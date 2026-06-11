@@ -1484,22 +1484,29 @@ class CrewGenerationService:
                 lose the user's actual goal).
             max_tasks: Maximum number of tasks to generate.
         """
+        # Dedicated lightweight plan template (~1.4k chars). The old approach
+        # sent the full 9.4k-char generate_crew template and then told the
+        # model to IGNORE most of it (descriptions/backstories/tools) — ~2k
+        # wasted prompt tokens with contradictory instructions on every
+        # "create a crew" chat message.
         system_message = await TemplateService.get_effective_template_content(
-            "generate_crew", group_context
+            "generate_crew_plan", group_context
         )
         if not system_message:
-            raise KasalError("Required prompt template 'generate_crew' not found")
-
-        # Override: for planning phase we only need the skeleton (names/roles),
-        # not full descriptions/backstories. Prepend a planning instruction.
-        planning_prefix = (
-            "You are generating a PLAN OUTLINE only. Return a lightweight JSON with:\n"
-            '{"complexity": "light|standard|complex", "process_type": "sequential|parallel", '
-            '"agents": [{"name": "...", "role": "..."}], '
-            '"tasks": [{"name": "...", "assigned_agent": "...", "context": []}]}\n'
-            "Do NOT include descriptions, goals, backstories, or tools — those will be generated separately.\n\n"
-        )
-        system_message = planning_prefix + system_message
+            # Fallback for DBs seeded before the plan template existed.
+            system_message = await TemplateService.get_effective_template_content(
+                "generate_crew", group_context
+            )
+            if not system_message:
+                raise KasalError("Required prompt template 'generate_crew_plan' not found")
+            planning_prefix = (
+                "You are generating a PLAN OUTLINE only. Return a lightweight JSON with:\n"
+                '{"complexity": "light|standard|complex", "process_type": "sequential|parallel", '
+                '"agents": [{"name": "...", "role": "..."}], '
+                '"tasks": [{"name": "...", "assigned_agent": "...", "context": []}]}\n'
+                "Do NOT include descriptions, goals, backstories, or tools — those will be generated separately.\n\n"
+            )
+            system_message = planning_prefix + system_message
 
         # Inject cap constraints based on verb-counted max_tasks
         system_cap = (

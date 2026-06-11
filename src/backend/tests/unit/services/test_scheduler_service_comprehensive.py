@@ -185,13 +185,13 @@ class TestGetAllSchedules:
 
     @pytest.mark.asyncio
     async def test_get_all_no_group_context(self):
+        # SECURITY: fail closed — no group context returns empty, not all tenants'.
         service = _make_service()
         service.repository.find_all = AsyncMock(return_value=[])
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
-            result = await service.get_all_schedules()
+        result = await service.get_all_schedules()
 
-        service.repository.find_all.assert_called_once()
+        service.repository.find_all.assert_not_called()
         assert result.count == 0
 
     @pytest.mark.asyncio
@@ -419,7 +419,7 @@ class TestCreateScheduleFromExecution:
     async def test_raises_not_found_when_execution_missing(self):
         from src.schemas.schedule import ScheduleCreateFromExecution
         service = _make_service()
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=None)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=None)
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -437,7 +437,7 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {},
             "tasks_yaml": {},
         }
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -460,7 +460,7 @@ class TestCreateScheduleFromExecution:
             "nodes": [],
             "edges": [],
         }
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-flow-1"
@@ -482,7 +482,7 @@ class TestCreateScheduleFromExecution:
             "tasks_yaml": {"task1": {"description": "D"}},
             "inputs": {},
         }
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
         service.repository.create = AsyncMock(return_value=MagicMock())
 
         schedule_data = MagicMock()
@@ -510,7 +510,7 @@ class TestCreateScheduleFromExecution:
             "edges": [{"id": "e1"}],
             "inputs": {},
         }
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
         service.repository.create = AsyncMock(return_value=MagicMock())
 
         schedule_data = MagicMock()
@@ -534,7 +534,7 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {"a": {}},
             "tasks_yaml": {"t": {}},
         }
-        service.execution_history_repository.find_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"

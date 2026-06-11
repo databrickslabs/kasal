@@ -245,57 +245,21 @@ describe('ChatInput — model picker', () => {
   });
 });
 
-describe('ChatInput — format selector', () => {
-  it('opens the picker, selects a format, and appends its directive on send', () => {
+describe('ChatInput — no output-format picker', () => {
+  it('does not render a format selector; the deliverable derives from content', () => {
+    // The picker was removed on purpose: output varieties will keep growing,
+    // so the deliverable type is inferred from the request, never enumerated.
+    render(<ChatInput {...baseProps} />);
+    expect(screen.queryByText('Auto format')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Choose the output format the crew should produce')).not.toBeInTheDocument();
+  });
+
+  it('a plain prompt sends with no dispatchSuffix (no [Output format:] directive)', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    // toggle shows the current (auto) label; opening lists every option
-    fireEvent.click(screen.getByText('Auto format'));
-    expect(screen.getByText('Interactive quiz')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Presentation')); // select → checkmark + close
-    expect(screen.getByText('Presentation')).toBeInTheDocument(); // toggle now reflects it (accent)
-    // a natural-language prompt gets the directive appended — to the dispatch
-    // payload (meta.dispatchSuffix), NOT the visible message.
     fireEvent.change(ta(), { target: { value: 'make slides' } });
     fireEvent.keyDown(ta(), { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith(
-      'make slides',
-      expect.objectContaining({ dispatchSuffix: expect.stringContaining('[Output format:') }),
-    );
-  });
-
-  it('never appends a directive to slash commands', () => {
-    const onSend = vi.fn();
-    render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.click(screen.getByText('Auto format'));
-    fireEvent.click(screen.getByText('Dashboard'));
-    fireEvent.change(ta(), { target: { value: '/unknown thing' } });
-    fireEvent.keyDown(ta(), { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith('/unknown thing'); // literal, no directive
-  });
-
-  it('outside mousedown closes the format picker', () => {
-    render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByText('Auto format'));
-    expect(screen.getByText('Report')).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByText('Report')).not.toBeInTheDocument();
-  });
-
-  it('opening the format picker closes the command list', () => {
-    render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
-    expect(screen.getByText('Commands')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Auto format'));
-    expect(screen.queryByText('Commands')).not.toBeInTheDocument();
-  });
-
-  it('mousedown inside the format picker does not close it', () => {
-    render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByText('Auto format'));
-    const option = screen.getByText('Report');
-    fireEvent.mouseDown(option); // inside the picker → stays open
-    expect(screen.getByText('Report')).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledWith('make slides'); // single-arg, no meta
   });
 });
 
@@ -630,5 +594,19 @@ describe('ChatInput — memory mode toggle (three-state, controlled)', () => {
     fireEvent.click(screen.getByText('No memory'));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
     expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe('ChatInput — model picker opens upward', () => {
+  it('anchors the dropdown ABOVE the input (bottom-full), like the other popovers', () => {
+    // Regression: the picker opened downward (top-full); once a conversation
+    // starts the input is pinned to the bottom of the screen, so the dropdown
+    // rendered off-screen — "model selector stopped working after the first
+    // prompt".
+    render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByText('Model One'));
+    const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
+    expect(popover.className).toContain('bottom-full');
+    expect(popover.className).not.toContain('top-full');
   });
 });

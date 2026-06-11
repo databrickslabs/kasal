@@ -29,8 +29,8 @@ def test_scopes_do_not_include_catalog_volumes():
         assert "catalog.volumes" not in scopes
 
 
-def test_scopes_do_not_include_postgres():
-    """postgres scope should NOT be in the configured scopes."""
+def test_scopes_include_postgres():
+    """postgres (Lakebase database instances) IS in the configured scopes."""
     with patch("deploy.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -44,14 +44,14 @@ def test_scopes_do_not_include_postgres():
         payload = json.loads(call_args[json_idx])
         scopes = payload["user_api_scopes"]
 
-        assert "postgres" not in scopes
-        # Also check no scope starts with "postgres"
-        for s in scopes:
-            assert not s.startswith("postgres"), f"Unexpected postgres scope: {s}"
+        assert "postgres" in scopes
 
 
-def test_scopes_include_expected_categories():
-    """Verify major scope categories are present."""
+def test_scopes_match_the_required_app_consent_set():
+    """The deploy configures EXACTLY the current Apps user-authorization
+    scope ids (the consent-screen names) — the older granular ids
+    (sql.warehouses, vectorsearch.*, serving.serving-endpoints,
+    dashboards.genie, files.files) were replaced by these."""
     with patch("deploy.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -65,18 +65,48 @@ def test_scopes_include_expected_categories():
         payload = json.loads(call_args[json_idx])
         scopes = payload["user_api_scopes"]
 
-        # SQL scopes
-        assert "sql" in scopes
-        # Vector search
-        assert any(s.startswith("vectorsearch.") for s in scopes)
-        # Serving
-        assert "serving.serving-endpoints" in scopes
-        # Catalog read scopes
-        assert "catalog.catalogs:read" in scopes
-        assert "catalog.tables:read" in scopes
-        assert "catalog.schemas:read" in scopes
-        # Genie
-        assert "dashboards.genie" in scopes
+        assert sorted(scopes) == sorted([
+            "sql",
+            "genie",
+            "postgres",
+            "model-serving",
+            "catalog.catalogs:read",
+            "catalog.schemas:read",
+            "catalog.tables:read",
+            "catalog.connections",
+            "files",
+            "ai-gateway",
+            "vector-search",
+            "workspace.workspace",
+            "mcp.external",
+            "mcp.functions",
+        ])
+
+
+def test_scopes_use_current_ids_not_legacy_ones():
+    """None of the replaced legacy scope ids sneak back in."""
+    with patch("deploy.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"user_api_scopes": []}),
+            stderr=""
+        )
+        configure_oauth_scopes("test-app")
+
+        call_args = mock_run.call_args[0][0]
+        json_idx = call_args.index("--json") + 1
+        payload = json.loads(call_args[json_idx])
+        scopes = payload["user_api_scopes"]
+
+        for legacy in (
+            "dashboards.genie",
+            "files.files",
+            "serving.serving-endpoints",
+            "sql.warehouses",
+            "vectorsearch.vector-search-endpoints",
+            "vectorsearch.vector-search-indexes",
+        ):
+            assert legacy not in scopes, f"Legacy scope id present: {legacy}"
 
 
 def test_scopes_exclude_dataplane_by_default():

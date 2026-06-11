@@ -31,6 +31,15 @@ class ToolService:
 
     # Removed factory method - using dependency injection instead
 
+
+    @staticmethod
+    async def _invalidate_enabled_tools_cache() -> None:
+        """Clear the enabled-tools list cache after any tool/group-tool
+        mutation. The cache is tiny, so clearing all groups is simpler and
+        safer than tracking which groups a mutation affects."""
+        from src.core.cache import tool_list_cache
+        await tool_list_cache.clear()
+
     async def get_all_tools(self) -> ToolListResponse:
         """
         Get all tools.
@@ -115,6 +124,25 @@ class ToolService:
         - Workspace eligibility is controlled by GroupTool mapping (added+enabled)
         - Effective config = base.config merged with group mapping config (group wins)
         """
+        # Read-through cache: the frontend polls this endpoint in same-second
+        # bursts and each call walked tools + group_tools. Deep-copied both
+        # ways so callers can't mutate the cached entry; every tool/group-tool
+        # mutation clears the cache.
+        from src.core.cache import tool_list_cache
+        cache_group = (
+            group_context.primary_group_id
+            if group_context and getattr(group_context, "primary_group_id", None)
+            else "__none__"
+        )
+        cached = await tool_list_cache.get(cache_group, "enabled_tools")
+        if cached is not None:
+            return cached.model_copy(deep=True)
+
+        result = await self._build_enabled_tools_for_group(group_context)
+        await tool_list_cache.set(cache_group, "enabled_tools", result.model_copy(deep=True))
+        return result
+
+    async def _build_enabled_tools_for_group(self, group_context: GroupContext) -> ToolListResponse:
         # Get all globally enabled tools
         enabled_tools = await self.repository.find_enabled()
 
@@ -222,6 +250,7 @@ class ToolService:
         try:
             # Create tool
             tool = await self.repository.create(tool_data.model_dump())
+            await self._invalidate_enabled_tools_cache()
             return ToolResponse.model_validate(tool)
         except Exception as e:
             logger.error(f"Failed to create tool: {str(e)}")
@@ -251,6 +280,7 @@ class ToolService:
 
             # Create tool
             tool = await self.repository.create(tool_dict)
+            await self._invalidate_enabled_tools_cache()
             return ToolResponse.model_validate(tool)
         except Exception as e:
             logger.error(f"Failed to create tool: {str(e)}")
@@ -280,6 +310,7 @@ class ToolService:
             # Update tool
             update_data = tool_data.model_dump(exclude_unset=True)
             updated_tool = await self.repository.update(tool_id, update_data)
+            await self._invalidate_enabled_tools_cache()
             return ToolResponse.model_validate(updated_tool)
         except Exception as e:
             logger.error(f"Failed to update tool: {str(e)}")
@@ -316,6 +347,7 @@ class ToolService:
             # Update tool
             update_data = tool_data.model_dump(exclude_unset=True)
             updated_tool = await self.repository.update(tool_id, update_data)
+            await self._invalidate_enabled_tools_cache()
             return ToolResponse.model_validate(updated_tool)
         except Exception as e:
             logger.error(f"Failed to update tool: {str(e)}")
@@ -343,6 +375,7 @@ class ToolService:
         try:
             # Delete tool
             await self.repository.delete(tool_id)
+            await self._invalidate_enabled_tools_cache()
             return True
         except Exception as e:
             logger.error(f"Failed to delete tool: {str(e)}")
@@ -377,6 +410,7 @@ class ToolService:
         try:
             # Delete tool
             await self.repository.delete(tool_id)
+            await self._invalidate_enabled_tools_cache()
             return True
         except Exception as e:
             logger.error(f"Failed to delete tool: {str(e)}")
@@ -398,6 +432,7 @@ class ToolService:
         try:
             # Toggle tool enabled status using repository
             tool = await self.repository.toggle_enabled(tool_id)
+            await self._invalidate_enabled_tools_cache()
             if not tool:
                 logger.warning(f"Tool with ID {tool_id} not found for toggle")
                 raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
@@ -459,6 +494,7 @@ class ToolService:
                 if existing_group_tool:
                     # Toggle the existing group-specific tool
                     toggled_tool = await self.repository.toggle_enabled(existing_group_tool.id)
+                    await self._invalidate_enabled_tools_cache()
                 else:
                     # Create a new group-specific copy with toggled state
                     # Don't include 'id' to let the database auto-generate it
@@ -472,6 +508,7 @@ class ToolService:
                         'created_by_email': group_context.group_email
                     }
                     toggled_tool = await self.repository.create(tool_data)
+                    await self._invalidate_enabled_tools_cache()
 
                 status_text = "enabled" if toggled_tool.enabled else "disabled"
                 return ToggleResponse(
@@ -486,6 +523,7 @@ class ToolService:
 
             # Toggle the group-specific tool
             toggled_tool = await self.repository.toggle_enabled(tool_id)
+            await self._invalidate_enabled_tools_cache()
 
             status_text = "enabled" if toggled_tool.enabled else "disabled"
             return ToggleResponse(
@@ -540,6 +578,7 @@ class ToolService:
         """
         try:
             updated_tool = await self.repository.update_configuration_by_title(title, config)
+            await self._invalidate_enabled_tools_cache()
             if not updated_tool:
                 logger.warning(f"Tool with title '{title}' not found for configuration update")
                 raise NotFoundError(detail=f"Tool with title '{title}' not found")

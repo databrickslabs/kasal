@@ -48,14 +48,17 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
     else:
         logger.warning(f"No user token or group context provided for execution {execution_id}")
     
-    # First, ensure status is set to RUNNING
+    # Ensure status is RUNNING. API-created records are born RUNNING, so this
+    # is a no-op there; scheduler-created records start "pending" and need the
+    # transition (only_if_changed skips the redundant write in the former case).
     from src.services.execution_status_service import ExecutionStatusService
     await ExecutionStatusService.update_status(
         job_id=execution_id,
         status=ExecutionStatus.RUNNING.value,
-        message="CrewAI execution is running"
+        message="CrewAI execution is running",
+        only_if_changed=True
     )
-    logger.info(f"Set status to RUNNING for execution {execution_id}")
+    logger.info(f"Ensured RUNNING status for execution {execution_id}")
     
     final_status = ExecutionStatus.FAILED.value # Default to FAILED
     final_message = "An unexpected error occurred during crew execution."
@@ -504,23 +507,29 @@ async def update_execution_status_with_retry(
     while retry_count < max_retries and not update_success:
         try:
             logger.info(f"Attempting final status update for {execution_id} to {status} (attempt {retry_count + 1}/{max_retries}).")
-            await ExecutionStatusService.update_status(
-                job_id=execution_id, 
+            # update_status returns False on failure (record not found, DB
+            # error swallowed internally) — it must be honored, otherwise the
+            # retry loop is dead code and failed writes go unnoticed until the
+            # engine's safety net force-completes the run.
+            update_success = bool(await ExecutionStatusService.update_status(
+                job_id=execution_id,
                 status=status,
                 message=message,
                 result=result
-            )
-            logger.info(f"Final status update call for {execution_id} successful.")
-            update_success = True
-            return True
+            ))
+            if update_success:
+                logger.info(f"Final status update call for {execution_id} successful.")
+                return True
+            retry_count += 1
+            logger.error(f"Final status update for {execution_id} reported failure (attempt {retry_count}/{max_retries}).")
         except Exception as update_exc:
             retry_count += 1
             logger.error(f"Error updating final status for {execution_id} (attempt {retry_count}/{max_retries}): {update_exc}")
-            if retry_count < max_retries:
-                # Exponential backoff: 1s, 2s, 4s, etc.
-                backoff_time = 2 ** (retry_count - 1)
-                logger.info(f"Retrying in {backoff_time} seconds...")
-                await asyncio.sleep(backoff_time)
+        if not update_success and retry_count < max_retries:
+            # Exponential backoff: 1s, 2s, 4s, etc.
+            backoff_time = 2 ** (retry_count - 1)
+            logger.info(f"Retrying in {backoff_time} seconds...")
+            await asyncio.sleep(backoff_time)
     
     if not update_success:
         logger.error(f"Failed to update execution status for {execution_id} after {max_retries} attempts.")
@@ -569,14 +578,17 @@ async def run_crew_in_process(
             import traceback
             f.write(traceback.format_exc())
     
-    # First, ensure status is set to RUNNING
+    # Ensure status is RUNNING. API-created records are born RUNNING, so this
+    # is a no-op there; scheduler-created records start "pending" and need the
+    # transition (only_if_changed skips the redundant write in the former case).
     from src.services.execution_status_service import ExecutionStatusService
     await ExecutionStatusService.update_status(
         job_id=execution_id,
         status=ExecutionStatus.RUNNING.value,
-        message="CrewAI execution is running in isolated process"
+        message="CrewAI execution is running in isolated process",
+        only_if_changed=True
     )
-    logger.info(f"[run_crew_in_process] Set status to RUNNING for process execution {execution_id}")
+    logger.info(f"[run_crew_in_process] Ensured RUNNING status for process execution {execution_id}")
     
     final_status = ExecutionStatus.FAILED.value  # Default to FAILED
     final_message = "An unexpected error occurred during crew execution."
@@ -678,6 +690,13 @@ async def run_crew_in_process(
             final_status = ExecutionStatus.FAILED.value
             final_message = result.get('error', 'Process execution failed')
             logger.error(f"Process execution failed for {execution_id}: {final_message}")
+            # The subprocess ships its full traceback in the result — without
+            # logging it here, failures surface as a bare one-line message
+            # (e.g. "'Agent' object has no attribute 'i18n'") with no frame
+            # information anywhere in the logs.
+            subprocess_tb = result.get('traceback')
+            if subprocess_tb:
+                logger.error(f"Subprocess traceback for {execution_id}:\n{subprocess_tb}")
             
     except asyncio.CancelledError:
         # Execution was cancelled

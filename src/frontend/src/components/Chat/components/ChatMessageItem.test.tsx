@@ -38,6 +38,13 @@ vi.mock('../GenieSpaceConfigPrompt', () => ({
   ),
 }));
 
+// Mock the A2UI surface card so these tests don't pull in the full renderer
+// (the real parseUiDocument still decides whether it is used).
+vi.mock('./UiSurfaceResult', () => ({
+  UiSurfaceResult: () => <div data-testid="ui-surface-result" />,
+  UiSurfaceView: () => <div data-testid="ui-surface-view" />,
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -869,6 +876,47 @@ describe('ChatMessageItem', () => {
       const messageContent = screen.getByTestId('message-content');
       expect(messageContent.textContent).not.toContain('```');
       expect(messageContent.textContent).toBe('Just a regular message');
+    });
+  });
+
+  // =========================================================================
+  // A2UI result rendering
+  // =========================================================================
+
+  describe('A2UI result rendering', () => {
+    const a2uiDoc = JSON.stringify({
+      messages: [
+        { createSurface: { surfaceId: 's1', catalogId: 'basic' } },
+        {
+          updateComponents: {
+            surfaceId: 's1',
+            components: [
+              { id: 'root', component: 'Column', children: ['t'] },
+              { id: 't', component: 'Text', variant: 'h1', text: 'Hello Report' },
+            ],
+          },
+        },
+      ],
+    });
+
+    it('renders an A2UI result message as the designed surface, not raw JSON', () => {
+      render(
+        <ChatMessageItem message={makeMessage({ type: 'result', content: a2uiDoc })} />
+      );
+
+      expect(screen.getByTestId('ui-surface-result')).toBeInTheDocument();
+      // The raw JSON dump must NOT also render.
+      expect(screen.queryByText(/createSurface/)).not.toBeInTheDocument();
+    });
+
+    it('keeps the raw JSON rendering for non-A2UI result messages', () => {
+      render(
+        <ChatMessageItem
+          message={makeMessage({ type: 'result', content: '{"status": "ok", "count": 42}' })}
+        />
+      );
+
+      expect(screen.queryByTestId('ui-surface-result')).not.toBeInTheDocument();
     });
   });
 });

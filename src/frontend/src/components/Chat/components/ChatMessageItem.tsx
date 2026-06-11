@@ -23,6 +23,8 @@ import { ChatMessage } from '../types';
 import { MessageContent } from './MessageRenderer';
 import { stripAnsiEscapes, isMarkdown, isHtmlDocument } from '../utils/textProcessing';
 import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
+import { UiSurfaceResult } from './UiSurfaceResult';
+import { parseUiDocument } from '../../ChatMode/utils/uiDocument';
 import type { ToolConfigNeededData } from '../../../hooks/global/useCrewGenerationSSE';
 
 interface ChatMessageItemProps {
@@ -70,6 +72,13 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
 
     // Special handling for result messages
     if (message.type === 'result') {
+      // A2UI documents render as their designed surface (like Chat mode's
+      // preview), not as raw JSON.
+      const uiSurface = parseUiDocument(processedContent);
+      if (uiSurface) {
+        return <UiSurfaceResult surface={uiSurface} />;
+      }
+
       // Try to parse as JSON
       try {
         const jsonContent = JSON.parse(processedContent);

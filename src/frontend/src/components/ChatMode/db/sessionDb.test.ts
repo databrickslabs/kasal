@@ -467,14 +467,14 @@ describe('preview persistence', () => {
     await sessionDb.initDb();
 
     await sessionDb.saveSessionPreview('s1', {
-      type: 'html',
+      type: 'ui',
       data: '<p>hi</p>',
       title: 'Preview',
     });
     let stored = await sessionDb.getSessionPreview('s1');
     expect(stored).toMatchObject({
       sessionId: 's1',
-      type: 'html',
+      type: 'ui',
       data: '<p>hi</p>',
       title: 'Preview',
     });

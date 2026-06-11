@@ -1721,3 +1721,74 @@ class TestMissingCoverage:
             mock_session.close.assert_awaited_once()
         finally:
             mod._lakebase_factory = original
+
+
+class TestLazyTokenRefresh:
+    """PERF-013: with the engine long-lived (stable bridge loop), NullPool mode
+    must refresh the credential lazily once per window — not per operation."""
+
+    def _factory_with_session(self):
+        from src.db.lakebase_session import LakebaseSessionFactory
+        factory = LakebaseSessionFactory()
+        mock_sf = MagicMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=AsyncMock())
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_sf.return_value = mock_ctx
+        factory._engine = MagicMock()
+        factory._session_factory = mock_sf
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_stale_token_triggers_lazy_refresh_in_nullpool_mode(self):
+        factory = self._factory_with_session()
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+        factory._refresh_task = None  # NullPool mode: no background refresher
+        factory._token_holder["refreshed_at"] = 0.0  # ancient
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+            async with factory.get_session():
+                pass
+        mock_refresh.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fresh_token_skips_refresh(self):
+        import time as _time
+        factory = self._factory_with_session()
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+        factory._refresh_task = None
+        factory._token_holder["refreshed_at"] = _time.time()  # just refreshed
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+            async with factory.get_session():
+                pass
+        mock_refresh.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_background_task_mode_skips_lazy_refresh(self):
+        factory = self._factory_with_session()
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+        factory._refresh_task = MagicMock()  # pooled mode: background refresher owns it
+        factory._token_holder["refreshed_at"] = 0.0
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+            async with factory.get_session():
+                pass
+        mock_refresh.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_lazy_refresh_failure_does_not_block_session(self):
+        factory = self._factory_with_session()
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+        factory._refresh_task = None
+        factory._token_holder["refreshed_at"] = 0.0
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock,
+                          side_effect=Exception("control plane down")):
+            async with factory.get_session() as session:
+                assert session is not None  # old token may still be valid; proceed
+
+    def test_is_token_stale_boundary(self):
+        import time as _time
+        from src.db.lakebase_session import LakebaseSessionFactory, TOKEN_REFRESH_INTERVAL_SECONDS
+        factory = LakebaseSessionFactory()
+        factory._token_holder["refreshed_at"] = _time.time() - TOKEN_REFRESH_INTERVAL_SECONDS - 1
+        assert factory._is_token_stale() is True
+        factory._token_holder["refreshed_at"] = _time.time()
+        assert factory._is_token_stale() is False

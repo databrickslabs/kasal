@@ -16,6 +16,7 @@ from src.utils.databricks_auth import (
     get_databricks_auth_headers
 )
 from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.sensitive_data_utils import mask_sensitive_headers
 
 if TYPE_CHECKING:
     from databricks.sdk import WorkspaceClient
@@ -299,7 +300,7 @@ class DatabricksVolumeRepository:
                         logger.error(f"[REST API] Upload failed with status {response.status}")
                         logger.error(f"[REST API] Error response: {error_text}")
                         logger.error(f"[REST API] Request URL: {upload_url}")
-                        logger.error(f"[REST API] Request headers: {headers}")
+                        logger.error(f"[REST API] Request headers: {mask_sensitive_headers(headers)}")
                         return {
                             "success": False,
                             "error": f"REST API upload failed (status {response.status}): {error_text if error_text else 'No error message returned'}"

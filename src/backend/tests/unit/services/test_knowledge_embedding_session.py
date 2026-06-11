@@ -84,7 +84,7 @@ class TestEnsureLakebaseDocTable:
 
     @pytest.mark.asyncio
     async def test_noop_when_columns_already_present(self):
-        session = self._session(["id", "embedding", "group_id", "file_path"])
+        session = self._session(["id", "embedding", "group_id", "file_path", "created_by"])
         await ensure_lakebase_doc_table(session)
         # Only the information_schema probe ran; no CREATE/ALTER.
         assert session.execute.await_count == 1

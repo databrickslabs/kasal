@@ -19,13 +19,11 @@ class TestPowerBIConnectorToolSchema:
         """Test schema with minimal required parameters"""
         schema = PowerBIConnectorToolSchema(
             semantic_model_id="model123",
-            group_id="workspace456",
-            access_token="token789"
+            group_id="workspace456"
         )
 
         assert schema.semantic_model_id == "model123"
         assert schema.group_id == "workspace456"
-        assert schema.access_token == "token789"
         assert schema.outbound_format == "dax"  # default
         assert schema.include_hidden is False  # default
         assert schema.filter_pattern is None
@@ -33,12 +31,26 @@ class TestPowerBIConnectorToolSchema:
         assert schema.uc_catalog == "main"  # default
         assert schema.uc_schema == "default"  # default
 
+    def test_schema_excludes_auth_and_connection_fields(self):
+        """Auth/connection plumbing must NOT be LLM-fillable schema fields.
+
+        These values are injected at tool-construction time from tool_configs,
+        not exposed as schema parameters.
+        """
+        forbidden = {
+            "client_secret", "password", "access_token", "llm_token",
+            "api_key", "token", "tenant_id", "client_id", "username",
+            "auth_method", "workspace_id", "dataset_id",
+            "llm_workspace_url", "llm_model",
+        }
+        present = forbidden & set(PowerBIConnectorToolSchema.model_fields.keys())
+        assert not present, f"Forbidden fields exposed in schema: {present}"
+
     def test_schema_initialization_all_parameters(self):
         """Test schema with all parameters"""
         schema = PowerBIConnectorToolSchema(
             semantic_model_id="model123",
             group_id="workspace456",
-            access_token="token789",
             outbound_format="sql",
             include_hidden=True,
             filter_pattern="Sales.*",

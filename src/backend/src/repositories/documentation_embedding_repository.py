@@ -28,6 +28,13 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         self.db = db
         self._model = model
 
+    def _owner_kwargs(self, item: DocumentationEmbeddingCreate) -> dict:
+        """created_by only exists on models that carry the column (e.g.
+        KnowledgeEmbedding) — never pass it to the legacy docs model."""
+        if hasattr(self._model, "created_by"):
+            return {"created_by": getattr(item, "created_by", None)}
+        return {}
+
     async def create(
         self,
         doc_embedding: DocumentationEmbeddingCreate
@@ -41,6 +48,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             doc_metadata=doc_embedding.doc_metadata,
             group_id=getattr(doc_embedding, "group_id", None),
             file_path=getattr(doc_embedding, "file_path", None),
+            **self._owner_kwargs(doc_embedding),
         )
         self.db.add(db_embedding)
         await self.db.flush()  # Flush to get the ID but don't commit
@@ -66,6 +74,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
                 doc_metadata=i.doc_metadata,
                 group_id=getattr(i, "group_id", None),
                 file_path=getattr(i, "file_path", None),
+                **self._owner_kwargs(i),
             )
             for i in items
         ]
@@ -127,21 +136,31 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         group_id: str,
         execution_id: str,
         filename: str,
+        created_by: Optional[str] = None,
     ) -> int:
         """Delete all chunk rows for one uploaded knowledge file.
 
         Matches within a workspace (group_id) on the stored full file_path, which
-        always contains ``/<execution_id>/`` and ends with the filename. Returns
-        the number of rows deleted. autoescape neutralizes LIKE wildcards in the
-        user-supplied filename/execution_id.
+        always contains ``/<execution_id>/`` and ends with the filename. When
+        ``created_by`` is given, only rows uploaded by THAT user (or legacy rows
+        with no uploader) are deleted — a user must not delete another user's
+        knowledge. Returns the number of rows deleted. autoescape neutralizes
+        LIKE wildcards in the user-supplied filename/execution_id.
         """
-        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import delete as sa_delete, or_
 
         conditions = [
             self._model.group_id == group_id,
             self._model.file_path.contains(f"/{execution_id}/", autoescape=True),
             self._model.file_path.contains(filename, autoescape=True),
         ]
+        if created_by and hasattr(self._model, "created_by"):
+            conditions.append(
+                or_(
+                    self._model.created_by.is_(None),
+                    self._model.created_by == created_by,
+                )
+            )
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(sa_delete(self._model).where(*conditions))
             return result.rowcount or 0
@@ -270,101 +289,59 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         group_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
     ) -> List[DocumentationEmbedding]:
-        """SQLite implementation of similarity search using JSON functions."""
-        import json
-        from sqlalchemy import text
+        """SQLite implementation: fetch the scoped rows and rank by cosine
+        similarity in Python.
 
-        query_json = json.dumps(query_embedding)
-        table = self._model.__tablename__
+        The previous pure-SQL version computed the dot product with a
+        json_each(embedding) × json_each(:query) join PER ROW (~1M joined rows
+        per chunk at 1024 dims) — ~30 seconds for a few hundred chunks, which
+        blew the knowledge tool's 30s timeout ("Error searching knowledge
+        base"). A few hundred 1024-dim vectors rank in milliseconds in Python.
+        Returning live model instances also keeps every column (created_by
+        included) for the per-user filters upstream.
+        """
+        import json as _json
+        import math
 
-        # Scope the candidate rows the same way as the pgvector path. group_id
-        # is bound as a parameter; file_paths is applied as a Python post-filter
-        # below (SQLite is dev-only, so exact-limit semantics matter less here).
-        params: Dict[str, Any] = {"query_vector": query_json, "limit_val": limit}
+        query = select(self._model)
         if group_id is None:
-            scope_clause = "AND group_id IS NULL"
+            # Built-in docs only (uploaded knowledge always carries a group_id).
+            query = query.where(self._model.group_id.is_(None))
         else:
-            scope_clause = "AND group_id = :group_id_val"
-            params["group_id_val"] = group_id
+            query = query.where(self._model.group_id == group_id)
+            if file_paths:
+                query = query.where(self._model.file_path.in_(file_paths))
+        result = await self.db.execute(query)
+        rows = result.scalars().all()
 
-        # Pure SQL cosine similarity calculation
-        similarity_query = text(f"""
-            WITH vector_calculations AS (
-                SELECT
-                    id,
-                    source,
-                    title,
-                    content,
-                    doc_metadata,
-                    group_id,
-                    file_path,
-                    created_at,
-                    updated_at,
-                    embedding,
-                    -- Parse JSON and calculate dot product with query vector
-                    (
-                        SELECT SUM(
-                            CAST(d.value AS REAL) * CAST(q.value AS REAL)
-                        )
-                        FROM json_each(embedding) d, json_each(:query_vector) q
-                        WHERE d.key = q.key
-                    ) AS dot_product,
-                    -- Calculate norm of document vector
-                    (
-                        SELECT SQRT(SUM(
-                            CAST(value AS REAL) * CAST(value AS REAL)
-                        ))
-                        FROM json_each(embedding)
-                    ) AS doc_norm,
-                    -- Query vector norm (calculated once)
-                    (
-                        SELECT SQRT(SUM(
-                            CAST(value AS REAL) * CAST(value AS REAL)
-                        ))
-                        FROM json_each(:query_vector)
-                    ) AS query_norm
-                FROM {table}
-                WHERE embedding IS NOT NULL
-                {scope_clause}
-            )
-            SELECT
-                id, source, title, content, doc_metadata, group_id, file_path,
-                created_at, updated_at,
-                -- Calculate cosine similarity
-                CASE
-                    WHEN doc_norm > 0 AND query_norm > 0
-                    THEN dot_product / (doc_norm * query_norm)
-                    ELSE 0
-                END AS similarity
-            FROM vector_calculations
-            WHERE similarity > 0
-            ORDER BY similarity DESC
-            LIMIT :limit_val
-        """)
+        q = [float(x) for x in query_embedding]
+        q_norm = math.sqrt(sum(x * x for x in q)) or 1.0
 
-        result = await self.db.execute(similarity_query, params)
-        rows = result.all()
-
-        # Convert rows to model objects
-        similar_docs = []
+        scored = []
         for row in rows:
-            if file_paths and getattr(row, "file_path", None) not in file_paths:
+            emb = row.embedding
+            if isinstance(emb, (str, bytes)):
+                try:
+                    emb = _json.loads(emb)
+                except (TypeError, ValueError):
+                    continue
+            if not emb:
                 continue
-            doc = self._model(
-                id=row.id,
-                source=row.source,
-                title=row.title,
-                content=row.content,
-                doc_metadata=row.doc_metadata,
-                group_id=row.group_id,
-                file_path=row.file_path,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-                embedding=[]  # Don't need to return the embedding
-            )
-            similar_docs.append(doc)
+            dot = 0.0
+            norm_sq = 0.0
+            for d, qv in zip(emb, q):
+                d = float(d)
+                dot += d * qv
+                norm_sq += d * d
+            if norm_sq <= 0:
+                continue
+            similarity = dot / (math.sqrt(norm_sq) * q_norm)
+            if similarity > 0:
+                scored.append((similarity, row))
 
-        return similar_docs
+        # Sort on the similarity only (model instances are not comparable).
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [row for _, row in scored[:limit]]
 
     async def _search_similar_postgres(
         self,

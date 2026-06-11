@@ -16,8 +16,13 @@ from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
-from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
+from src.dependencies.admin_auth import (
+    AdminUserDep,
+    AuthenticatedUserDep,
+    SystemAdminUserDep,
+)
 from src.models.group import Group, GroupUser
+from src.models.user import User
 from src.schemas.group import (
     GroupCreateRequest,
     GroupResponse,
@@ -63,6 +68,32 @@ def get_group_service(session: SessionDep) -> GroupService:
         GroupService instance with injected session
     """
     return GroupService(session)
+
+
+async def _verify_group_admin(
+    service: GroupService, current_user: User, group_id: str
+) -> None:
+    """
+    Authorize a group-scoped admin action against the TARGET group.
+
+    SECURITY: System admins may manage any group. Any other caller must hold
+    the 'admin' role in THIS specific group_id. This deliberately does NOT use
+    check_role_in_context / highest_role (which only reflect the caller's own
+    selected workspace), so that an admin of group A cannot mutate group B
+    (cross-tenant takeover). Mirrors the per-group check in list_group_users.
+
+    Raises:
+        ForbiddenError: If the caller is not a system admin and is not an admin
+            of the target group.
+    """
+    if getattr(current_user, "is_system_admin", False):
+        return
+
+    membership = await service.get_user_group_membership(current_user.id, group_id)
+    if not membership or str(membership.role).lower() != "admin":
+        raise ForbiddenError(
+            "You must be an administrator of this workspace to perform this action"
+        )
 
 
 @router.get("/my-groups", response_model=List[GroupWithRoleResponse])
@@ -111,7 +142,7 @@ async def list_my_groups(
 @router.get("/", response_model=List[GroupResponse])
 async def list_groups(
     service: Annotated[GroupService, Depends(get_group_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100,
@@ -120,7 +151,8 @@ async def list_groups(
     List all groups with user counts.
 
     Admin endpoint for viewing all groups in the system.
-    Requires admin privileges.
+    SECURITY: Requires SYSTEM admin — this exposes every tenant's groups, so a
+    workspace admin of one group must not be able to enumerate other tenants.
     """
     # Use injected service
 
@@ -219,10 +251,9 @@ async def update_group(
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ) -> GroupResponse:
-    """Update a group. Requires admin privileges."""
-    # Check permissions - only admins can update groups
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can update groups")
+    """Update a group. Requires admin privileges on the target group."""
+    # SECURITY: must be a system admin or an admin of THIS group (not just any group)
+    await _verify_group_admin(service, admin_user, group_id)
 
     # Use injected service
 
@@ -263,11 +294,10 @@ async def delete_group(
     - All related data
 
     This action cannot be undone.
-    Requires admin privileges.
+    Requires admin privileges on the target group.
     """
-    # Check permissions - only admins can delete groups
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can delete groups")
+    # SECURITY: must be a system admin or an admin of THIS group (not just any group)
+    await _verify_group_admin(service, admin_user, group_id)
 
     # Use injected service
 
@@ -347,11 +377,10 @@ async def assign_user_to_group(
     Assign a user to a group manually.
 
     Admin endpoint for manual user assignment with role control.
-    Requires admin privileges.
+    Requires admin privileges on the target group.
     """
-    # Check permissions - only admins can assign users to groups
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can assign users to groups")
+    # SECURITY: must be a system admin or an admin of THIS group (not just any group)
+    await _verify_group_admin(service, admin_user, group_id)
 
     # Use injected service
 
@@ -383,10 +412,9 @@ async def update_group_user(
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ) -> GroupUserResponse:
-    """Update a user's role or status in a group. Requires admin privileges."""
-    # Check permissions - only admins can update group users
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can update group users")
+    """Update a user's role or status in a group. Requires admin privileges on the target group."""
+    # SECURITY: must be a system admin or an admin of THIS group (not just any group)
+    await _verify_group_admin(service, admin_user, group_id)
 
     # Use injected service
 
@@ -424,10 +452,9 @@ async def remove_user_from_group(
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ):
-    """Remove a user from a group. Requires admin privileges."""
-    # Check permissions - only admins can remove users from groups
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can remove users from groups")
+    """Remove a user from a group. Requires admin privileges on the target group."""
+    # SECURITY: must be a system admin or an admin of THIS group (not just any group)
+    await _verify_group_admin(service, admin_user, group_id)
 
     # Use injected service
 
@@ -441,14 +468,14 @@ async def remove_user_from_group(
 @router.get("/stats", response_model=GroupStatsResponse)
 async def get_group_stats(
     service: Annotated[GroupService, Depends(get_group_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
 ) -> GroupStatsResponse:
     """
     Get group statistics.
 
     Admin endpoint for viewing system-wide group statistics.
-    Requires admin privileges.
+    SECURITY: Requires SYSTEM admin — these are cross-tenant aggregates.
     """
     # Use injected service
 

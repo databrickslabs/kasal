@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.services.documentation_embedding_service import DocumentationEmbeddingService
+from src.services.databricks_index_service import is_auth_or_permission_error
 from src.services.memory_backend_service import MemoryBackendService
 from src.core.llm_manager import LLMManager
 from src.db.session import async_session_factory
@@ -302,11 +303,27 @@ async def create_documentation_chunks(url: str) -> List[Dict[str, Any]]:
     return result
 
 
+class DocumentationIndexUnavailableError(Exception):
+    """The Databricks documentation index cannot be checked because of an
+    authentication/permission failure (401/403/invalid token).
+
+    Seeding in this state is futile — every write would fail with the same
+    error — so callers must SKIP seeding instead of treating the failure as
+    "index is empty". Before this distinction existed, every backend restart
+    re-ran the full seeding pipeline (including a 2-minute index-readiness
+    wait) against a known-failing endpoint.
+    """
+
+
 async def check_existing_documentation() -> tuple[bool, int]:
     """Check if documentation embeddings already exist.
-    
+
     Returns:
         tuple: (exists: bool, count: int) - Whether records exist and how many
+
+    Raises:
+        DocumentationIndexUnavailableError: when the index check fails with an
+            auth/permission error — seeding must be skipped, not attempted.
     """
     logger.info("📋 CHECKING FOR EXISTING DOCUMENTATION EMBEDDINGS...")
     
@@ -384,6 +401,10 @@ async def check_existing_documentation() -> tuple[bool, int]:
                             if not index_info or not index_info.get('success', False):
                                 error_msg = index_info.get('message', 'Failed to get index info') if index_info else 'Failed to get index info'
                                 logger.error(f"Failed to get index info for {index_name}: {error_msg}")
+                                if is_auth_or_permission_error(error_msg):
+                                    raise DocumentationIndexUnavailableError(
+                                        f"Cannot check index {index_name}: {error_msg}"
+                                    )
                                 return False, 0
                             
                             # Check if index exists 
@@ -404,6 +425,8 @@ async def check_existing_documentation() -> tuple[bool, int]:
                                 logger.info(f"Index {index_name} is not ready yet (state: {state})")
                                 return False, 0
                             
+                        except DocumentationIndexUnavailableError:
+                            raise
                         except Exception as e:
                             error_str = str(e)
                             if "does not exist" in error_str or "not found" in error_str:
@@ -412,6 +435,10 @@ async def check_existing_documentation() -> tuple[bool, int]:
                             elif "not ready" in error_str:
                                 logger.info(f"Index {index_name} is not ready yet")
                                 return False, 0
+                            elif is_auth_or_permission_error(error_str):
+                                raise DocumentationIndexUnavailableError(
+                                    f"Cannot check index {index_name}: {e}"
+                                ) from e
                             else:
                                 logger.warning(f"Error checking index status: {e}")
                                 return False, 0
@@ -469,7 +496,7 @@ async def check_existing_documentation() -> tuple[bool, int]:
         logger.error(f"Error checking existing documentation: {e}")
         raise
 
-async def seed_documentation_embeddings(user_token: Optional[str] = None) -> None:
+async def seed_documentation_embeddings(user_token: Optional[str] = None) -> bool:
     """Seed documentation embeddings using services only.
 
     Args:
@@ -529,13 +556,13 @@ async def seed_documentation_embeddings(user_token: Optional[str] = None) -> Non
                     logger.info("Documentation embeddings are only created in:")
                     logger.info("  1. Local development (SQLite or localhost PostgreSQL)")
                     logger.info("  2. When Databricks Vector Search is configured")
-                    return
+                    return False
                 logger.info("📊 Using local database for documentation storage (local development mode)")
     except Exception as e:
         logger.warning(f"Could not check backend configuration: {e}")
         if not is_local_dev:
             logger.info("⏭️ Skipping documentation embeddings - not in local development mode")
-            return
+            return False
         logger.info("📊 Defaulting to local database for documentation storage")
     
     # Check if we can create embeddings - fail fast if not configured
@@ -615,7 +642,7 @@ async def seed_documentation_embeddings(user_token: Optional[str] = None) -> Non
                         logger.warning(f"❌ Databricks index {document_index} not ready after {attempts} attempts ({elapsed_time:.1f}s): {message}")
                         logger.warning("Skipping documentation seeding - index must be ready before creating embeddings")
                         logger.info("💡 Please wait for the index to be ready and run the seeding again")
-                        return  # Exit early without processing
+                        return False  # Exit early without processing
                     
                     logger.info(f"✅ Databricks index {document_index} is ready after {readiness_result.get('attempts', 0)} attempts ({readiness_result.get('elapsed_time', 0):.1f}s)")
                     logger.info("Proceeding with embedding creation and seeding...")
@@ -737,10 +764,13 @@ async def seed_documentation_embeddings(user_token: Optional[str] = None) -> Non
                 logger.error(f"Error processing best practices: {str(e)}")
 
         logger.info(f"Completed seeding documentation embeddings: {total_chunks_processed} chunks processed")
-        
+
         if using_databricks and total_chunks_processed > 0:
             logger.info(f"Successfully seeded {total_chunks_processed} documentation chunks to Databricks")
             logger.info("Future runs will detect these documents and skip re-seeding")
+        # 0 chunks means nothing was actually written — callers must not
+        # report success (which previously masked the auth-failure loop).
+        return total_chunks_processed > 0
 
 async def seed_async():
     """Seed the documentation_embeddings table asynchronously - DEPRECATED, use seed() instead."""
@@ -778,24 +808,34 @@ async def seed():
         logger.info("Checking if documentation embeddings already exist...")
         exists, count = await check_existing_documentation()
         logger.info(f"Documentation check result: exists={exists}, count={count}")
-        
+
         if exists:
             logger.info(f"⏭️ Documentation embeddings seeding skipped ({count} records already exist)")
             logger.info(f"Documentation seeder completed in < 1 second (skipped - already seeded)")
             return True
+    except DocumentationIndexUnavailableError as e:
+        # Auth/permission failure: seeding would fail with the same error on
+        # every write — skip instead of burning ~2 minutes per restart against
+        # a known-failing endpoint.
+        logger.warning(f"⏭️ Skipping documentation seeding — index unavailable (auth/permission): {e}")
+        logger.warning("Fix the Databricks token/permissions for the document index, then re-run seeding.")
+        return False
     except Exception as e:
         logger.warning(f"Could not check existing documentation: {e}")
         # If we can't check, assume we need to seed
         logger.info("Will proceed with seeding since check failed")
-    
+
     # Only proceed with heavy seeding if necessary
     logger.info("Documentation needs seeding, proceeding...")
-    
+
     try:
         # This is the slow part - only run if actually needed
-        await seed_documentation_embeddings()
-        logger.info("✅ Documentation embeddings seeded successfully")
-        return True
+        seeded = await seed_documentation_embeddings()
+        if seeded:
+            logger.info("✅ Documentation embeddings seeded successfully")
+        else:
+            logger.warning("⚠️ Documentation seeding did not write any chunks (skipped or index unavailable)")
+        return bool(seeded)
     except Exception as e:
         logger.error(f"❌ Error in documentation seeder: {e}")
         import traceback

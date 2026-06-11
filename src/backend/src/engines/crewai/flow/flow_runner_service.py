@@ -1092,12 +1092,15 @@ class FlowRunnerService:
                 await self._emit_error_span(job_id, str(e), group_id=config.get('group_id'))
                 return {"success": False, "error": str(e), "execution_id": execution_id}
 
-    async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
+    async def get_flow_execution(self, execution_id: int, group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Get flow execution details.
 
         Args:
             execution_id: ID of the flow execution
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, an execution that belongs to a different group is
+                reported as not found (prevents cross-tenant IDOR).
 
         Returns:
             Dictionary with execution details
@@ -1106,6 +1109,18 @@ class FlowRunnerService:
             execution = await self.flow_execution_service.get_execution(execution_id)
 
             if not execution:
+                return {
+                    "success": False,
+                    "error": f"Flow execution with ID {execution_id} not found"
+                }
+
+            # SECURITY: enforce tenant isolation. A record that belongs to a
+            # group the caller is not a member of is treated as not found.
+            if group_ids and execution.group_id and execution.group_id not in group_ids:
+                logger.warning(
+                    f"Access denied: flow execution {execution_id} belongs to group "
+                    f"{execution.group_id}, caller groups={group_ids}"
+                )
                 return {
                     "success": False,
                     "error": f"Flow execution with ID {execution_id} not found"
@@ -1151,19 +1166,28 @@ class FlowRunnerService:
                 "execution_id": execution_id
             }
     
-    async def get_flow_executions_by_flow(self, flow_id: Union[uuid.UUID, str]) -> Dict[str, Any]:
+    async def get_flow_executions_by_flow(self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Get all executions for a specific flow.
 
         Args:
             flow_id: ID of the flow
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, executions belonging to other groups are excluded.
 
         Returns:
             Dictionary with list of executions
         """
         try:
             executions = await self.flow_execution_service.get_executions_by_flow(flow_id)
-            
+
+            # SECURITY: drop executions that belong to other tenants.
+            if group_ids:
+                executions = [
+                    e for e in executions
+                    if not getattr(e, "group_id", None) or e.group_id in group_ids
+                ]
+
             return {
                 "success": True,
                 "flow_id": flow_id,

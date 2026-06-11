@@ -49,30 +49,15 @@ def _run_async_in_sync_context(coro):
 class PowerBIDaxExecutorSchema(BaseModel):
     """Input schema for PowerBIDaxExecutorTool."""
 
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) containing the semantic model."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID) to execute the DAX query against."
-    )
     dax_query: Optional[str] = Field(
         None,
         description="[Required] The DAX EVALUATE statement to execute against the Power BI semantic model."
     )
 
-    # Auth fields
-    auth_method: Optional[str] = Field(
-        None,
-        description="Authentication method: 'service_principal', 'service_account', or 'user_oauth'."
-    )
-    tenant_id: Optional[str] = Field(None, description="Azure AD tenant ID.")
-    client_id: Optional[str] = Field(None, description="Azure AD application/client ID.")
-    client_secret: Optional[str] = Field(None, description="Client secret for service principal auth.")
-    username: Optional[str] = Field(None, description="Username/UPN for service account auth.")
-    password: Optional[str] = Field(None, description="Password for service account auth.")
-    access_token: Optional[str] = Field(None, description="Pre-obtained OAuth access token.")
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # Output options
     output_format: Optional[str] = Field(

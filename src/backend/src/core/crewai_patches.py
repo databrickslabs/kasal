@@ -140,10 +140,13 @@ def install_memory_event_patches() -> bool:
         f"{patched}/{len(target_names)} classes"
     )
     logger.info(msg)
-    # Print to stderr so subprocess activity is visible even before logging
-    # is fully wired up in the forked process.
-    import sys as _sys
-    print(msg, file=_sys.stderr, flush=True)
+    # In subprocesses, also print to stderr so the activity is visible even
+    # before logging is wired up in the forked process. In the main process
+    # the logger line above suffices — the raw print would just duplicate it.
+    import os as _os
+    if _os.environ.get("CREW_SUBPROCESS_MODE") == "true":
+        import sys as _sys
+        print(msg, file=_sys.stderr, flush=True)
     return patched > 0
 
 
@@ -196,16 +199,55 @@ def install_remember_many_patch() -> bool:
     _um.Memory.remember = patched_remember
     _um.Memory.remember_many = patched_remember_many
     _um.Memory._kasal_remember_many_patched = True  # type: ignore[attr-defined]
-    import sys as _sys
-    print(
-        "[KASAL-PATCH] Wrapped Memory.remember / remember_many for content capture",
-        file=_sys.stderr,
-        flush=True,
-    )
+    msg = "[KASAL-PATCH] Wrapped Memory.remember / remember_many for content capture"
+    logger.info(msg)
+    import os as _os
+    if _os.environ.get("CREW_SUBPROCESS_MODE") == "true":
+        import sys as _sys
+        print(msg, file=_sys.stderr, flush=True)
     return True
+
+
+def log_runtime_versions() -> str:
+    """Log the actual installed versions of the CrewAI stack.
+
+    Diagnostic for environment skew: a deployed app whose dependency build
+    diverged from uv.lock (e.g. a stale requirements.txt, partial env reuse)
+    produces version-mismatch failures like ``'Agent' object has no attribute
+    'i18n'`` that are impossible to attribute without knowing the runtime
+    versions. This line lands in every subprocess/app log.
+    """
+    import importlib
+    import importlib.metadata
+
+    versions = {}
+    for pkg, dist in (
+        ("crewai", "crewai"),
+        ("crewai_core", "crewai-core"),
+        ("litellm", "litellm"),
+        ("mlflow", "mlflow"),
+        ("openinference_crewai", "openinference-instrumentation-crewai"),
+    ):
+        try:
+            # Not every package exposes __version__ (litellm doesn't) — fall
+            # back to the installed distribution metadata.
+            module = importlib.import_module(pkg) if "-" not in pkg else None
+            versions[pkg] = (
+                getattr(module, "__version__", None)
+                or importlib.metadata.version(dist)
+            )
+        except Exception:
+            try:
+                versions[pkg] = importlib.metadata.version(dist)
+            except Exception:
+                versions[pkg] = "absent"
+    summary = " ".join(f"{k}={v}" for k, v in versions.items())
+    logger.info(f"[CrewAIPatches] Runtime versions: {summary}")
+    return summary
 
 
 def install_all_patches() -> None:
     """Entry point called once from the FastAPI lifespan startup."""
+    log_runtime_versions()
     install_memory_event_patches()
     install_remember_many_patch()

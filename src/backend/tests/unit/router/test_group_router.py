@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.group_router import router
 from src.core.dependencies import get_db
 from src.dependencies.admin_auth import (
-    require_authenticated_user, get_authenticated_user, get_admin_user
+    require_authenticated_user, get_authenticated_user, get_admin_user,
+    get_system_admin_user,
 )
 from src.models.enums import UserRole, UserStatus, GroupStatus, GroupUserRole, GroupUserStatus
 
@@ -81,6 +82,7 @@ def app(mock_db_session, mock_current_user, mock_group_context):
     app.dependency_overrides[require_authenticated_user] = override_auth
     app.dependency_overrides[get_authenticated_user] = override_auth
     app.dependency_overrides[get_admin_user] = override_auth
+    app.dependency_overrides[get_system_admin_user] = override_auth
     app.dependency_overrides[get_group_context] = override_group_context
 
     return app

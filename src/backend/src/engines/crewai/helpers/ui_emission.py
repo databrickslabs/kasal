@@ -71,7 +71,9 @@ def _build_theme_block(
         return []
     keys = _THEME_ORDER
     if deliverable:
-        keys = [k for k in _THEME_ORDER if k in (deliverable, "default")]
+        # Deliverable-specific palette FIRST, Default as the explicit fallback —
+        # models tend to copy whichever palette is listed first.
+        keys = [deliverable] if deliverable == "default" else [deliverable, "default"]
     palette_lines: List[str] = []
     for key in keys:
         theme = themes.get(key)
@@ -83,13 +85,15 @@ def _build_theme_block(
         return []
     return [
         "",
-        'THEME / BRANDING — add a "theme" object to createSurface using the palette',
-        "that matches the deliverable you build. The renderer applies it as the stage",
-        "background, accent, text colors and font, so honor these exactly:",
+        'THEME / BRANDING — createSurface MUST carry a "theme" object copied from the',
+        "palette below that MATCHES the deliverable you build (e.g. Slides → the",
+        "Presentation palette; use the Default palette ONLY when no specific palette",
+        "matches). The renderer applies it as the stage background, accent, text",
+        "colors and font, so copy the matching palette's values exactly:",
         '  { "createSurface": { "surfaceId": "s1", "catalogId": "basic", "theme":',
-        '    { "accent": "#2563eb", "background": "#ffffff", "surface": "#f8fafc",',
-        '      "text": "#0f172a", "heading": "#0f172a", "muted": "#64748b",',
-        '      "font": "sans", "density": "comfortable" } } }',
+        '    { "accent": "<accent>", "background": "<background>", "surface": "<surface>",',
+        '      "text": "<text>", "heading": "<heading>", "muted": "<muted>",',
+        '      "font": "<font>", "density": "<density>" } } }',
         '("font" is one of sans/serif/rounded/mono; "density" is comfortable/compact.)',
         "Use the palette for what you build:",
         *palette_lines,
@@ -257,21 +261,20 @@ _DELIVERABLE_KEYWORDS = [
 def _infer_deliverable(text: str) -> Optional[str]:
     """Best-effort guess of the deliverable type from the final task's text.
 
-    Returns a _THEME_ORDER key when EXACTLY ONE deliverable type is mentioned, so
-    the UI instruction can emit only that deliverable's theme/directive block.
-    Returns ``None`` when nothing matches or the text is ambiguous (multiple
-    distinct types), in which case the caller emits the full set — a safe
-    fallback that never narrows incorrectly."""
+    _DELIVERABLE_KEYWORDS is ordered by specificity, and a final task builds
+    exactly ONE deliverable — so when several keywords match (e.g. a
+    presentation task that mentions KPI charts), the FIRST match in the
+    ordered list wins. The previous exactly-one-match rule returned ``None``
+    for every multi-keyword task, which made the caller re-send ALL eight
+    theme/directive blocks (~1.5-1.9k tokens) on every agent iteration.
+    ``None`` (full-set fallback) is reserved for tasks that mention no
+    deliverable at all."""
     if not text:
         return None
     lowered = text.lower()
-    matches = {
-        deliverable
-        for keyword, deliverable in _DELIVERABLE_KEYWORDS
-        if keyword in lowered
-    }
-    if len(matches) == 1:
-        return next(iter(matches))
+    for keyword, deliverable in _DELIVERABLE_KEYWORDS:
+        if keyword in lowered:
+            return deliverable
     return None
 
 

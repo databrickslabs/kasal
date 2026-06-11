@@ -362,6 +362,7 @@ def run_flow_in_process(
                     )
                     from opentelemetry import trace as _otel_trace
                     from opentelemetry.sdk.trace.export import (
+                        BatchSpanProcessor,
                         SimpleSpanProcessor,
                     )
 
@@ -370,7 +371,10 @@ def run_flow_in_process(
                         service_name="kasal-flow-engine",
                     )
 
-                    # DB exporter + SSE processor
+                    # DB exporter + SSE processor. BatchSpanProcessor
+                    # (PERF-014): batch DB commits on a worker thread instead
+                    # of one transaction per span; 1s delay keeps UI polling
+                    # near-live.
                     from src.services.otel_tracing.db_exporter import (
                         KasalDBSpanExporter,
                     )
@@ -378,10 +382,11 @@ def run_flow_in_process(
                         KasalSSESpanProcessor,
                     )
                     otel_provider.add_span_processor(
-                        SimpleSpanProcessor(
+                        BatchSpanProcessor(
                             KasalDBSpanExporter(
                                 execution_id, group_context
-                            )
+                            ),
+                            schedule_delay_millis=1000,
                         )
                     )
                     otel_provider.add_span_processor(

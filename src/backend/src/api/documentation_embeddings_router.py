@@ -7,10 +7,11 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import ForbiddenError, NotFoundError
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
+from src.core.permissions import check_role_in_context
 from src.schemas.documentation_embedding import (
     DocumentationEmbedding as DocumentationEmbeddingSchema,
 )
@@ -67,6 +68,8 @@ async def create_documentation_embedding(
     ),
 ):
     """Create a new documentation embedding."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can create documentation embeddings")
     # Extract user token from headers (OAuth2-Proxy takes priority)
     user_token = x_auth_request_access_token or x_forwarded_access_token
     result = await service.create_documentation_embedding(
@@ -160,6 +163,8 @@ async def delete_documentation_embedding(
     group_context: GroupContextDep = None,
 ):
     """Delete a documentation embedding by ID."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can delete documentation embeddings")
     success = await service.delete_documentation_embedding(embedding_id)
 
     if not success:
@@ -179,6 +184,9 @@ async def seed_all_documentation_embeddings(
     ),
 ):
     """Re-seed all documentation embeddings from the docs directory."""
+    # SECURITY: bulk re-seeding is an admin operation.
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can re-seed documentation embeddings")
     try:
         # Import the seeding function
         from src.seeds.documentation import seed_documentation_embeddings

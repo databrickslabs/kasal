@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
+import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -320,5 +320,44 @@ describe('ChatMode crews api', () => {
       get.mockResolvedValue({ data: [] });
       expect(await listSavedFlows()).toEqual([]);
     });
+  });
+});
+
+describe('stripGenieTools', () => {
+  it('removes Genie refs (name, alias, id) from agent and task tool lists', () => {
+    const genieData = {
+      agents: [{ name: 'A', tools: ['GenieTool', 'SerperDevTool', 'Genie'] }],
+      tasks: [{ name: 'T', tools: ['35', 'DataSearch', 'PerplexityTool'] }],
+    };
+    const out = stripGenieTools(genieData as never);
+    expect(out.agents[0].tools).toEqual(['SerperDevTool']);
+    expect(out.tasks[0].tools).toEqual(['PerplexityTool']);
+  });
+
+  it('resolves Genie via the toolNameMap for non-canonical ids', () => {
+    const out = stripGenieTools(
+      { agents: [{ tools: ['99'] }], tasks: [] } as never,
+      { '99': 'GenieTool' },
+    );
+    expect(out.agents[0].tools).toEqual([]);
+  });
+
+  it('drops GenieTool tool_configs entries but keeps the rest', () => {
+    const out = stripGenieTools({
+      agents: [],
+      tasks: [{ tool_configs: { GenieTool: { spaceId: 's' }, Reducer: { q: '{x}' } } }],
+    } as never);
+    expect(out.tasks[0].tool_configs).toEqual({ Reducer: { q: '{x}' } });
+  });
+
+  it('leaves items without tools or tool_configs untouched and does not mutate the input', () => {
+    const input = {
+      agents: [{ name: 'A' }],
+      tasks: [{ name: 'T', tools: ['GenieTool'] }],
+    };
+    const out = stripGenieTools(input as never);
+    expect(out.agents[0]).toEqual({ name: 'A' });
+    expect(out.tasks[0].tools).toEqual([]);
+    expect((input.tasks[0].tools as string[])).toEqual(['GenieTool']); // input untouched
   });
 });

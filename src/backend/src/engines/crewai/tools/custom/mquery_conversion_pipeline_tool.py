@@ -17,6 +17,57 @@ from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
+# SECURITY: PowerBI table/column names are attacker-controllable (defined by
+# whoever authored the scanned semantic model) and get interpolated into DDL/DML
+# executed on the SQL warehouse. These helpers prevent identifier breakout.
+import re as _ident_re
+
+_SAFE_SQL_IDENTIFIER = _ident_re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _sanitize_sql_identifier(name: str, fallback: str = "tbl") -> str:
+    """Coerce an arbitrary string into a safe unquoted SQL identifier."""
+    cleaned = _ident_re.sub(r'[^0-9A-Za-z_]', '_', str(name)).strip('_').lower()
+    if not cleaned:
+        cleaned = fallback
+    if cleaned[0].isdigit():
+        cleaned = f"t_{cleaned}"
+    return cleaned
+
+
+def _validate_sql_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a (config-supplied) SQL identifier; raise on violation."""
+    if not name or not _SAFE_SQL_IDENTIFIER.match(str(name)):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
+
+def _quote_sql_column(name: str) -> str:
+    """Backtick-quote a column name, escaping embedded backticks (doubling)."""
+    return "`" + str(name).replace("`", "``") + "`"
+
+
+# Spark SQL column types permitted in generated DDL. Anything else (e.g. an
+# LLM-hallucinated/injected "type") falls back to STRING so a type token cannot
+# carry extra clauses (e.g. "STRING) LOCATION 'abfss://evil' --").
+_ALLOWED_SQL_TYPES = {
+    "STRING", "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "LONG",
+    "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC", "BOOLEAN", "DATE", "TIMESTAMP", "BINARY",
+}
+
+
+def _safe_sql_type(sql_type: str) -> str:
+    """Validate a column type against an allow-list; default to STRING.
+
+    Permits only ``TYPE`` or ``TYPE(p)`` / ``TYPE(p,s)`` numeric suffixes.
+    """
+    t = str(sql_type).strip().upper()
+    m = _ident_re.match(r"^([A-Z]+)(\s*\(\s*\d+\s*(?:,\s*\d+\s*)?\))?$", t)
+    if not m or m.group(1) not in _ALLOWED_SQL_TYPES:
+        return "STRING"
+    return t
+
+
 # Thread pool executor for running async operations from sync context
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
@@ -1182,8 +1233,16 @@ class MqueryConversionPipelineTool(BaseTool):
 
         # Clean PBI column names: "[Table].[Column]" → "Column"
         clean_cols = [c.split("].[")[-1].rstrip("]").lstrip("[") for c in columns]
-        safe_name = tname.replace(" ", "_").lower()
-        full_target = f"{target_prefix}.{safe_name}"
+        # SECURITY: coerce the attacker-controllable table name to a strict SQL
+        # identifier (it is interpolated UNQUOTED into CREATE TABLE/INSERT), and
+        # validate the config-supplied catalog.schema prefix. Prevents identifier
+        # breakout / SQL injection on the warehouse.
+        safe_name = _sanitize_sql_identifier(tname)
+        safe_prefix = ".".join(
+            _validate_sql_identifier(part, "catalog/schema")
+            for part in str(target_prefix).split(".")
+        )
+        full_target = f"{safe_prefix}.{safe_name}"
 
         # 2. Ask LLM to generate CREATE TABLE + INSERT based on the actual data
         create_sql, insert_sqls = await self._llm_generate_insert_sql(
@@ -1254,19 +1313,29 @@ class MqueryConversionPipelineTool(BaseTool):
             )
             if isinstance(response, str):
                 m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
-                create_sql = m.group(1).strip() if m else response.strip()
-                # Extract column types from LLM output for mechanical INSERT generation
-                type_map = self._parse_types_from_create(create_sql, columns)
+                llm_sql = m.group(1).strip() if m else response.strip()
+                # Use the LLM output ONLY to infer column types — never execute it.
+                type_map = self._parse_types_from_create(llm_sql, columns)
             else:
                 raise ValueError("LLM returned non-string response")
         except Exception as e:
             logger.warning(f"[Validation] LLM schema generation failed for {tname}, using fallback: {e}")
             type_map = self._infer_schema_types(columns, rows[:10])
-            schema_def = ", ".join(f"`{c}` {t}" for c, t in type_map.items())
-            create_sql = f"CREATE TABLE IF NOT EXISTS {full_target} ({schema_def})"
+
+        # SECURITY: build the executed CREATE TABLE deterministically from the
+        # validated target + escaped columns + allow-listed types. We never run
+        # the LLM's raw SQL string, which could be steered (via prompt injection
+        # in the table name/data) to a different target or carry dangerous
+        # clauses (LOCATION, stacked statements, ...).
+        if not type_map:
+            type_map = self._infer_schema_types(columns, rows[:10])
+        schema_def = ", ".join(
+            f"{_quote_sql_column(c)} {_safe_sql_type(t)}" for c, t in type_map.items()
+        )
+        create_sql = f"CREATE TABLE IF NOT EXISTS {full_target} ({schema_def})"
 
         # Generate INSERT VALUES batches mechanically using the inferred types
-        col_list = ", ".join(f"`{c}`" for c in columns)
+        col_list = ", ".join(_quote_sql_column(c) for c in columns)
         insert_sqls = []
         for i in range(0, len(rows), 500):
             batch = rows[i:i + 500]

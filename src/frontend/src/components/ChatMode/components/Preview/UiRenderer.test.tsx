@@ -860,19 +860,35 @@ describe('UiRenderer — Mindmap canvas interactions (pan + drag)', () => {
     expect(px(node(container, 'r.1').style.left)).toBe(bLeft0); // B untouched
   });
 
+  // The initial view centers the ROOT node in the viewport (jsdom reports a
+  // 0×0 canvas, so the centered pan is exactly the negated root position).
+  const centeredTransform = (c: HTMLElement) => {
+    const root = node(c, 'r');
+    return `translate(${-px(root.style.left)}px, ${-px(root.style.top)}px) scale(1)`;
+  };
+
+  it('opens centered on the root node', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    expect(worldEl(container).style.transform).toBe(centeredTransform(container));
+  });
+
   it('pans the whole canvas when dragging empty space', () => {
     const { container } = render(<UiRenderer surface={mindmap()} />);
-    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)');
+    const t0 = centeredTransform(container);
+    expect(worldEl(container).style.transform).toBe(t0);
     fireEvent.pointerDown(canvasEl(container), { clientX: 10, clientY: 10 });
     fireEvent.pointerMove(canvasEl(container), { clientX: 40, clientY: 22 }); // delta (30, 12)
     fireEvent.pointerUp(canvasEl(container));
-    expect(worldEl(container).style.transform).toBe('translate(78px, 44px) scale(1)');
+    const m = t0.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/) as RegExpMatchArray;
+    expect(worldEl(container).style.transform).toBe(
+      `translate(${parseFloat(m[1]) + 30}px, ${parseFloat(m[2]) + 12}px) scale(1)`,
+    );
   });
 
   it('ignores pointer moves when nothing is being dragged', () => {
     const { container } = render(<UiRenderer surface={mindmap()} />);
     fireEvent.pointerMove(canvasEl(container), { clientX: 99, clientY: 99 });
-    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)'); // unchanged
+    expect(worldEl(container).style.transform).toBe(centeredTransform(container)); // unchanged
   });
 
   it('pressing a node toggle does not start a drag (stops propagation)', () => {
@@ -892,7 +908,7 @@ describe('UiRenderer — Mindmap canvas interactions (pan + drag)', () => {
     expect(scaleOf(worldEl(container).style.transform)).toBeLessThan(1);
   });
 
-  it('zooms via the +/− buttons and restores with reset', () => {
+  it('zooms via the +/− buttons and restores with reset (re-centered on the root)', () => {
     const { container } = render(<UiRenderer surface={mindmap()} />);
     // pressing a zoom button must not start a canvas pan
     fireEvent.pointerDown(screen.getByLabelText('Zoom in'));
@@ -900,7 +916,7 @@ describe('UiRenderer — Mindmap canvas interactions (pan + drag)', () => {
     fireEvent.click(screen.getByLabelText('Zoom in'));
     expect(scaleOf(worldEl(container).style.transform)).toBeGreaterThan(1);
     fireEvent.click(screen.getByLabelText('Reset view'));
-    expect(worldEl(container).style.transform).toBe('translate(48px, 32px) scale(1)');
+    expect(worldEl(container).style.transform).toBe(centeredTransform(container));
     fireEvent.click(screen.getByLabelText('Zoom out'));
     expect(scaleOf(worldEl(container).style.transform)).toBeLessThan(1);
   });
@@ -916,6 +932,89 @@ describe('UiRenderer — Mindmap canvas interactions (pan + drag)', () => {
   it('detaches the wheel listener on unmount without error', () => {
     const { unmount } = render(<UiRenderer surface={mindmap()} />);
     expect(() => unmount()).not.toThrow(); // ref callback runs with null → cleanup
+  });
+});
+
+describe('UiRenderer — Mindmap bilateral layout', () => {
+  const mindmap = (tree: Record<string, unknown>) =>
+    surface({ root: { id: 'root', component: 'Mindmap', root: tree } });
+  const px = (v: string) => parseFloat(v || '0');
+  const node = (c: HTMLElement, id: string) => c.querySelector(`[data-mm-node="${id}"]`) as HTMLElement;
+
+  it('splits top-level branches symmetrically left and right of the central node', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={mindmap({
+          label: 'Center',
+          children: [{ label: 'B1' }, { label: 'B2' }, { label: 'B3' }, { label: 'B4' }],
+        })}
+      />,
+    );
+    const rootX = px(node(container, 'r').style.left);
+    // Greedy balance, ties to the right: B1/B3 right, B2/B4 left…
+    expect(px(node(container, 'r.0').style.left)).toBeGreaterThan(rootX);
+    expect(px(node(container, 'r.2').style.left)).toBeGreaterThan(rootX);
+    expect(px(node(container, 'r.1').style.left)).toBeLessThan(rootX);
+    expect(px(node(container, 'r.3').style.left)).toBeLessThan(rootX);
+    // …at the same distance on both sides.
+    expect(rootX - px(node(container, 'r.1').style.left)).toBe(px(node(container, 'r.0').style.left) - rootX);
+    // Both sides share the same rows and the root sits on the vertical midline.
+    expect(px(node(container, 'r.0').style.top)).toBe(px(node(container, 'r.1').style.top));
+    const topRow = px(node(container, 'r.0').style.top);
+    const bottomRow = px(node(container, 'r.2').style.top);
+    expect(px(node(container, 'r').style.top)).toBe((topRow + bottomRow) / 2);
+  });
+
+  it('keeps a single branch on the right of the root (no lonely left side)', () => {
+    const { container } = render(
+      <UiRenderer surface={mindmap({ label: 'C', children: [{ label: 'Only' }] })} />,
+    );
+    expect(px(node(container, 'r.0').style.left)).toBeGreaterThan(px(node(container, 'r').style.left));
+  });
+
+  it('grows deeper levels outward on their own side', () => {
+    // B1 (leaf) → right; B2 (subtree) → left; B2's child must be FURTHER left.
+    const { container } = render(
+      <UiRenderer
+        surface={mindmap({
+          label: 'C',
+          children: [{ label: 'B1' }, { label: 'B2', children: [{ label: 'B2a' }] }],
+        })}
+      />,
+    );
+    const rootX = px(node(container, 'r').style.left);
+    const b2 = px(node(container, 'r.1').style.left);
+    expect(b2).toBeLessThan(rootX);
+    expect(px(node(container, 'r.1.0').style.left)).toBeLessThan(b2);
+    expect(px(node(container, 'r.0').style.left)).toBeGreaterThan(rootX);
+  });
+
+  it('vertically centers the lighter side against the heavier one', () => {
+    // Heavy (2 leaves) → right; Light (1 leaf) → left, centered on the midline.
+    const { container } = render(
+      <UiRenderer
+        surface={mindmap({
+          label: 'C',
+          children: [{ label: 'Heavy', children: [{ label: 'H1' }, { label: 'H2' }] }, { label: 'Light' }],
+        })}
+      />,
+    );
+    const rootTop = px(node(container, 'r').style.top);
+    expect(px(node(container, 'r.1').style.top)).toBe(rootTop); // lighter side on the midline
+    expect(px(node(container, 'r.0.0').style.top)).toBeLessThan(rootTop);
+    expect(px(node(container, 'r.0.1').style.top)).toBeGreaterThan(rootTop);
+  });
+
+  it('mirrors node chrome on the left side (outer accent bar, reversed row)', () => {
+    const { container } = render(
+      <UiRenderer surface={mindmap({ label: 'C', children: [{ label: 'R' }, { label: 'L' }] })} />,
+    );
+    const rightNode = node(container, 'r.0');
+    const leftNode = node(container, 'r.1');
+    expect(rightNode.style.flexDirection).toBe('row');
+    expect(rightNode.style.borderLeftWidth).toBe('3px');
+    expect(leftNode.style.flexDirection).toBe('row-reverse');
+    expect(leftNode.style.borderRightWidth).toBe('3px');
   });
 });
 
@@ -950,5 +1049,96 @@ describe('UiRenderer — remaining visual branches', () => {
     expect((container.firstChild as HTMLElement).style.fontFamily).toContain('Georgia');
     rerender(<UiRenderer surface={themed('weird')} />); // unknown font → sans fallback
     expect((container.firstChild as HTMLElement).style.fontFamily).toContain('Inter');
+  });
+});
+
+describe('UiRenderer — URL sanitization (security)', () => {
+  it('sanitizes javascript: URLs in Album anchors and keeps safe http(s) links', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: {
+        id: 'root',
+        component: 'Album',
+        images: [
+          { url: 'javascript:alert(document.cookie)', alt: 'evil' },
+          { url: 'https://example.com/safe.png', alt: 'safe' },
+        ],
+      },
+    })} />);
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+    // No anchor may carry a javascript: scheme.
+    expect(hrefs.some((h) => h.toLowerCase().startsWith('javascript:'))).toBe(false);
+    // The safe https link is preserved.
+    expect(hrefs).toContain('https://example.com/safe.png');
+  });
+
+  it('blocks a javascript: URL on a single Image (rendered as empty src, not executed)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Image', url: 'javascript:alert(1)' },
+    })} />);
+    const img = container.querySelector('img');
+    // sanitizeImageSrc strips script schemes -> empty -> node returns null (no img) or empty src.
+    expect(img?.getAttribute('src') ?? '').not.toContain('javascript:');
+  });
+});
+
+describe('UiRenderer — presentation deck caliber (Databricks defaults)', () => {
+  const deckSurface = (theme?: Record<string, unknown>) =>
+    ({
+      rootId: 'root',
+      components: {
+        root: { id: 'root', component: 'Slides', children: ['s0', 's1'] },
+        s0: { id: 's0', component: 'Slide', title: 'First', children: ['t0'] },
+        t0: { id: 't0', component: 'Text', text: 'alpha' },
+        s1: { id: 's1', component: 'Slide', title: 'Second', children: ['t1'] },
+        t1: { id: 't1', component: 'Text', text: 'beta' },
+      } as never,
+      data: {},
+      ...(theme ? { theme } : {}),
+    }) as unknown as UiSurface;
+
+  it('a Slides root gets the deck default tokens (orange accent, teal stage)', () => {
+    const { container } = render(<UiRenderer surface={deckSurface()} />);
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('#FF3621');
+    expect(stage.style.getPropertyValue('--ui-stage')).toContain('#162A34');
+  });
+
+  it('a UI-Configurator palette still overrides the deck defaults', () => {
+    const { container } = render(
+      <UiRenderer surface={deckSurface({ accent: '#00A972', background: '#101010' })} />,
+    );
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('#00A972');
+    expect(stage.style.getPropertyValue('--ui-stage')).toBe('#101010');
+  });
+
+  it('non-deck roots keep the generic premium theme (no deck tokens)', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={
+          {
+            rootId: 'root',
+            components: { root: { id: 'root', component: 'Text', text: 'hi' } } as never,
+            data: {},
+          } as unknown as UiSurface
+        }
+      />,
+    );
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('');
+  });
+
+  it('shows a deck-style slide counter and replays the entrance animation per slide', () => {
+    const { container } = render(<UiRenderer surface={deckSurface()} />);
+    expect(screen.getByText('01 / 02')).toBeInTheDocument();
+    const firstWrapper = container.querySelector('.ui-slide-enter');
+    expect(firstWrapper).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Go to slide 2'));
+    expect(screen.getByText('02 / 02')).toBeInTheDocument();
+    // keyed remount: the wrapper is a NEW element, so the CSS animation replays
+    const secondWrapper = container.querySelector('.ui-slide-enter');
+    expect(secondWrapper).not.toBe(firstWrapper);
+    expect(screen.getByText('Second')).toBeInTheDocument();
   });
 });

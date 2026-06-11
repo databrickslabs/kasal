@@ -6,6 +6,13 @@ import { SaveCrewProps } from '../../types/crews';
 import { Edge } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore';
+
+/** Refresh the chat-mode catalog rail so agent-builder saves show up there
+ * immediately (the rail otherwise only reloads on mount/workspace change). */
+const refreshChatCatalog = () => {
+  void useChatAppStore.getState().loadCatalog();
+};
 
 interface SaveCrewComponentProps extends SaveCrewProps {
   disabled?: boolean;
@@ -113,21 +120,39 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         });
 
         // Use the current tab's nodes and edges for update
-        const updatedCrew = await CrewService.updateCrew(crewId, {
+        const savePayload = {
           name: tab.savedCrewName || tab.name,
           agent_ids: [], // Will be calculated in the service
           task_ids: [], // Will be calculated in the service
           nodes: uniqueNodes,
           edges: validEdges,
           ...executionConfig
-        });
-        
+        };
+
+        let updatedCrew;
+        try {
+          updatedCrew = await CrewService.updateCrew(crewId, savePayload);
+        } catch (updateError) {
+          // The tab's crewId is persisted client-side and can go stale (DB
+          // reset, crew deleted elsewhere, id never persisted). A 404 here
+          // used to dead-end every save — recover by recreating the crew
+          // and adopting the new id below.
+          const status = (updateError as { response?: { status?: number } })?.response?.status;
+          if (status === 404) {
+            console.warn(`SaveCrew: crew ${crewId} not found — recreating instead`);
+            updatedCrew = await CrewService.saveCrew(savePayload);
+          } else {
+            throw updateError;
+          }
+        }
+
         console.log('SaveCrew: Update successful', updatedCrew);
         
         // Update the tab's crew info and mark as clean
         const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
         updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
         markTabClean(tabId);
+        refreshChatCatalog();
         
         // Dispatch completion event
         setTimeout(() => {
@@ -227,6 +252,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
         updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
         markTabClean(tabId);
+        refreshChatCatalog();
         
         // Dispatch completion event
         setTimeout(() => {
@@ -506,6 +532,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       });
       
       console.log('SaveCrew: Save successful, closing dialog', savedCrew);
+      refreshChatCatalog();
 
       // Update the tab's crew info
       console.log('SaveCrew: Updating tab crew info:', {

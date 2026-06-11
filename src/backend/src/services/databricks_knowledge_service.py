@@ -3,31 +3,27 @@ Databricks Knowledge Source Service
 """
 
 import asyncio
-import base64
 import io
-import json
 import logging
 import os
-import uuid
+import tempfile
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import UploadFile
-
-try:
-    from databricks.sdk.service.files import FileInfo
-except ImportError:
-    # Databricks SDK not installed, will use REST API
-    FileInfo = None
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import KasalError, UnprocessableEntityError
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
-from src.utils.databricks_auth import get_workspace_client
 
 logger = logging.getLogger(__name__)
+
+# SECURITY: cap knowledge-file uploads so a single request cannot buffer an
+# unbounded amount of data into memory (DoS). Enforced via Content-Length up
+# front when available, with a post-read backstop.
+MAX_KNOWLEDGE_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 class DatabricksKnowledgeService:
@@ -70,23 +66,28 @@ class DatabricksKnowledgeService:
         file: UploadFile,
         execution_id: str,
         group_id: str,
-        volume_config: Dict[str, Any],
+        volume_config: Optional[Dict[str, Any]] = None,
         agent_ids: Optional[List[str]] = None,
         user_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Upload a file to Databricks Volume for knowledge source.
+        Ingest an uploaded knowledge file: stage it in a local temp file,
+        embed its content into the local knowledge store (knowledge_embeddings
+        — SQLite locally, Lakebase pgvector when deployed) stamped with the
+        uploading user, then delete the temp file. No Databricks Volume is
+        involved and no raw upload is retained.
 
         Args:
             file: The uploaded file
             execution_id: Execution ID for scoping
             group_id: Group ID for tenant isolation
-            volume_config: Volume configuration
+            volume_config: Legacy volume configuration (only selected_agents
+                is still read; the volume itself is no longer used for uploads)
             agent_ids: Optional list of agent IDs that can access this knowledge source
             user_token: Optional user token for OBO authentication
 
         Returns:
-            Upload response with file path and metadata
+            Upload response with the logical file path and embedding metadata
         """
         logger.info("=" * 60)
         logger.info("STARTING KNOWLEDGE FILE UPLOAD")
@@ -110,220 +111,85 @@ class DatabricksKnowledgeService:
         logger.info("=" * 60)
 
         try:
-            # Get Databricks configuration
-            config = await self.repository.get_active_config(group_id=group_id)
-            if not config:
-                # Use default configuration if none exists - get from unified auth
-                logger.warning(
-                    "No Databricks config found in database, using unified auth defaults"
+            # SECURITY: reject oversized uploads up front (via Content-Length when
+            # available) so we never buffer an unbounded body into memory.
+            _max = MAX_KNOWLEDGE_UPLOAD_BYTES
+            declared_size = getattr(file, "size", None)
+            if isinstance(declared_size, int) and declared_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
                 )
-                workspace_url = "https://example.databricks.com"
-                token = ""
-                try:
-                    from src.utils.databricks_auth import get_auth_context
-
-                    auth = await get_auth_context()
-                    if auth:
-                        workspace_url = auth.workspace_url
-                        token = auth.token
-                        logger.debug(
-                            f"Using unified {auth.auth_method} auth for default config"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to get unified auth for default config: {e}"
-                    )
-
-                config = type(
-                    "obj",
-                    (object,),
-                    {
-                        "knowledge_volume_enabled": True,
-                        "knowledge_volume_path": "main.default.knowledge",
-                        "workspace_url": workspace_url,
-                        "encrypted_personal_access_token": token,
-                    },
-                )()
-                logger.info(f"Default config - workspace_url: {config.workspace_url}")
-                logger.info(
-                    f"Default config - volume_path: {config.knowledge_volume_path}"
-                )
-            else:
-                logger.info(
-                    f"Found Databricks config - workspace_url: {config.workspace_url}"
-                )
-                logger.info(
-                    f"Found Databricks config - volume_enabled: {config.knowledge_volume_enabled}"
-                )
-                logger.info(
-                    f"Found Databricks config - volume_path: {config.knowledge_volume_path}"
-                )
-
-            # Construct volume path
-            volume_path = volume_config.get("volume_path", "main.default.knowledge")
-            if (
-                hasattr(config, "knowledge_volume_path")
-                and config.knowledge_volume_path
-            ):
-                volume_path = config.knowledge_volume_path
-
-            logger.info(f"Using volume path: {volume_path}")
-
-            # Parse volume path (format: catalog.schema.volume)
-            parts = volume_path.split(".")
-            if len(parts) != 3:
-                # Use defaults if invalid format
-                catalog, schema, volume = "main", "default", "knowledge"
-                logger.warning(
-                    f"Invalid volume path format '{volume_path}', using defaults: {catalog}.{schema}.{volume}"
-                )
-            else:
-                catalog, schema, volume = parts
-                logger.info(
-                    f"Parsed volume path - Catalog: {catalog}, Schema: {schema}, Volume: {volume}"
-                )
-
-            # Create date directory if configured
-            date_dir = ""
-            if volume_config.get("create_date_dirs", True):
-                date_dir = datetime.now().strftime("%Y-%m-%d")
-                logger.info(f"Creating date directory: {date_dir}")
-
-            # Construct full path - ensure it starts with /Volumes
-            # Don't add 'knowledge' subdirectory since the volume itself is already 'knowledge'
-            file_path = (
-                f"/Volumes/{catalog}/{schema}/{volume}/{group_id}/{execution_id}"
-            )
-            if date_dir:
-                file_path = f"{file_path}/{date_dir}"
-            file_path = f"{file_path}/{file.filename}"
-            file_path = file_path.replace("//", "/")  # Clean up double slashes
-
-            logger.info("=" * 60)
-            logger.info(f"FULL UPLOAD PATH: {file_path}")
-            logger.info("=" * 60)
 
             # Read file content
             content = await file.read()
             file_size = len(content)
+            # Backstop in case Content-Length was absent or understated.
+            if file_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
+                )
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
-            # Use DatabricksVolumeRepository for upload (includes OBO → PAT fallback)
-            logger.info("Attempting upload via DatabricksVolumeRepository")
+            # TTL sweep: purge expired knowledge BEFORE adding more, so the
+            # embedding store never bloats (KNOWLEDGE_TTL_DAYS; non-fatal).
+            await self.embedding_service.purge_expired(user_token=user_token)
 
-            # Track upload success and method used
-            upload_successful = False
-            upload_method = "none"
-            upload_error: Optional[str] = None
-            selected_agents = volume_config.get("selected_agents", [])
-            workspace_url = None
-
+            # Stage the raw upload in a LOCAL TEMP FILE — its content is
+            # embedded into the local knowledge store (knowledge_embeddings:
+            # SQLite locally, Lakebase pgvector when deployed), stamped with
+            # the uploading user for per-user isolation, and the temp file is
+            # deleted as soon as the embedding attempt finishes. No Databricks
+            # Volume is required and no raw upload is retained anywhere.
+            safe_name = os.path.basename(file.filename or "upload.txt") or "upload.txt"
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                prefix="kasal-knowledge-", suffix=f"-{safe_name}"
+            )
+            logger.info(f"[UPLOAD] Staged upload in temp file: {tmp_path}")
             try:
-                # Upload using the repository layer (handles auth fallback automatically)
-                upload_result = await self.volume_repository.upload_file_to_volume(
-                    catalog=catalog,
-                    schema=schema,
-                    volume_name=volume,
-                    file_name=(
-                        f"{group_id}/{execution_id}/{date_dir}/{file.filename}"
-                        if date_dir
-                        else f"{group_id}/{execution_id}/{file.filename}"
-                    ),
-                    file_content=content,
-                    user_token=user_token,  # Pass user_token for OBO authentication
-                )
+                with os.fdopen(tmp_fd, "wb") as staged:
+                    staged.write(content)
+                with open(tmp_path, "rb") as staged:
+                    raw_bytes = staged.read()
 
-                if upload_result["success"]:
-                    logger.info("=" * 60)
-                    logger.info("SUCCESS! File uploaded via DatabricksVolumeRepository")
-                    logger.info(f"File location: {file_path}")
-                    logger.info("=" * 60)
-
-                    upload_successful = True
-                    upload_method = "repository"
-
-                    # Get workspace URL for display
-                    from src.utils.databricks_auth import get_auth_context
-
-                    try:
-                        auth = await get_auth_context()
-                        if auth:
-                            workspace_url = auth.workspace_url
-                    except Exception:
-                        pass
-                else:
-                    logger.error(
-                        f"Repository upload failed: {upload_result.get('error')}"
+                extraction = self._extract_text_content(safe_name, raw_bytes)
+                if extraction.get("status") != "success":
+                    raise UnprocessableEntityError(
+                        detail=extraction.get(
+                            "message", f"Could not extract text from '{safe_name}'"
+                        )
                     )
-                    raise Exception(upload_result.get("error", "Upload failed"))
 
-            except Exception as e:
-                upload_error = str(e)
-                logger.error(f"Failed to upload to Databricks: {e}", exc_info=True)
+                # Logical path — the stable identity of the embedded chunks.
+                # The crew's tool_configs carry it and the search tool
+                # soft-filters by its basename; no physical file lives here.
+                file_path = f"uploads/{group_id}/{execution_id}/{safe_name}"
 
-            # Surface a real failure instead of masking it as a "simulated"
-            # success: a file that never reached the Volume can be neither read
-            # nor embedded, so the caller (and the UI) must know it failed.
-            if not upload_successful:
-                logger.info("=" * 60)
-                logger.info("UPLOAD FAILED - File not uploaded to Databricks")
-                logger.info(f"Target path: {file_path}")
-                logger.info(f"File: {file.filename}, Size: {file_size} bytes")
-                logger.info(
-                    f"Cause: {upload_error or 'authentication or configuration error'}"
+                logger.info(f"[UPLOAD] Starting embedding for file: {file_path}")
+                embedding_result = await self.embedding_service.embed_file(
+                    file_path=file_path,
+                    file_content=extraction.get("content", ""),
+                    execution_id=execution_id,
+                    agent_ids=agent_ids,
+                    user_token=user_token,
+                    created_by=self.created_by_email,
                 )
-                logger.info(
-                    "To resolve: verify the volume's catalog/schema exist and that"
-                )
-                logger.info(
-                    "OBO / PAT / Service-Principal auth has write access to it."
-                )
-                logger.info("=" * 60)
+            finally:
+                # The raw upload never outlives the embedding attempt.
+                try:
+                    os.unlink(tmp_path)
+                    logger.info(f"[UPLOAD] Deleted temp file: {tmp_path}")
+                except OSError:
+                    pass
 
+            if embedding_result.get("status") != "success":
+                # Embedding IS the upload now — nothing was persisted, so the
+                # caller (and the UI) must see a real failure.
                 raise UnprocessableEntityError(
-                    f"Failed to upload '{file.filename}' to Databricks Volume "
-                    f"'{catalog}.{schema}.{volume}': "
-                    f"{upload_error or 'authentication or configuration error'}. "
-                    "Verify the volume's catalog/schema exist and that your "
-                    "Databricks auth (OBO/PAT/SPN) has write access to it."
-                )
-
-            logger.info(f"Selected agents for knowledge access: {selected_agents}")
-
-            # SINGLE EMBEDDING EXECUTION: Process and embed the uploaded file once
-            logger.info(f"[UPLOAD] Starting embedding for file: {file_path}")
-
-            try:
-                # Read file content for embedding
-                read_result = await self.read_knowledge_file(
-                    file_path=file_path, group_id=group_id, user_token=user_token
-                )
-
-                if read_result.get("status") == "success":
-                    file_content = read_result.get("content", "")
-
-                    # Delegate to embedding service (proper separation of concerns)
-                    embedding_result = await self.embedding_service.embed_file(
-                        file_path=file_path,
-                        file_content=file_content,
-                        execution_id=execution_id,
-                        agent_ids=agent_ids,
-                        user_token=user_token,
+                    detail=(
+                        f"Failed to embed '{safe_name}': "
+                        f"{embedding_result.get('message') or embedding_result.get('reason') or 'unknown error'}"
                     )
-                else:
-                    embedding_result = {
-                        "status": "error",
-                        "message": read_result.get(
-                            "message", "Failed to read file for embedding"
-                        ),
-                    }
-
-            except Exception as embed_error:
-                logger.error(f"[UPLOAD] EMBEDDING FAILED: {embed_error}", exc_info=True)
-                embedding_result = {
-                    "status": "error",
-                    "message": f"Embedding failed: {embed_error}",
-                }
+                )
 
             logger.info(
                 f"[UPLOAD] Embedding completed with result: {embedding_result.get('status')}"
@@ -336,26 +202,23 @@ class DatabricksKnowledgeService:
             # excludes it and the agent gets "Tool not found in available tools".
             await self._ensure_knowledge_tool_in_group(group_id)
 
-            # Return unified response regardless of upload method
             response = {
                 "status": "success",
                 "path": file_path,
-                "filename": file.filename,
+                "filename": safe_name,
                 "size": file_size,
                 "execution_id": execution_id,
                 "group_id": group_id,
+                "created_by": self.created_by_email,
                 "uploaded_at": datetime.now().isoformat(),
-                "selected_agents": selected_agents,
+                "selected_agents": (volume_config or {}).get("selected_agents", []),
                 "embedding_result": embedding_result,
-                "upload_method": upload_method,
-                "volume_info": {
-                    "catalog": catalog,
-                    "schema": schema,
-                    "volume": volume,
-                    "full_path": file_path,
-                },
-                "message": f"File {file.filename} uploaded successfully via {upload_method}",
-                "simulated": not upload_successful,
+                "upload_method": "temp_embed",
+                "message": (
+                    f"File {safe_name} embedded successfully "
+                    f"({embedding_result.get('chunks_embedded', 0)} chunks); "
+                    "the temporary upload was deleted"
+                ),
             }
 
             logger.info(f"Returning unified response: {response}")
@@ -411,6 +274,66 @@ class DatabricksKnowledgeService:
             logger.warning(
                 f"Could not register knowledge search tool for group {group_id}: {e}"
             )
+
+    def _extract_text_content(self, filename: str, content: Any) -> Dict[str, Any]:
+        """Extract embeddable text from raw file content (bytes or str).
+
+        PDFs go through pdfminer.six text extraction; everything else is
+        decoded as UTF-8 (lossy fallback). Shared by the temp-file upload
+        path and the legacy volume read path so both extract identically.
+
+        Returns:
+            {"status": "success", "content": str} or {"status": "error", "message": str}
+        """
+        lower_name = (filename or "").lower()
+        if lower_name.endswith(".pdf"):
+            logger.info("Detected PDF file, extracting text content")
+            try:
+                # pdfminer.six (MIT-licensed) — pure-Python PDF text extraction.
+                from pdfminer.high_level import extract_text
+
+                raw = content if isinstance(content, bytes) else str(content).encode("utf-8")
+                text_content = extract_text(io.BytesIO(raw)) or ""
+            except ImportError:
+                # Fail loudly instead of embedding a placeholder as "success":
+                # otherwise the table gets one junk chunk and the real content
+                # is silently dropped.
+                logger.error("pdfminer.six not installed — cannot extract PDF text")
+                return {
+                    "status": "error",
+                    "message": (
+                        "PDF text extraction requires the 'pdfminer.six' package "
+                        "(MIT). Install it (pip install pdfminer.six) and re-upload."
+                    ),
+                }
+            except Exception as pdf_error:
+                logger.error(f"Error extracting PDF text: {pdf_error}", exc_info=True)
+                return {
+                    "status": "error",
+                    "message": f"Could not extract text from PDF '{filename}': {pdf_error}",
+                }
+
+            if not text_content.strip():
+                logger.warning(f"No extractable text found in PDF: {filename}")
+                return {
+                    "status": "error",
+                    "message": (
+                        f"No extractable text found in '{filename}'. It may be a "
+                        "scanned / image-only PDF that needs OCR."
+                    ),
+                }
+
+            logger.info(f"Extracted {len(text_content)} chars from PDF")
+            return {"status": "success", "content": text_content}
+
+        # For non-PDF files, decode as text
+        if isinstance(content, bytes):
+            try:
+                content = content.decode("utf-8")
+            except UnicodeDecodeError:
+                logger.warning(f"Failed to decode {filename} as UTF-8")
+                content = content.decode("utf-8", errors="ignore")
+        return {"status": "success", "content": content}
 
     async def read_knowledge_file(
         self, file_path: str, group_id: str, user_token: Optional[str] = None
@@ -485,62 +408,17 @@ class DatabricksKnowledgeService:
                     "path": file_path,
                 }
 
-            # Handle PDF files if needed
+            # Extract text (PDF via pdfminer, otherwise UTF-8 decode) — shared
+            # with the temp-file upload path.
             filename = file_path.split("/")[-1].lower()
-            if filename.endswith(".pdf"):
-                logger.info("Detected PDF file, extracting text content")
-                try:
-                    # pdfminer.six (MIT-licensed) — pure-Python PDF text extraction.
-                    import io
-
-                    from pdfminer.high_level import extract_text
-
-                    # Content from repository is bytes.
-                    text_content = extract_text(io.BytesIO(content)) or ""
-                except ImportError:
-                    # Fail loudly instead of embedding a placeholder as "success":
-                    # otherwise the table gets one junk chunk and the real content
-                    # is silently dropped.
-                    logger.error("pdfminer.six not installed — cannot extract PDF text")
-                    return {
-                        "status": "error",
-                        "message": (
-                            "PDF text extraction requires the 'pdfminer.six' package "
-                            "(MIT). Install it (pip install pdfminer.six) and re-upload."
-                        ),
-                        "path": file_path,
-                    }
-                except Exception as pdf_error:
-                    logger.error(
-                        f"Error extracting PDF text: {pdf_error}", exc_info=True
-                    )
-                    return {
-                        "status": "error",
-                        "message": f"Could not extract text from PDF '{filename}': {pdf_error}",
-                        "path": file_path,
-                    }
-
-                if not text_content.strip():
-                    logger.warning(f"No extractable text found in PDF: {filename}")
-                    return {
-                        "status": "error",
-                        "message": (
-                            f"No extractable text found in '{filename}'. It may be a "
-                            "scanned / image-only PDF that needs OCR."
-                        ),
-                        "path": file_path,
-                    }
-
-                logger.info(f"Extracted {len(text_content)} chars from PDF")
-                content = text_content
-            else:
-                # For non-PDF files, decode as text
-                if isinstance(content, bytes):
-                    try:
-                        content = content.decode("utf-8")
-                    except UnicodeDecodeError:
-                        logger.warning(f"Failed to decode {filename} as UTF-8")
-                        content = content.decode("utf-8", errors="ignore")
+            extraction = self._extract_text_content(filename, content)
+            if extraction.get("status") != "success":
+                return {
+                    "status": "error",
+                    "message": extraction.get("message", "Could not extract text"),
+                    "path": file_path,
+                }
+            content = extraction.get("content", "")
 
             logger.info(f"Successfully read file: {len(content)} characters")
 
@@ -787,77 +665,45 @@ class DatabricksKnowledgeService:
             True if deletion was successful
         """
         try:
-            # Get Databricks configuration
-            config = await self._get_databricks_config(group_id)
-            if not config or not config.knowledge_volume_path:
-                logger.error(
-                    "Databricks configuration or knowledge_volume_path not found"
-                )
-                return False
-
-            # Build full file path: /Volumes/catalog.schema.volume/execution_id/filename
-            volume_path = config.knowledge_volume_path
-            parts = volume_path.split(".")
-            if len(parts) != 3:
-                logger.error(f"Invalid volume path format: {volume_path}")
-                return False
-
-            catalog, schema, volume = parts
-            file_path = f"{execution_id}/{filename}"
-
-            # Use repository to delete file
-            delete_result = await self.volume_repository.delete_volume_file(
-                catalog=catalog, schema=schema, volume_name=volume, file_path=file_path
+            # Uploads are no longer persisted anywhere (temp file deleted after
+            # embedding), so "deleting a knowledge file" means deleting its
+            # EMBEDDINGS from the knowledge store (Lakebase pgvector when
+            # active, else the app DB) so the search tool no longer retrieves
+            # its chunks.
+            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.services.knowledge_embedding_session import (
+                ensure_lakebase_doc_table,
+                knowledge_embedding_session,
             )
 
-            # Also remove the file's embeddings from the pgvector store (Lakebase
-            # memory instance when active, else the app DB) so the knowledge
-            # search tool no longer retrieves stale chunks for it.
-            try:
-                from src.models.documentation_embedding import KnowledgeEmbedding
-                from src.repositories.documentation_embedding_repository import (
-                    DocumentationEmbeddingRepository,
+            async with knowledge_embedding_session(
+                self.session, group_id, user_token
+            ) as (store_session, is_lakebase):
+                doc_repo = DocumentationEmbeddingRepository(
+                    store_session, model=KnowledgeEmbedding
                 )
-                from src.services.knowledge_embedding_session import (
-                    ensure_lakebase_doc_table,
-                    knowledge_embedding_session,
+                if is_lakebase:
+                    await ensure_lakebase_doc_table(store_session)
+                deleted_rows = await doc_repo.delete_by_file(
+                    group_id,
+                    execution_id,
+                    filename,
+                    # A user only deletes their OWN uploads (legacy rows with
+                    # no uploader stay group-deletable).
+                    created_by=self.created_by_email,
                 )
-
-                async with knowledge_embedding_session(
-                    self.session, group_id, user_token
-                ) as (store_session, is_lakebase):
-                    doc_repo = DocumentationEmbeddingRepository(
-                        store_session, model=KnowledgeEmbedding
-                    )
-                    if is_lakebase:
-                        await ensure_lakebase_doc_table(store_session)
-                    deleted_rows = await doc_repo.delete_by_file(
-                        group_id, execution_id, filename
-                    )
-                    if not is_lakebase:
-                        await store_session.commit()
-                logger.info(
-                    f"Removed {deleted_rows} embedding rows for {filename} (execution {execution_id})"
-                )
-            except Exception as emb_err:
-                logger.error(f"Failed to remove embeddings for {filename}: {emb_err}")
-
-            if delete_result.get("success"):
-                logger.info(
-                    f"Successfully deleted file {filename} for execution {execution_id}"
-                )
-                return True
-            else:
-                logger.error(
-                    f"Failed to delete file {filename}: {delete_result.get('message')}"
-                )
-                return False
+                if not is_lakebase:
+                    await store_session.commit()
+            logger.info(
+                f"Removed {deleted_rows} embedding rows for {filename} (execution {execution_id})"
+            )
+            return True
 
         except Exception as e:
-            logger.error(f"Error deleting knowledge file: {e}")
-            import traceback
-
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error deleting knowledge file: {e}", exc_info=True)
             return False
 
     async def _resolve_filenames_to_paths(
@@ -1008,6 +854,7 @@ class DatabricksKnowledgeService:
         agent_id: Optional[str] = None,
         limit: int = 5,
         user_token: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for knowledge in the Databricks Vector Index.
@@ -1026,23 +873,21 @@ class DatabricksKnowledgeService:
         Returns:
             List of search results with content and metadata
         """
-        # Resolve filenames to full paths if needed
-        resolved_file_paths = file_paths
-        if file_paths and not all(path.startswith("/Volumes") for path in file_paths):
-            logger.info(f"[DK SERVICE] Resolving file paths: {file_paths}")
-            resolved_file_paths = await self._resolve_filenames_to_paths(
-                file_paths, user_token
-            )
-            logger.info(f"[DK SERVICE] Resolved to: {resolved_file_paths}")
+        # No path resolution needed: uploads use logical paths
+        # (uploads/{group}/{execution}/{name}) and the search service
+        # soft-filters by basename, so bare filenames and full paths both work.
 
         # Delegate to search service (proper separation of concerns)
         result = await self.search_service.search(
             query=query,
             execution_id=execution_id,
-            file_paths=resolved_file_paths,
+            file_paths=file_paths,
             agent_id=agent_id,
             limit=limit,
             user_token=user_token,
+            # Per-user isolation: prefer the explicit caller identity, falling
+            # back to the service's own (API-context) user.
+            created_by=created_by or self.created_by_email,
         )
 
         return result

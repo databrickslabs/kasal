@@ -1079,3 +1079,70 @@ class TestEdgeCases:
 
         found = await service.find_by_name("K")
         assert found is None
+
+
+# ===========================================================================
+# PAT cache invalidation hooks (PERF-005)
+# ===========================================================================
+
+class TestPatCacheInvalidationHooks:
+    """Key mutations must drop the get_auth_context PAT cache for the group,
+    otherwise a rotated DATABRICKS_TOKEN keeps serving stale auth for a TTL."""
+
+    @pytest.mark.asyncio
+    async def test_create_invalidates_pat_cache(self):
+        service, repo = _build_service(group_id="grp_pat")
+        repo.create = AsyncMock(return_value=_make_api_key())
+        data = ApiKeyCreate(name="DATABRICKS_TOKEN", value="dapi-new", description="")
+
+        with patch("src.services.api_keys_service.EncryptionUtils"), \
+             patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+            await service.create_api_key(data)
+
+        mock_inv.assert_called_once_with("grp_pat")
+
+    @pytest.mark.asyncio
+    async def test_update_invalidates_pat_cache(self):
+        service, repo = _build_service(group_id="grp_pat")
+        service.find_by_name = AsyncMock(return_value=_make_api_key())
+        repo.update = AsyncMock(return_value=_make_api_key())
+        data = ApiKeyUpdate(value="dapi-rotated")
+
+        with patch("src.services.api_keys_service.EncryptionUtils"), \
+             patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+            await service.update_api_key("DATABRICKS_TOKEN", data)
+
+        mock_inv.assert_called_once_with("grp_pat")
+
+    @pytest.mark.asyncio
+    async def test_delete_invalidates_pat_cache(self):
+        service, repo = _build_service(group_id="grp_pat")
+        service.find_by_name = AsyncMock(return_value=_make_api_key())
+        repo.delete = AsyncMock(return_value=True)
+
+        with patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+            assert await service.delete_api_key("DATABRICKS_TOKEN") is True
+
+        mock_inv.assert_called_once_with("grp_pat")
+
+    @pytest.mark.asyncio
+    async def test_failed_delete_does_not_invalidate(self):
+        service, repo = _build_service(group_id="grp_pat")
+        service.find_by_name = AsyncMock(return_value=None)
+
+        with patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+            assert await service.delete_api_key("MISSING") is False
+
+        mock_inv.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalidation_error_does_not_break_mutation(self):
+        service, repo = _build_service(group_id="grp_pat")
+        repo.create = AsyncMock(return_value=_make_api_key())
+        data = ApiKeyCreate(name="DATABRICKS_TOKEN", value="dapi-x", description="")
+
+        with patch("src.services.api_keys_service.EncryptionUtils"), \
+             patch("src.utils.databricks_auth.invalidate_pat_cache", side_effect=Exception("boom")):
+            result = await service.create_api_key(data)  # must not raise
+
+        assert result is not None

@@ -21,6 +21,17 @@ from src.api.tools_router import (
 from src.schemas.tool import ToolCreate, ToolUpdate
 
 
+
+
+@pytest.fixture(autouse=True)
+def _clear_tool_list_cache():
+    """The enabled-tools cache is module-global (PERF: burst polling);
+    clear it around every test so suites stay independent."""
+    from src.core.cache import tool_list_cache
+    tool_list_cache._cache.clear()
+    yield
+    tool_list_cache._cache.clear()
+
 class Ctx:
     def __init__(self, user_role="user", primary_group_id="g1"):
         self.user_role = user_role

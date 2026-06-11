@@ -438,34 +438,14 @@ export class RunService {
       // Only attempt API call if available
       if (await this.checkApiAvailability()) {
         try {
-          // First try direct API endpoint by UUID
+          // Direct API endpoint by UUID
           const directResponse = await apiClient.get(`/executions/${jobId}`);
           return this.convertToRun(directResponse.data);
-        } catch (directError) {
-          // Fallback: Get all runs and filter by job_id
-          const runsResponse = await this.getRuns(100, 0);
-          const run = runsResponse.runs.find(r => r.job_id === jobId);
-          
-          if (run) {
-            // Check if we have YAML data
-            if ((!run.agents_yaml || !run.tasks_yaml) && run.job_id) {
-              // Try to get the raw database record to extract the YAML directly
-              try {
-                const rawResponse = await apiClient.get(`/executions/history`, {
-                  params: { job_id: run.job_id }
-                });
-                
-                if (rawResponse.data && Array.isArray(rawResponse.data) && rawResponse.data.length > 0) {
-                  // Reconvert the raw data to get the YAML properly
-                  return this.convertToRun(rawResponse.data[0]);
-                }
-              } catch (rawError) {
-                // Failed to get raw record, continue with what we have
-              }
-            }
-          }
-          
-          return run || null;
+        } catch {
+          // No bulk fallback here: run-status reconciliation polls this every
+          // 10s, and fetching 100 full rows per miss costs far more than
+          // reporting "not found". All callers handle null.
+          return null;
         }
       }
       return null;

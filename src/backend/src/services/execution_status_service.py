@@ -29,7 +29,8 @@ class ExecutionStatusService:
         status: str,
         message: str,
         result: Any = None,
-        session: AsyncSession | None = None
+        session: AsyncSession | None = None,
+        only_if_changed: bool = False
     ) -> bool:
         """
         Update the status of an execution in the database.
@@ -39,6 +40,11 @@ class ExecutionStatusService:
             status: New status string value
             message: Status message
             result: Optional result data
+            only_if_changed: Skip the UPDATE/commit/SSE broadcast when the
+                record already has this status (and no result payload was
+                given). Used for idempotent transitions like the RUNNING
+                write at execution start, where API-created records are
+                already RUNNING but scheduler-created records start pending.
 
         Returns:
             True if successful, False otherwise
@@ -64,6 +70,17 @@ class ExecutionStatusService:
                 # Get the integer primary key (id) from the record
                 record_id = execution_record.id
                 logger.debug(f"[ExecutionStatusService] Found record_id: {record_id} for job_id: {job_id}. Preparing update data.")
+
+                if (
+                    only_if_changed
+                    and result is None
+                    and execution_record.status
+                    and execution_record.status.upper() == status.upper()
+                ):
+                    logger.debug(
+                        f"[ExecutionStatusService] Status for job_id {job_id} already {status}; skipping no-op update."
+                    )
+                    return True
 
                 # Prepare complete update data with all fields
                 update_data = {

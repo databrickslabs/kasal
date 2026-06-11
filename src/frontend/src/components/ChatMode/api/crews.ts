@@ -124,6 +124,38 @@ export function usesGenieTool(
   return anyGenie(agents) || anyGenie(tasks);
 }
 
+/**
+ * A copy of the generation with every Genie tool reference removed — used when
+ * the user SKIPS the Genie-space prompt: the crew runs with its remaining
+ * tools instead of blocking on a space pick. Strips GenieTool (name, alias or
+ * id) from agent/task tool lists and drops any GenieTool tool_configs entry.
+ */
+export function stripGenieTools(
+  data: GenerationCompleteData,
+  toolNameMap: Record<string, string> = {},
+): GenerationCompleteData {
+  const stripItem = (item: Record<string, unknown>): Record<string, unknown> => {
+    const next = { ...item };
+    if (Array.isArray(next.tools)) {
+      next.tools = (next.tools as unknown[]).filter((t) => !isGenieToolRef(t, toolNameMap));
+    }
+    const cfgs = next.tool_configs;
+    if (cfgs && typeof cfgs === 'object') {
+      next.tool_configs = Object.fromEntries(
+        Object.entries(cfgs as Record<string, unknown>).filter(
+          ([key]) => !isGenieToolRef(key, toolNameMap),
+        ),
+      );
+    }
+    return next;
+  };
+  return {
+    ...data,
+    agents: (data.agents || []).map(stripItem),
+    tasks: (data.tasks || []).map(stripItem),
+  };
+}
+
 /** Derive a sensible default crew name when the user doesn't supply one. */
 export function deriveCrewName(
   data: GenerationCompleteData | Record<string, unknown>,
@@ -270,4 +302,28 @@ export async function listSavedFlows(): Promise<CatalogItem[]> {
   return (res.data || [])
     .filter((f) => f && f.id && f.name)
     .map((f) => ({ id: String(f.id), name: String(f.name) }));
+}
+
+// --- Crew thumbs feedback (surfaced in the Agent Builder catalog) -----------
+
+export interface CrewFeedbackEntry {
+  id: string;
+  crew_id: string;
+  rating: 'up' | 'down';
+  comment?: string | null;
+  created_at: string;
+  group_email?: string | null;
+}
+
+/** Record a thumbs vote on a cataloged crew. Thumbs-down requires a comment. */
+export async function postCrewFeedback(
+  crewId: string,
+  rating: 'up' | 'down',
+  comment?: string,
+): Promise<CrewFeedbackEntry> {
+  const res = await getClient().post<CrewFeedbackEntry>(`/crews/${crewId}/feedback`, {
+    rating,
+    ...(comment ? { comment } : {}),
+  });
+  return res.data;
 }

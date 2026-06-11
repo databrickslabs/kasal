@@ -375,66 +375,58 @@ class TestDatabricksKnowledgeServiceDeleteKnowledgeFile:
         self.group_id = "test-group-id"
         self.service = DatabricksKnowledgeService(self.mock_session, self.group_id)
 
+    def _patch_store(self, deleted_rows=2):
+        """Deletion now removes the file's EMBEDDINGS (no raw file exists)."""
+        from contextlib import asynccontextmanager
+
+        store_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_ctx(_session, _group_id, _user_token=None):
+            yield store_session, False
+
+        delete_by_file = AsyncMock(return_value=deleted_rows)
+        repo_cls = MagicMock(return_value=MagicMock(delete_by_file=delete_by_file))
+        return (
+            patch(
+                "src.services.knowledge_embedding_session.knowledge_embedding_session",
+                fake_ctx,
+            ),
+            patch(
+                "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository",
+                repo_cls,
+            ),
+            delete_by_file,
+        )
+
     @pytest.mark.asyncio
     async def test_delete_file_basic(self):
-        """Test deleting a knowledge file"""
-        execution_id = "test-execution-id"
-        filename = "test.txt"
-
-        # Mock the methods that delete_knowledge_file actually calls
-        mock_config = type(
-            "obj", (object,), {"knowledge_volume_path": "catalog.schema.volume"}
-        )()
-
-        # Use AsyncMock since _get_databricks_config is an async method
-        mock_get_config = AsyncMock(return_value=mock_config)
-        with (
-            patch.object(
-                self.service, "_get_databricks_config", mock_get_config, create=True
-            ),
-            patch.object(
-                self.service.volume_repository, "delete_volume_file"
-            ) as mock_delete,
-        ):
-
-            mock_delete.return_value = {"success": True}
-
+        """Deleting a knowledge file removes its embedding rows"""
+        ctx_patch, repo_patch, delete_by_file = self._patch_store()
+        with ctx_patch, repo_patch:
             result = await self.service.delete_knowledge_file(
-                execution_id, self.group_id, filename
+                "test-execution-id", self.group_id, "test.txt"
             )
 
-            assert result is True
+        assert result is True
+        delete_by_file.assert_awaited_once_with(
+            self.group_id, "test-execution-id", "test.txt", created_by=None
+        )
 
     @pytest.mark.asyncio
     async def test_delete_file_with_user_token(self):
         """Test deleting file with user token"""
-        execution_id = "test-execution-id"
-        filename = "test.txt"
-        user_token = "test-user-token"
-
-        # Mock the methods that delete_knowledge_file actually calls
-        mock_config = type(
-            "obj", (object,), {"knowledge_volume_path": "catalog.schema.volume"}
-        )()
-
-        # Use AsyncMock since _get_databricks_config is an async method
-        mock_get_config = AsyncMock(return_value=mock_config)
-        with (
-            patch.object(
-                self.service, "_get_databricks_config", mock_get_config, create=True
-            ),
-            patch.object(
-                self.service.volume_repository, "delete_volume_file"
-            ) as mock_delete,
-        ):
-
-            mock_delete.return_value = {"success": True}
-
+        ctx_patch, repo_patch, delete_by_file = self._patch_store()
+        with ctx_patch, repo_patch:
             result = await self.service.delete_knowledge_file(
-                execution_id, self.group_id, filename, user_token=user_token
+                "test-execution-id",
+                self.group_id,
+                "test.txt",
+                user_token="test-user-token",
             )
 
-            assert result is True
+        assert result is True
+        delete_by_file.assert_awaited_once()
 
 
 class TestDatabricksKnowledgeServiceBrowseVolumeFiles:

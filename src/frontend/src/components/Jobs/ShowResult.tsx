@@ -23,8 +23,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import WebIcon from '@mui/icons-material/Web';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import HtmlIcon from '@mui/icons-material/Html';
+import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
 // import CloudIcon from '@mui/icons-material/Cloud';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import DownloadForOfflineIcon from '@mui/icons-material/DownloadForOffline';
@@ -35,9 +34,10 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { sanitizeUrl } from '../Chat/components/MessageRenderer';
+import { UiSurfaceView } from '../Chat/components/UiSurfaceResult';
+import { parseUiDocument } from '../ChatMode/utils/uiDocument';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
-import { generateRunPDF } from '../../utils/pdfGenerator';
 import { DatabricksService } from '../../api/DatabricksService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
@@ -48,8 +48,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const theme = useTheme();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState<'code' | 'html'>('code');
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewMode, setViewMode] = useState<'code' | 'html' | 'ui'>('code');
+  // Results open full screen by default; the toggle shrinks to a dialog.
+  const [isFullscreen, setIsFullscreen] = useState(true);
   const [databricksVolumeInfo, setDatabricksVolumeInfo] = useState<{ path: string; workspaceUrl?: string } | null>(null);
   const [isCicdDownloading, setIsCicdDownloading] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -271,36 +272,6 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     }
   }, [run]);
 
-  // Update the hasOpened ref when dialog opens and set view mode based on content
-  useEffect(() => {
-    if (open) {
-      hasOpenedRef.current = true;
-      // Set view mode to 'html' if HTML content is detected
-      if (result) {
-        const resultString = JSON.stringify(result);
-        if (/<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html')) {
-          setViewMode('html');
-        } else {
-          setViewMode('code');
-        }
-
-        // Check for Databricks volume information from configuration
-        checkForDatabricksVolumeInfo(result);
-      }
-    }
-  }, [open, result, checkForDatabricksVolumeInfo]);
-
-  // URL detection regex pattern
-  const urlPattern = /(https?:\/\/[^\s]+)/g;
-
-  // Check if result contains HTML content
-  const isHtmlContent = useMemo(() => {
-    if (!result) return false;
-    const resultString = JSON.stringify(result);
-    // Check for common HTML tags
-    return /<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html');
-  }, [result]);
-
   // Memoize the formatted result to prevent unnecessary re-processing
   const memoizedResult = useMemo(() => {
     if (!result) return {};
@@ -331,109 +302,47 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     return result;
   }, [result]);
 
-  // Fullscreen handlers
-  const handleFullscreen = async () => {
-    if (!document.fullscreenElement) {
-      try {
-        const element = dialogRef.current?.querySelector('.MuiDialog-paper');
-        if (element) {
-          await element.requestFullscreen();
-          setIsFullscreen(true);
-        }
-      } catch (err) {
-        console.error('Error attempting to enable fullscreen:', err);
-      }
-    } else {
-      try {
-        await document.exitFullscreen();
-        setIsFullscreen(false);
-      } catch (err) {
-        console.error('Error attempting to exit fullscreen:', err);
-      }
-    }
-  };
+  // A2UI document detection: when the result is (or contains) a parseable A2UI
+  // surface, the dialog can render it as the designed UI and toggle to raw JSON.
+  const uiSurface = useMemo(
+    () => parseUiDocument(memoizedResult as string | Record<string, unknown>),
+    [memoizedResult],
+  );
 
-  // Download HTML function
-  const handleDownloadHtml = () => {
-    if (!run) return;
-
-    // Recursively search for an HTML string in a nested result object
-    const findHtmlString = (obj: unknown): string | null => {
-      if (typeof obj === 'string') {
-        // Check for markdown-wrapped HTML first: ```html\n...\n```
-        // Must come before raw HTML check, otherwise the wrapping is returned as-is
-        const mdMatch = obj.match(/^```(?:html|HTML)\s*\n([\s\S]*)\n```\s*$/);
-        if (mdMatch && (mdMatch[1].includes('<html') || mdMatch[1].includes('<!DOCTYPE'))) {
-          return mdMatch[1];
-        }
-        // Check if this string itself is HTML
-        if (obj.includes('<html') || obj.includes('<!DOCTYPE')) {
-          return obj;
-        }
-        return null;
-      }
-      if (obj && typeof obj === 'object') {
-        for (const value of Object.values(obj)) {
-          const found = findHtmlString(value);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    let htmlContent = findHtmlString(result) || '';
-
-    // If no HTML found, create a simple HTML with the result
-    if (!htmlContent) {
-      htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Result</title>
-</head>
-<body>
-    <pre>${JSON.stringify(result, null, 2)}</pre>
-</body>
-</html>
-      `;
-    }
-
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    // eslint-disable-next-line react/prop-types
-    const sanitizedName = run?.run_name ? run.run_name.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'result';
-    const timestamp = new Date().toISOString().split('T')[0];
-    // eslint-disable-next-line react/prop-types
-    const jobId = run?.job_id || 'unknown';
-    link.download = `${sanitizedName}_${timestamp}_${jobId}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  // Listen for fullscreen changes
+  // Update the hasOpened ref when dialog opens and set view mode based on content
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
+    if (open) {
+      hasOpenedRef.current = true;
+      // The dialog stays mounted across open/close (keepMounted), so re-apply
+      // the full-screen default on every open.
+      setIsFullscreen(true);
+      if (result) {
+        // Default to the A2UI rendering when the result is an A2UI document,
+        // then to the HTML preview when HTML content is detected.
+        const resultString = JSON.stringify(result);
+        if (uiSurface) {
+          setViewMode('ui');
+        } else if (/<[^>]*>/.test(resultString) || resultString.includes('<!DOCTYPE') || resultString.includes('<html')) {
+          setViewMode('html');
+        } else {
+          setViewMode('code');
+        }
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+        // Check for Databricks volume information from configuration
+        checkForDatabricksVolumeInfo(result);
+      }
+    }
+  }, [open, result, uiSurface, checkForDatabricksVolumeInfo]);
 
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-    };
-  }, []);
+  // URL detection regex pattern
+  const urlPattern = /(https?:\/\/[^\s]+)/g;
+
+  // Fullscreen toggle — uses the Dialog's own fullScreen mode (CSS) instead of
+  // the browser Fullscreen API, which is blocked inside the Databricks Apps
+  // iframe and silently did nothing there.
+  const handleFullscreen = () => {
+    setIsFullscreen((prev) => !prev);
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const formatValue = (value: unknown): string => {
@@ -1264,6 +1173,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
       open={open}
       onClose={onClose}
       keepMounted={hasOpenedRef.current} // Keep the dialog mounted after first open
+      fullScreen={isFullscreen}
       maxWidth={viewMode === 'html' && Object.values(memoizedResult || {}).some(value =>
         typeof value === 'string' && isHTML(value)
       ) ? "xl" : "lg"}
@@ -1284,8 +1194,29 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     >
       <DialogTitle sx={{ px: 3, py: 1, pb: 0 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          {/* Left side: View Mode Toggle (only when HTML content is present) */}
+          {/* Left side: View Mode Toggle (A2UI rendered ↔ raw JSON when the
+              result is an A2UI document; Code ↔ HTML when HTML is present) */}
           {(() => {
+            if (uiSurface) {
+              return (
+                <ToggleButtonGroup
+                  value={viewMode}
+                  exclusive
+                  onChange={(_, newMode) => newMode && setViewMode(newMode)}
+                  size="small"
+                  sx={{ height: 32 }}
+                >
+                  <ToggleButton value="ui" aria-label="rendered view">
+                    <ViewQuiltIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                    Rendered
+                  </ToggleButton>
+                  <ToggleButton value="code" aria-label="raw json view">
+                    <CodeIcon sx={{ mr: 0.5, fontSize: 18 }} />
+                    Raw JSON
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              );
+            }
             const hasHTMLContent = Object.values(memoizedResult || {}).some(value =>
               typeof value === 'string' && isHTML(value)
             );
@@ -1316,6 +1247,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
                   <IconButton
                     onClick={handleFullscreen}
+                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                     size="small"
                     sx={{
                       color: 'text.secondary',
@@ -1368,7 +1300,13 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           display: 'flex',
           flexDirection: 'column',
         }}>
-          {renderContent(memoizedResult)}
+          {viewMode === 'ui' && uiSurface ? (
+            <Box sx={{ borderRadius: 1.5, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+              <UiSurfaceView surface={uiSurface} />
+            </Box>
+          ) : (
+            renderContent(memoizedResult)
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
@@ -1418,22 +1356,6 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               }}
             >
               Open in Databricks Volume
-            </Button>
-          </Tooltip>
-        )}
-        {run && (
-          <Tooltip title={isHtmlContent ? "Download as HTML" : "Download as PDF"}>
-            <Button
-              onClick={isHtmlContent ? handleDownloadHtml : () => generateRunPDF(run)}
-              variant="outlined"
-              startIcon={isHtmlContent ? <HtmlIcon /> : <PictureAsPdfIcon />}
-              sx={{
-                borderRadius: '8px',
-                textTransform: 'none',
-                fontWeight: 500,
-              }}
-            >
-              {isHtmlContent ? 'Download HTML' : 'Download PDF'}
             </Button>
           </Tooltip>
         )}

@@ -95,6 +95,9 @@ class KnowledgeEmbedding(Base):
     doc_metadata = Column(JSON, nullable=True)
     group_id = Column(String(100), index=True, nullable=True)  # workspace isolation
     file_path = Column(String, index=True, nullable=True)  # source knowledge file
+    # Uploader email — per-user isolation of uploaded knowledge within a group
+    # (NULL on legacy rows, treated as group-shared).
+    created_by = Column(String(255), index=True, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

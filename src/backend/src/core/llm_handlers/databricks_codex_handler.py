@@ -103,6 +103,21 @@ class DatabricksCodexCompletion(OpenAICompletion):
             messages=messages, tools=tools, response_model=response_model
         )
 
+        # Cap the output budget. model_configs carries the model's CAPABILITY
+        # (max_output_tokens=128000), which used to flow into every request —
+        # ~30x the largest response ever observed (p99 well under 4k tokens)
+        # and an open invitation for a runaway generation to bill 128k output
+        # tokens. Override via KASAL_CODEX_MAX_OUTPUT_TOKENS when a workload
+        # genuinely needs more.
+        import os as _os
+        cap = int(_os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"))
+        current = params.get("max_output_tokens")
+        if current is None:
+            explicit = getattr(self, "max_completion_tokens", None) or getattr(self, "max_tokens", None)
+            params["max_output_tokens"] = min(int(explicit), cap) if explicit else cap
+        elif int(current) > cap:
+            params["max_output_tokens"] = cap
+
         # Sanitise input items for Responses API compatibility.
         # CrewAI's executor builds messages in Chat Completions format
         # (role: assistant/tool with tool_calls), but the Responses API
@@ -228,6 +243,11 @@ class DatabricksCodexCompletion(OpenAICompletion):
         import litellm
         from openai.types.responses import Response
 
+        # Reset per call: _handle_responses reads this to decide whether the
+        # response's token usage represents real API spend (cache replays cost
+        # zero tokens and must not inflate the crew's total_tokens aggregate).
+        self._last_response_from_cache = False
+
         cache = getattr(litellm, "cache", None)
         cache_key = None
         if cache is not None:
@@ -236,6 +256,7 @@ class DatabricksCodexCompletion(OpenAICompletion):
                 cached = cache.get_cache(cache_key=cache_key)
                 if cached is not None:
                     logger.info("[DatabricksCodex] Responses cache HIT")
+                    self._last_response_from_cache = True
                     # Reconstruct with the OpenAI SDK's lenient ``construct`` — the
                     # SAME path the live client uses to parse responses. Strict
                     # ``model_validate`` rejects Databricks-specific values the live
@@ -293,7 +314,26 @@ class DatabricksCodexCompletion(OpenAICompletion):
                     self._last_reasoning_items = reasoning_items
 
             usage = self._extract_responses_token_usage(response)
-            self._track_token_usage_internal(usage)
+            if getattr(self, "_last_response_from_cache", False):
+                # Cache replay: the original usage is embedded in the cached
+                # payload but no API tokens were spent — counting it would
+                # overstate crew total_tokens by roughly the cache hit rate.
+                logger.debug("[DatabricksCodex] cache hit — token usage not counted")
+                usage_for_event = None
+            else:
+                self._track_token_usage_internal(usage)
+                # Surface per-call usage on the event bus (LLMCallCompletedEvent
+                # carries it to the OTel bridge → execution_trace) and in the
+                # logs — this path bypasses litellm, so without this the codex
+                # path records zero token usage anywhere.
+                usage_for_event = usage
+                if usage:
+                    logger.info(
+                        "[DatabricksCodex] usage: prompt=%s completion=%s total=%s",
+                        usage.get("prompt_tokens"),
+                        usage.get("completion_tokens"),
+                        usage.get("total_tokens"),
+                    )
 
             self._log_response(response)
 
@@ -307,6 +347,7 @@ class DatabricksCodexCompletion(OpenAICompletion):
                     from_task=from_task,
                     from_agent=from_agent,
                     messages=params.get("input", []),
+                    usage=usage_for_event,
                 )
                 return parsed_result
 
@@ -343,6 +384,7 @@ class DatabricksCodexCompletion(OpenAICompletion):
                     from_task=from_task,
                     from_agent=from_agent,
                     messages=params.get("input", []),
+                    usage=usage_for_event,
                 )
                 return wrapped_calls
 
@@ -379,6 +421,7 @@ class DatabricksCodexCompletion(OpenAICompletion):
                         from_task=from_task,
                         from_agent=from_agent,
                         messages=params.get("input", []),
+                        usage=usage_for_event,
                     )
                     return structured_result
                 except ValueError as e:
@@ -392,6 +435,7 @@ class DatabricksCodexCompletion(OpenAICompletion):
                 from_task=from_task,
                 from_agent=from_agent,
                 messages=params.get("input", []),
+                usage=usage_for_event,
             )
 
             return content
@@ -481,8 +525,12 @@ class DatabricksCodexCompletion(OpenAICompletion):
             has_instructions,
         )
 
-        # Log full tool schemas on first call for debugging format issues
-        if params.get("tools"):
+        # Log full tool schemas ONCE per handler instance for debugging format
+        # issues. Previously this fired on EVERY request (the request line
+        # above already carries the tool names) — up to 500 chars per tool per
+        # iteration, re-logged even on cache hits.
+        if params.get("tools") and not getattr(self, "_tool_schemas_logged", False):
+            self._tool_schemas_logged = True
             for i, tool in enumerate(params["tools"]):
                 logger.info(
                     "[DatabricksCodex] Tool[%d] schema: %s",

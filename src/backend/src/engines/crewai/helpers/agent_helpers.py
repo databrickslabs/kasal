@@ -172,18 +172,22 @@ async def create_agent(
     
     # Add MCP tools using the centralized integration module
     try:
-        from src.core.unit_of_work import UnitOfWork
-        from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
-        
-        from src.db.session import request_scoped_session
-        async with request_scoped_session() as session:
-            mcp_service = MCPService(session)
-            mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
-                agent_config, agent_key, mcp_service, config
-            )
-            agent_tools.extend(mcp_tools)
-            logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_key}")
+
+        # Cheap dict check FIRST: with no explicit servers the integration
+        # returns [] without ever touching the service, so opening a DB
+        # session + MCPService per agent was pure waste (the 100% case when
+        # MCP is unused).
+        if MCPIntegration._extract_mcp_servers_from_config(agent_config.get('tool_configs', {})):
+            from src.services.mcp_service import MCPService
+            from src.db.session import request_scoped_session
+            async with request_scoped_session() as session:
+                mcp_service = MCPService(session)
+                mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
+                    agent_config, agent_key, mcp_service, config
+                )
+                agent_tools.extend(mcp_tools)
+                logger.info(f"Added {len(mcp_tools)} MCP tools to agent {agent_key}")
     except Exception as e:
         logger.error(f"Error adding MCP tools to agent {agent_key}: {str(e)}")
         import traceback
@@ -323,33 +327,38 @@ async def create_agent(
             agent_kwargs[param] = agent_config[param]
             logger.info(f"Setting additional parameter '{param}' to {agent_config[param]} for agent {agent_key}")
 
-    # Handle prompt templates
-    if 'system_template' in agent_config and agent_config['system_template']:
-        agent_kwargs['system_prompt'] = agent_config['system_template']
-    if 'prompt_template' in agent_config and agent_config['prompt_template']:
-        agent_kwargs['task_prompt'] = agent_config['prompt_template']
-    if 'response_template' in agent_config and agent_config['response_template']:
-        agent_kwargs['format_prompt'] = agent_config['response_template']
+    # Handle prompt templates. CrewAI's Agent field names are system_template /
+    # prompt_template / response_template — the previously used system_prompt /
+    # task_prompt / format_prompt kwargs are NOT fields and were silently
+    # dropped by Pydantic, so custom templates (and the security preamble)
+    # never reached the LLM.
+    if agent_config.get('system_template'):
+        agent_kwargs['system_template'] = agent_config['system_template']
+    if agent_config.get('prompt_template'):
+        agent_kwargs['prompt_template'] = agent_config['prompt_template']
+    if agent_config.get('response_template'):
+        agent_kwargs['response_template'] = agent_config['response_template']
+    # CrewAI only honors custom templates when BOTH system_template and
+    # prompt_template are present (utilities/prompts.py falls back to the
+    # default format otherwise) — supply a passthrough user template when only
+    # the system one was configured.
+    if agent_kwargs.get('system_template') and not agent_kwargs.get('prompt_template'):
+        agent_kwargs['prompt_template'] = "{{ .Prompt }}"
 
-    # SECURITY: Inject prompt hardening preamble into every agent's system prompt.
-    # When the user supplied a custom system_template it is already set as
-    # 'system_prompt' above — prepend the preamble to preserve it.
-    # When no template was provided, build an explicit system_prompt from the
-    # agent's role/goal/backstory so CrewAI's default template is replaced and
-    # the preamble is guaranteed to be present.
+    # SECURITY: Inject prompt hardening preamble into every agent's context.
+    # With a custom system_template, prepend the preamble to it. Otherwise
+    # prepend it to the backstory: CrewAI's default system prompt embeds
+    # {backstory}, so the preamble is guaranteed to be in the rendered prompt.
     preamble = _build_security_preamble()
-    if 'system_prompt' in agent_kwargs and agent_kwargs['system_prompt']:
-        agent_kwargs['system_prompt'] = preamble + "\n\n" + agent_kwargs['system_prompt']
+    if agent_kwargs.get('system_template'):
+        agent_kwargs['system_template'] = preamble + "\n\n" + agent_kwargs['system_template']
+        injected_into, injected_text = 'system_template', agent_kwargs['system_template']
     else:
-        agent_kwargs['system_prompt'] = (
-            preamble + "\n\n"
-            f"You are {agent_config['role']}.\n"
-            f"Your goal: {agent_config['goal']}\n"
-            f"Background: {agent_config['backstory']}"
-        )
+        agent_kwargs['backstory'] = preamble + "\n\n" + (agent_kwargs.get('backstory') or "")
+        injected_into, injected_text = 'backstory', agent_kwargs['backstory']
     logger.info(
-        f"[SECURITY] system_prompt for agent '{agent_config.get('role', agent_key)}' "
-        f"starts with: {agent_kwargs['system_prompt'][:300]!r}"
+        f"[SECURITY] preamble injected into {injected_into} for agent "
+        f"'{agent_config.get('role', agent_key)}', starts with: {injected_text[:300]!r}"
     )
 
     # Note: Embedder configuration is handled at the Crew level, not Agent level

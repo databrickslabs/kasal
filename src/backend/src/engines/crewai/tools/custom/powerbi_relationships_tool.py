@@ -26,49 +26,10 @@ logger = logging.getLogger(__name__)
 class PowerBIRelationshipsSchema(BaseModel):
     """Input schema for PowerBIRelationshipsTool."""
 
-    # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID containing the semantic model (required). Supports {placeholder} for dynamic mode."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID to extract relationships from (required). Supports {placeholder} for dynamic mode."
-    )
-
-    # ===== SERVICE PRINCIPAL AUTHENTICATION (must be workspace member) =====
-    tenant_id: Optional[str] = Field(
-        None,
-        description="[Auth] Azure AD tenant ID (required for SP or Service Account)"
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="[Auth] Application/Client ID - must be a workspace member (required for SP or Service Account)"
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="[Auth] Client secret (required for Service Principal)"
-    )
-
-    # ===== SERVICE ACCOUNT AUTHENTICATION =====
-    username: Optional[str] = Field(
-        None,
-        description="[Auth] Service account username/UPN (for Service Account authentication)"
-    )
-    password: Optional[str] = Field(
-        None,
-        description="[Auth] Service account password (for Service Account authentication)"
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
-    )
-
-    # User OAuth token (alternative to Service Principal/Service Account)
-    access_token: Optional[str] = Field(
-        None,
-        description="[Auth] Pre-obtained OAuth access token (alternative to SP/Service Account). Use this when authenticating as a user."
-    )
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(

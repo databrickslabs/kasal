@@ -34,7 +34,8 @@ class KnowledgeSearchService:
         file_paths: Optional[List[str]] = None,
         agent_id: Optional[str] = None,
         limit: int = 5,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for knowledge in the Databricks Vector Index.
@@ -46,11 +47,14 @@ class KnowledgeSearchService:
             agent_id: Optional agent ID for access control filtering
             limit: Maximum number of results to return
             user_token: Optional user token for OBO authentication
+            created_by: Requesting user's email — when set, results are
+                isolated to chunks THIS user uploaded (rows without an
+                uploader, e.g. legacy ones, stay group-shared)
 
         Returns:
             List of search results with content and metadata
         """
-        logger.info(f"Knowledge search: query='{query}', group={self.group_id}, agent={agent_id}, limit={limit}")
+        logger.info(f"Knowledge search: query='{query}', group={self.group_id}, agent={agent_id}, user={created_by}, limit={limit}")
         logger.info(f"File paths parameter: {file_paths}")
 
         try:
@@ -107,6 +111,34 @@ class KnowledgeSearchService:
                         # the group-wide results (filename mismatch shouldn't blank it).
                         if narrowed:
                             rows = narrowed
+
+                    # Per-user isolation: only chunks uploaded by the requesting
+                    # user are returned (rows without an uploader — legacy or
+                    # built-in — stay group-shared).
+                    if created_by:
+                        rows = [
+                            r for r in rows
+                            if (owner := getattr(r, 'created_by', None)) is None
+                            or owner == created_by
+                        ]
+
+                    # TTL: expired chunks are excluded immediately, even before
+                    # the next upload-time purge sweeps them out of the table.
+                    from src.services.knowledge_embedding_service import KNOWLEDGE_TTL_DAYS
+                    if KNOWLEDGE_TTL_DAYS > 0:
+                        from datetime import datetime, timedelta, timezone
+
+                        cutoff = datetime.now(timezone.utc) - timedelta(days=KNOWLEDGE_TTL_DAYS)
+
+                        def _fresh(r) -> bool:
+                            created = getattr(r, 'created_at', None)
+                            if not created:
+                                return True
+                            if created.tzinfo is None:
+                                created = created.replace(tzinfo=timezone.utc)
+                            return created >= cutoff
+
+                        rows = [r for r in rows if _fresh(r)]
 
                     logger.info(
                         f"[KNOWLEDGE-SEARCH] table=knowledge_embeddings lakebase={_is_lakebase} "

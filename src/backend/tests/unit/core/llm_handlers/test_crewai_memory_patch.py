@@ -62,3 +62,40 @@ class TestPatchedModels:
             _analyze.ExtractedMemories.model_validate('{"memories": []}')
         except Exception:
             pass
+
+
+class TestRuntimeVersionLogging:
+    """log_runtime_versions makes dependency skew visible in every app log."""
+
+    def test_reports_installed_crewai_stack(self):
+        from src.core.crewai_patches import log_runtime_versions
+
+        summary = log_runtime_versions()
+
+        assert "crewai=" in summary and "crewai=absent" not in summary
+        assert "litellm=" in summary and "litellm=absent" not in summary
+
+    def test_absent_package_does_not_raise(self, monkeypatch):
+        import builtins
+        import importlib.metadata
+        from src.core import crewai_patches
+
+        real_import = builtins.__import__
+        real_version = importlib.metadata.version
+
+        def failing_import(name, *args, **kwargs):
+            if name == "mlflow":
+                raise ImportError("simulated absence")
+            return real_import(name, *args, **kwargs)
+
+        def failing_version(dist):
+            if dist == "mlflow":
+                raise importlib.metadata.PackageNotFoundError(dist)
+            return real_version(dist)
+
+        import sys
+        monkeypatch.delitem(sys.modules, "mlflow", raising=False)
+        monkeypatch.setattr(builtins, "__import__", failing_import)
+        monkeypatch.setattr(importlib.metadata, "version", failing_version)
+        summary = crewai_patches.log_runtime_versions()
+        assert "mlflow=absent" in summary

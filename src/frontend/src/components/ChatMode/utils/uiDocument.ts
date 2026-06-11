@@ -151,8 +151,8 @@ function coerceJson(
   // of dumping escaped JSON into the chat. Depth-capped to avoid any loop.
   if (depth < 4 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
     try {
-      const unwrapped = JSON.parse(trimmed);
-      if (typeof unwrapped === 'string') return coerceJson(unwrapped, depth + 1);
+      // A valid JSON document delimited by quotes is necessarily a string.
+      return coerceJson(JSON.parse(trimmed) as string, depth + 1);
     } catch {
       /* not a JSON-encoded string; fall through to normal handling */
     }
@@ -248,6 +248,87 @@ export function parseUiDocument(raw: string | Record<string, unknown>): UiSurfac
 /* NOTE: the crew "emit a UI document" instruction is built BACKEND-side
  * (src/backend/src/engines/crewai/helpers/ui_emission.py) so every execution
  * channel behaves the same. This module only parses + renders UI documents. */
+
+/** Workspace UI-Configurator palettes keyed by deliverable type
+ *  ('default', 'presentation', 'dashboard', …) — the parsed `themes` map of
+ *  the workspace ui_config's style_json. */
+export type WorkspaceThemes = Record<string, UiTheme>;
+
+// Component → deliverable, ordered by specificity (mirrors the backend keyword
+// table in ui_emission.py). The first component type present anywhere in the
+// surface decides the deliverable; surfaces with none of these are 'default'.
+const DELIVERABLE_BY_COMPONENT: [UiComponentType, string][] = [
+  ['Slides', 'presentation'],
+  ['Quiz', 'quiz'],
+  ['Album', 'album'],
+  ['Mindmap', 'mindmap'],
+  ['Dashboard', 'dashboard'],
+  ['Table', 'genie'],
+];
+
+/** Which deliverable type a surface materializes, judged by its components. */
+export function inferSurfaceDeliverable(surface: UiSurface): string {
+  const present = new Set(Object.values(surface.components).map((c) => c.component));
+  for (const [component, deliverable] of DELIVERABLE_BY_COMPONENT) {
+    if (present.has(component)) return deliverable;
+  }
+  return 'default';
+}
+
+/** True when every token the embedded theme defines equals that palette's —
+ *  i.e. the theme is a (possibly partial) copy of the palette rather than a
+ *  deliberate deviation. Color tokens compare case-insensitively. */
+function matchesPalette(theme: UiTheme, palette: UiTheme | null | undefined): boolean {
+  if (!palette) return false;
+  return (Object.keys(theme) as (keyof UiTheme)[]).every((key) => {
+    const own = theme[key];
+    const configured = palette[key];
+    if (typeof own === 'string' && typeof configured === 'string') {
+      return own.trim().toLowerCase() === configured.trim().toLowerCase();
+    }
+    return own === configured;
+  });
+}
+
+/**
+ * Re-resolve a surface's theme from the workspace UI-Configurator palettes —
+ * the source of truth. The agent is instructed to stamp the matching palette
+ * onto createSurface.theme, but in practice models routinely copy the Default
+ * palette onto every surface (turning e.g. a themed deck white), so the
+ * renderer must not trust the embedded theme when the configured palettes are
+ * known. Resolving at render time also retroactively fixes persisted documents.
+ *
+ * EXCEPTION: an embedded theme that deviates from EVERY configured palette was
+ * changed on purpose — a refine like "make the background black" edits the
+ * embedded theme — and is kept as-is. The wrong-palette failure mode this
+ * function exists for is always a (possibly partial) COPY of a configured
+ * palette, so copies re-resolve and deviations survive.
+ *
+ * - `themes` unavailable (config disabled / fetch failed) → surface unchanged.
+ * - Presentation with no own palette → theme cleared, so the built-in
+ *   Databricks deck identity (DECK_THEME_VARS) applies.
+ * - Other deliverables fall back to the Default palette, then to whatever the
+ *   agent embedded.
+ */
+export function applyConfiguredTheme(
+  surface: UiSurface,
+  themes: WorkspaceThemes | null | undefined,
+): UiSurface {
+  if (!themes) return surface;
+  const embedded = surface.theme;
+  if (
+    embedded &&
+    Object.keys(embedded).length > 0 &&
+    !Object.values(themes).some((palette) => matchesPalette(embedded, palette))
+  ) {
+    return surface;
+  }
+  const deliverable = inferSurfaceDeliverable(surface);
+  if (deliverable === 'presentation') {
+    return { ...surface, theme: themes.presentation };
+  }
+  return { ...surface, theme: themes[deliverable] || themes.default || surface.theme };
+}
 
 /** Resolve a `{ path: "/a/b" }` binding (or literal) against the data model. */
 export function resolveValue(value: unknown, data: Record<string, unknown>): unknown {
