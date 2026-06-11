@@ -218,6 +218,28 @@ adapter work. A second engine re-implements only this responsibility set (likely
 of `flow/` is CrewAI-specific workaround), and receives all tools via the registry for free.
 Ports (interfaces) live in `engines/base/`; shared cross-engine code in `engines/common/`.
 
+**Anatomy of an engine adapter — what every new engine (`engines/<engine>/`) must provide:**
+
+| # | Responsibility | CrewAI reference | Backed by (shared, NOT re-implemented) |
+|---|---|---|---|
+| 1 | Engine service — run/prepare/cancel executions, implements `engines/base/BaseEngineService` | `crewai_engine_service.py`, `execution_runner.py`, `crew_preparation.py` | ExecutionService, repositories |
+| 2 | Config adapter — Kasal flow config (nodes/edges + agents_yaml/tasks_yaml) → engine structures | `config_adapter.py`, `config/` | engine-neutral stored flow definitions |
+| 3 | Agent/task assembly from config | `helpers/` | `core/llm_manager` for model binding |
+| 4 | Flow orchestration driving — sequencing, output injection, checkpoint/resume, HITL gates | `flow/` | flow state persistence, WP2 contracts |
+| 5 | Eventing/callbacks wiring → Kasal traces | `callbacks/` | `core/security` scanning, OTel trace writer |
+| 6 | Memory wiring | `memory/` (wiring part) | core/services memory backends (Databricks vector etc.) |
+| 7 | Guardrail wrappers | `guardrails/` (wrapper classes) | core LLM-judge + caching primitives |
+| 8 | Tool adapter factory — `to_<engine>_tool(tool, binder)`, ~30 lines, written once | `to_crewai_tool` | the generic tool registry (§6.1) |
+
+**What a new engine does NOT implement (inherited for free):** all 35+ tools and their domain
+logic (registry + factory #8), domain services, converters, LLM access/auth/model resolution,
+DB sessions/UoW, tenant identity, security scanning, telemetry, exporters. **The tools are
+engine-independent**; per engine, the entire tool surface costs one ~30-line factory.
+
+This table doubles as the WP6 estimation basis: rows 1–8 are the full scope of "add LangGraph"
+— and rows 5–7 presuppose the `engines/base/` ports exist (declared during WP4, first
+implemented by the CrewAI adapter).
+
 ### WP5 — Small optimizations (S effort, opportunistic)
 
 - Short-TTL (60s) in-process cache for model-config + API-key resolution in
