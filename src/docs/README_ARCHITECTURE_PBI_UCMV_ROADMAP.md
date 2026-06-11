@@ -299,3 +299,44 @@ headless reuse (API/MCP can invoke tools without any agent framework).
 contract would freeze the mess behind a nicer signature. This contract IS the target shape of
 the WP3-extracted services; ambient `UserContext` remains at the HTTP layer and is resolved
 exactly once in `binder.bind()`.
+
+---
+
+## 7. Implementation sequence & effort estimate
+
+**Phase 0 — Golden outputs (0.5 d).** Run the validated flows (`flow_test_3`,
+`flow_genie_space_gen`, `flow_dashboard_deployer`, analyst crew) and snapshot their trace
+outputs. This snapshot is the parity suite for every WP3 migration.
+
+**Phase 1 — WP1 + WP2 (~1.5–2 wks).** WP1 first — the `[FALLBACK]` metric and routed logs are
+the safety net that detects silent degradation *during* the WP3 migration, not just after.
+WP2 second — the Pydantic contracts define the service I/O signatures WP3 is written against.
+(WP1: 1–2 d · WP2: 3–5 d)
+
+**Phase 2 — WP3 incremental, one tool per PR (~3–5 wks).** Define the §6.1
+`KasalTool`/`ToolContext` contract first (1–2 d; fold it into WP3, do not defer to WP6), then
+migrate per tool, each PR gated on a parity run vs. golden outputs:
+
+| Order | Tool(s) | Lines | Est. |
+|---|---|---|---|
+| 1 | Metadata Reducer (pathfinder) | 1,266 | 2 d |
+| 2 | Validator + Genie config gen + Visual mapper | ~1,400 | 2–3 d |
+| 3 | Semantic Model Fetcher | 2,534 | 3–4 d |
+| 4 | DAX Generator | 2,345 | 3–4 d |
+| 5 | mquery pipeline + Report References | ~3,600 | 3–4 d |
+| 6 | Analysis tool | 3,560 | 4–5 d |
+
+Heavy regression testing is **per-tool and continuous** (parity gate on every PR), not a
+big-bang phase at the end. The sequence is interruptible: any prefix ships safely.
+
+**Phase 3 — WP4 + WP5 (~3–4 d).** Mechanical after WP3: import moves + import-linter rule +
+model-config TTL cache. Test suite benefit: services tested with a `FakeContext` (no
+LLMManager patching, no thread bridges) — expect materially smaller, faster PBI test files.
+
+**WP6** stays parked until a concrete driver exists; post-Phase 3 it is a ~2–3 wk adapter
+project.
+
+**Total: ~6–8 engineer-weeks focused work (WP1→WP5).** AI-assisted development compresses
+calendar time (~3–5 wks realistic), but parity flow runs and human review of service
+boundaries do not compress. Clean release-split line if needed: WP1+WP2+tools 1–3 in release
+N, rest in N+1. Largest uncertainty: the analysis tool (assume 2–3 latent surprises).
