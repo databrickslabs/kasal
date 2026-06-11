@@ -252,3 +252,50 @@ behavioral drift on identical flows). Build the *boundary* now (WP3/WP4 — want
 the second *adapter* only on a concrete driver (CrewAI roadmap/licensing risk, customer
 requirement, engine-exclusive capability). The architectural value is optionality: when needed,
 a new engine is a bounded adapter project, not a rewrite.
+
+### 6.1 Generic tool layer — target design (the WP3 end-state contract)
+
+Goal: any model/provider can be channeled into any tool, and any engine can host any tool.
+Tools currently have three hard couplings to remove: they subclass `crewai.BaseTool`
+(framework), they resolve their own `llm_model` string (model choice), and they read ambient
+state (`UserContext`, session factories). Inverted design:
+
+**a) Engine-neutral contract** (`core/tooling/contract.py`, no crewai imports):
+
+```python
+class ToolContext(Protocol):
+    llm: LLMPort                # bound model — the tool never selects one
+    db: SessionPort             # UoW/session factory
+    identity: GroupIdentity     # group_id + user token, explicit (not ambient)
+    emit: Callable[[ToolEvent], None]   # progress / [FALLBACK] events (WP1)
+
+class KasalTool(Protocol):
+    name: str
+    description: str
+    input_model: type[BaseModel]    # WP2 contracts reused as tool schemas
+    output_model: type[BaseModel]
+    async def execute(self, request, ctx: ToolContext) -> BaseModel: ...
+```
+
+**b) Model independence via `LLMPort`** — completion-only protocol
+(`async complete(messages, *, temperature, max_tokens) -> str`). The *binding layer* decides
+the implementation per tool/tenant (LLMManager-backed today; any provider later) — model
+choice becomes configuration resolved once at bind time, not string-plumbing inside `_run`.
+Deliberately narrow: streaming/tool-calling stays in LLMManager; the port is only the
+injection seam, not a provider abstraction.
+
+**c) One tool, N engine adapters** — generic factories written once:
+`to_crewai_tool(tool, binder)` (wraps schema as `args_schema`, binds context, bridges via
+`run_async_with_context`), `to_langchain_tool(...)`, and MCP exposure for free (the contract —
+name + JSON schema + async execute — is already the MCP tool shape). `BaseToolRegistry` becomes
+the single registry the factories read; `tool_factory.py` reduces to one generic loop.
+
+**Payoff matrix:** engine-independent (adapter factories) · model-independent per tool
+(LLMPort binding) · tenant-safe by construction (identity injected at bind, no contextvars
+bridges inside tools) · trivially testable (`execute(req, FakeContext())`, no patching) ·
+headless reuse (API/MCP can invoke tools without any agent framework).
+
+**Sequencing constraint:** only meaningful *after* WP3 — wrapping today's god-tools in this
+contract would freeze the mess behind a nicer signature. This contract IS the target shape of
+the WP3-extracted services; ambient `UserContext` remains at the HTTP layer and is resolved
+exactly once in `binder.bind()`.
