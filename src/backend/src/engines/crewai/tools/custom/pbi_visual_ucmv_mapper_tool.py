@@ -452,7 +452,19 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get('ucmv_output')
         if not ucmv_raw:
-            return json.dumps({"error": "No ucmv_output available — required for UCMV mapping"})
+            # DB fallback (same as the UCMV Validator / Genie config generator):
+            # covers standalone runs and flows where multi-hop injection did not
+            # deliver the deployer output across the intermediate crews.
+            try:
+                from src.engines.crewai.tools.custom.metric_view_validator_tool import MetricViewValidatorTool
+                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                if isinstance(latest, dict) and latest.get('yaml'):
+                    logger.info("[PBIVisualMapper] ucmv_output not injected — using latest UCMV Generator output from DB")
+                    ucmv_raw = json.dumps(latest)
+            except Exception as e:
+                logger.warning(f"[PBIVisualMapper] DB fallback for ucmv_output failed: {e}")
+        if not ucmv_raw:
+            return json.dumps({"error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"})
 
         ucmv_data = self._parse_ucmv_output(ucmv_raw)
         ucmv_summaries = self._build_ucmv_summaries(ucmv_data, catalog, schema)
