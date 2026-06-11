@@ -165,10 +165,16 @@ class PowerBIMetadataReducerTool(BaseTool):
         from src.utils.user_context import UserContext
 
         gc = UserContext.get_group_context()
+        # backend_flow.py sets the raw config value into UserContext, which
+        # may be a dict rather than a GroupContext — handle both shapes.
+        if isinstance(gc, dict):
+            gc_group = gc.get("primary_group_id") or gc.get("group_id")
+        else:
+            gc_group = gc.primary_group_id if gc else None
         return (
             config.get("group_id")
             or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
-            or (gc.primary_group_id if gc else None)
+            or gc_group
             or "default"
         )
 
