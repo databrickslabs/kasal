@@ -245,6 +245,11 @@ db_config_cache: TTLCache = TTLCache(ttl=300, maxsize=100, name="db_config")
 # Intent detection cache - 2 minute TTL (short because user context evolves)
 intent_cache: TTLCache = TTLCache(ttl=120, maxsize=500, name="intent")
 
+# Enabled-tools list cache - 60s TTL; the frontend polls this endpoint in
+# bursts (several identical calls per second) and each one walked tools +
+# group_tools. Mutations clear the whole cache (it's tiny).
+tool_list_cache: TTLCache = TTLCache(ttl=60, maxsize=200, name="tool_list")
+
 
 def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
     """
@@ -257,4 +262,5 @@ def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
         "model_config": model_config_cache.stats(),
         "db_config": db_config_cache.stats(),
         "intent": intent_cache.stats(),
+        "tool_list": tool_list_cache.stats(),
     }

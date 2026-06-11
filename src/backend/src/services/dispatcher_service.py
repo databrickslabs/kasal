@@ -22,6 +22,26 @@ except ImportError:
     _mlflow = None  # type: ignore[assignment]
     _HAS_MLFLOW = False
 
+
+def _set_mlflow_tracing(enabled: bool) -> None:
+    """Hard-toggle MLflow tracing to match the setup outcome.
+
+    Importing mlflow (litellm/crewai integrations) can leave a trace exporter
+    armed even when our setup decides tracing is off — every dispatcher LLM
+    call then attempts a doomed export and logs
+    'INVALID_PARAMETER_VALUE: experiment_id is missing'. Disable explicitly
+    when setup is skipped/fails, re-enable on a successful setup.
+    """
+    if not _HAS_MLFLOW:
+        return
+    try:
+        if enabled:
+            _mlflow.tracing.enable()
+        else:
+            _mlflow.tracing.disable()
+    except Exception:
+        pass
+
 from src.core.cache import intent_cache
 from src.core.llm_manager import LLMManager
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
@@ -445,6 +465,7 @@ class DispatcherService:
                 logger.info(
                     "[Dispatcher] MLflow disabled for this workspace; skipping tracing setup"
                 )
+                _set_mlflow_tracing(False)
                 return False
 
             def _setup_mlflow_sync():
@@ -634,13 +655,16 @@ class DispatcherService:
             setup_ok = await asyncio.to_thread(_setup_mlflow_sync)
             if setup_ok is False:
                 logger.info("[Dispatcher] MLflow setup returned False — tracing disabled")
+                _set_mlflow_tracing(False)
                 return False
             logger.info(
                 "[Dispatcher] MLflow tracing configured (experiment and autolog)"
             )
+            _set_mlflow_tracing(True)
             return True
         except Exception as e:
             logger.warning(f"[Dispatcher] MLflow setup skipped: {e}")
+            _set_mlflow_tracing(False)
             return False
 
     @staticmethod

@@ -31,6 +31,13 @@ class GroupToolService:
         self.tool_repo = ToolRepository(session)
         self.group_tool_repo = GroupToolRepository(session)
 
+    @staticmethod
+    async def _invalidate_enabled_tools_cache() -> None:
+        """GroupTool mappings feed the enabled-tools list — clear its cache
+        after every mapping mutation."""
+        from src.core.cache import tool_list_cache
+        await tool_list_cache.clear()
+
     async def list_added_for_group(self, group_context: GroupContext) -> GroupToolListResponse:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
@@ -85,6 +92,7 @@ class GroupToolService:
             defaults = {**defaults, "enabled": True}
 
         mapping = await self.group_tool_repo.upsert(tool_id=tool_id, group_id=group_id, defaults=defaults)
+        await self._invalidate_enabled_tools_cache()
         return GroupToolResponse.model_validate(mapping)
 
     async def set_group_tool_enabled(self, tool_id: int, enabled: bool, group_context: GroupContext) -> GroupToolResponse:
@@ -93,6 +101,7 @@ class GroupToolService:
         group_id = group_context.primary_group_id
 
         updated = await self.group_tool_repo.set_enabled(tool_id=tool_id, group_id=group_id, enabled=enabled)
+        await self._invalidate_enabled_tools_cache()
         if not updated:
             raise NotFoundError(detail="Group tool mapping not found")
         return GroupToolResponse.model_validate(updated)
@@ -103,6 +112,7 @@ class GroupToolService:
         group_id = group_context.primary_group_id
 
         updated = await self.group_tool_repo.update_config(tool_id=tool_id, group_id=group_id, config=config)
+        await self._invalidate_enabled_tools_cache()
         if not updated:
             raise NotFoundError(detail="Group tool mapping not found")
         return GroupToolResponse.model_validate(updated)
@@ -112,5 +122,6 @@ class GroupToolService:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
         deleted = await self.group_tool_repo.delete_mapping(tool_id=tool_id, group_id=group_id)
+        await self._invalidate_enabled_tools_cache()
         return deleted > 0
 

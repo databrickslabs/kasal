@@ -6,6 +6,17 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+
+
+@pytest.fixture(autouse=True)
+def _clear_tool_list_cache():
+    """The enabled-tools cache is module-global (PERF: burst polling);
+    clear it around every test so suites stay independent."""
+    from src.core.cache import tool_list_cache
+    tool_list_cache._cache.clear()
+    yield
+    tool_list_cache._cache.clear()
+
 def make_service():
     session = AsyncMock()
     with patch('src.services.tool_service.ToolRepository') as MockRepo:

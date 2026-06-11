@@ -233,7 +233,7 @@ class CrewAIEngineService(BaseEngineService):
                     ks = agent_config['knowledge_sources']
                     logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
                 else:
-                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
+                    logger.debug(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
             
             # We assume the execution record is already created by the caller
             # We will only update the status

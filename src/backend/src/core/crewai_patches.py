@@ -140,10 +140,13 @@ def install_memory_event_patches() -> bool:
         f"{patched}/{len(target_names)} classes"
     )
     logger.info(msg)
-    # Print to stderr so subprocess activity is visible even before logging
-    # is fully wired up in the forked process.
-    import sys as _sys
-    print(msg, file=_sys.stderr, flush=True)
+    # In subprocesses, also print to stderr so the activity is visible even
+    # before logging is wired up in the forked process. In the main process
+    # the logger line above suffices — the raw print would just duplicate it.
+    import os as _os
+    if _os.environ.get("CREW_SUBPROCESS_MODE") == "true":
+        import sys as _sys
+        print(msg, file=_sys.stderr, flush=True)
     return patched > 0
 
 
@@ -196,12 +199,12 @@ def install_remember_many_patch() -> bool:
     _um.Memory.remember = patched_remember
     _um.Memory.remember_many = patched_remember_many
     _um.Memory._kasal_remember_many_patched = True  # type: ignore[attr-defined]
-    import sys as _sys
-    print(
-        "[KASAL-PATCH] Wrapped Memory.remember / remember_many for content capture",
-        file=_sys.stderr,
-        flush=True,
-    )
+    msg = "[KASAL-PATCH] Wrapped Memory.remember / remember_many for content capture"
+    logger.info(msg)
+    import os as _os
+    if _os.environ.get("CREW_SUBPROCESS_MODE") == "true":
+        import sys as _sys
+        print(msg, file=_sys.stderr, flush=True)
     return True
 
 

@@ -118,18 +118,18 @@ async def get_current_user_from_email(
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"[AUTH DEBUG] get_current_user_from_email called with email: {group_context.group_email if group_context.group_email else 'None'}")
+    logger.debug(f"[AUTH DEBUG] get_current_user_from_email called with email: {group_context.group_email if group_context.group_email else 'None'}")
 
     if not group_context.group_email:
-        logger.info("[AUTH DEBUG] No group email found in context")
+        logger.debug("[AUTH DEBUG] No group email found in context")
         return None
 
     # Use UserService instead of UserRepository to trigger first user setup logic
     from src.services.user_service import UserService
-    logger.info(f"[AUTH DEBUG] Creating UserService and calling get_or_create_user_by_email for {group_context.group_email}")
+    logger.debug(f"[AUTH DEBUG] Creating UserService and calling get_or_create_user_by_email for {group_context.group_email}")
     user_service = UserService(session)
     user = await user_service.get_or_create_user_by_email(group_context.group_email)
-    logger.info(f"[AUTH DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}")
+    logger.debug(f"[AUTH DEBUG] get_or_create_user_by_email returned user: {user.email if user else 'None'}")
 
     return user
 
@@ -154,16 +154,16 @@ async def require_authenticated_user(
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"[AUTH DEBUG] require_authenticated_user called with email: {group_context.group_email if group_context.group_email else 'None'}")
+    logger.debug(f"[AUTH DEBUG] require_authenticated_user called with email: {group_context.group_email if group_context.group_email else 'None'}")
 
     if not group_context.group_email:
-        logger.info("[AUTH DEBUG] No group email in require_authenticated_user - returning 401")
+        logger.debug("[AUTH DEBUG] No group email in require_authenticated_user - returning 401")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. X-Forwarded-Email header not found."
         )
 
-    logger.info(f"[AUTH DEBUG] About to call get_current_user_from_email in require_authenticated_user")
+    logger.debug(f"[AUTH DEBUG] About to call get_current_user_from_email in require_authenticated_user")
     user = await get_current_user_from_email(session, group_context)
     
     if not user:
