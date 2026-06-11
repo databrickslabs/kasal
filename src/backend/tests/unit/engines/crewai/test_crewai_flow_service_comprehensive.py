@@ -310,13 +310,13 @@ class TestGetFlowExecution:
         }
 
         mock_flow_runner = MagicMock()
-        mock_flow_runner.get_flow_execution.return_value = expected_result
+        mock_flow_runner.get_flow_execution = AsyncMock(return_value=expected_result)
 
         with patch.object(service, '_get_flow_runner', return_value=mock_flow_runner):
             result = await service.get_flow_execution(execution_id)
 
             assert result == expected_result
-            mock_flow_runner.get_flow_execution.assert_called_once_with(execution_id)
+            mock_flow_runner.get_flow_execution.assert_called_once_with(execution_id, group_ids=None)
 
     @pytest.mark.asyncio
     async def test_get_flow_execution_error_raises_http_exception(self, service):
@@ -354,7 +354,7 @@ class TestGetFlowExecutionsByFlow:
         }
 
         mock_flow_runner = MagicMock()
-        mock_flow_runner.get_flow_executions_by_flow.return_value = expected_result
+        mock_flow_runner.get_flow_executions_by_flow = AsyncMock(return_value=expected_result)
 
         with patch.object(service, '_get_flow_runner', return_value=mock_flow_runner):
             result = await service.get_flow_executions_by_flow(flow_id)
@@ -368,7 +368,7 @@ class TestGetFlowExecutionsByFlow:
         expected_result = {'executions': []}
 
         mock_flow_runner = MagicMock()
-        mock_flow_runner.get_flow_executions_by_flow.return_value = expected_result
+        mock_flow_runner.get_flow_executions_by_flow = AsyncMock(return_value=expected_result)
 
         with patch.object(service, '_get_flow_runner', return_value=mock_flow_runner):
             result = await service.get_flow_executions_by_flow(flow_id)

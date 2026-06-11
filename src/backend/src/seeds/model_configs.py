@@ -265,6 +265,13 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000
     },
+    "databricks-claude-fable-5": {
+        "name": "databricks-claude-fable-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000
+    },
     "databricks-claude-sonnet-4": {
         "name": "databricks-claude-sonnet-4",
         "temperature": 0.7,

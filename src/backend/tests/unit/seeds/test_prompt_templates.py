@@ -246,12 +246,14 @@ class TestTaskTemplateToolCatalog:
     """Test cases for tool catalog and available tools in the task template."""
 
     def test_task_template_tool_catalog(self):
-        """Test that GENERATE_TASK_TEMPLATE references key tools from the catalog."""
+        """Test that GENERATE_TASK_TEMPLATE references key tools from the catalog.
+
+        PerplexityTool/DatabricksKnowledgeSearchTool were removed from the
+        task template's catalog (they remain in the crew-level template).
+        """
         assert "GenieTool" in GENERATE_TASK_TEMPLATE
         assert "SerperDevTool" in GENERATE_TASK_TEMPLATE
         assert "ScrapeWebsiteTool" in GENERATE_TASK_TEMPLATE
-        assert "PerplexityTool" in GENERATE_TASK_TEMPLATE
-        assert "DatabricksKnowledgeSearchTool" in GENERATE_TASK_TEMPLATE
 
     def test_task_template_available_tools_placeholder(self):
         """Test that GENERATE_TASK_TEMPLATE references 'Available tools' for assignment."""
