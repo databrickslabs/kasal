@@ -51,9 +51,21 @@ describe('GroupedTraceMessages (run-activity container)', () => {
     expect(screen.queryByLabelText('Expand run activity')).not.toBeInTheDocument();
   });
 
-  it('shows "Working…" while the run is live and traces are streaming in', () => {
-    render(<GroupedTraceMessages messages={[makeTrace()]} running />);
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+  it('shows the latest step as a live one-liner while traces stream in', () => {
+    render(
+      <GroupedTraceMessages
+        messages={[
+          makeTrace({ id: 't1', eventType: 'agent_execution', content: 'first step' }),
+          makeTrace({ id: 't2', eventType: 'task_completed', content: 'Summary written\nmore detail below' }),
+        ]}
+        running
+      />
+    );
+    // The header tracks the LATEST step: name + first line of its output.
+    expect(screen.getByText('Task Completed')).toBeInTheDocument();
+    expect(screen.getByText(/— Summary written/)).toBeInTheDocument();
+    // The static label and the done label are both replaced by the live line.
+    expect(screen.queryByText('Working…')).not.toBeInTheDocument();
     expect(screen.queryByText('Run activity')).not.toBeInTheDocument();
   });
 

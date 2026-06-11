@@ -27,14 +27,17 @@ const SUMMARY_MAX_CHARS = 140;
 const humanizeEventType = (value?: string): string =>
   value ? value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '';
 
-/** One step on the run-activity timeline: a dot on the left rail, the event
- *  name in bold, its timestamp, a short summary line, and — behind a per-step
- *  toggle — the full trace output (kept hidden so the timeline stays
- *  scannable, matching the Chat-mode run-activity container). */
-const TimelineStep: React.FC<{ message: ChatMessage; last: boolean }> = ({ message, last }) => {
-  const [open, setOpen] = useState(false);
-  const name =
-    humanizeEventType(message.eventType) || message.eventSource || 'Step';
+/** Derive the display pieces for one trace step: event name (agent/task/tool),
+ *  the task context, a one-line summary, and the full output (only when it
+ *  adds something beyond the summary). Shared by the timeline steps and the
+ *  live header line. */
+function describeTrace(message: ChatMessage): {
+  name: string;
+  meta: string;
+  summary: string;
+  context: string;
+} {
+  const name = humanizeEventType(message.eventType) || message.eventSource || 'Step';
   const meta = message.eventContext || '';
   const content = stripAnsiEscapes(message.content).trim();
   const firstLine = content.split('\n').find((l) => l.trim() !== '') || '';
@@ -42,8 +45,17 @@ const TimelineStep: React.FC<{ message: ChatMessage; last: boolean }> = ({ messa
     firstLine.length > SUMMARY_MAX_CHARS
       ? firstLine.substring(0, SUMMARY_MAX_CHARS) + '…'
       : firstLine;
-  // Full output — only when it adds something beyond the summary.
   const context = content !== summary ? content : '';
+  return { name, meta, summary, context };
+}
+
+/** One step on the run-activity timeline: a dot on the left rail, the event
+ *  name in bold, its timestamp, a short summary line, and — behind a per-step
+ *  toggle — the full trace output (kept hidden so the timeline stays
+ *  scannable, matching the Chat-mode run-activity container). */
+const TimelineStep: React.FC<{ message: ChatMessage; last: boolean }> = ({ message, last }) => {
+  const [open, setOpen] = useState(false);
+  const { name, meta, summary, context } = describeTrace(message);
 
   return (
     <Box component="li" sx={{ position: 'relative', pl: 2.5, pb: last ? 0 : 1.5, listStyle: 'none' }}>
@@ -178,6 +190,10 @@ export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({
 
   const jobId = messages[0]?.jobId;
   const label = running ? 'Working…' : 'Run activity';
+  // While the run is live, the header shows the LATEST step as a one-liner
+  // (agent/task/tool name + first line of its output) so the box visibly
+  // progresses; "Working…" only fills the gap before the first trace arrives.
+  const live = running && hasTimeline ? describeTrace(messages[messages.length - 1]) : null;
 
   return (
     <Fade in={true} timeout={300}>
@@ -231,9 +247,12 @@ export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({
             >
               <Typography
                 variant="caption"
+                noWrap
+                title={live && live.summary ? `${live.name} — ${live.summary}` : undefined}
                 sx={{
                   fontWeight: 500,
                   color: 'text.secondary',
+                  minWidth: 0,
                   ...(running && {
                     animation: 'kasalRunPulse 2s ease-in-out infinite',
                     '@keyframes kasalRunPulse': {
@@ -243,7 +262,16 @@ export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({
                   }),
                 }}
               >
-                {label}
+                {live ? (
+                  <>
+                    <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                      {live.name}
+                    </Box>
+                    {live.summary ? ` — ${live.summary}` : ''}
+                  </>
+                ) : (
+                  label
+                )}
               </Typography>
               {hasTimeline && (
                 <ChevronRightIcon

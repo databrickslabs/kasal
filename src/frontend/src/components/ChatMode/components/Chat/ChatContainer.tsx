@@ -118,6 +118,18 @@ const TimelineStep: React.FC<{ step: TraceEntryData; last: boolean }> = ({ step,
   );
 };
 
+/** One-line live status for the collapsed header: the LATEST step's name plus
+ *  the first line of its query/answer, so the box visibly progresses while the
+ *  crew works (agent → task → memory query → memory answer → tool call → …)
+ *  instead of sitting on a static "Working…". Full detail stays behind the
+ *  expand chevron. For Memory results the interesting line is the retrieved
+ *  context (detail), not the generic "context retrieved" sublabel. */
+export function liveStepLine(step: TraceEntryData): { name: string; line: string } {
+  const src = step.label === 'Memory' ? step.detail || step.sublabel : step.sublabel || step.detail;
+  const line = (src || '').split('\n').map((l) => l.trim()).find((l) => l !== '') || '';
+  return { name: step.label, line: line.length > 100 ? `${line.slice(0, 100)}…` : line };
+}
+
 /**
  * A single, collapsible "run activity" container shown in the conversation flow:
  * a status row (pulsing dot while running, check when done) + a chevron that
@@ -144,6 +156,14 @@ const RunProgress: React.FC<{
     if (!running) setStopping(false);
   }, [running]);
   const hasTimeline = groups.length > 0;
+  // The latest streamed step drives a live one-liner in the header while the
+  // run is active — the static labels are only fallbacks for the gaps before
+  // the first trace arrives and after the run ends.
+  const steps = groups.flatMap((g) => g.msgs.map((m) => m.resultData as TraceEntryData));
+  const liveStep =
+    !stopping && (running || generating) && steps.length > 0
+      ? liveStepLine(steps[steps.length - 1])
+      : null;
   const label = stopping
     ? 'Stopping…'
     : generating
@@ -191,19 +211,30 @@ const RunProgress: React.FC<{
             style={{ cursor: hasTimeline ? 'pointer' : 'default' }}
             aria-label={hasTimeline ? (open ? 'Collapse run activity' : 'Expand run activity') : undefined}
           >
-            <span
-              className={`text-xs font-medium ${running ? 'animate-pulse' : ''}`}
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {label}
-              {generating && !stopping && (
-                <span className="kasal-thinking-dots" aria-hidden="true">
-                  <span>.</span>
-                  <span>.</span>
-                  <span>.</span>
-                </span>
-              )}
-            </span>
+            {liveStep ? (
+              <span
+                className="text-xs animate-pulse min-w-0 overflow-hidden whitespace-nowrap text-ellipsis text-left"
+                style={{ color: 'var(--text-secondary)' }}
+                title={liveStep.line ? `${liveStep.name} — ${liveStep.line}` : liveStep.name}
+              >
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{liveStep.name}</span>
+                {liveStep.line && <span> — {liveStep.line}</span>}
+              </span>
+            ) : (
+              <span
+                className={`text-xs font-medium ${running ? 'animate-pulse' : ''}`}
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {label}
+                {generating && !stopping && (
+                  <span className="kasal-thinking-dots" aria-hidden="true">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                )}
+              </span>
+            )}
             {hasTimeline && (
               <svg
                 className="w-3.5 h-3.5 flex-shrink-0 transition-transform"
