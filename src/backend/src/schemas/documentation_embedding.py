@@ -13,6 +13,10 @@ class DocumentationEmbeddingBase(BaseModel):
     # Multi-tenant knowledge scoping (NULL for built-in CrewAI docs)
     group_id: Optional[str] = None
     file_path: Optional[str] = None
+    # Uploader email — per-user isolation of uploaded knowledge (NULL for
+    # legacy rows and built-in docs; only persisted by models that carry the
+    # column, e.g. KnowledgeEmbedding).
+    created_by: Optional[str] = None
 
 
 class DocumentationEmbeddingCreate(DocumentationEmbeddingBase):

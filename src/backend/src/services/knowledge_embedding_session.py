@@ -35,6 +35,7 @@ _KNOWLEDGE_CREATE_SQL = f"""
         doc_metadata JSON,
         group_id VARCHAR(100),
         file_path VARCHAR,
+        created_by VARCHAR(255),
         embedding vector(1024),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
@@ -43,15 +44,17 @@ _KNOWLEDGE_CREATE_SQL = f"""
 _KNOWLEDGE_INDEX_SQL = (
     f"CREATE INDEX IF NOT EXISTS idx_knowledge_emb_group_id ON {_KNOWLEDGE_TABLE} (group_id)",
     f"CREATE INDEX IF NOT EXISTS idx_knowledge_emb_file_path ON {_KNOWLEDGE_TABLE} (file_path)",
+    f"CREATE INDEX IF NOT EXISTS idx_knowledge_emb_created_by ON {_KNOWLEDGE_TABLE} (created_by)",
     f"CREATE INDEX IF NOT EXISTS idx_knowledge_emb_embedding "
     f"ON {_KNOWLEDGE_TABLE} USING hnsw (embedding vector_cosine_ops)",
 )
 _KNOWLEDGE_ALTER_SQL = {
     "group_id": f"ALTER TABLE {_KNOWLEDGE_TABLE} ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)",
     "file_path": f"ALTER TABLE {_KNOWLEDGE_TABLE} ADD COLUMN IF NOT EXISTS file_path VARCHAR",
+    "created_by": f"ALTER TABLE {_KNOWLEDGE_TABLE} ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)",
     "embedding": f"ALTER TABLE {_KNOWLEDGE_TABLE} ADD COLUMN IF NOT EXISTS embedding vector(1024)",
 }
-_KNOWLEDGE_REQUIRED_COLS = ("embedding", "group_id", "file_path")
+_KNOWLEDGE_REQUIRED_COLS = ("embedding", "group_id", "file_path", "created_by")
 
 _KNOWLEDGE_OWNERSHIP_HINT = (
     "The Lakebase table kasal.knowledge_embeddings is missing pgvector columns "
@@ -91,7 +94,7 @@ async def ensure_lakebase_doc_table(session: AsyncSession) -> None:
         return  # already correct — no DDL needed
 
     try:
-        for col in ("group_id", "file_path", "embedding"):
+        for col in _KNOWLEDGE_REQUIRED_COLS:
             if col in missing:
                 await session.execute(text(_KNOWLEDGE_ALTER_SQL[col]))
         for idx in _KNOWLEDGE_INDEX_SQL:
