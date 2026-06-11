@@ -16,42 +16,24 @@ class TestPowerBIHierarchiesSchema:
     """Tests for PowerBIHierarchiesSchema Pydantic model"""
 
     def test_schema_initialization_minimal(self):
-        """Test schema with minimal required parameters"""
-        schema = PowerBIHierarchiesSchema(
-            workspace_id="workspace123",
-            dataset_id="dataset456",
-            tenant_id="tenant789",
-            client_id="client012",
-            client_secret="secret345"
-        )
+        """Test schema instantiates with no arguments (all fields have defaults)"""
+        schema = PowerBIHierarchiesSchema()
 
-        assert schema.workspace_id == "workspace123"
-        assert schema.dataset_id == "dataset456"
-        assert schema.tenant_id == "tenant789"
-        assert schema.client_id == "client012"
-        assert schema.client_secret == "secret345"
+        assert schema.target_catalog == "main"
+        assert schema.target_schema == "default"
 
-    def test_schema_with_user_token(self):
-        """Test schema with user OAuth token"""
-        schema = PowerBIHierarchiesSchema(
-            workspace_id="workspace123",
-            dataset_id="dataset456",
-            access_token="user_oauth_token"
-        )
-
-        assert schema.workspace_id == "workspace123"
-        assert schema.dataset_id == "dataset456"
-        assert schema.access_token == "user_oauth_token"
+    def test_schema_excludes_connection_and_auth_fields(self):
+        """Connection/auth plumbing must not be LLM-fillable schema fields"""
+        forbidden = {
+            "workspace_id", "dataset_id", "tenant_id", "client_id",
+            "client_secret", "username", "password", "auth_method",
+            "access_token",
+        }
+        assert forbidden.isdisjoint(PowerBIHierarchiesSchema.model_fields.keys())
 
     def test_schema_with_defaults(self):
         """Test schema default values"""
-        schema = PowerBIHierarchiesSchema(
-            workspace_id="workspace123",
-            dataset_id="dataset456",
-            tenant_id="tenant789",
-            client_id="client012",
-            client_secret="secret345"
-        )
+        schema = PowerBIHierarchiesSchema()
 
         assert schema.target_catalog == "main"
         assert schema.target_schema == "default"

@@ -205,27 +205,14 @@ DELIVERABLE OUTPUT RULE:
   instruct any task to emit HTML, CSS, JavaScript, or "<!DOCTYPE html>".
 - A presentation/dashboard task that ALSO needs to gather data online still gets research tools.
 
-FEW-SHOT EXAMPLES (from GEPA optimization):
+FEW-SHOT EXAMPLE (from GEPA optimization):
 
-Example 1 — Server monitoring task (detailed description + structured output):
-User: "create a task to check server status and report any issues"
-Output: {"name": "Server Status Monitoring and Issue Reporting", "description": "Monitor and assess the current operational status of designated servers by checking critical health indicators including uptime, response time, CPU usage, memory utilization, disk space availability, network connectivity, and running services. Identify any anomalies, performance degradation, or failures that require attention and compile findings into a comprehensive status report.", "expected_output": "A structured status report containing: server identifier, timestamp of check, overall status (operational/degraded/down), individual metrics with current values and thresholds, list of detected issues with severity levels (critical/warning/info), affected services or components, and recommended actions for each issue identified.", "tools": [], "advanced_config": {"timeout_seconds": 300, "retry_attempts": 2}, "llm_guardrail": {"description": "Output must be a structured status report containing server identifier, timestamp, overall operational status, individual health metrics with values, a list of any detected issues with severity levels, affected components, and recommended remediation actions.", "llm_model": "databricks-claude-sonnet-4-5"}}
-
-Example 2 — Presentation with online research (gets tools, content/structure output):
-User: "gather swiss news in a presentation"
-Output: {"name": "Swiss News Presentation", "description": "Research and gather the latest Swiss news from multiple sources, then organize the key developments into a slide presentation: a title slide plus 6-9 content slides, each with a heading and 3-5 concise points.", "expected_output": "A structured slide presentation: a title slide and 6-9 slides, each with a heading and 3-5 substantive points (full sentences), using charts or stats where they aid understanding.", "tools": ["SerperDevTool", "ScrapeWebsiteTool"], "llm_guardrail": {"description": "Must be a slide deck of 7-10 slides, each with a heading and 3-5 substantive points; reject sparse one-liners.", "llm_model": "databricks-claude-sonnet-4-5"}}
-
-Example 3 — Dashboard with data analysis (gets tools, content/structure output):
 User: "analyze sales data and create a dashboard"
 Output: {"name": "Sales Analysis Dashboard", "description": "Query and analyze sales performance data, then organize the findings into a metrics dashboard: KPI tiles for the headline numbers, plus charts for trends and a table of the underlying rows.", "expected_output": "A metrics dashboard: at least 4 KPI tiles with values and deltas, one or more charts for trends/breakdowns, and a data table of the key rows.", "tools": ["GenieTool"], "llm_guardrail": {"description": "Must present at least 4 KPI tiles with values, at least one chart, and a data table; reject if sparse.", "llm_model": "databricks-claude-sonnet-4-5"}}
 
-Example 4 — Research task (gets tools, normal text output):
-User: "gather latest news on switzerland from today"
-Output: {"name": "Swiss News Gathering", "description": "Research and collect the latest news articles about Switzerland published today from multiple credible sources, covering politics, economy, technology, and society.", "expected_output": "A comprehensive news summary with 8-10 articles, each containing: headline, source, publication date, and 2-3 sentence summary.", "tools": ["SerperDevTool", "ScrapeWebsiteTool"], "llm_guardrail": {"description": "Must include at least 5 news items with source references.", "llm_model": "databricks-claude-sonnet-4-5"}}
-
-Example 5 — Writing task (NO tools):
-User: "draft a professional email to the marketing team"
-Output: {"name": "Marketing Team Email", "description": "Draft a professional email to the marketing team summarizing key updates, action items, and upcoming deadlines with a clear and concise tone.", "expected_output": "A complete email with: subject line, professional greeting, structured body with bullet points for action items, and professional closing.", "tools": [], "llm_guardrail": {"description": "Must have proper email structure with subject, body, and professional tone.", "llm_model": "databricks-claude-sonnet-4-5"}}
+(Note the pattern: a writing/composition task would instead carry "tools": [] —
+the LLM composes natively; a public-web research task would carry
+["SerperDevTool", "ScrapeWebsiteTool"].)
 
 Please provide your response strictly as a valid and well-formatted JSON object using the following schema:
 json
@@ -266,51 +253,12 @@ Please follow these strict guidelines when generating your output:
 9. Do not include any explanation or commentary—only return the JSON object.
 10. CRITICAL: Do NOT include an "output_file" field in your response. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
 
-TOOL CATALOG — Reference this when deciding which tools to assign:
-
-GENERAL RULES:
+TOOL SELECTION RULES — apply these against the "Available tools" list provided at the end of this prompt (each entry carries its own description):
 - Assign at most 1-2 tools per task. Fewer is better.
-- ALWAYS prefer internal/organizational data tools over web search when the task involves the user's OWN data (campaigns, metrics, reports, KPIs, employees, products, etc.).
+- ALWAYS prefer internal/organizational data tools (e.g. GenieTool) over web search when the task involves the user's OWN data (campaigns, metrics, reports, KPIs, employees, products, etc.).
 - Use web search tools ONLY when the task explicitly needs external/public information (industry trends, competitor research, general knowledge).
 - Tasks that write, compose, synthesize, summarize, or review typically need NO tools — the LLM handles these natively.
 - Tasks that CREATE presentations or dashboards from already-gathered data need NO tools — the LLM composes the content directly.
-
-1. GenieTool — INTERNAL DATA QUERIES
-   USE: When the task needs to query the organization's own data — databases, tables, metrics, KPIs, campaign performance, sales figures, employee data, product catalogs, etc.
-   DO NOT USE: For general internet research or external information gathering.
-   PRIORITY: HIGH — If the task is about analyzing "our", "my", or company-specific data, this is almost always the right tool.
-
-2. SerperDevTool — WEB SEARCH
-   USE: When the task needs to search the public internet for current news, trends, general information, or external competitor data.
-   DO NOT USE: For internal data analysis, writing tasks, or when GenieTool would be more appropriate. Not needed if PerplexityTool is already assigned.
-
-3. ScrapeWebsiteTool — WEB CONTENT EXTRACTION
-   USE: When the task needs to extract full content from a specific website or URL (e.g., scraping a competitor's product page, extracting article content).
-   DO NOT USE: For general search (use SerperDevTool), internal data queries, or writing tasks.
-
-4. PerplexityTool — AI-POWERED RESEARCH
-   USE: When the task needs in-depth research with citations and references on external topics, fact-checking, or detailed explanations of complex subjects.
-   DO NOT USE: For internal data analysis (use GenieTool), simple web searches (use SerperDevTool), or writing/synthesis tasks.
-
-5. DatabricksKnowledgeSearchTool — DOCUMENT SEARCH (RAG)
-   USE: When the task needs to search through uploaded knowledge documents (PDFs, Word docs, text files) stored in the organization's knowledge base.
-   DO NOT USE: For structured database queries (use GenieTool), web search, or when no knowledge documents have been uploaded.
-
-6. DatabricksJobsTool — JOB ORCHESTRATION
-   USE: When the task needs to list, run, monitor, or create Databricks jobs and data pipelines.
-   DO NOT USE: For data analysis (use GenieTool), web search, or content generation tasks.
-
-7. AgentBricksTool — AI AGENT ENDPOINTS
-   USE: When the task needs to call a pre-built Databricks AI agent endpoint for specialized processing.
-   DO NOT USE: For standard data queries (use GenieTool), web search, or general-purpose tasks.
-
-8. PowerBIAnalysisTool — BUSINESS INTELLIGENCE
-   USE: When the task needs to run complex Power BI analytics, DAX queries, year-over-year analysis, or heavy computational BI workloads.
-   DO NOT USE: For simple data queries (use GenieTool), web search, or non-BI tasks.
-
-9. MCPTool — MCP SERVER ACCESS
-   USE: When the task needs access to specialized tools from the MCP ecosystem not covered by other tools above.
-   DO NOT USE: As a first choice — prefer specific tools above. Use only when no other tool fits.
 
 LLM GUARDRAIL GUIDELINES:
 The llm_guardrail field enables AI-powered output validation.
@@ -324,17 +272,10 @@ How to write the guardrail description:
 3. Be specific about format, content requirements, and quality standards
 
 The guardrail description should answer: "What makes this task's output valid and complete?"
-
-Examples based on task type:
-- Research: {"description": "Output must include at least 3 credible sources, distinguish facts from opinions, and provide specific data points.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Writing: {"description": "Must be professional tone, well-structured, free of jargon, and suitable for the intended audience.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Analysis: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Email: {"description": "Must have proper email structure, clear message body, and professional tone.", "llm_model": "databricks-claude-sonnet-4-5"}
-
-If the user's goal involves creating a presentation or dashboard:
+Example: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
 
 TOOL ASSIGNMENT FOR PRESENTATION/DASHBOARD CREWS:
-- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, GenieTool, etc.) — they need to fetch data.
+- Research/gathering tasks ALWAYS get tools — they need to fetch data.
 - The LAST task that composes the final deliverable gets tools: [] ONLY IF prior tasks already gathered the data.
 - If there is only ONE task that must BOTH gather data AND compose the deliverable, it MUST get tools.
 - NEVER strip tools from research or data-gathering tasks just because the crew involves a presentation/dashboard.
@@ -343,18 +284,11 @@ Example — multi-task crew "gather news and create a presentation":
     Task 1 "Gather News": tools: ["SerperDevTool", "ScrapeWebsiteTool"]  ← GETS TOOLS (needs to search)
     Task 2 "Create Presentation": tools: []  ← NO TOOLS (composes the deck from Task 1's data)
 
-Example — single-task crew "search online and create a dashboard":
-    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND compose)
-
-OUTPUT FORMAT — the platform renders every final deliverable through its design-system UI renderer:
-- Describe the final task's output by CONTENT and STRUCTURE only (slides with headings and points,
-  KPI tiles, chart data, table rows, quiz questions) — in a format-neutral way.
-- Do NOT mention HTML, "<!DOCTYPE html>", CSS, JavaScript, or a downloadable file anywhere in a task.
-- Do NOT set output_json or output_pydantic on the final deliverable task.
-- Research/gathering tasks that come BEFORE the final task keep NORMAL text output (reports, summaries, data).
-
-Aim for substantive content density: presentation slides carry 3-5 full-sentence points (not sparse
-one-liners); dashboards present multiple KPIs with values/deltas plus charts and a data table."""
+Final-deliverable tasks follow the DELIVERABLE OUTPUT RULE above (content and
+structure only, no HTML/CSS/JS, no output_json/output_pydantic); earlier
+research tasks keep normal text output. Aim for substantive content density:
+slides carry 3-5 full-sentence points; dashboards present multiple KPIs with
+values/deltas plus charts and a data table."""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
@@ -403,6 +337,24 @@ Output: {"system_template": "You are a {role}. Your goal is to {goal}. Backgroun
 Example 3 — Minimal input (edge case):
 Input: "Role: Helper, Goal: Help, Backstory: Helpful"
 Output: {"system_template": "You are a {role}. Your goal is to {goal}. Background: {backstory}. You are a versatile problem-solver who adapts your approach to each unique situation, providing clear, practical, and well-organized assistance.", "prompt_template": "Context: {context}\\n\\nTask: {input}\\n\\nPlease complete this task thoroughly. Break down complex problems into manageable steps and provide clear, actionable results.", "response_template": "THOUGHTS:\\n[Analysis of the task requirements and approach]\\n\\nACTION:\\n[Steps taken and methodology applied]\\n\\nRESULT:\\n[Final output with clear formatting and actionable conclusions]"}"""
+
+GENERATE_CREW_PLAN_TEMPLATE = """You are an expert at planning AI crews. Produce a PLAN OUTLINE only — the skeleton of agents and tasks; descriptions, goals, backstories, and tools are generated separately.
+
+VERB-TO-TASK MAPPING (CRITICAL):
+Count the distinct action verbs in the user's message. Each distinct verb typically maps to one task:
+- 1 verb = 1 task ("summarize this document" → 1 task)
+- 2 verbs = 2 tasks ("create a dashboard AND send an email" → 2 tasks)
+- 3+ verbs = match the verb count up to the stated maximum
+When verbs are closely related sub-steps of one action (e.g., "extract, transform, and load" = ETL), they MAY be combined into a single task. Use the minimum number of agents needed to cover the tasks.
+
+OUTPUT — respond with ONLY this JSON shape (no markdown, no commentary):
+{"complexity": "light|standard|complex", "process_type": "sequential|parallel", "agents": [{"name": "...", "role": "..."}], "tasks": [{"name": "...", "assigned_agent": "...", "context": []}]}
+
+Rules:
+1. Every task's assigned_agent must be the name of one of the agents.
+2. A task's context lists the names of earlier tasks whose output it needs (empty list if none).
+3. Names are short and descriptive; roles are one specialised sentence fragment.
+4. Do NOT include descriptions, goals, backstories, or tools."""
 
 GENERATE_CREW_TEMPLATE = """You are an expert at creating AI crews. Based on the user's goal, generate a complete crew setup with appropriate agents and tasks.
 Each agent should be specialized and have a clear purpose. Each task should be assigned to a specific agent and have clear dependencies.
@@ -719,6 +671,12 @@ DEFAULT_TEMPLATES = [
         "name": "generate_crew",
         "description": "Template for generating a complete crew with agents and tasks",
         "template": GENERATE_CREW_TEMPLATE,
+        "is_active": True
+    },
+    {
+        "name": "generate_crew_plan",
+        "description": "Lightweight template for the crew PLAN OUTLINE phase (skeleton only)",
+        "template": GENERATE_CREW_PLAN_TEMPLATE,
         "is_active": True
     },
     {

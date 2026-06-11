@@ -1744,3 +1744,74 @@ class TestExportIntegration:
         assert record["event_context"] == "tool:WebSearch"
         assert record["output"]["tool_name"] == "WebSearch"
         assert record["trace_metadata"]["tool_parameters"] == {"query": "AI trends"}
+
+
+class TestForceFlush:
+    """PERF-032 regression: force_flush was a no-op, so BatchSpanProcessor's
+    shutdown flush had no real guarantee and backed-up queues dropped traces."""
+
+    def _exporter(self):
+        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"):
+            exporter = KasalDBSpanExporter("job-ff")
+        return exporter
+
+    def test_force_flush_waits_for_queued_writes(self):
+        exporter = self._exporter()
+        barrier_future = MagicMock()
+        exporter._executor = MagicMock()
+        exporter._executor.submit.return_value = barrier_future
+
+        assert exporter.force_flush(timeout_millis=5000) is True
+        exporter._executor.submit.assert_called_once()
+        barrier_future.result.assert_called_once_with(timeout=5.0)
+
+    def test_force_flush_returns_false_on_timeout(self):
+        import concurrent.futures as cf
+        exporter = self._exporter()
+        barrier_future = MagicMock()
+        barrier_future.result.side_effect = cf.TimeoutError()
+        exporter._executor = MagicMock()
+        exporter._executor.submit.return_value = barrier_future
+
+        assert exporter.force_flush(timeout_millis=100) is False
+
+    def test_force_flush_after_shutdown_is_noop_success(self):
+        exporter = self._exporter()
+        exporter._shutdown = True
+        exporter._executor = MagicMock()
+
+        assert exporter.force_flush() is True
+        exporter._executor.submit.assert_not_called()
+
+    def test_force_flush_real_pool_drains_pending_work(self):
+        """End-to-end: a slow queued write completes before force_flush returns."""
+        import threading
+        exporter = KasalDBSpanExporter("job-ff-real", max_workers=1)
+        done = threading.Event()
+
+        def slow_write():
+            import time
+            time.sleep(0.2)
+            done.set()
+
+        exporter._executor.submit(slow_write)
+        assert exporter.force_flush(timeout_millis=5000) is True
+        assert done.is_set()  # everything queued before the barrier finished
+        exporter.shutdown()
+
+
+class TestBatchProcessorWiring:
+    """PERF-014: the DB exporter must be wired through BatchSpanProcessor in
+    the subprocess executors — one transaction per span doesn't scale."""
+
+    def test_crew_executor_uses_batch_processor_for_db_exporter(self):
+        import inspect
+        import src.services.process_crew_executor as m
+        src_text = inspect.getsource(m)
+        assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text
+
+    def test_flow_executor_uses_batch_processor_for_db_exporter(self):
+        import inspect
+        import src.services.process_flow_executor as m
+        src_text = inspect.getsource(m)
+        assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text

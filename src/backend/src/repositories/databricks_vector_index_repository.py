@@ -19,6 +19,7 @@ from src.schemas.databricks_vector_index import (
     IndexState,
     IndexType
 )
+from src.utils.aiohttp_session import shared_client_session
 from src.utils.databricks_auth import get_auth_context
 from src.utils.telemetry import get_user_agent_header, KasalProduct
 from src.utils.sensitive_data_utils import mask_sensitive_headers
@@ -135,7 +136,7 @@ class DatabricksVectorIndexRepository:
             logger.info(f"Creating index {index_data.name} via REST API at {url}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     response_text = await response.text()
                     
@@ -207,7 +208,7 @@ class DatabricksVectorIndexRepository:
             logger.debug(f"Getting index {index_name} via REST API at {url}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -367,7 +368,7 @@ class DatabricksVectorIndexRepository:
             logger.debug(f"Listing indexes for endpoint {endpoint_name} via REST API")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.get(url, headers=headers, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -488,7 +489,7 @@ class DatabricksVectorIndexRepository:
             logger.info(f"Deleting index {index_name} via REST API at {url}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.delete(url, headers=headers) as response:
                     response_text = await response.text()
                     
@@ -566,7 +567,7 @@ class DatabricksVectorIndexRepository:
             # Step 1: Get current index configuration
             describe_url = f"{self.workspace_url}/api/2.0/vector-search/indexes/{encoded_index_name}"
             
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 # Get index info
                 async with session.get(describe_url, headers=headers) as response:
                     if response.status != 200:
@@ -806,7 +807,7 @@ class DatabricksVectorIndexRepository:
                 payload["filters_json"] = json.dumps(filters)
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         results = await response.json()
@@ -815,7 +816,15 @@ class DatabricksVectorIndexRepository:
                         if results and 'result' in results:
                             data_array = results.get('result', {}).get('data_array', [])
                             logger.debug(f"[similarity_search] Returned {len(data_array)} results")
-                            if len(data_array) == 0 and filters:
+                            # Diagnostic re-query is OPT-IN (KASAL_VS_DEBUG=1):
+                            # it doubles vector-search round trips on the hottest
+                            # cold-start path (first recall of every new crew)
+                            # and reads other tenants' crew_ids into the logs.
+                            if (
+                                len(data_array) == 0
+                                and filters
+                                and os.environ.get("KASAL_VS_DEBUG", "").lower() in ("1", "true", "yes")
+                            ):
                                 logger.warning(f"[similarity_search] No results found with filters: {filters}")
                                 # Try without filters to debug
                                 logger.info("[similarity_search] DEBUG: Trying search WITHOUT filters to diagnose...")
@@ -1052,7 +1061,7 @@ class DatabricksVectorIndexRepository:
             logger.debug(f"Payload has 'inputs_json' key with JSON string of {len(records)} records")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 # Log the complete structure for debugging
                 logger.info(f"Sending upsert request to: {url}")
                 logger.info(f"Payload keys: {list(payload.keys())}")
@@ -1179,7 +1188,7 @@ class DatabricksVectorIndexRepository:
             logger.info(f"Deleting {len(primary_keys)} records from {index_name}")
             
             # Make the REST API call
-            async with aiohttp.ClientSession() as session:
+            async with shared_client_session() as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status in [200, 204]:
                         logger.info(f"Successfully deleted {len(primary_keys)} records from {index_name}")

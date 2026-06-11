@@ -15,33 +15,38 @@ from src.engines.crewai.tools.custom.powerbi_relationships_tool import (
 class TestPowerBIRelationshipsSchema:
     """Tests for PowerBIRelationshipsSchema Pydantic model"""
 
-    def test_schema_initialization_minimal(self):
-        """Test schema with minimal required parameters"""
+    def test_schema_defaults(self):
+        """Test schema defaults for the LLM-fillable output/target fields"""
+        schema = PowerBIRelationshipsSchema()
+
+        assert schema.target_catalog == "main"
+        assert schema.target_schema == "default"
+        assert schema.include_inactive is False
+        assert schema.skip_system_tables is True
+
+    def test_schema_overrides(self):
+        """Test schema accepts overrides for output/target fields"""
         schema = PowerBIRelationshipsSchema(
-            workspace_id="workspace123",
-            dataset_id="dataset456",
-            tenant_id="tenant789",
-            client_id="client012",
-            client_secret="secret345"
+            target_catalog="analytics",
+            target_schema="powerbi",
+            include_inactive=True,
+            skip_system_tables=False
         )
 
-        assert schema.workspace_id == "workspace123"
-        assert schema.dataset_id == "dataset456"
-        assert schema.tenant_id == "tenant789"
-        assert schema.client_id == "client012"
-        assert schema.client_secret == "secret345"
+        assert schema.target_catalog == "analytics"
+        assert schema.target_schema == "powerbi"
+        assert schema.include_inactive is True
+        assert schema.skip_system_tables is False
 
-    def test_schema_with_user_token(self):
-        """Test schema with user OAuth token"""
-        schema = PowerBIRelationshipsSchema(
-            workspace_id="workspace123",
-            dataset_id="dataset456",
-            access_token="user_oauth_token"
-        )
-
-        assert schema.workspace_id == "workspace123"
-        assert schema.dataset_id == "dataset456"
-        assert schema.access_token == "user_oauth_token"
+    def test_schema_excludes_connection_and_auth_plumbing(self):
+        """Connection/auth values are injected from tool_configs, not LLM-fillable"""
+        forbidden = {
+            "workspace_id", "dataset_id", "tenant_id", "client_id",
+            "client_secret", "username", "password", "auth_method",
+            "access_token", "token", "api_key", "llm_token",
+            "llm_workspace_url", "llm_model",
+        }
+        assert forbidden.isdisjoint(PowerBIRelationshipsSchema.model_fields.keys())
 
 
 class TestPowerBIRelationshipsTool:

@@ -79,14 +79,6 @@ class PowerBISemanticModelDaxSchema(BaseModel):
     )
 
     # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) — needed for DAX execution and cache fallback."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID) — needed for DAX execution."
-    )
     report_id: Optional[str] = Field(
         None,
         description="[Power BI] Optional Report ID (GUID) for visual reference lookup."
@@ -125,19 +117,10 @@ class PowerBISemanticModelDaxSchema(BaseModel):
                     "Provide one or more EVALUATE statements that work against this model."
     )
 
-    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
-    tenant_id: Optional[str] = Field(None, description="[Auth] Azure AD tenant ID.")
-    client_id: Optional[str] = Field(None, description="[Auth] Application/Client ID.")
-    client_secret: Optional[str] = Field(None, description="[Auth] Client secret for SP.")
-    username: Optional[str] = Field(None, description="[Auth] Service account username.")
-    password: Optional[str] = Field(None, description="[Auth] Service account password.")
-    auth_method: Optional[str] = Field(None, description="[Auth] 'service_principal', 'service_account', or auto.")
-    access_token: Optional[str] = Field(None, description="[Auth] Pre-obtained OAuth token.")
-
-    # ===== LLM CONFIGURATION =====
-    llm_workspace_url: Optional[str] = Field(None, description="[LLM] Databricks workspace URL.")
-    llm_token: Optional[str] = Field(None, description="[LLM] Databricks token for LLM access.")
-    llm_model: str = Field("databricks-claude-sonnet-4", description="[LLM] Model for DAX generation.")
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # ===== OPTIONS =====
     include_visual_references: bool = Field(True, description="[Options] Search for visual references.")

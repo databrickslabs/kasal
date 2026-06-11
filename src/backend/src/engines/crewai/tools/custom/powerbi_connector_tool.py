@@ -24,36 +24,11 @@ class PowerBIConnectorToolSchema(BaseModel):
         ...,
         description="Power BI workspace ID (required)"
     )
-    tenant_id: Optional[str] = Field(
-        None,
-        description="Azure AD tenant ID (required for service_principal or service_account auth)"
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="Azure AD application (client) ID (required for service_principal or service_account auth)"
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="Azure AD application client secret (required for service_principal auth)"
-    )
-    access_token: Optional[str] = Field(
-        None,
-        description="OAuth access token for Power BI authentication (alternative to service_principal/service_account)"
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="Authentication method: 'service_principal', 'service_account', or auto-detect. "
-                    "service_principal uses client_id+client_secret+tenant_id. "
-                    "service_account uses username+password+client_id+tenant_id."
-    )
-    username: Optional[str] = Field(
-        None,
-        description="Service account username/UPN (for service_account auth)"
-    )
-    password: Optional[str] = Field(
-        None,
-        description="Service account password (for service_account auth)"
-    )
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
+
     username_env: Optional[str] = Field(
         None,
         description="Environment variable name containing service account username (alternative to direct username)"

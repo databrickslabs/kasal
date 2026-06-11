@@ -101,6 +101,10 @@ class CrewPreparation:
         self.user_token = user_token  # Store user token for OBO auth
         self.custom_embedder = None
         self.embedder_config = None
+        # Group agent list cache: the UUID lookup runs once PER agent in the
+        # crew; without this, every agent re-fetched and re-decrypted the
+        # ENTIRE group agent table (O(crew_agents x group_agents) DB load).
+        self._group_agents_cache: Optional[list] = None
 
         # Log the configuration to debug memory backend
         logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
@@ -1031,44 +1035,51 @@ class CrewPreparation:
             Kasal agent UUID from database, or None if not found
         """
         try:
-            from src.core.unit_of_work import UnitOfWork
-            from src.services.agent_service import AgentService
-            from src.utils.user_context import GroupContext
+            # Fetch the group's agents ONCE per preparation and reuse for every
+            # agent in the crew (previously each agent re-fetched the whole
+            # group table, including tool_config decryption per row).
+            if self._group_agents_cache is None:
+                from src.services.agent_service import AgentService
+                from src.utils.user_context import GroupContext
+                from src.db.session import request_scoped_session
 
-            # Get the group_id from config
-            group_id = self.config.get('group_id', 'default')
+                group_id = self.config.get('group_id', 'default')
+                async with request_scoped_session() as session:
+                    agent_service = AgentService(session)
+                    group_context = GroupContext(group_ids=[group_id])
+                    self._group_agents_cache = await agent_service.find_by_group(group_context)
+                logger.info(
+                    f"[CrewPreparation] Cached {len(self._group_agents_cache)} group "
+                    f"agents for UUID lookups (group '{group_id}')"
+                )
 
-            from src.db.session import request_scoped_session
+            agents = self._group_agents_cache
 
-            async with request_scoped_session() as session:
-                agent_service = AgentService(session)
-                group_context = GroupContext(group_ids=[group_id])
+            # Try to match by various criteria
+            agent_role = agent_config.get('role', '')
+            agent_name = agent_config.get('name', '')
 
-                # Get all agents for the group
-                agents = await agent_service.find_by_group(group_context)
+            for db_agent in agents:
+                # Try exact matches first
+                if (db_agent.role == agent_role or
+                    db_agent.name == agent_name or
+                    str(db_agent.id) == config_agent_id):
+                    logger.info(f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
+                    return str(db_agent.id)
 
-                # Try to match by various criteria
-                agent_role = agent_config.get('role', '')
-                agent_name = agent_config.get('name', '')
+            # No exact match: log a BOUNDED summary. Dumping the whole group
+            # table (up to hundreds of rows) at INFO cost ~60KB of log + the
+            # same again copied into execution_logs, per failed lookup.
+            sample = ", ".join(
+                f"{db_agent.role!r}" for db_agent in agents[:3]
+            )
+            logger.warning(
+                f"[CrewPreparation] No matching agent found for config_id='{config_agent_id}' "
+                f"(role='{agent_role}', name='{agent_name}') among {len(agents)} group agents; "
+                f"sample roles: [{sample}]"
+            )
 
-                logger.info(f"[CrewPreparation] Looking for agent in {len(agents)} agents in group '{group_id}'")
-                logger.info(f"[CrewPreparation] Searching for role='{agent_role}', name='{agent_name}', config_id='{config_agent_id}'")
-
-                for db_agent in agents:
-                    # Try exact matches first
-                    if (db_agent.role == agent_role or
-                        db_agent.name == agent_name or
-                        str(db_agent.id) == config_agent_id):
-                        logger.info(f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
-                        return str(db_agent.id)
-
-                # If no exact match, log available agents for debugging
-                logger.warning(f"[CrewPreparation] No matching agent found for config_id='{config_agent_id}'")
-                logger.info(f"[CrewPreparation] Available agents:")
-                for db_agent in agents:
-                    logger.info(f"[CrewPreparation]   - UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
-
-                return None
+            return None
 
         except Exception as e:
             logger.error(f"[CrewPreparation] Error looking up Kasal agent UUID: {e}")

@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from src.config.settings import settings
 
@@ -233,7 +233,12 @@ async def get_execution_status(
 
 @router.get("", response_model=list[ExecutionResponse])
 async def list_executions(
-    group_context: GroupContextDep, db: SessionDep, limit: int = 50, offset: int = 0
+    group_context: GroupContextDep,
+    db: SessionDep,
+    # Bounded: an unbounded limit let any client pull the entire table
+    # (megabytes of result JSON) in one request on the most-polled endpoint.
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     """
     List executions with group filtering.

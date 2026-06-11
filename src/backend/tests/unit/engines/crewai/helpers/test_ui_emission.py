@@ -295,10 +295,54 @@ def test_build_ui_instruction_deliverable_is_smaller():
         ("an interactive quiz that tracks score", "quiz"),
         ("a concept map / mindmap of the topic", "mindmap"),
         ("a data answer from Genie", "genie"),
-        ("a dashboard AND a report", None),  # ambiguous → safe fallback
+        # Multi-keyword resolves by specificity order (dashboard precedes
+        # report in _DELIVERABLE_KEYWORDS) — the old None fallback re-sent
+        # all eight theme/directive blocks every iteration (LLM-022).
+        ("a dashboard AND a report", "dashboard"),
         ("just analyze the numbers", None),  # no match → safe fallback
         ("", None),
     ],
 )
 def test_infer_deliverable(text, expected):
     assert _infer_deliverable(text) == expected
+
+
+class TestInferDeliverableMultiKeyword:
+    """Regression (LLM-022): multi-keyword final tasks used to return None and
+    re-send ALL eight theme/directive blocks (~1.5-1.9k tokens) every agent
+    iteration. The ordered keyword list now decides by specificity."""
+
+    def test_multi_keyword_resolves_by_specificity_order(self):
+        from src.engines.crewai.helpers.ui_emission import _infer_deliverable
+
+        # presentation + kpi(dashboard) both match — presentation is earlier
+        # in the specificity order.
+        text = "Create a presentation from the data, include KPI charts per slide"
+        assert _infer_deliverable(text) == "presentation"
+
+    def test_single_keyword_unchanged(self):
+        from src.engines.crewai.helpers.ui_emission import _infer_deliverable
+
+        assert _infer_deliverable("build an interactive quiz about Rome") == "quiz"
+
+    def test_no_keyword_falls_back_to_none(self):
+        from src.engines.crewai.helpers.ui_emission import _infer_deliverable
+
+        assert _infer_deliverable("summarize the findings for the team") is None
+        assert _infer_deliverable("") is None
+
+    def test_narrowed_instruction_is_materially_smaller(self):
+        from src.engines.crewai.helpers.ui_emission import build_ui_instruction
+
+        themes = {k: {"accent": "#2563eb", "background": "#fff"} for k in
+                  ("default", "presentation", "dashboard", "quiz", "report",
+                   "album", "mindmap", "genie")}
+        directives = {k: f"Detailed {k} behavior settings. " * 8 for k in
+                      ("presentation", "dashboard", "quiz", "report",
+                       "album", "mindmap", "genie")}
+
+        full = build_ui_instruction(themes=themes, directives=directives, deliverable=None)
+        narrowed = build_ui_instruction(themes=themes, directives=directives,
+                                        deliverable="presentation")
+
+        assert len(narrowed) < len(full) - 1000  # at least ~250 tokens saved

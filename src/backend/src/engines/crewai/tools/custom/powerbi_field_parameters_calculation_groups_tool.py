@@ -31,49 +31,10 @@ logger = logging.getLogger(__name__)
 class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     """Input schema for PowerBIFieldParametersCalculationGroupsTool."""
 
-    # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) containing the semantic model. Leave empty to use pre-configured value."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID) to extract from. Leave empty to use pre-configured value."
-    )
-
-    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
-    tenant_id: Optional[str] = Field(
-        None,
-        description="[Auth] Azure AD tenant ID for Service Principal or Service Account authentication."
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="[Auth] Application/Client ID for Service Principal or Service Account authentication."
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="[Auth] Client secret for Service Principal authentication."
-    )
-
-    # ===== SERVICE ACCOUNT AUTHENTICATION =====
-    username: Optional[str] = Field(
-        None,
-        description="[Auth] Service account username/UPN (for Service Account authentication)"
-    )
-    password: Optional[str] = Field(
-        None,
-        description="[Auth] Service account password (for Service Account authentication)"
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
-    )
-
-    # User OAuth token (alternative to Service Principal/Service Account)
-    access_token: Optional[str] = Field(
-        None,
-        description="[Auth] Pre-obtained OAuth access token (alternative to SP/Service Account)."
-    )
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
@@ -85,19 +46,7 @@ class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
         description="[Target] Unity Catalog schema name for generated SQL (default: 'default')."
     )
 
-    # ===== LLM CONFIGURATION FOR MEASURE TRANSLATION =====
-    llm_workspace_url: Optional[str] = Field(
-        None,
-        description="[LLM] Databricks workspace URL for LLM-based DAX translation."
-    )
-    llm_token: Optional[str] = Field(
-        None,
-        description="[LLM] Databricks token for LLM access."
-    )
-    llm_model: str = Field(
-        "databricks-claude-sonnet-4",
-        description="[LLM] Model to use for DAX translation (default: 'databricks-claude-sonnet-4')."
-    )
+    # ===== MEASURE TRANSLATION OPTIONS =====
     translate_measures: bool = Field(
         True,
         description="[LLM] Whether to translate referenced DAX measures to SQL (default: True)."

@@ -86,44 +86,20 @@ async def configure_mlflow_in_subprocess(
 
     try:
         # -------------------------------------------------------
-        # 2. Import MLflow (graceful fallback if not installed)
-        # -------------------------------------------------------
-        try:
-            import mlflow
-        except ImportError:
-            alog.warning("[SUBPROCESS] MLflow package not installed; skipping configuration")
-            return MlflowSetupResult(
-                enabled=True, tracing_ready=False, error="mlflow not installed"
-            )
-
-        # -------------------------------------------------------
-        # 3. Auth setup: SPN → PAT (NO OBO for MLflow)
-        # -------------------------------------------------------
-        from src.utils.user_context import UserContext
-
-        # Set UserContext with group_context in subprocess (contextvars are process-local)
-        if group_context:
-            try:
-                UserContext.set_group_context(group_context)
-                alog.info(
-                    f"[SUBPROCESS] Set UserContext with group_id: "
-                    f"{getattr(group_context, 'primary_group_id', None)}"
-                )
-            except Exception as ctx_err:
-                alog.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
-
+        # 2. SPN credential check FIRST — before importing mlflow.
+        #
+        # ``import mlflow`` costs ~1.1s inside the subprocess critical path
+        # (spawn → kickoff). Environments without SPN credentials (all local
+        # dev, any app without injected client credentials) skip MLflow
+        # anyway, so check the cheap env vars before paying the import.
+        #
         # MLflow auth: use SPN credentials (DATABRICKS_CLIENT_ID /
         # DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by the
-        # Databricks Apps platform.  Extract a bearer token up-front
-        # so the MLflow exporter uses simple HOST + TOKEN auth.
-        #
-        # The platform also injects DATABRICKS_TOKEN (a PAT) which
-        # conflicts with SPN in the SDK ("more than one authorization
-        # method").  We strip PAT vars before the SDK call and
-        # restore them after.
+        # Databricks Apps platform.
         #
         # NOTE: Databricks Apps proxy redacts log lines containing words
         # like SECRET/TOKEN/BEARER.  Use neutral wording in all logs.
+        # -------------------------------------------------------
         host = os.environ.get("DATABRICKS_HOST", "")
         client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
         client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
@@ -143,6 +119,42 @@ async def configure_mlflow_in_subprocess(
                 tracing_ready=False,
                 error="SPN credentials required",
             )
+
+        # -------------------------------------------------------
+        # 3. Import MLflow (graceful fallback if not installed)
+        # -------------------------------------------------------
+        try:
+            import mlflow
+        except ImportError:
+            alog.warning("[SUBPROCESS] MLflow package not installed; skipping configuration")
+            return MlflowSetupResult(
+                enabled=True, tracing_ready=False, error="mlflow not installed"
+            )
+
+        # -------------------------------------------------------
+        # 4. Auth setup: SPN → PAT (NO OBO for MLflow)
+        # -------------------------------------------------------
+        from src.utils.user_context import UserContext
+
+        # Set UserContext with group_context in subprocess (contextvars are
+        # process-local). The crew subprocess also sets this independently
+        # (process_crew_executor), so skipping it via the early returns above
+        # is safe.
+        if group_context:
+            try:
+                UserContext.set_group_context(group_context)
+                alog.info(
+                    f"[SUBPROCESS] Set UserContext with group_id: "
+                    f"{getattr(group_context, 'primary_group_id', None)}"
+                )
+            except Exception as ctx_err:
+                alog.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
+
+        # The platform also injects DATABRICKS_TOKEN (a PAT) which
+        # conflicts with SPN in the SDK ("more than one authorization
+        # method").  We strip PAT vars before the SDK call and restore
+        # them after; a bearer token is extracted up-front so the MLflow
+        # exporter uses simple HOST + TOKEN auth.
 
         auth_method: Optional[str] = None
 

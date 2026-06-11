@@ -13,7 +13,6 @@ demand it.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import os
 import re
@@ -540,24 +539,18 @@ class LakebaseStorageBackend:
         return list(vector)
 
     def _run_sync(self, coro: Any) -> Any:
+        """Run a coroutine on the shared long-lived bridge loop (PERF-013).
+
+        A fresh loop per call made _is_engine_loop_stale() trip on EVERY
+        memory operation, forcing engine recreation + ~3 Databricks
+        control-plane calls (credential, instance lookup, username) before
+        each <10ms pgvector query. A stable loop keeps the engine cached;
+        token freshness is handled lazily by get_session.
+        """
         if not asyncio.iscoroutine(coro):
             return coro
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        def _runner(c: Any) -> Any:
-            new_loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(new_loop)
-                return new_loop.run_until_complete(c)
-            finally:
-                asyncio.set_event_loop(None)
-                new_loop.close()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_runner, coro).result()
+        from src.engines.crewai.memory.databricks_storage_backend import _get_bridge_loop
+        return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
 
 
 # ----------------------------------------------------------------------

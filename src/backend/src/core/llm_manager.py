@@ -568,7 +568,7 @@ class LLMManager:
         messages: List[Dict[str, str]],
         model: str,
         temperature: float = 0.7,
-        max_tokens: int = 4000,
+        max_tokens: Optional[int] = None,
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> str:
         """
@@ -578,7 +578,10 @@ class LLMManager:
             messages: List of message dicts with 'role' and 'content' keys
             model: Model identifier (e.g. 'databricks-llama-4-maverick')
             temperature: Sampling temperature (default 0.7)
-            max_tokens: Maximum tokens in response (default 4000)
+            max_tokens: Maximum tokens in response. None (default) inherits the
+                model config's max_output_tokens already applied by
+                configure_crewai_llm; a last-resort 4000 cap applies only when
+                neither the caller nor the model config sets a budget.
             extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
 
         Returns:
@@ -590,7 +593,10 @@ class LLMManager:
         """
         group_id = LLMManager._get_group_id_from_context(required=True)
         llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
-        llm.max_tokens = max_tokens
+        if max_tokens is not None:
+            llm.max_tokens = max_tokens
+        elif not getattr(llm, "max_tokens", None) and not getattr(llm, "max_completion_tokens", None):
+            llm.max_tokens = 4000
         if extra_headers:
             # Pass extra_headers to the underlying litellm call via LLM extra_headers param
             llm.extra_headers = extra_headers
@@ -937,7 +943,8 @@ class LLMManager:
                 total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "60"))
             )
             results: List[Optional[List[float]]] = []
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            from src.utils.aiohttp_session import shared_client_session
+            async with shared_client_session() as session:
                 for start in range(0, len(texts), batch_size):
                     batch = texts[start:start + batch_size]
                     payload = {"input": batch}
@@ -1093,7 +1100,8 @@ class LLMManager:
                         payload["model"] = body_model
 
                     timeout = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30")))
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                    from src.utils.aiohttp_session import shared_client_session
+                    async with shared_client_session() as session:
                         async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as response:
                             if response.status == 200:
                                 result = await response.json()
@@ -1156,10 +1164,12 @@ class LLMManager:
                 raw_model = embedding_model.removeprefix("ollama/")
 
                 timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                async with aiohttp.ClientSession(timeout=timeout_val) as http_session:
+                from src.utils.aiohttp_session import shared_client_session
+                async with shared_client_session() as http_session:
                     async with http_session.post(
                         f"{api_base}/api/embed",
                         json={"model": raw_model, "input": text},
+                        timeout=timeout_val,
                     ) as resp:
                         if resp.status != 200:
                             error_text = await resp.text()
@@ -1192,8 +1202,9 @@ class LLMManager:
                 payload = {"model": f"models/{raw_model}", "content": {"parts": [{"text": text}]}}
 
                 timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                async with aiohttp.ClientSession(timeout=timeout_val) as http_session:
-                    async with http_session.post(url, json=payload) as resp:
+                from src.utils.aiohttp_session import shared_client_session
+                async with shared_client_session() as http_session:
+                    async with http_session.post(url, json=payload, timeout=timeout_val) as resp:
                         if resp.status != 200:
                             error_text = await resp.text()
                             embedding_logger.error(f"Google embedding API error {resp.status}: {error_text}")
@@ -1224,8 +1235,9 @@ class LLMManager:
                 payload = {"model": embedding_model, "input": text}
 
                 timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                async with aiohttp.ClientSession(timeout=timeout_val) as http_session:
-                    async with http_session.post(url, headers=headers, json=payload) as resp:
+                from src.utils.aiohttp_session import shared_client_session
+                async with shared_client_session() as http_session:
+                    async with http_session.post(url, headers=headers, json=payload, timeout=timeout_val) as resp:
                         if resp.status != 200:
                             error_text = await resp.text()
                             embedding_logger.error(f"OpenAI embedding API error {resp.status}: {error_text}")

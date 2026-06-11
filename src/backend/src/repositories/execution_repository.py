@@ -35,7 +35,8 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         group_ids: List[str] = None,
         status_filter: List[str] = None,
         user_email: str = None,
-        system_level: bool = False
+        system_level: bool = False,
+        include_count: bool = False
     ) -> Tuple[List[ExecutionHistory], int]:
         """
         Get paginated execution history with group and user filtering.
@@ -95,11 +96,15 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
             else:
                 base_filter = base_filter & status_condition
         
-        # Get total count
-        count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
-        total_count_result = await self.session.execute(count_stmt)
-        total_count = total_count_result.scalar() or 0
-        
+        # Total count is OPT-IN: every caller of the hot list path discarded
+        # it, yet the COUNT(*) doubled DB round trips on the most-polled
+        # endpoint (~24 calls/min at peak).
+        total_count = 0
+        if include_count:
+            count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
+            total_count_result = await self.session.execute(count_stmt)
+            total_count = total_count_result.scalar() or 0
+
         # Get paginated executions
         stmt = (select(ExecutionHistory)
                .where(base_filter)

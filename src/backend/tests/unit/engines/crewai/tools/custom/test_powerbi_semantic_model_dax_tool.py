@@ -117,16 +117,15 @@ class TestPowerBISemanticModelDaxSchema:
         schema = PowerBISemanticModelDaxSchema(model_context_json=SAMPLE_MODEL_CONTEXT)
         assert schema.model_context_json == SAMPLE_MODEL_CONTEXT
 
-    def test_sp_auth_fields(self):
-        schema = PowerBISemanticModelDaxSchema(
-            workspace_id=WS_ID,
-            dataset_id=DS_ID,
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-        )
-        assert schema.tenant_id == TENANT_ID
-        assert schema.client_secret == CLIENT_SECRET
+    def test_no_auth_or_plumbing_fields_exposed(self):
+        # Connection / auth / LLM plumbing is injected at tool-construction
+        # time from tool_configs — it must never be an LLM-fillable field.
+        forbidden = {
+            "workspace_id", "dataset_id", "tenant_id", "client_id",
+            "client_secret", "username", "password", "auth_method",
+            "access_token", "llm_workspace_url", "llm_token", "llm_model",
+        }
+        assert not forbidden & set(PowerBISemanticModelDaxSchema.model_fields)
 
     def test_context_enrichment_fields(self):
         schema = PowerBISemanticModelDaxSchema(
@@ -153,10 +152,6 @@ class TestPowerBISemanticModelDaxSchema:
     def test_output_format_default(self):
         schema = PowerBISemanticModelDaxSchema()
         assert schema.output_format == "markdown"
-
-    def test_llm_model_default(self):
-        schema = PowerBISemanticModelDaxSchema()
-        assert schema.llm_model == "databricks-claude-sonnet-4"
 
 
 # ===========================================================================

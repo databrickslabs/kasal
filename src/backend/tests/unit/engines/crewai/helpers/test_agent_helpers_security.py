@@ -126,71 +126,111 @@ class TestBuildSecurityPreamble:
 
 # ---------------------------------------------------------------------------
 # Tests for preamble injection in create_agent()
+#
+# REGRESSION CONTEXT: create_agent used to pass system_prompt / task_prompt /
+# format_prompt kwargs, which are NOT CrewAI Agent fields — Pydantic silently
+# dropped them, so the security preamble and custom templates never reached
+# the LLM while a "[SECURITY]" log line claimed they were active. The fixed
+# contract: preamble goes into `backstory` (embedded by CrewAI's default
+# system prompt) or into `system_template` when one is configured.
 # ---------------------------------------------------------------------------
 
 class TestCreateAgentSecurityPreamble:
-    """Test suite verifying security preamble is injected into agent system prompts."""
+    """Test suite verifying security preamble is injected into agent prompts."""
 
     @pytest.mark.asyncio
-    async def test_system_prompt_contains_preamble_without_custom_template(
+    async def test_all_kwargs_are_real_crewai_agent_fields(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Preamble is present in system_prompt when user has not set system_template."""
+        """Every kwarg passed to Agent() must be an actual field on the
+        installed CrewAI Agent — otherwise Pydantic silently drops it."""
+        from crewai import Agent as RealAgent
+
+        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        unknown = set(kwargs) - set(RealAgent.model_fields)
+        assert not unknown, f"kwargs silently dropped by CrewAI Agent: {unknown}"
+
+    @pytest.mark.asyncio
+    async def test_backstory_contains_preamble_without_custom_template(
+        self, base_agent_config, mock_config, mock_tools
+    ):
+        """Without a custom template, the preamble is prepended to backstory —
+        which CrewAI's default system prompt embeds via {backstory}."""
         kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
 
-        assert "system_prompt" in kwargs
-        assert "SECURITY INSTRUCTION" in kwargs["system_prompt"]
+        assert "system_prompt" not in kwargs  # the silently-dropped kwarg is gone
+        assert "SECURITY INSTRUCTION" in kwargs["backstory"]
 
     @pytest.mark.asyncio
-    async def test_system_prompt_contains_preamble_with_custom_template(
+    async def test_preamble_comes_before_original_backstory(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Preamble is prepended when user provides a custom system_template."""
+        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        backstory = kwargs["backstory"]
+        assert backstory.index("SECURITY INSTRUCTION") < backstory.index("expert data analyst")
+
+    @pytest.mark.asyncio
+    async def test_system_template_gets_preamble_with_custom_template(
+        self, base_agent_config, mock_config, mock_tools
+    ):
+        """With a custom template, the preamble is prepended to system_template
+        (the real CrewAI field, not the old dropped 'system_prompt' kwarg)."""
         config = {**base_agent_config, "system_template": "You are a custom assistant."}
         kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
 
-        assert "system_prompt" in kwargs
-        system_prompt = kwargs["system_prompt"]
-        # Preamble must come BEFORE the custom template content
-        preamble_pos = system_prompt.index("SECURITY INSTRUCTION")
-        custom_pos = system_prompt.index("You are a custom assistant.")
-        assert preamble_pos < custom_pos
+        assert "system_template" in kwargs
+        template = kwargs["system_template"]
+        assert template.index("SECURITY INSTRUCTION") < template.index("You are a custom assistant.")
 
     @pytest.mark.asyncio
-    async def test_role_is_present_in_system_prompt(
+    async def test_lone_system_template_gets_passthrough_prompt_template(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Agent role is preserved in system_prompt alongside the preamble."""
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        assert "Data Analyst" in kwargs["system_prompt"]
+        """CrewAI only honors custom templates when BOTH system_template and
+        prompt_template are set — a passthrough user template must be added."""
+        config = {**base_agent_config, "system_template": "You are a custom assistant."}
+        kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
+
+        assert kwargs.get("prompt_template") == "{{ .Prompt }}"
 
     @pytest.mark.asyncio
-    async def test_goal_is_present_in_system_prompt(
+    async def test_user_prompt_template_is_passed_through(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Agent goal is preserved in system_prompt alongside the preamble."""
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        assert "Analyse business data" in kwargs["system_prompt"]
+        config = {
+            **base_agent_config,
+            "system_template": "Custom system.",
+            "prompt_template": "Custom user: {{ .Prompt }}",
+            "response_template": "Answer: {{ .Response }}",
+        }
+        kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
+
+        assert kwargs["prompt_template"] == "Custom user: {{ .Prompt }}"
+        assert kwargs["response_template"] == "Answer: {{ .Response }}"
 
     @pytest.mark.asyncio
-    async def test_backstory_is_present_in_system_prompt(
+    async def test_role_and_goal_kwargs_preserved(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Agent backstory is preserved in system_prompt alongside the preamble."""
         kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        assert "expert data analyst" in kwargs["system_prompt"]
+        assert kwargs["role"] == "Data Analyst"
+        assert "Analyse business data" in kwargs["goal"]
 
     @pytest.mark.asyncio
-    async def test_preamble_comes_before_role_content(
+    async def test_rendered_default_prompt_contains_preamble(
         self, base_agent_config, mock_config, mock_tools
     ):
-        """Security preamble appears at the start of system_prompt — highest priority."""
+        """End-to-end: a real CrewAI Agent built from the kwargs renders a
+        system prompt that actually contains the preamble."""
+        from crewai import Agent as RealAgent
+        from crewai.utilities.prompts import Prompts
+
         kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        system_prompt = kwargs["system_prompt"]
-        # Preamble index must be before role/goal content
-        preamble_pos = system_prompt.index("SECURITY INSTRUCTION")
-        role_pos = system_prompt.index("Data Analyst")
-        assert preamble_pos < role_pos
+        kwargs = {**kwargs, "tools": [], "llm": "gpt-4o"}  # real Agent needs serializable llm
+        agent = RealAgent(**kwargs)
+        result = Prompts(agent=agent, has_tools=False, use_system_prompt=True).task_execution()
+        rendered = result["system"] if isinstance(result, dict) else str(result)
+        assert "SECURITY INSTRUCTION" in rendered
 
     @pytest.mark.asyncio
     async def test_allow_code_execution_always_false(
@@ -208,25 +248,4 @@ class TestCreateAgentSecurityPreamble:
         """Preamble is injected even when date awareness params are also set."""
         config = {**base_agent_config, "inject_date": True, "date_format": "%Y-%m-%d"}
         kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
-        assert "SECURITY INSTRUCTION" in kwargs["system_prompt"]
-
-    @pytest.mark.asyncio
-    async def test_custom_template_content_fully_preserved(
-        self, base_agent_config, mock_config, mock_tools
-    ):
-        """The full custom system_template text is preserved after prepending preamble."""
-        custom = "You are SpecialBot. Never deviate from your mission."
-        config = {**base_agent_config, "system_template": custom}
-        kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
-        # Entire custom template must be in the resulting prompt
-        assert custom in kwargs["system_prompt"]
-
-    @pytest.mark.asyncio
-    async def test_system_prompt_key_always_set(
-        self, base_agent_config, mock_config, mock_tools
-    ):
-        """system_prompt key is always present in agent kwargs after hardening."""
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        assert "system_prompt" in kwargs
-        assert kwargs["system_prompt"] is not None
-        assert len(kwargs["system_prompt"]) > 0
+        assert "SECURITY INSTRUCTION" in kwargs["backstory"]

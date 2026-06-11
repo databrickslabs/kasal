@@ -732,6 +732,7 @@ def run_crew_in_process(
                     )
                     from opentelemetry import trace as _otel_trace
                     from opentelemetry.sdk.trace.export import (
+                        BatchSpanProcessor,
                         SimpleSpanProcessor,
                     )
 
@@ -739,7 +740,12 @@ def run_crew_in_process(
                         job_id=execution_id
                     )
 
-                    # DB exporter + SSE processor
+                    # DB exporter + SSE processor. BatchSpanProcessor
+                    # (PERF-014): spans are queued and exported in batches on
+                    # its own worker thread instead of one DB transaction per
+                    # span inline with span end; _write_batch commits a whole
+                    # batch at once. 1s schedule delay keeps UI trace polling
+                    # near-live while still aggregating bursts.
                     from src.services.otel_tracing.db_exporter import (
                         KasalDBSpanExporter,
                     )
@@ -747,10 +753,11 @@ def run_crew_in_process(
                         KasalSSESpanProcessor,
                     )
                     otel_provider.add_span_processor(
-                        SimpleSpanProcessor(
+                        BatchSpanProcessor(
                             KasalDBSpanExporter(
                                 execution_id, group_context
-                            )
+                            ),
+                            schedule_delay_millis=1000,
                         )
                     )
                     otel_provider.add_span_processor(

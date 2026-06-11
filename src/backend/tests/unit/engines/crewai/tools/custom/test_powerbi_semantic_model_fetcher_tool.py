@@ -95,21 +95,19 @@ class TestRunAsyncInSyncContextFetcher:
 class TestPowerBISemanticModelFetcherSchema:
     def test_all_fields_optional(self):
         schema = PowerBISemanticModelFetcherSchema()
-        assert schema.workspace_id is None
-        assert schema.dataset_id is None
         assert schema.report_id is None
 
-    def test_sp_auth_fields(self):
-        schema = PowerBISemanticModelFetcherSchema(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
-        )
-        assert schema.tenant_id == TENANT_ID
-        assert schema.client_secret == CLIENT_SECRET
-
-    def test_access_token_field(self):
-        schema = PowerBISemanticModelFetcherSchema(access_token=ACCESS_TOKEN)
-        assert schema.access_token == ACCESS_TOKEN
+    def test_no_auth_or_plumbing_fields_exposed(self):
+        # Connection/auth/LLM plumbing is injected via tool_configs in
+        # __init__ and must never be LLM-fillable schema fields.
+        forbidden = {
+            "workspace_id", "dataset_id",
+            "tenant_id", "client_id", "client_secret",
+            "username", "password", "auth_method",
+            "access_token", "llm_token", "api_key", "token",
+            "llm_workspace_url", "llm_model",
+        }
+        assert not forbidden & set(PowerBISemanticModelFetcherSchema.model_fields)
 
     def test_report_id_optional(self):
         schema = PowerBISemanticModelFetcherSchema(report_id="rpt-abc123")
@@ -126,15 +124,6 @@ class TestPowerBISemanticModelFetcherSchema:
     def test_output_format_default(self):
         schema = PowerBISemanticModelFetcherSchema()
         assert schema.output_format == "json"
-
-    def test_sa_auth_fields(self):
-        schema = PowerBISemanticModelFetcherSchema(
-            username="svc@example.com",
-            password="pass",
-            auth_method="service_account",
-        )
-        assert schema.username == "svc@example.com"
-        assert schema.auth_method == "service_account"
 
 
 # ===========================================================================

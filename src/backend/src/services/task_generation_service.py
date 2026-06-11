@@ -194,12 +194,9 @@ class TaskGenerationService:
                 "\n\nRefer to the TOOL CATALOG above for when to use each tool."
                 " Assign at most 1-2 tools. If none are essential, return an empty tools array."
             )
-            # Prefer GenieTool for internal-data questions when it's available, so a
-            # data prompt yields a Genie task (→ space picker) not a web-search task.
-            if any(t.get('name') == 'GenieTool' for t in request.available_tools):
-                from src.seeds.prompt_templates import GENIE_ROUTING_DIRECTIVE
-                base_message += f"\n{GENIE_ROUTING_DIRECTIVE}"
-                logger.info("[GenieRouting] generate_task: applied Genie routing directive (GenieTool available)")
+            # GenieTool routing guidance lives in GENERATE_TASK_TEMPLATE itself
+            # (tool catalog + "ALWAYS prefer internal/organizational data tools"),
+            # so no extra directive is appended here.
 
         # Documentation context disabled: skip vector search/embedding for task generation
         # (No documentation context injected)

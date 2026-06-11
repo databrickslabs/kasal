@@ -257,21 +257,20 @@ _DELIVERABLE_KEYWORDS = [
 def _infer_deliverable(text: str) -> Optional[str]:
     """Best-effort guess of the deliverable type from the final task's text.
 
-    Returns a _THEME_ORDER key when EXACTLY ONE deliverable type is mentioned, so
-    the UI instruction can emit only that deliverable's theme/directive block.
-    Returns ``None`` when nothing matches or the text is ambiguous (multiple
-    distinct types), in which case the caller emits the full set — a safe
-    fallback that never narrows incorrectly."""
+    _DELIVERABLE_KEYWORDS is ordered by specificity, and a final task builds
+    exactly ONE deliverable — so when several keywords match (e.g. a
+    presentation task that mentions KPI charts), the FIRST match in the
+    ordered list wins. The previous exactly-one-match rule returned ``None``
+    for every multi-keyword task, which made the caller re-send ALL eight
+    theme/directive blocks (~1.5-1.9k tokens) on every agent iteration.
+    ``None`` (full-set fallback) is reserved for tasks that mention no
+    deliverable at all."""
     if not text:
         return None
     lowered = text.lower()
-    matches = {
-        deliverable
-        for keyword, deliverable in _DELIVERABLE_KEYWORDS
-        if keyword in lowered
-    }
-    if len(matches) == 1:
-        return next(iter(matches))
+    for keyword, deliverable in _DELIVERABLE_KEYWORDS:
+        if keyword in lowered:
+            return deliverable
     return None
 
 
