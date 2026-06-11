@@ -6,6 +6,13 @@ import { SaveCrewProps } from '../../types/crews';
 import { Edge } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore';
+
+/** Refresh the chat-mode catalog rail so agent-builder saves show up there
+ * immediately (the rail otherwise only reloads on mount/workspace change). */
+const refreshChatCatalog = () => {
+  void useChatAppStore.getState().loadCatalog();
+};
 
 interface SaveCrewComponentProps extends SaveCrewProps {
   disabled?: boolean;
@@ -145,6 +152,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
         updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
         markTabClean(tabId);
+        refreshChatCatalog();
         
         // Dispatch completion event
         setTimeout(() => {
@@ -244,6 +252,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
         updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
         markTabClean(tabId);
+        refreshChatCatalog();
         
         // Dispatch completion event
         setTimeout(() => {
@@ -523,6 +532,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       });
       
       console.log('SaveCrew: Save successful, closing dialog', savedCrew);
+      refreshChatCatalog();
 
       // Update the tab's crew info
       console.log('SaveCrew: Updating tab crew info:', {

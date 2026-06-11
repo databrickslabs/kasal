@@ -35,6 +35,7 @@ import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../store/modelConfig';
+import { useTabManagerStore } from '../../store/tabManager';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
@@ -429,6 +430,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     inputRef
   );
 
+  /** Detach the active tab from its saved crew before generated content
+   * replaces the canvas. Without this, the next Save updates the OLD crew
+   * record in place (overwriting its content, keeping its old name) instead
+   * of opening the save dialog to create a new crew. */
+  const detachTabFromSavedCrew = useCallback(() => {
+    const { activeTabId, getTab, clearTabCrewInfo } = useTabManagerStore.getState();
+    if (!activeTabId) return;
+    const tab = getTab(activeTabId);
+    if (tab?.savedCrewId) {
+      console.log(
+        `[WorkflowChat] Detaching tab ${activeTabId} from saved crew ${tab.savedCrewId} (new crew generated)`
+      );
+      clearTabCrewInfo(activeTabId);
+    }
+  }, []);
+
   // ── Progressive crew generation via SSE ──────────────────────────
   const [generationId, setGenerationId] = useState<string | null>(null);
   const indexMapRef = useRef<IndexNodeIdMap | null>(null);
@@ -448,6 +465,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const sseHandlers = useMemo<CrewGenerationSSEHandlers>(() => ({
     onPlanReady: (plan) => {
+      // The generated crew REPLACES the canvas content. Detach the tab from
+      // any previously loaded crew, otherwise the next Save silently
+      // overwrites that crew (content AND keeps its old name) instead of
+      // creating a new one.
+      detachTabFromSavedCrew();
       const buildSkeleton = createCrewSkeletonHandler(
         setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, layoutManagerRef
       );
@@ -553,7 +575,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         },
       ]);
     },
-  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine]);
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew]);
 
   useCrewGenerationSSE(generationId, sseHandlers);
 
@@ -1095,6 +1117,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               // Keep isLoading true — it will be cleared by onComplete/onFailed
             } else {
               // Legacy synchronous path (fallback)
+              detachTabFromSavedCrew();
               handleCrewGenerated(genResult as GeneratedCrew);
             }
             break;

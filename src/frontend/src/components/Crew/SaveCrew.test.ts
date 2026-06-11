@@ -172,3 +172,28 @@ describe('SaveCrew - stale crewId recovery', () => {
     expect(saveCalled).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Chat catalog refresh wiring (agent-builder saves must surface in the
+// chat-mode catalog rail). The rail only reloads on mount/workspace change/
+// chat saves, so SaveCrew must push a refresh through the chat app store on
+// every success path: update-by-id, update-by-name, and create.
+// ---------------------------------------------------------------------------
+
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+describe('SaveCrew - chat catalog refresh wiring', () => {
+  const source = readFileSync(resolve(__dirname, 'SaveCrew.tsx'), 'utf-8');
+
+  it('defines refreshChatCatalog against the chat app store', () => {
+    expect(source).toContain("import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore'");
+    expect(source).toContain('useChatAppStore.getState().loadCatalog()');
+  });
+
+  it('refreshes the catalog on all three save success paths', () => {
+    // update-by-id, update-by-name, and create-new must each refresh the rail
+    const calls = source.match(/refreshChatCatalog\(\);/g) || [];
+    expect(calls.length).toBe(3);
+  });
+});
