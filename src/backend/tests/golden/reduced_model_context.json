@@ -1,0 +1,95 @@
+{
+  "status": "success",
+  "reduction_summary": {
+    "strategy": "llm",
+    "original_tables": 16,
+    "kept_tables": 9,
+    "original_measures": 9,
+    "kept_measures": 0,
+    "original_columns": 36,
+    "kept_columns": 20,
+    "reduction_pct": 43.8,
+    "relevant_tables": [
+      "dim_country",
+      "tbl_initial_sizing_tracking",
+      "dim_customer_classification",
+      "dim_account_group",
+      "dim_customer_hierarchy_3",
+      "dim_customer_group_4_name",
+      "dim_customer_visit",
+      "dim_payer_partner_function",
+      "dim_field_is_mandatory"
+    ],
+    "reasoning": "Fuzzy-only fallback (LLM unavailable), threshold=80",
+    "normalization_log": [
+      {
+        "filter": "dim_customer_classification[cust_class_id]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_account_group[Account Group]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_customer_hierarchy_3[Customer Hierarchy 3]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_customer_group_4_name[Customer Group 4]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_customer_visit[Customer Visit]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_payer_partner_function[Payer Partner Function]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_account_group[account_group_code]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      },
+      {
+        "filter": "dim_field_is_mandatory[Is Field Mandatory]",
+        "status": "passthrough",
+        "reason": "No reference values available"
+      }
+    ],
+    "question_intent": {
+      "original_question": "What is the number of completed CGR per business unit?",
+      "keywords": [
+        "number",
+        "completed",
+        "cgr",
+        "business",
+        "unit"
+      ],
+      "measures": [],
+      "dimensions": [
+        "BU"
+      ],
+      "time_intelligence": {
+        "grain": null,
+        "delta_periods": [],
+        "has_ytd": false,
+        "has_mtd": false,
+        "has_qtd": false
+      },
+      "output_shape": "list",
+      "top_n": null,
+      "needs_split": false,
+      "sub_questions": []
+    }
+  },
+  "default_filters_count": 8,
+  "cache_saved": true,
+  "message": "Reduced model context saved to cache. 16→9 tables (43.8% reduction), 9→0 measures. The DAX Generator tool will automatically load this from cache."
+}
