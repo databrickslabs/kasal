@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { ChatMessage, ChatSession } from '../types/chat';
 import { generateId } from '../utils/markdown';
+// Sessions persist server-side (SQLite locally / Lakebase when active)
+// through the /chat-history API instead of browser IndexedDB. The adapter
+// keeps sessionDb's exact contract; previews and running-job markers stay
+// device-local in sessionDb.
 import {
   initDb,
   assignUngroupedSessions as dbAssignUngroupedSessions,
@@ -12,7 +16,7 @@ import {
   addMessageToSession,
   updateMessageInSession,
   clearSessionMessages,
-} from '../db/sessionDb';
+} from '../db/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 
@@ -93,23 +97,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reloadForGroup: async () => {
-    // Only this workspace's sessions. The active-session pointer is global, so
-    // validate it against THIS group's sessions; if it belongs to another
-    // workspace (just switched), fall back to this group's most recent — or an
-    // empty state when the workspace has no chats yet.
+    // Land on a FRESH chat: list this workspace's sessions for the history
+    // rail but do NOT auto-restore the last one. A session is created lazily
+    // when the first message is sent; previous chats stay one click away.
     const allSessions = await dbListSessions(currentGroupId());
-    const lastId = localStorage.getItem(ACTIVE_SESSION_KEY);
-    if (lastId && allSessions.some((s) => s.id === lastId)) {
-      const msgs = await getSessionMessages(lastId);
-      set({ sessions: allSessions, currentSessionId: lastId, messages: msgs });
-    } else if (allSessions.length > 0) {
-      const recent = allSessions[0];
-      localStorage.setItem(ACTIVE_SESSION_KEY, recent.id);
-      const msgs = await getSessionMessages(recent.id);
-      set({ sessions: allSessions, currentSessionId: recent.id, messages: msgs });
-    } else {
-      set({ sessions: allSessions, currentSessionId: null, messages: [] });
-    }
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+    set({ sessions: allSessions, currentSessionId: null, messages: [] });
   },
 
   switchSession: async (sessionId: string) => {

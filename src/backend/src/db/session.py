@@ -509,6 +509,24 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
         logger.warning(f"Could not ensure knowledge_embeddings table: {e}")
 
 
+async def _ensure_chat_sessions_table(conn) -> None:
+    """Idempotently create the chat_sessions table (named chat-mode sessions).
+
+    create_all is skipped on existing DBs, so DBs created before this table
+    was added need it created explicitly here.
+    """
+    try:
+        from src.models.chat_session import ChatSession
+
+        def _create_chat_sessions_table(sync_conn):
+            ChatSession.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_chat_sessions_table)
+        logger.info("Ensured chat_sessions table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure chat_sessions table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -718,6 +736,7 @@ async def init_db() -> None:
                 async with ensure_engine.begin() as conn:
                     await _ensure_documentation_embeddings_columns(conn)
                     await _ensure_databricks_config_columns(conn)
+                    await _ensure_chat_sessions_table(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

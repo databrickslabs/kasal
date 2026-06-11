@@ -662,3 +662,22 @@ class TestChatHistoryRepositoryIntegration:
             group_ids=["group-111"]
         )
         assert count == 0
+
+class TestGetByIdAndGroup:
+    """Message lookup by id, group-checked (used by the PUT /messages update)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_message_in_group(self, chat_history_repository, mock_session):
+        row = ChatHistory(id="m1", session_id="s1", user_id="u", message_type="user",
+                          content="hi", group_id="g1")
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = row
+        mock_session.execute = AsyncMock(return_value=result)
+
+        found = await chat_history_repository.get_by_id_and_group("m1", ["g1"])
+        assert found is row
+
+    @pytest.mark.asyncio
+    async def test_empty_groups_short_circuits(self, chat_history_repository, mock_session):
+        assert await chat_history_repository.get_by_id_and_group("m1", []) is None
+        mock_session.execute.assert_not_awaited()
