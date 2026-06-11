@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parseUiDocument, resolveValue } from './uiDocument';
+import {
+  parseUiDocument,
+  resolveValue,
+  applyConfiguredTheme,
+  inferSurfaceDeliverable,
+  UiSurface,
+  WorkspaceThemes,
+} from './uiDocument';
 
 const doc = {
   messages: [
@@ -226,5 +233,59 @@ describe('parseUiDocument — surface theme', () => {
 
   it('leaves theme undefined when no theme is provided', () => {
     expect(parseUiDocument(doc as never)!.theme).toBeUndefined();
+  });
+});
+
+describe('applyConfiguredTheme — workspace palettes are the source of truth', () => {
+  const surfaceOf = (components: Record<string, string>, theme?: UiSurface['theme']): UiSurface => ({
+    rootId: 'root',
+    components: Object.fromEntries(
+      Object.entries(components).map(([id, component]) => [id, { id, component: component as never }]),
+    ),
+    data: {},
+    theme,
+  });
+
+  const themes: WorkspaceThemes = {
+    default: { accent: '#2272B4', background: '#FFFFFF' },
+    presentation: { accent: '#FF3621', background: '#0E1B21' },
+    dashboard: { accent: '#7C3AED', background: '#111111' },
+  };
+
+  it('infers the deliverable from the components present', () => {
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Slides', s1: 'Slide' }))).toBe('presentation');
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Quiz' }))).toBe('quiz');
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', d: 'Dashboard' }))).toBe('dashboard');
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', t: 'Table' }))).toBe('genie');
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', t: 'Text' }))).toBe('default');
+    // Slides outranks the Table inside a slide.
+    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Slides', t: 'Table' }))).toBe('presentation');
+  });
+
+  it('overrides an agent-stamped wrong palette on a deck with the configured Presentation palette', () => {
+    // Regression: agents routinely copy the Default (white) palette onto every
+    // surface, turning a themed deck white.
+    const deck = surfaceOf({ root: 'Slides', s1: 'Slide' }, { accent: '#2272B4', background: '#FFFFFF' });
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
+  });
+
+  it('clears the theme on a deck when no Presentation palette is configured (built-in deck identity wins)', () => {
+    const deck = surfaceOf({ root: 'Slides' }, { background: '#FFFFFF' });
+    expect(applyConfiguredTheme(deck, { default: themes.default }).theme).toBeUndefined();
+  });
+
+  it('applies the deliverable palette, falling back to Default, then the embedded theme', () => {
+    const dash = surfaceOf({ root: 'Column', d: 'Dashboard' }, { background: '#FFFFFF' });
+    expect(applyConfiguredTheme(dash, themes).theme).toEqual(themes.dashboard);
+    // No dashboard palette configured → Default palette.
+    expect(applyConfiguredTheme(dash, { default: themes.default }).theme).toEqual(themes.default);
+    // No palettes at all in the map → embedded theme survives.
+    expect(applyConfiguredTheme(dash, {}).theme).toEqual({ background: '#FFFFFF' });
+  });
+
+  it('leaves the surface untouched when the workspace themes are unavailable', () => {
+    const deck = surfaceOf({ root: 'Slides' }, { background: '#FFFFFF' });
+    expect(applyConfiguredTheme(deck, null)).toBe(deck);
+    expect(applyConfiguredTheme(deck, undefined)).toBe(deck);
   });
 });

@@ -48,6 +48,21 @@ const STAGE_BG =
   'radial-gradient(1100px 560px at 12% -10%, rgba(90,162,255,0.20), transparent 60%),' +
   'radial-gradient(900px 520px at 92% 8%, rgba(167,139,250,0.18), transparent 55%),' +
   'linear-gradient(135deg, #0b1020, #131a33 45%, #1b2347))';
+// Presentation decks default to a Databricks-grade identity (deep teal radial
+// stage, brand-orange accent, hairline alpha borders) so a generated deck has
+// the caliber of a hand-built one out of the box. These are pure DEFAULTS:
+// they sit UNDER the UI-Configurator palette (themeVars) and any root-style
+// refine, both of which still win.
+const DECK_THEME_VARS = {
+  '--ui-accent': '#FF3621',
+  '--ui-on-accent': '#FFFFFF',
+  '--ui-stage': 'radial-gradient(ellipse at 50% 38%, #162A34 0%, #080F14 72%)',
+  '--ui-surface': 'rgba(255,255,255,0.04)',
+  '--ui-surface-strong': 'rgba(255,255,255,0.08)',
+  '--ui-border': 'rgba(255,255,255,0.12)',
+  '--ui-muted': 'rgba(255,255,255,0.55)',
+} as React.CSSProperties;
+
 const TONE: Record<string, string> = {
   good: '#34d6b6',
   warn: '#fbbf24',
@@ -293,11 +308,24 @@ const SlidesNode: React.FC<{ childIds: string[]; renderChild: (id: string) => Re
     <div style={{ display: 'flex', flexDirection: 'column', height: '84vh' }}>
       {/* One slide = one screen. It centers when it fits; if a slide is overly
           dense it scrolls WITHIN this area so the dots below stay visible. */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div
+        key={childIds[current]}
+        className="ui-slide-enter"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
+      >
         {renderChild(childIds[current])}
       </div>
-      {/* Clickable dots (keyboard ← / → also navigate) */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 20 }}>
+      {/* Clickable dots (keyboard ← / → also navigate) + deck-style counter */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 20, position: 'relative' }}>
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute', left: 4, color: MUTED, fontSize: '0.78rem',
+            fontVariantNumeric: 'tabular-nums', letterSpacing: '0.08em',
+          }}
+        >
+          {String(current + 1).padStart(2, '0')} / {String(count).padStart(2, '0')}
+        </span>
         {childIds.map((cid, i) => (
           <button
             key={cid}
@@ -1192,7 +1220,7 @@ const Node: React.FC<{
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22, ...nodeStyle }}>
           {node.title != null && (
-            <div style={{ color: myColor, fontWeight: 800, fontSize: '2.6rem', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{String(resolveValue(node.title, data))}</div>
+            <div style={{ color: myColor, fontWeight: 800, fontSize: '2.9rem', letterSpacing: '-0.025em', lineHeight: 1.08 }}>{String(resolveValue(node.title, data))}</div>
           )}
           {childIds.map(renderChild)}
         </div>
@@ -1260,6 +1288,7 @@ const UiRenderer: React.FC<UiRendererProps> = ({ surface }) => {
   // built-in premium theme when the agent specifies nothing.
   const rootStyle = extractNodeStyle(surface.components[surface.rootId]);
   const theme = surface.theme;
+  const isDeck = surface.components[surface.rootId]?.component === 'Slides';
   // The surface theme defines the --ui-* CSS vars on the stage; an explicit
   // root-node style override (e.g. a "make the background black" refine) still wins.
   const stageBackground = rootStyle.background ?? rootStyle.backgroundColor ?? STAGE_BG;
@@ -1268,7 +1297,7 @@ const UiRenderer: React.FC<UiRendererProps> = ({ surface }) => {
   const pad = theme?.density === 'compact' ? '22px 30px' : '36px 48px';
 
   return (
-    <div style={{ ...themeVars(theme), minHeight: '100%', background: stageBackground, padding: pad, color: stageColor, fontFamily }}>
+    <div style={{ ...(isDeck ? DECK_THEME_VARS : {}), ...themeVars(theme), minHeight: '100%', background: stageBackground, padding: pad, color: stageColor, fontFamily }}>
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>
         <Node id={surface.rootId} surface={surface} data={data} setData={setData} seen={new Set()} inheritedColor={stageColor} />
       </div>
