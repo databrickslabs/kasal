@@ -143,7 +143,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.queryByTestId('trace-group')).toBeNull();
   });
 
-  it('while executing with traces: "Working…", Stop on the right, expandable timeline (dots + bold names + text)', () => {
+  it('while executing with traces: live latest-step header, Stop on the right, expandable timeline (dots + bold names + text)', () => {
     const onStop = vi.fn();
     render(
       <ChatContainer
@@ -158,10 +158,12 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         onStopExecution={onStop}
       />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    // The header tracks the LATEST step (no static "Working…" once traces exist).
+    expect(screen.queryByText('Working…')).toBeNull();
+    expect(screen.getByText('ScrapeTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // collapsed by default → no steps visible yet
+    // collapsed by default → no steps visible yet (only the live header line)
     expect(screen.queryByText('PerplexityTool')).toBeNull();
     // expand → chronological steps, bold names + their summary + duration
     fireEvent.click(screen.getByLabelText('Expand run activity'));
@@ -174,11 +176,49 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getByText('recalled 3 items')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Hide context for Memory'));
     expect(screen.queryByText('recalled 3 items')).toBeNull();
-    expect(screen.getByText('ScrapeTool')).toBeInTheDocument(); // no summary, no duration, no context
+    // Stop was pressed → the header shows "Stopping…", so the only ScrapeTool
+    // left is the timeline step (no summary, no duration, no context).
+    expect(screen.getAllByText('ScrapeTool')).toHaveLength(1);
     expect(screen.getByText('100ms')).toBeInTheDocument(); // first step's duration
     // toggling closed again (Collapse label)
     fireEvent.click(screen.getByLabelText('Collapse run activity'));
     expect(screen.queryByText('PerplexityTool')).toBeNull();
+  });
+
+  it('live header shows the latest step name + first line of its query (one-liner)', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          msg('u', 'q'),
+          traceMsg('t1', 'Search memory', { sublabel: 'oil price benchmarks\nsecond line ignored' }),
+        ]}
+        isExecuting
+      />,
+    );
+    expect(screen.getByText('Search memory')).toBeInTheDocument();
+    // Only the FIRST line of the sublabel, prefixed with an em dash.
+    expect(screen.getByText(/—\s*oil price benchmarks/)).toBeInTheDocument();
+    expect(screen.queryByText(/second line ignored/)).toBeNull();
+  });
+
+  it('live header shows the first line of the retrieved Memory context (not the generic sublabel)', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          msg('u', 'q'),
+          traceMsg('m1', 'Memory', {
+            sublabel: 'context retrieved',
+            detail: 'WTI closed at $78.12 yesterday\nBrent at $82.40',
+          }),
+        ]}
+        isExecuting
+      />,
+    );
+    expect(screen.getByText('Memory')).toBeInTheDocument();
+    expect(screen.getByText(/—\s*WTI closed at \$78\.12 yesterday/)).toBeInTheDocument();
+    expect(screen.queryByText(/Brent at/)).toBeNull();
   });
 
   it('shows no "Show context" toggle when a step\'s detail just duplicates its summary', () => {
@@ -216,7 +256,8 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
 
   it('executing without a stop handler shows no Stop button', () => {
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q'), traceMsg('t1', 'PerplexityTool')]} isExecuting />);
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    // Live header shows the latest step instead of a static "Working…".
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     expect(screen.queryByLabelText('Stop execution')).toBeNull();
   });
 
@@ -226,12 +267,14 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     const { rerender } = render(
       <ChatContainer {...baseProps} messages={stillRunning} isExecuting onStopExecution={onStop} />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // immediate feedback: "Stopping…" + the control becomes a disabled spinner
+    // immediate feedback: "Stopping…" replaces the live line + the control
+    // becomes a disabled spinner
     expect(screen.getByText('Stopping…')).toBeInTheDocument();
     expect(screen.queryByText('Working…')).toBeNull();
+    expect(screen.queryByText('PerplexityTool')).toBeNull();
     expect(screen.getByLabelText('Stopping…')).toBeDisabled();
     // run actually ends → state clears, container settles into the done view
     rerender(<ChatContainer {...baseProps} messages={stillRunning} />); // isExecuting now false
@@ -271,13 +314,14 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         onStopExecution={onStop}
       />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    // Live header shows the latest step name (the timeline itself stays collapsed).
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
     expect(screen.getByLabelText('Stop execution')).toBeInTheDocument();
     // timeline collapsed by default; expands like tool activity
-    expect(screen.queryByText('PerplexityTool')).toBeNull();
+    expect(screen.queryByText('find stock photos')).toBeNull();
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
+    expect(screen.getAllByText('PerplexityTool')).toHaveLength(2); // header + timeline step
     expect(screen.getByText('find stock photos')).toBeInTheDocument();
   });
 
@@ -374,9 +418,9 @@ describe('ChatContainer — one run-activity section per prompt', () => {
         onStopExecution={onStop}
       />,
     );
-    // First container is finished; the second is the working one
+    // First container is finished; the second is live and shows its latest step
     expect(screen.getByText('Run activity')).toBeInTheDocument();
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    expect(screen.getByText('Crew planned')).toBeInTheDocument();
     expect(screen.getAllByLabelText('Stop execution')).toHaveLength(1);
   });
 
