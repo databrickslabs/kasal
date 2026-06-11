@@ -652,3 +652,31 @@ export class CrewService {
     }
   }
 }
+
+export interface CrewFeedbackSummaryEntry {
+  crew_id: string;
+  up: number;
+  down: number;
+}
+
+export interface CrewFeedbackEntry {
+  id: string;
+  crew_id: string;
+  rating: 'up' | 'down';
+  comment?: string | null;
+  created_at: string;
+  group_email?: string | null;
+}
+
+/** Thumbs feedback left from chat mode, reviewed here in the catalog. */
+export class CrewFeedbackService {
+  static async getSummary(): Promise<CrewFeedbackSummaryEntry[]> {
+    const response = await API.get<CrewFeedbackSummaryEntry[]>('/crews/feedback-summary');
+    return response.data || [];
+  }
+
+  static async getForCrew(crewId: string): Promise<CrewFeedbackEntry[]> {
+    const response = await API.get<CrewFeedbackEntry[]>(`/crews/${crewId}/feedback`);
+    return response.data || [];
+  }
+}

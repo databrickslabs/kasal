@@ -271,3 +271,27 @@ export async function listSavedFlows(): Promise<CatalogItem[]> {
     .filter((f) => f && f.id && f.name)
     .map((f) => ({ id: String(f.id), name: String(f.name) }));
 }
+
+// --- Crew thumbs feedback (surfaced in the Agent Builder catalog) -----------
+
+export interface CrewFeedbackEntry {
+  id: string;
+  crew_id: string;
+  rating: 'up' | 'down';
+  comment?: string | null;
+  created_at: string;
+  group_email?: string | null;
+}
+
+/** Record a thumbs vote on a cataloged crew. Thumbs-down requires a comment. */
+export async function postCrewFeedback(
+  crewId: string,
+  rating: 'up' | 'down',
+  comment?: string,
+): Promise<CrewFeedbackEntry> {
+  const res = await getClient().post<CrewFeedbackEntry>(`/crews/${crewId}/feedback`, {
+    rating,
+    ...(comment ? { comment } : {}),
+  });
+  return res.data;
+}

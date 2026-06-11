@@ -20,7 +20,7 @@ import {
   Tab,
   Divider
 } from '@mui/material';
-import { CrewService } from '../../../api/CrewService';
+import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../api/CrewService';
 import { FlowService } from '../../../api/FlowService';
 import { CrewResponse } from '../../../types/crews';
 import { FlowResponse } from '../../../types/flow';
@@ -75,6 +75,20 @@ function TabPanel(props: TabPanelProps) {
     </div>
   );
 }
+
+// Thumb icons matching the chat-mode actions bar exactly (same Heroicons
+// outline paths) so the feedback shown here reads as the same control the
+// user submitted. `filled` mirrors the "active vote" fill in chat.
+const ThumbUp: React.FC<{ filled?: boolean }> = ({ filled }) => (
+  <svg width="14" height="14" fill={filled ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.5c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V3a.75.75 0 01.75-.75A2.25 2.25 0 0116.5 4.5c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904" />
+  </svg>
+);
+const ThumbDown: React.FC<{ filled?: boolean }> = ({ filled }) => (
+  <svg width="14" height="14" fill={filled ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7.498 15.25H4.372c-1.026 0-1.945-.694-2.054-1.715a12.137 12.137 0 01-.068-1.285c0-2.848.992-5.464 2.649-7.521C5.287 4.247 5.886 4 6.504 4h4.016a4.5 4.5 0 011.423.23l3.114 1.04a4.5 4.5 0 001.423.23h1.294M7.498 15.25c.618 0 .991.724.725 1.282A7.471 7.471 0 007.5 19.75 2.25 2.25 0 009.75 22a.75.75 0 00.75-.75v-.633c0-.573.11-1.14.322-1.672.304-.76.93-1.33 1.653-1.715a9.04 9.04 0 002.86-2.4c.498-.634 1.226-1.08 2.032-1.08h.384" />
+  </svg>
+);
 
 const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   open,
@@ -175,12 +189,42 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }, 150);
   };
 
+  // Thumbs feedback left from chat mode: per-crew counts + on-demand comments
+  const [feedbackSummary, setFeedbackSummary] = useState<Record<string, { up: number; down: number }>>({});
+  const [feedbackComments, setFeedbackComments] = useState<Record<string, CrewFeedbackEntry[]>>({});
+  const [feedbackOpenFor, setFeedbackOpenFor] = useState<string | null>(null);
+
+  const toggleFeedback = async (e: React.MouseEvent, crewId: string) => {
+    e.stopPropagation();
+    if (feedbackOpenFor === crewId) {
+      setFeedbackOpenFor(null);
+      return;
+    }
+    setFeedbackOpenFor(crewId);
+    if (!feedbackComments[crewId]) {
+      try {
+        const entries = await CrewFeedbackService.getForCrew(crewId);
+        setFeedbackComments((prev) => ({ ...prev, [crewId]: entries }));
+      } catch {
+        /* leave empty — counts still show */
+      }
+    }
+  };
+
   const loadCrews = async () => {
     setLoading(true);
     try {
       const fetchedCrews = await CrewService.getCrews();
       setCrews(fetchedCrews);
       setError(null);
+      // Best-effort: feedback counts for the catalog cards
+      CrewFeedbackService.getSummary()
+        .then((rows) => {
+          const map: Record<string, { up: number; down: number }> = {};
+          for (const r of rows) map[r.crew_id] = { up: r.up, down: r.down };
+          setFeedbackSummary(map);
+        })
+        .catch(() => undefined);
     } catch (error) {
       console.error('Error loading crews:', error);
       setError('Failed to load crews');
@@ -1485,6 +1529,52 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                             <Typography variant="caption" color="text.secondary" display="block">
                               Created: {new Date(crew.created_at).toLocaleString()}
                             </Typography>
+                            {(() => {
+                              const fb = feedbackSummary[crew.id];
+                              if (!fb || (fb.up === 0 && fb.down === 0)) return null;
+                              const open = feedbackOpenFor === crew.id;
+                              const comments = (feedbackComments[crew.id] || []).filter((c) => c.comment);
+                              return (
+                                // Stop ALL clicks here from bubbling to the card's
+                                // load-crew handler — otherwise expanding/reading the
+                                // feedback loaded the crew and closed the dialog.
+                                <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                                  <Box
+                                    onClick={(e) => toggleFeedback(e, crew.id)}
+                                    sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, cursor: 'pointer' }}
+                                    title="User feedback from chat — click for details"
+                                    data-testid={`crew-feedback-${crew.id}`}
+                                  >
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>
+                                      <ThumbUp filled />
+                                      <Typography variant="caption" sx={{ fontWeight: 600 }}>{fb.up}</Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: fb.down > 0 ? 'error.main' : 'text.secondary' }}>
+                                      <ThumbDown filled={fb.down > 0} />
+                                      <Typography variant="caption" sx={{ fontWeight: 600 }}>{fb.down}</Typography>
+                                    </Box>
+                                  </Box>
+                                  {open && (
+                                    <Box sx={{ mt: 0.5, pl: 1, borderLeft: '2px solid', borderColor: 'divider' }}>
+                                      {comments.length === 0 ? (
+                                        <Typography variant="caption" color="text.secondary" display="block">
+                                          No written feedback yet.
+                                        </Typography>
+                                      ) : (
+                                        comments.map((c) => (
+                                          <Box key={c.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mb: 0.25, color: c.rating === 'down' ? 'error.main' : 'success.main' }}>
+                                            {c.rating === 'down' ? <ThumbDown /> : <ThumbUp />}
+                                            <Typography variant="caption" color="text.secondary">
+                                              “{c.comment}”{c.group_email ? ` — ${c.group_email}` : ''}
+                                            </Typography>
+                                          </Box>
+                                        ))
+                                      )}
+                                    </Box>
+                                  )}
+                                </Box>
+                              );
+                            })()}
                             <Typography variant="caption" color="text.secondary" display="block">
                               Agents: {(() => {
                                 // Count agents from nodes
