@@ -518,26 +518,83 @@ function buildMindmap(root: MindmapData): { nodes: Record<string, MMNode>; rootI
   return { nodes, rootId: 'r' };
 }
 
-/** Tidy horizontal tree layout → a center point per node. Computed once for the
- *  full tree; positions are then user-editable (drag) and stable across collapse. */
+/** Leaf rows a subtree occupies (a childless node is one row). */
+function leafCount(nodes: Record<string, MMNode>, id: string): number {
+  const n = nodes[id];
+  return n.childIds.length === 0 ? 1 : n.childIds.reduce((s, c) => s + leafCount(nodes, c), 0);
+}
+
+/** Tidy BILATERAL tree layout → a center point per node: the root sits in the
+ *  middle and its top-level branches split left/right (balanced by leaf rows),
+ *  so the map grows symmetrically around the center instead of marching off to
+ *  the right. Computed once for the full tree; positions are then
+ *  user-editable (drag) and stable across collapse. */
 function layoutMindmap(nodes: Record<string, MMNode>, rootId: string): Record<string, XY> {
   const pos: Record<string, XY> = {};
-  let nextLeaf = 0;
-  const place = (id: string): number => {
-    const node = nodes[id];
-    const x = node.depth * MM_COL;
-    let y: number;
-    if (node.childIds.length === 0) {
-      y = nextLeaf * MM_ROW;
-      nextLeaf += 1;
+  const root = nodes[rootId];
+
+  // Greedy balance: each top-level branch goes to the lighter side (ties →
+  // right), so both sides end up with a similar number of leaf rows.
+  const right: string[] = [];
+  const left: string[] = [];
+  let rightLeaves = 0;
+  let leftLeaves = 0;
+  for (const branchId of root.childIds) {
+    const leaves = leafCount(nodes, branchId);
+    if (leftLeaves < rightLeaves) {
+      left.push(branchId);
+      leftLeaves += leaves;
     } else {
-      const ys = node.childIds.map(place);
-      y = (ys[0] + ys[ys.length - 1]) / 2; // center the parent on its children
+      right.push(branchId);
+      rightLeaves += leaves;
     }
-    pos[id] = { x, y };
-    return y;
+  }
+
+  // Lay out one side: x grows away from the root with the side's sign.
+  const placeSide = (branchIds: string[], sign: 1 | -1) => {
+    let nextLeaf = 0;
+    const place = (id: string): number => {
+      const node = nodes[id];
+      const x = sign * node.depth * MM_COL;
+      let y: number;
+      if (node.childIds.length === 0) {
+        y = nextLeaf * MM_ROW;
+        nextLeaf += 1;
+      } else {
+        const ys = node.childIds.map(place);
+        y = (ys[0] + ys[ys.length - 1]) / 2; // center the parent on its children
+      }
+      pos[id] = { x, y };
+      return y;
+    };
+    branchIds.forEach(place);
   };
-  place(rootId);
+  placeSide(right, 1);
+  placeSide(left, -1);
+
+  // Center both sides (and the root) on the same vertical midline.
+  const rightHeight = Math.max(0, rightLeaves - 1) * MM_ROW;
+  const leftHeight = Math.max(0, leftLeaves - 1) * MM_ROW;
+  const mid = Math.max(rightHeight, leftHeight) / 2;
+  const shiftSide = (branchIds: string[], height: number) => {
+    const offset = mid - height / 2;
+    if (offset === 0) return;
+    for (const branchId of branchIds) {
+      for (const id of [branchId, ...descendantsOf(nodes, branchId)]) {
+        pos[id] = { ...pos[id], y: pos[id].y + offset };
+      }
+    }
+  };
+  shiftSide(right, rightHeight);
+  shiftSide(left, leftHeight);
+  pos[rootId] = { x: 0, y: mid };
+
+  // Normalize so the leftmost node sits at x = 0 — the initial pan expects
+  // content to start near the origin (negative x would render off-screen).
+  const minX = Math.min(...Object.values(pos).map((p) => p.x));
+  if (minX !== 0) {
+    for (const id of Object.keys(pos)) pos[id] = { ...pos[id], x: pos[id].x - minX };
+  }
   return pos;
 }
 
@@ -570,8 +627,16 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
     () => new Set(Object.values(nodes).filter((n) => n.depth >= 2 && n.childIds.length > 0).map((n) => n.id)),
   );
   // pan (x,y) + zoom (scale) in one object so a wheel-zoom updates both atomically.
+  // The pan is re-centered on the root node as soon as the canvas mounts and
+  // reports its size (see centerView), so the map opens centered.
   const [view, setView] = useState({ scale: 1, x: 48, y: 32 });
   const [grabbing, setGrabbing] = useState(false);
+
+  // Latest positions behind a ref so centerView stays identity-stable (it is a
+  // dependency of the canvas ref callback — a new identity would re-attach the
+  // wheel listener and re-center on every node drag).
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 }); // viewport size, for centering button-zoom
@@ -612,9 +677,19 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
     });
   }, []);
 
+  // Center the viewport on the root node at scale 1 — the initial view and the
+  // "Reset view" button both land here, so the map opens symmetric around its
+  // central node instead of anchored to the top-left corner.
+  const centerView = useCallback(() => {
+    const { w, h } = sizeRef.current;
+    const p = positionsRef.current[rootId];
+    setView({ scale: 1, x: w / 2 - p.x, y: h / 2 - p.y });
+  }, [rootId]);
+
   // Callback ref: attach a NON-passive wheel listener (so we can preventDefault
   // the page scroll) when the canvas mounts; detach on unmount. Also stash the
-  // element + size for the zoom buttons.
+  // element + size for the zoom buttons, and center the view now that the
+  // viewport size is known.
   const canvasRefCb = useCallback(
     (el: HTMLDivElement | null) => {
       canvasRef.current = el;
@@ -631,13 +706,14 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
         };
         el.addEventListener('wheel', handler, { passive: false });
         wheelCleanup.current = () => el.removeEventListener('wheel', handler);
+        centerView();
       }
     },
-    [zoomAt],
+    [zoomAt, centerView],
   );
 
   const zoomButton = (factor: number) => () => zoomAt(factor, sizeRef.current.w / 2, sizeRef.current.h / 2);
-  const resetView = () => setView({ scale: 1, x: 48, y: 32 });
+  const resetView = centerView;
 
   const startNodeDrag = (id: string) => (e: React.PointerEvent) => {
     e.stopPropagation(); // don't also pan the canvas
@@ -689,8 +765,8 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
       onPointerLeave={endDrag}
       style={{
         position: 'relative',
-        height: '74vh',
-        minHeight: 540,
+        height: '84vh',
+        minHeight: 640,
         overflow: 'hidden',
         borderRadius: 14,
         border: `1px solid ${GLASS_BORDER}`,
@@ -735,6 +811,10 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
           const p = positions[id];
           const hasKids = node.childIds.length > 0;
           const isCollapsed = collapsed.has(id);
+          // Bilateral layout: nodes left of the root mirror their chrome (accent
+          // bar on the outer edge, toggle facing outward) so both sides read
+          // symmetrically from the center.
+          const onLeft = !isRoot && p.x < positions[rootId].x;
           return (
             <div
               key={id}
@@ -746,6 +826,7 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 top: p.y,
                 transform: 'translate(-50%, -50%)',
                 display: 'inline-flex',
+                flexDirection: onLeft ? 'row-reverse' : 'row',
                 alignItems: 'center',
                 gap: 8,
                 cursor: 'grab',
@@ -754,7 +835,11 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 background: isRoot ? ACCENT : GLASS,
                 color: isRoot ? ON_ACCENT : TEXT,
                 border: `1px solid ${isRoot ? ACCENT : GLASS_BORDER}`,
-                borderLeft: isRoot ? `1px solid ${ACCENT}` : `3px solid ${node.color}`,
+                ...(isRoot
+                  ? { borderLeft: `1px solid ${ACCENT}` }
+                  : onLeft
+                    ? { borderRight: `3px solid ${node.color}` }
+                    : { borderLeft: `3px solid ${node.color}` }),
                 borderRadius: isRoot ? 14 : 11,
                 padding: isRoot ? '11px 17px' : '8px 13px',
                 fontWeight: isRoot ? 800 : 600,
