@@ -300,6 +300,78 @@ contract would freeze the mess behind a nicer signature. This contract IS the ta
 the WP3-extracted services; ambient `UserContext` remains at the HTTP layer and is resolved
 exactly once in `binder.bind()`.
 
+### 6.2 Target architecture diagram (post WP3–WP6)
+
+```
+                                CLIENT (React UI)
+                                       │  REST
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│  API LAYER — FastAPI routers                                                 │
+│  (auth, group context extraction → UserContext set ONCE here)                │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│  APPLICATION SERVICES — ExecutionService, FlowService, CRUD services         │
+│  (transactions via UnitOfWork; persistence via repositories)                 │
+└──────────┬──────────────────────────────────────────────┬───────────────────┘
+           │ agentic execution                             │ direct / headless
+           ▼                                               │ (REST, MCP — no agent)
+┌─────────────────────────────┐                            │
+│  ENGINE FACTORY             │                            │
+│  engine_type → adapter      │                            │
+│  (exists: engines/factory)  │                            │
+└──────┬──────────────┬───────┘                            │
+       ▼              ▼                                    │
+┌────────────┐  ┌────────────┐    THIN ADAPTERS ONLY:      │
+│ engines/   │  │ engines/   │    config interpretation,   │
+│ crewai/    │  │ langgraph/ │    callbacks, memory &      │
+│            │  │ (future)   │    guardrail ports, HITL    │
+└──────┬─────┘  └─────┬──────┘                             │
+       │ to_crewai_   │ to_langchain_                      │
+       │ tool(t, b)   │ tool(t, b)     ← binder injects    │
+       └───────┬──────┘                  ToolContext HERE  │
+               ▼                                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  GENERIC TOOL LAYER — KasalTool registry (one registry, N engine adapters)    │
+│  each tool: name + input/output schema (WP2 contracts) + execute(req, ctx)    │
+│  ToolContext = { llm: LLMPort, db: SessionPort, identity, emit }              │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  DOMAIN SERVICES — engine-free business logic (the WP3 extraction)            │
+│  services/powerbi/{semantic_model, dax_generation, metadata_reduction, …}     │
+│  services/uc_metrics/{generation, validation, genie_config, visual_mapping}   │
+│  converters/services/{mquery, powerbi, uc_metrics}                            │
+└──────────┬─────────────────────────────────────────────┬─────────────────────┘
+           ▼                                             ▼
+┌─────────────────────────┐                 ┌─────────────────────────────────┐
+│  REPOSITORIES + UoW     │                 │  CORE                           │
+│  (all DB access)        │                 │  LLMManager (the LLMPort impl)  │
+│        │                │                 │  async_bridge · security ·      │
+│        ▼                │                 │  logging · telemetry            │
+│     DATABASE            │                 │        │                        │
+└─────────────────────────┘                 │        ▼                        │
+                                            │ Databricks / PowerBI / LLM APIs │
+                                            └─────────────────────────────────┘
+
+  DEPENDENCY RULE (import-linter, WP4): arrows only point DOWNWARD.
+  engines → tools → domain services → repositories/core. Never upward.
+```
+
+Reading notes:
+
+- **"N engines → N tools" is a registry × adapter-factory composition, not an N×N router.**
+  The engine factory routes the *execution* (which engine runs this flow); the tool
+  registry + per-engine adapter factories route the *tools* (any registered `KasalTool`
+  wrapped for whichever engine is active). New engine = one adapter factory; new tool = one
+  registry entry; they compose automatically. Model/tenant selection happens once, in the
+  binder (`ToolContext`), at the seam between the two.
+- **Repositories are storage only** — they are not on the path to engines; services reach
+  engines via the factory, and repositories are used *by* services/domain services for
+  persistence.
+- **The headless right-hand path is the payoff of tools living below the engines:** the same
+  tool is callable from a plain REST endpoint or MCP without any agent framework.
+
 ---
 
 ## 7. Implementation sequence & effort estimate
