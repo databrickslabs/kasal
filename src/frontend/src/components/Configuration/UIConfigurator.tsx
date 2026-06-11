@@ -71,6 +71,9 @@ const THEME_PRESETS: { key: string; label: string; theme: Theme }[] = [
   { key: 'minimal', label: 'Minimal', theme: { accent: '#111827', background: '#FFFFFF', surface: '#FFFFFF', text: '#111827', heading: '#000000', muted: '#9CA3AF', font: 'sans', density: 'compact' } },
   { key: 'corporate', label: 'Corporate', theme: { accent: '#1E3A5F', background: '#FFFFFF', surface: '#F1F5F9', text: '#1E293B', heading: '#0F2540', muted: '#64748B', font: 'serif', density: 'comfortable' } },
   { key: 'playful', label: 'Playful', theme: { accent: '#F97316', background: '#FFFBEB', surface: '#FEF3C7', text: '#7C2D12', heading: '#C2410C', muted: '#B45309', font: 'rounded', density: 'comfortable' } },
+  // Mirrors the renderer's built-in presentation deck identity (UiRenderer
+  // DECK_THEME_VARS) so users can pin it as an explicit palette and tweak it.
+  { key: 'databricks-deck', label: 'Databricks Deck', theme: { accent: '#FF3621', background: '#0E1B21', surface: '#16272F', text: '#E8EEF2', heading: '#FFFFFF', muted: '#8FA3AD', font: 'sans', density: 'comfortable' } },
 ];
 
 const DEFAULT_THEME: Theme = THEME_PRESETS[0].theme;
@@ -550,7 +553,9 @@ const UIConfigurator: React.FC = () => {
 
           {!isCustomized && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
-              Inherits the Default palette. Turn on the switch above to give {activeLabel} its own branding.
+              {activeType === 'presentation'
+                ? 'Presentations render with the built-in Databricks deck theme (deep-teal stage, orange accent, animated slides). Turn on the switch above to set custom branding instead.'
+                : `Inherits the Default palette. Turn on the switch above to give ${activeLabel} its own branding.`}
             </Typography>
           )}
 

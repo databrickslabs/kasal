@@ -981,3 +981,65 @@ describe('UiRenderer — URL sanitization (security)', () => {
     expect(img?.getAttribute('src') ?? '').not.toContain('javascript:');
   });
 });
+
+describe('UiRenderer — presentation deck caliber (Databricks defaults)', () => {
+  const deckSurface = (theme?: Record<string, unknown>) =>
+    ({
+      rootId: 'root',
+      components: {
+        root: { id: 'root', component: 'Slides', children: ['s0', 's1'] },
+        s0: { id: 's0', component: 'Slide', title: 'First', children: ['t0'] },
+        t0: { id: 't0', component: 'Text', text: 'alpha' },
+        s1: { id: 's1', component: 'Slide', title: 'Second', children: ['t1'] },
+        t1: { id: 't1', component: 'Text', text: 'beta' },
+      } as never,
+      data: {},
+      ...(theme ? { theme } : {}),
+    }) as unknown as UiSurface;
+
+  it('a Slides root gets the deck default tokens (orange accent, teal stage)', () => {
+    const { container } = render(<UiRenderer surface={deckSurface()} />);
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('#FF3621');
+    expect(stage.style.getPropertyValue('--ui-stage')).toContain('#162A34');
+  });
+
+  it('a UI-Configurator palette still overrides the deck defaults', () => {
+    const { container } = render(
+      <UiRenderer surface={deckSurface({ accent: '#00A972', background: '#101010' })} />,
+    );
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('#00A972');
+    expect(stage.style.getPropertyValue('--ui-stage')).toBe('#101010');
+  });
+
+  it('non-deck roots keep the generic premium theme (no deck tokens)', () => {
+    const { container } = render(
+      <UiRenderer
+        surface={
+          {
+            rootId: 'root',
+            components: { root: { id: 'root', component: 'Text', text: 'hi' } } as never,
+            data: {},
+          } as unknown as UiSurface
+        }
+      />,
+    );
+    const stage = container.firstElementChild as HTMLElement;
+    expect(stage.style.getPropertyValue('--ui-accent')).toBe('');
+  });
+
+  it('shows a deck-style slide counter and replays the entrance animation per slide', () => {
+    const { container } = render(<UiRenderer surface={deckSurface()} />);
+    expect(screen.getByText('01 / 02')).toBeInTheDocument();
+    const firstWrapper = container.querySelector('.ui-slide-enter');
+    expect(firstWrapper).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Go to slide 2'));
+    expect(screen.getByText('02 / 02')).toBeInTheDocument();
+    // keyed remount: the wrapper is a NEW element, so the CSS animation replays
+    const secondWrapper = container.querySelector('.ui-slide-enter');
+    expect(secondWrapper).not.toBe(firstWrapper);
+    expect(screen.getByText('Second')).toBeInTheDocument();
+  });
+});

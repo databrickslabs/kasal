@@ -1,10 +1,13 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { parseUiDocument } from '../../utils/uiDocument';
+import { parseUiDocument, applyConfiguredTheme, WorkspaceThemes } from '../../utils/uiDocument';
+import { UIConfigService } from '../../../../api/UIConfigService';
 import UiRenderer from './UiRenderer';
 
-export type PreviewContentType = 'html' | 'json' | 'markdown' | 'text' | 'ui';
+// The preview pane renders structured A2UI documents ONLY — the UI document is
+// the single source of truth for generated deliverables. Raw HTML, JSON,
+// markdown and plain text deliberately get NO preview: crews are steered toward
+// A2UI by the UI Configurator, and anything else stays in the chat transcript.
+export type PreviewContentType = 'ui';
 
 export interface PreviewContent {
   type: PreviewContentType;
@@ -25,74 +28,6 @@ interface PreviewPanelProps {
   index?: number;
   /** Switch the displayed preview to another history entry. */
   onNavigate?: (index: number) => void;
-}
-
-// SECURITY: crew/LLM-generated HTML is untrusted (it can be steered via prompt
-// injection from fetched/tool content). It is rendered in an iframe whose
-// sandbox is "allow-scripts" ONLY — deliberately WITHOUT allow-same-origin — so
-// any scripts run in an opaque origin and cannot reach the Kasal origin
-// (localStorage, cookies, the Kasal API, or the parent DOM). A restrictive CSP
-// is also injected to block network exfiltration (default-src 'none'; no
-// connect-src). Because the frame is cross-origin we cannot doc.write into it
-// from the parent, so the content is delivered via the srcDoc attribute.
-function buildSandboxedSrcDoc(html: string): string {
-  const csp =
-    "<meta http-equiv=\"Content-Security-Policy\" content=\"" +
-    "default-src 'none'; " +
-    "img-src data: blob: https:; " +
-    "media-src data: blob: https:; " +
-    "style-src 'unsafe-inline' https:; " +
-    "font-src data: https:; " +
-    "script-src 'unsafe-inline'\">";
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => m + csp);
-  }
-  if (/<html[^>]*>/i.test(html)) {
-    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${csp}</head>`);
-  }
-  return `<!DOCTYPE html><html><head>${csp}</head><body>${html}</body></html>`;
-}
-
-function detectContentType(raw: string): PreviewContentType {
-  const trimmed = raw.trim();
-
-  // Check for HTML
-  if (
-    trimmed.startsWith('<!DOCTYPE') ||
-    trimmed.startsWith('<!doctype') ||
-    trimmed.startsWith('<html') ||
-    trimmed.startsWith('<HTML') ||
-    /<html[\s>]/i.test(trimmed) ||
-    (trimmed.includes('<script') && trimmed.includes('</script>')) ||
-    (trimmed.startsWith('<') && trimmed.includes('</') && /<\w+[\s>]/.test(trimmed))
-  ) {
-    return 'html';
-  }
-
-  // Check for JSON
-  if (
-    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-    (trimmed.startsWith('[') && trimmed.endsWith(']'))
-  ) {
-    try {
-      JSON.parse(trimmed);
-      return 'json';
-    } catch {
-      // not valid JSON
-    }
-  }
-
-  // Check for structured markdown (headers + significant length)
-  const hasHeaders = /^#{1,3}\s/m.test(trimmed);
-  const hasStructure =
-    (trimmed.includes('```') ? 1 : 0) +
-    (/^\|.+\|$/m.test(trimmed) ? 1 : 0) +
-    (/^\s*[-*]\s/m.test(trimmed) ? 1 : 0);
-  if (hasHeaders && (trimmed.length > 500 || hasStructure >= 1)) {
-    return 'markdown';
-  }
-
-  return 'text';
 }
 
 /**
@@ -124,208 +59,61 @@ function stripCodeFences(raw: string): string {
 }
 
 /**
- * Extract the largest embedded HTML document from mixed text content.
- * Handles cases where task output contains text + JSON + one or more full HTML
- * documents all concatenated together.
+ * A task output is previewable IFF it is (or contains) a parseable A2UI
+ * document. Everything else — HTML, generic JSON, markdown, plain text —
+ * returns null and stays in the chat transcript.
  */
-function extractEmbeddedHtml(raw: string): string | null {
-  // Find all complete HTML documents: <!DOCTYPE html>...  </html>
-  const htmlDocRegex = /<!DOCTYPE\s+html[\s\S]*?<\/html>/gi;
-  const matches = raw.match(htmlDocRegex);
-  if (!matches || matches.length === 0) {
-    // Also try <html>...</html> without DOCTYPE
-    const htmlTagRegex = /<html[\s>][\s\S]*?<\/html>/gi;
-    const tagMatches = raw.match(htmlTagRegex);
-    if (!tagMatches || tagMatches.length === 0) return null;
-    // Pick the largest match (most complete document)
-    return tagMatches.reduce((a, b) => (a.length >= b.length ? a : b));
-  }
-  // Pick the largest match (most complete document)
-  return matches.reduce((a, b) => (a.length >= b.length ? a : b));
-}
-
 export function parsePreviewContent(raw: string): PreviewContent | null {
   if (!raw || raw.length < 10) return null;
 
   // Drop the chat layer's bold-title prefix so the preview shows only the body.
   const body = stripTaskTitlePrefix(raw);
 
-  // Strip markdown code fences that often wrap HTML/JSON output
+  // Strip markdown code fences that often wrap the JSON document.
   const cleaned = stripCodeFences(body);
 
-  // A2UI documents are JSON too, so check before generic JSON detection: an
-  // A2UI doc declares a surface / catalog components and renders via our
-  // brand-consistent renderer instead of a raw JSON table.
   if (parseUiDocument(cleaned)) {
     return { type: 'ui', data: cleaned };
   }
 
-  const type = detectContentType(cleaned);
-  if (type !== 'text') {
-    return { type, data: cleaned };
-  }
-
-  // The cleaned content looks like plain text — but it may contain embedded
-  // HTML documents mixed with other text (common in crew task output that
-  // includes descriptions, JSON data, AND HTML dashboards).
-  const embeddedHtml = extractEmbeddedHtml(body);
-  if (embeddedHtml && embeddedHtml.length > 100) {
-    return { type: 'html', data: embeddedHtml };
-  }
-
-  return null; // Genuinely plain text — don't preview
+  return null;
 }
 
-function JsonTable({ data }: { data: unknown }) {
-  if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
-    // Array of objects → table
-    const allKeys = new Set<string>();
-    data.forEach((row) => {
-      if (row && typeof row === 'object') {
-        Object.keys(row as Record<string, unknown>).forEach((k) => allKeys.add(k));
-      }
-    });
-    const keys = Array.from(allKeys);
-
-    return (
-      <div className="overflow-auto">
-        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {keys.map((key) => (
-                <th
-                  key={key}
-                  className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider"
-                  style={{
-                    color: 'var(--text-muted)',
-                    borderBottom: '2px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-secondary)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {key}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row, i) => (
-              <tr key={i}>
-                {keys.map((key) => {
-                  const val = (row as Record<string, unknown>)?.[key];
-                  const display =
-                    val === null || val === undefined
-                      ? ''
-                      : typeof val === 'object'
-                        ? JSON.stringify(val)
-                        : String(val);
-                  return (
-                    <td
-                      key={key}
-                      className="px-3 py-2"
-                      style={{
-                        color: 'var(--text-primary)',
-                        borderBottom: '1px solid var(--border-color)',
-                        maxWidth: '300px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {display}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
-    // Single object → key-value table
-    const entries = Object.entries(data as Record<string, unknown>);
-    return (
-      <div className="overflow-auto">
-        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th
-                className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider"
-                style={{
-                  color: 'var(--text-muted)',
-                  borderBottom: '2px solid var(--border-color)',
-                  backgroundColor: 'var(--bg-secondary)',
-                }}
-              >
-                Key
-              </th>
-              <th
-                className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider"
-                style={{
-                  color: 'var(--text-muted)',
-                  borderBottom: '2px solid var(--border-color)',
-                  backgroundColor: 'var(--bg-secondary)',
-                }}
-              >
-                Value
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(([key, val]) => {
-              const display =
-                val === null || val === undefined
-                  ? ''
-                  : typeof val === 'object'
-                    ? JSON.stringify(val, null, 2)
-                    : String(val);
-              return (
-                <tr key={key}>
-                  <td
-                    className="px-3 py-2 font-medium"
-                    style={{
-                      color: 'var(--text-secondary)',
-                      borderBottom: '1px solid var(--border-color)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {key}
-                  </td>
-                  <td
-                    className="px-3 py-2"
-                    style={{
-                      color: 'var(--text-primary)',
-                      borderBottom: '1px solid var(--border-color)',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {display}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  // Fallback: array of primitives or other
-  return (
-    <pre
-      className="text-sm p-4 overflow-auto"
-      style={{ color: 'var(--text-primary)' }}
-    >
-      {JSON.stringify(data, null, 2)}
-    </pre>
-  );
+/**
+ * The workspace UI-Configurator palettes (style_json.themes), fetched when the
+ * preview pane mounts. The surface theme is re-resolved against these via
+ * applyConfiguredTheme — the configurator is the source of truth; the
+ * agent-embedded theme is only a fallback (models routinely stamp the wrong
+ * palette). Stays null when the config is disabled, has no themes, or the
+ * fetch fails — then the embedded theme is used as before.
+ */
+function useWorkspaceThemes(): WorkspaceThemes | null {
+  const [themes, setThemes] = useState<WorkspaceThemes | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    UIConfigService.getConfig()
+      .then((cfg) => {
+        if (cancelled || !cfg.enabled || !cfg.style_json) return;
+        try {
+          const style = JSON.parse(cfg.style_json) as { themes?: unknown };
+          if (style && typeof style.themes === 'object' && style.themes) {
+            setThemes(style.themes as WorkspaceThemes);
+          }
+        } catch {
+          /* malformed style_json — keep the embedded theme */
+        }
+      })
+      .catch(() => {
+        /* config unavailable — keep the embedded theme */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return themes;
 }
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, history, index, onNavigate }) => {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineValue, setRefineValue] = useState('');
   const asideRef = useRef<HTMLElement>(null);
@@ -360,30 +148,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
 
-  // For HTML: render untrusted content via srcDoc in an opaque-origin sandbox
-  // (allow-scripts only, no allow-same-origin) with an injected CSP. See
-  // buildSandboxedSrcDoc for the security rationale.
-  const htmlSrcDoc = useMemo(
-    () => (content.type === 'html' ? buildSandboxedSrcDoc(displayData) : ''),
-    [content, displayData],
-  );
-
-  const jsonData = useMemo(() => {
-    if (content.type === 'json') {
-      try {
-        return JSON.parse(displayData);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }, [content, displayData]);
-
-  // Parse the A2UI document for the brand-consistent renderer.
-  const uiSurface = useMemo(
-    () => (content.type === 'ui' ? parseUiDocument(displayData) : null),
-    [content, displayData],
-  );
+  // Parse the A2UI document for the brand-consistent renderer, then re-resolve
+  // its theme from the workspace UI-Configurator palettes (source of truth —
+  // the agent-embedded theme is frequently the wrong palette).
+  const workspaceThemes = useWorkspaceThemes();
+  const uiSurface = useMemo(() => {
+    const parsed = parseUiDocument(displayData);
+    return parsed ? applyConfiguredTheme(parsed, workspaceThemes) : null;
+  }, [displayData, workspaceThemes]);
 
   return (
     <aside
@@ -410,11 +182,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             style={{ color: 'var(--text-muted)' }}
             title={chatCollapsed ? 'Show chat' : 'Hide chat'}
           >
+            {/* The preview sits to the RIGHT of the chat, so expanding it to
+                full width grows LEFTWARD: "hide chat" points left (◀◀), and
+                restoring the chat points right (▶▶). */}
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               {chatCollapsed ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
-              ) : (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
               )}
             </svg>
           </button>
@@ -426,31 +201,17 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             stroke="currentColor"
             strokeWidth={2}
           >
-            {content.type === 'html' ? (
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
-              />
-            ) : content.type === 'markdown' ? (
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
-              />
-            ) : (
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125"
-              />
-            )}
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125"
+            />
           </svg>
           <span
             className="text-sm font-medium"
             style={{ color: 'var(--text-primary)' }}
           >
-            {content.title || (content.type === 'html' ? 'Preview' : content.type === 'markdown' ? 'Report' : content.type === 'ui' ? 'App' : 'Result')}
+            {content.title || 'App'}
           </span>
           <span
             className="text-[10px] px-1.5 py-0.5 rounded font-mono"
@@ -588,39 +349,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
         </div>
       )}
 
-      {/* Content */}
+      {/* Content — A2UI only; non-UI documents are never previewable. */}
       <div className="flex-1 overflow-auto">
-        {content.type === 'html' && (
-          <iframe
-            ref={iframeRef}
-            className="w-full h-full border-0"
-            // SECURITY: opaque-origin sandbox (no allow-same-origin) so scripts
-            // in untrusted crew/LLM HTML cannot access the Kasal origin.
-            sandbox="allow-scripts"
-            srcDoc={htmlSrcDoc}
-            title="Execution result preview"
-            style={{ backgroundColor: '#ffffff' }}
-          />
-        )}
-
-        {content.type === 'json' && jsonData !== null && (
-          <div className="p-4">
-            <JsonTable data={jsonData} />
-          </div>
-        )}
-
-        {content.type === 'markdown' && (
-          <div
-            className="prose max-w-none p-6"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {displayData}
-            </ReactMarkdown>
-          </div>
-        )}
-
-        {content.type === 'ui' && uiSurface && (
+        {uiSurface && (
           // Key on the displayed content so a refine (or history navigation)
           // REMOUNTS the renderer instead of reusing the instance. The refined
           // deck reuses the same component ids (root/slide1…), so without a key
