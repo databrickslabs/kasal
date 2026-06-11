@@ -218,6 +218,12 @@ class CrewAIEngineService(BaseEngineService):
             if group_context and group_context.primary_group_id:
                 execution_config["group_id"] = group_context.primary_group_id
                 logger.info(f"[CrewAIEngineService] Added group_id to config: {group_context.primary_group_id}")
+
+            # Propagate the executing user's email so tools can isolate
+            # per-user data (e.g. knowledge search returns only the chunks
+            # this user uploaded).
+            if group_context and group_context.group_email:
+                execution_config["user_email"] = group_context.group_email
             
             # Extract crew definition sections from config
             crew_config = execution_config.get("crew", {})

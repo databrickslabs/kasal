@@ -54,6 +54,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
     _group_id: str = PrivateAttr(default="default")
     _execution_id: Optional[str] = PrivateAttr(default=None)
     _user_token: Optional[str] = PrivateAttr(default=None)
+    _user_email: Optional[str] = PrivateAttr(default=None)
     _service: Optional[Any] = PrivateAttr(default=None)
 
     def __init__(
@@ -63,6 +64,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         user_token: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
         agent_id: Optional[str] = None,
+        user_email: Optional[str] = None,
         **kwargs
     ):
         """
@@ -74,6 +76,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
             user_token: Optional user token for OBO authentication
             file_paths: Optional list of file paths to filter searches (from tool_configs)
             agent_id: Optional agent ID for access control filtering
+            user_email: Executing user's email — search results are isolated
+                to the knowledge THIS user uploaded
             **kwargs: Additional arguments for BaseTool
         """
         # CRITICAL DEBUG: Print to stdout (will show in logs even before logging is configured)
@@ -91,6 +95,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         self._group_id = group_id
         self._execution_id = execution_id
         self._user_token = user_token
+        self._user_email = user_email  # Per-user knowledge isolation
         self._configured_file_paths = file_paths  # Store configured file paths from tool_configs
         self._agent_id = agent_id  # Store agent ID for access control
 
@@ -338,7 +343,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                     file_paths=file_paths,
                     agent_id=self._agent_id,
                     limit=limit,
-                    user_token=self._user_token
+                    user_token=self._user_token,
+                    # Per-user isolation: only this user's uploaded knowledge
+                    created_by=self._user_email,
                 )
 
                 logger.info("="*80)

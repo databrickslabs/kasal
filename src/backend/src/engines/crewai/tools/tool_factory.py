@@ -1569,7 +1569,11 @@ class ToolFactory:
                     "group_id": self.config.get('group_id', 'default'),
                     # DO NOT PASS execution_id - we want to search all documents!
                     # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
-                    "user_token": self.user_token
+                    "user_token": self.user_token,
+                    # Per-user knowledge isolation: search only returns chunks
+                    # uploaded by the executing user (set by the engine from
+                    # the group context).
+                    "user_email": self.config.get('user_email'),
                 }
                 # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
                 if tool_config and isinstance(tool_config, dict):

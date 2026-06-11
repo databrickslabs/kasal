@@ -508,6 +508,26 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     except Exception as e:
         logger.warning(f"Could not ensure knowledge_embeddings table: {e}")
 
+    # Self-heal: knowledge_embeddings.created_by (per-user isolation of
+    # uploaded knowledge). checkfirst-create above never ALTERs a table that
+    # already exists, so pre-existing DBs need the column added here.
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(knowledge_embeddings)")
+            cols = {row[1] for row in res.fetchall()}
+            if cols and "created_by" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE knowledge_embeddings ADD COLUMN created_by VARCHAR(255)"
+                )
+                logger.info("Added knowledge_embeddings.created_by column (SQLite self-heal)")
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE knowledge_embeddings ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"
+            )
+        logger.info("Ensured knowledge_embeddings.created_by column")
+    except Exception as e:
+        logger.warning(f"Could not ensure knowledge_embeddings.created_by column: {e}")
+
 
 async def _ensure_chat_sessions_table(conn) -> None:
     """Idempotently create the chat_sessions table (named chat-mode sessions).

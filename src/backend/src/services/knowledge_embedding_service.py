@@ -4,12 +4,18 @@ Knowledge Embedding Service
 Handles embedding of knowledge files into vector storage.
 Separated from DatabricksKnowledgeService for clean architecture.
 """
+import os
 from typing import Dict, Any, List, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# TTL for uploaded knowledge embeddings: rows older than this are purged
+# (opportunistically at upload time and excluded from search), so the store
+# never accumulates stale uploads. 0 or a negative value disables the TTL.
+KNOWLEDGE_TTL_DAYS = int(os.getenv("KNOWLEDGE_TTL_DAYS", "30"))
 
 
 class KnowledgeEmbeddingService:
@@ -33,7 +39,8 @@ class KnowledgeEmbeddingService:
         file_content: str,
         execution_id: str,
         agent_ids: Optional[List[str]] = None,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Embed a file's content into vector storage.
@@ -44,6 +51,8 @@ class KnowledgeEmbeddingService:
             execution_id: Execution ID for scoping
             agent_ids: Optional list of agent IDs for access control
             user_token: Optional user token for OBO authentication
+            created_by: Uploader email — stamped on every chunk so search can
+                isolate knowledge per user within the group
 
         Returns:
             Embedding result with status and metadata
@@ -115,6 +124,7 @@ class KnowledgeEmbeddingService:
                     'document_summary': document_summary,
                     'raw_content': raw_content,
                     'file_path': file_path,
+                    'created_by': created_by,
                     'created_at': datetime.utcnow().isoformat(),
                     'type': 'knowledge_source',
                     'content_type': self._detect_content_type(filename)
@@ -128,6 +138,7 @@ class KnowledgeEmbeddingService:
                     doc_metadata=metadata,
                     group_id=self.group_id,
                     file_path=file_path,
+                    created_by=created_by,
                 ))
 
             # Store all chunk rows in ONE bulk insert. When the active memory
@@ -185,6 +196,51 @@ class KnowledgeEmbeddingService:
                 "error": str(e),
                 "message": f"Failed to embed file {file_path}"
             }
+
+    async def purge_expired(self, user_token: Optional[str] = None) -> int:
+        """Delete knowledge embeddings past the TTL (KNOWLEDGE_TTL_DAYS).
+
+        Runs opportunistically before each upload so the table never
+        accumulates stale uploads — there is no scheduler dependency. Search
+        additionally excludes expired rows, so expiry takes effect even
+        between uploads. Failures never block an upload (non-fatal).
+
+        Returns:
+            Number of purged chunk rows.
+        """
+        if KNOWLEDGE_TTL_DAYS <= 0:
+            return 0
+        from sqlalchemy import delete
+        from src.models.documentation_embedding import KnowledgeEmbedding
+        from src.services.knowledge_embedding_session import knowledge_embedding_session
+
+        cutoff = datetime.utcnow() - timedelta(days=KNOWLEDGE_TTL_DAYS)
+        try:
+            async with knowledge_embedding_session(
+                self.session, self.group_id, user_token
+            ) as (store_session, is_lakebase):
+                # Scoped to THIS group: the table is shared across tenants and
+                # one tenant's request must never run DML on another's rows
+                # (defense in depth — expired rows are filtered from search
+                # regardless, and each group sweeps its own on upload).
+                result = await store_session.execute(
+                    delete(KnowledgeEmbedding).where(
+                        KnowledgeEmbedding.group_id == self.group_id,
+                        KnowledgeEmbedding.created_at < cutoff,
+                    )
+                )
+                if not is_lakebase:
+                    await store_session.commit()
+                purged = int(getattr(result, "rowcount", 0) or 0)
+                if purged:
+                    logger.info(
+                        f"[EMBEDDING] TTL purge removed {purged} knowledge chunks "
+                        f"older than {KNOWLEDGE_TTL_DAYS} days"
+                    )
+                return purged
+        except Exception as e:
+            logger.warning(f"[EMBEDDING] TTL purge failed (non-fatal): {e}")
+            return 0
 
     async def _chunk_with_context(
         self,

@@ -168,31 +168,155 @@ class TestUploadKnowledgeFile:
 
     @pytest.mark.asyncio
     async def test_upload_failure_raises(self):
-        """A failed Volume upload must RAISE (not be masked as a 'simulated'
-        success) so the API surfaces the real cause to the UI."""
+        """A failed embedding must RAISE (embedding IS the upload now —
+        nothing was persisted) so the API surfaces the real cause to the UI."""
         from src.core.exceptions import UnprocessableEntityError
 
         svc = make_svc()
         file = make_upload_file()
 
-        svc.repository.get_active_config = AsyncMock(return_value=None)
-        svc.volume_repository.upload_file_to_volume = AsyncMock(
-            return_value={"success": False, "error": "Schema 'users.x' does not exist"}
+        svc.embedding_service.embed_file = AsyncMock(
+            return_value={"status": "error", "message": "embedding model unavailable"}
         )
 
+        with pytest.raises(UnprocessableEntityError) as exc:
+            await svc.upload_knowledge_file(
+                file=file,
+                execution_id="exec-1",
+                group_id="g1",
+                volume_config={},
+            )
+
+        assert exc.value.status_code == 422
+        assert "embedding model unavailable" in exc.value.detail
+
+    @pytest.mark.asyncio
+    async def test_upload_never_touches_the_volume(self):
+        """The temp-embed flow has no Databricks Volume dependency at all."""
+        svc = make_svc()
+        file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.embed_file = AsyncMock(
+            return_value={"status": "success", "chunks_embedded": 2}
+        )
+
+        result = await svc.upload_knowledge_file(
+            file=file, execution_id="exec-1", group_id="g1", volume_config={}
+        )
+
+        assert result["status"] == "success"
+        assert result["upload_method"] == "temp_embed"
+        svc.volume_repository.upload_file_to_volume.assert_not_called()
+        svc.repository.get_active_config.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_upload_embeds_logical_path_with_uploader(self):
+        """Chunks embed under the logical uploads/ path, stamped with the
+        uploading user (per-user isolation), after a TTL purge sweep."""
+        svc = make_svc()
+        file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.embed_file = AsyncMock(
+            return_value={"status": "success", "chunks_embedded": 2}
+        )
+
+        result = await svc.upload_knowledge_file(
+            file=file, execution_id="exec-1", group_id="g1", volume_config={}
+        )
+
+        assert result["path"] == "uploads/g1/exec-1/notes.txt"
+        assert result["created_by"] == "u@test.com"
+        kwargs = svc.embedding_service.embed_file.call_args.kwargs
+        assert kwargs["file_path"] == "uploads/g1/exec-1/notes.txt"
+        assert kwargs["created_by"] == "u@test.com"
+        # TTL sweep ran before the new content was embedded.
+        svc.embedding_service.purge_expired.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_upload_temp_file_is_deleted_even_when_embedding_fails(self):
+        """The raw upload only ever lives in a temp file, which never outlives
+        the embedding attempt — success or failure."""
+        import os as _os
+        import tempfile as _tempfile
+        from src.core.exceptions import KasalError
+
+        svc = make_svc()
+        file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.embed_file = AsyncMock(side_effect=Exception("embed boom"))
+
+        staged = []
+        # Bind the real function BEFORE patching: the service imports the
+        # stdlib tempfile module itself, so patching it also patches this
+        # reference (calling _tempfile.mkstemp inside would recurse).
+        real_mkstemp = _tempfile.mkstemp
+
+        def tracking_mkstemp(*args, **kwargs):
+            fd, path = real_mkstemp(*args, **kwargs)
+            staged.append(path)
+            return fd, path
+
         with patch(
-            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+            "src.services.databricks_knowledge_service.tempfile.mkstemp",
+            side_effect=tracking_mkstemp,
+        ):
+            with pytest.raises(KasalError):
+                await svc.upload_knowledge_file(
+                    file=file, execution_id="exec-1", group_id="g1", volume_config={}
+                )
+
+        assert len(staged) == 1
+        assert not _os.path.exists(staged[0])
+
+    @pytest.mark.asyncio
+    async def test_upload_temp_file_is_deleted_on_success(self):
+        import os as _os
+        import tempfile as _tempfile
+
+        svc = make_svc()
+        file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.embed_file = AsyncMock(
+            return_value={"status": "success", "chunks_embedded": 1}
+        )
+
+        staged = []
+        # Bind the real function BEFORE patching: the service imports the
+        # stdlib tempfile module itself, so patching it also patches this
+        # reference (calling _tempfile.mkstemp inside would recurse).
+        real_mkstemp = _tempfile.mkstemp
+
+        def tracking_mkstemp(*args, **kwargs):
+            fd, path = real_mkstemp(*args, **kwargs)
+            staged.append(path)
+            return fd, path
+
+        with patch(
+            "src.services.databricks_knowledge_service.tempfile.mkstemp",
+            side_effect=tracking_mkstemp,
+        ):
+            result = await svc.upload_knowledge_file(
+                file=file, execution_id="exec-1", group_id="g1", volume_config={}
+            )
+
+        assert result["status"] == "success"
+        assert len(staged) == 1
+        assert not _os.path.exists(staged[0])
+
+    @pytest.mark.asyncio
+    async def test_upload_extraction_error_raises(self):
+        from src.core.exceptions import UnprocessableEntityError
+
+        svc = make_svc()
+        file = make_upload_file("scan.pdf", b"%PDF fake")
+
+        with patch.object(
+            svc,
+            "_extract_text_content",
+            return_value={"status": "error", "message": "image-only PDF needs OCR"},
         ):
             with pytest.raises(UnprocessableEntityError) as exc:
                 await svc.upload_knowledge_file(
-                    file=file,
-                    execution_id="exec-1",
-                    group_id="g1",
-                    volume_config={},
+                    file=file, execution_id="exec-1", group_id="g1", volume_config={}
                 )
 
-        assert exc.value.status_code == 422
-        assert "Schema 'users.x' does not exist" in exc.value.detail
+        assert "image-only PDF needs OCR" in exc.value.detail
 
     @pytest.mark.asyncio
     async def test_with_date_dirs(self):
@@ -225,33 +349,22 @@ class TestUploadKnowledgeFile:
         assert result["status"] == "success"
 
     @pytest.mark.asyncio
-    async def test_embedding_exception_is_caught(self):
+    async def test_embedding_exception_raises_kasal_error(self):
+        """An unexpected embedding exception propagates as KasalError —
+        embedding IS the upload now, so it must not be masked as success."""
+        from src.core.exceptions import KasalError
+
         svc = make_svc()
         file = make_upload_file()
-        fake_config = SimpleNamespace(
-            knowledge_volume_path="main.default.knowledge",
-            knowledge_volume_enabled=True,
-            workspace_url="https://ws.databricks.com",
-        )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
-        svc.volume_repository.upload_file_to_volume = AsyncMock(
-            return_value={"success": True}
-        )
-        svc.read_knowledge_file = AsyncMock(
-            return_value={"status": "success", "content": "data"}
-        )
         svc.embedding_service.embed_file = AsyncMock(
             side_effect=Exception("embed error")
         )
 
-        with patch(
-            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
-        ):
-            result = await svc.upload_knowledge_file(
+        with pytest.raises(KasalError) as exc:
+            await svc.upload_knowledge_file(
                 file=file, execution_id="exec-1", group_id="g1", volume_config={}
             )
-        assert result["status"] == "success"
-        assert result["embedding_result"]["status"] == "error"
+        assert "embed error" in exc.value.detail
 
     @pytest.mark.asyncio
     async def test_outer_exception_raises_kasal_error(self):
@@ -261,7 +374,7 @@ class TestUploadKnowledgeFile:
 
         svc = make_svc()
         file = make_upload_file()
-        svc.repository.get_active_config = AsyncMock(side_effect=Exception("db crash"))
+        svc.embedding_service.purge_expired = AsyncMock(side_effect=Exception("db crash"))
 
         with pytest.raises(KasalError) as exc:
             await svc.upload_knowledge_file(
@@ -641,50 +754,65 @@ class TestOtherMethods:
 # ---------------------------------------------------------------------------
 
 
+def patch_embedding_store(deleted_rows=3, delete_error=None):
+    """Patch the knowledge store context + repo used by delete_knowledge_file.
+
+    Returns (context managers list, delete_by_file mock) — deletion now targets
+    the EMBEDDINGS (no raw file is retained anywhere).
+    """
+    from contextlib import asynccontextmanager
+
+    store_session = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_ctx(_session, _group_id, _user_token=None):
+        yield store_session, False
+
+    delete_by_file = AsyncMock(return_value=deleted_rows, side_effect=delete_error)
+    repo_cls = MagicMock(return_value=MagicMock(delete_by_file=delete_by_file))
+    patches = [
+        patch(
+            "src.services.knowledge_embedding_session.knowledge_embedding_session",
+            fake_ctx,
+        ),
+        patch(
+            "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository",
+            repo_cls,
+        ),
+    ]
+    return patches, delete_by_file
+
+
 class TestDeleteKnowledgeFile:
     @pytest.mark.asyncio
-    async def test_delete_success(self):
+    async def test_delete_removes_the_files_embeddings(self):
         svc = make_svc()
-        fake_config = SimpleNamespace(knowledge_volume_path="cat.sch.vol")
-        svc._get_databricks_config = AsyncMock(return_value=fake_config)
-        svc.volume_repository.delete_volume_file = AsyncMock(
-            return_value={"success": True}
-        )
+        patches, delete_by_file = patch_embedding_store(deleted_rows=5)
+        with patches[0], patches[1]:
+            result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
 
-        result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
         assert result is True
-
-    @pytest.mark.asyncio
-    async def test_delete_returns_false_when_no_config(self):
-        svc = make_svc()
-        svc._get_databricks_config = AsyncMock(return_value=None)
-        result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_delete_returns_false_when_invalid_volume_path(self):
-        svc = make_svc()
-        fake_config = SimpleNamespace(knowledge_volume_path="invalid")
-        svc._get_databricks_config = AsyncMock(return_value=fake_config)
-        result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_delete_returns_false_when_volume_delete_fails(self):
-        svc = make_svc()
-        fake_config = SimpleNamespace(knowledge_volume_path="cat.sch.vol")
-        svc._get_databricks_config = AsyncMock(return_value=fake_config)
-        svc.volume_repository.delete_volume_file = AsyncMock(
-            return_value={"success": False, "message": "Not found"}
+        delete_by_file.assert_awaited_once_with(
+            "g1", "exec-1", "file.txt", created_by="u@test.com"
         )
-        result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
-        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_scopes_to_the_requesting_user(self):
+        """The uploader's email rides into the delete predicate so a user can
+        only delete their OWN uploads."""
+        svc = make_svc()
+        patches, delete_by_file = patch_embedding_store()
+        with patches[0], patches[1]:
+            await svc.delete_knowledge_file("exec-9", "g1", "doc.pdf")
+
+        assert delete_by_file.call_args.kwargs["created_by"] == "u@test.com"
 
     @pytest.mark.asyncio
     async def test_delete_returns_false_on_exception(self):
         svc = make_svc()
-        svc._get_databricks_config = AsyncMock(side_effect=Exception("db error"))
-        result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
+        patches, _ = patch_embedding_store(delete_error=Exception("db error"))
+        with patches[0], patches[1]:
+            result = await svc.delete_knowledge_file("exec-1", "g1", "file.txt")
         assert result is False
 
 
@@ -754,24 +882,41 @@ class TestAdditionalCoverage:
                 await svc.register_volume_file("exec-1", "/path/file.txt", "g1")
 
     @pytest.mark.asyncio
-    async def test_search_knowledge_delegates_and_resolves_paths(self):
-        """Cover search_knowledge lines 849-866."""
+    async def test_search_knowledge_delegates_with_user_isolation(self):
+        """file_paths pass straight through (basename soft-filter downstream)
+        and the requesting user's email is forwarded for per-user isolation."""
         svc = make_svc()
         svc.search_service.search = AsyncMock(
             return_value=[{"id": "r1", "content": "result"}]
-        )
-        svc._resolve_filenames_to_paths = AsyncMock(
-            return_value=["/Volumes/cat/sch/vol/file.txt"]
         )
 
         result = await svc.search_knowledge(
             query="test",
             group_id="g1",
-            file_paths=["file.txt"],  # Not starting with /Volumes, needs resolution
+            file_paths=["file.txt"],
             user_token="token",
         )
         assert isinstance(result, list)
-        svc._resolve_filenames_to_paths.assert_called_once()
+        kwargs = svc.search_service.search.call_args.kwargs
+        assert kwargs["file_paths"] == ["file.txt"]  # no volume resolution
+        # Falls back to the service's own (API-context) user.
+        assert kwargs["created_by"] == "u@test.com"
+
+    @pytest.mark.asyncio
+    async def test_search_knowledge_explicit_caller_identity_wins(self):
+        """A tool-supplied created_by (the executing user) takes precedence."""
+        svc = make_svc()
+        svc.search_service.search = AsyncMock(return_value=[])
+
+        await svc.search_knowledge(
+            query="test",
+            group_id="g1",
+            created_by="runner@test.com",
+        )
+        assert (
+            svc.search_service.search.call_args.kwargs["created_by"]
+            == "runner@test.com"
+        )
 
     @pytest.mark.asyncio
     async def test_search_knowledge_no_resolution_needed(self):
