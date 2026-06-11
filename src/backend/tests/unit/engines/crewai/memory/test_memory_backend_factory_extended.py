@@ -430,15 +430,10 @@ class TestLakebaseBackendCases:
 
     @pytest.mark.asyncio
     async def test_lakebase_empty_table_name_raises(self):
-        """Empty memory_table raises ValueError."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.LAKEBASE,
-            lakebase_config=LakebaseMemoryConfig(memory_table=""),
-        )
-        with pytest.raises(ValueError, match="memory_table is required"):
-            await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="grp_crew_abc123"
-            )
+        """Empty memory_table is rejected at schema validation time
+        (identifier validation moved into LakebaseMemoryConfig)."""
+        with pytest.raises(ValueError, match="memory_table"):
+            LakebaseMemoryConfig(memory_table="")
 
 
 # ─── DatabricksIndexValidationError edge cases ───────────────────────────────

@@ -621,9 +621,11 @@ class TestRouterConfiguration:
             assert path in route_paths, f"Missing route: {path}"
 
     def test_expected_methods(self):
+        # A path can be registered under several methods (e.g. GET + POST
+        # /chat-history/sessions) — accumulate instead of overwriting.
         methods_by_path = {}
         for route in router.routes:
-            methods_by_path[route.path] = route.methods
+            methods_by_path.setdefault(route.path, set()).update(route.methods)
 
         assert "POST" in methods_by_path["/chat-history/messages"]
         assert "GET" in methods_by_path["/chat-history/sessions/{session_id}/messages"]

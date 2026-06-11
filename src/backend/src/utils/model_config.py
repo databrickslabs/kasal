@@ -28,6 +28,10 @@ def model_rejects_temperature(model_name: Optional[str]) -> bool:
         return True
     if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
         return True
+    if "claude-fable" in m:
+        # Fable 5 has the same request surface as Opus 4.7/4.8 — sampling
+        # params (temperature/top_p/top_k) return 400.
+        return True
     return False
 
 
