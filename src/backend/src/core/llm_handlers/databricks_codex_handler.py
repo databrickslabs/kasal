@@ -248,7 +248,11 @@ class DatabricksCodexCompletion(OpenAICompletion):
                 logger.debug("[DatabricksCodex] cache read skipped: %s", exc)
                 cache_key = None
 
-        response = self._get_sync_client().responses.create(**params)
+        # CrewAI 1.14+ exposes the lazy _get_sync_client(); 1.9.x builds
+        # self.client eagerly in __init__ — support both.
+        getter = getattr(self, "_get_sync_client", None)
+        client = getter() if callable(getter) else self.client
+        response = client.responses.create(**params)
 
         if cache is not None and cache_key is not None:
             try:
