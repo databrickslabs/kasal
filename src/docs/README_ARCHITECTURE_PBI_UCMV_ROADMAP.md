@@ -659,3 +659,37 @@ project.
 calendar time (~3–5 wks realistic), but parity flow runs and human review of service
 boundaries do not compress. Clean release-split line if needed: WP1+WP2+tools 1–3 in release
 N, rest in N+1. Largest uncertainty: the analysis tool (assume 2–3 latent surprises).
+
+---
+
+## 8. Food for thought (explicitly NOT prioritized): first-party agent-platform alignment
+
+Databricks is building out first-party agentic offerings (Agent Bricks and related runtime
+work). Without committing to anything pre-GA, the architecture in this document positions
+Kasal for three distinct integration vectors with a first-party agent runtime — all routed
+through the same §6.1 generic tool contract, which is why no extra work is needed now beyond
+keeping that contract MCP-first:
+
+| Vector | Direction | What it is | When |
+|---|---|---|---|
+| **Tools out** | Kasal → platform | PBI/UCMV/Genie tools exposed via MCP, consumable by any platform agent with a one-line declaration | Free after WP3 (§6.1 is MCP-first) |
+| **Coding in** | platform → Kasal | A governed `coding_agent_tool` (KasalTool wrapping a platform coding-agent session): a "Code" node in the flow builder, an interactive coding panel for tech-savvy analysts, and analysts authoring new Kasal tools themselves | Prototype after WP3, behind a flag |
+| **Engine swap** | platform under Kasal | First-party runtime as an `engines/<x>/` adapter — realistically only for the conversational subset; Kasal's deterministic node/edge flows stay on their own orchestration | Parked (WP6 criteria apply) |
+
+Notes for whenever this is picked up:
+
+- **The "coding in" vector is the most product-shaped.** A coding surface for non-coders is
+  only shippable on top of a runtime with per-action policy enforcement and sandboxed
+  execution — exactly what a first-party governed runtime provides and what Kasal should not
+  rebuild. The real design work is the **group → permission-profile matrix** (which Kasal
+  group may let its coding agent touch which repos/volumes/workspaces) — that governance
+  model is the feature; the integration is the easy part.
+- **Kasal does not "become a tool"** under any vector: the application (flow builder,
+  multi-tenant workspace, pipeline-as-product) is untouched; the capabilities (the tool
+  registry) are *additionally* exported. Kasal holds both positions — consumer of engines and
+  provider of tools — simultaneously, which is the most durable posture toward a platform
+  runtime it does not control.
+- **Discipline:** nothing here changes WP1–3 or their justification (incident response, see
+  §6.4). Pre-GA platform APIs churn; pin versions, prototype behind flags, commit nothing to
+  the roadmap until stable. This section is the "big opportunity" trigger condition for WP6 —
+  documented so the option is exercised deliberately, not rediscovered.
