@@ -304,9 +304,14 @@ exactly once in `binder.bind()`.
 
 ## 7. Implementation sequence & effort estimate
 
-**Phase 0 — Golden outputs (0.5 d).** Run the validated flows (`flow_test_3`,
-`flow_genie_space_gen`, `flow_dashboard_deployer`, analyst crew) and snapshot their trace
-outputs. This snapshot is the parity suite for every WP3 migration.
+**Phase 0 — Golden outputs ✅ DONE (2026-06-11).** The validated outputs of the four flows
+(`flow_test_3`, `flow_genie_space_gen`, `flow_dashboard_deployer`, analyst crew) were extracted
+from `execution_trace` and committed as sanitized, version-controlled baselines under
+`src/backend/tests/golden/` (4 files), with structural guard tests in
+`src/backend/tests/unit/golden/test_golden_baselines.py` (11 tests) and comparison rules in
+`tests/golden/README.md`. This is the parity suite for every WP3 migration: after each tool
+extraction, re-run the matching flow, sanitize the fresh output the same way, and diff the
+structured fields against the baseline.
 
 **Phase 1 — WP1 + WP2 (~1.5–2 wks).** WP1 first — the `[FALLBACK]` metric and routed logs are
 the safety net that detects silent degradation *during* the WP3 migration, not just after.
