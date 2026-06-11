@@ -190,12 +190,37 @@ class TestGenieConfigOverride:
 
 class TestErrorCases:
     def test_no_ucmv_output_returns_error(self):
-        """Neither ucmv_output nor override → error JSON."""
+        """Neither ucmv_output, override, nor a prior UCMV run in the DB → error JSON."""
         tool = UCMVGenieConfigGeneratorTool()
-        result = tool._run()
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value={},
+        ):
+            result = tool._run()
         data = json.loads(result)
         assert "error" in data
         assert "ucmv_output" in data["error"]
+
+    def test_no_ucmv_output_falls_back_to_db(self):
+        """No injected ucmv_output but a prior UCMV run exists in the DB → uses it."""
+        tool = UCMVGenieConfigGeneratorTool()
+        db_ucmv = {"yaml": {"fact_sales": SAMPLE_YAML}, "sql": {}}
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value=db_ucmv,
+        ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   _mock_llm_completion(json.dumps({
+                       "text_instructions": "Test instructions",
+                       "sample_questions": "Q1",
+                       "example_sqls": [],
+                   }))):
+            result = tool._run(catalog="main", schema_name="metrics")
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["text_instructions"] == "Test instructions"
 
     def test_empty_ucmv_output_returns_error(self):
         """ucmv_output with empty yaml dict → error."""

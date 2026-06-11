@@ -289,7 +289,18 @@ Rules:
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get('ucmv_output')
         if not ucmv_raw:
-            return json.dumps({"error": "No ucmv_output available — auto-generation requires ucmv_output from flow injection"})
+            # DB fallback (same as the UCMV Validator): allows running the
+            # Genie-space flow standalone after a previous UCMV Generator run.
+            try:
+                from src.engines.crewai.tools.custom.metric_view_validator_tool import MetricViewValidatorTool
+                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                if isinstance(latest, dict) and latest.get('yaml'):
+                    logger.info("[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB")
+                    ucmv_raw = json.dumps(latest)
+            except Exception as e:
+                logger.warning(f"[GenieConfigGen] DB fallback for ucmv_output failed: {e}")
+        if not ucmv_raw:
+            return json.dumps({"error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"})
 
         yaml_specs = self._extract_yaml_specs(ucmv_raw)
         if not yaml_specs:
