@@ -81,7 +81,9 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   panelPosition: persistedState.panelPosition || 50,
   areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : false,
   layoutOrientation: persistedState.layoutOrientation || 'horizontal',
-  appMode: persistedState.appMode || 'crew',
+  // Land on Chat by default — Agent Builder ('crew') and Flow are opt-in via
+  // the mode switcher; an explicit persisted choice always wins.
+  appMode: persistedState.appMode || 'chat',
 
   // Actions
   setAppMode: (mode: AppMode) => {
