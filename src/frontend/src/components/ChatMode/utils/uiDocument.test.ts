@@ -288,4 +288,34 @@ describe('applyConfiguredTheme — workspace palettes are the source of truth', 
     expect(applyConfiguredTheme(deck, null)).toBe(deck);
     expect(applyConfiguredTheme(deck, undefined)).toBe(deck);
   });
+
+  it('keeps an embedded theme that deviates from every configured palette (user refine)', () => {
+    // Regression: "change the background to black and the text to white"
+    // edits the embedded theme — it must NOT be wiped by re-resolution.
+    const refined = { accent: '#2272B4', background: '#000000', text: '#FFFFFF' };
+    const deck = surfaceOf({ root: 'Slides', s1: 'Slide' }, refined);
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(refined);
+
+    // Same for non-presentation deliverables.
+    const dash = surfaceOf({ root: 'Column', d: 'Dashboard' }, refined);
+    expect(applyConfiguredTheme(dash, themes).theme).toEqual(refined);
+  });
+
+  it('still re-resolves a PARTIAL copy of a configured palette', () => {
+    // A subset of the Presentation palette is a copy, not a deviation —
+    // re-resolve to the full configured palette.
+    const deck = surfaceOf({ root: 'Slides' }, { background: '#0E1B21' });
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
+  });
+
+  it('matches palette colors case-insensitively when deciding copy vs deviation', () => {
+    // Lowercase copy of the Default palette is still a copy → re-resolved.
+    const deck = surfaceOf({ root: 'Slides' }, { accent: '#2272b4', background: '#ffffff' });
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
+  });
+
+  it('re-resolves when the embedded theme is an empty object', () => {
+    const deck = surfaceOf({ root: 'Slides' }, {});
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
+  });
 });
