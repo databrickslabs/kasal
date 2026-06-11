@@ -300,7 +300,45 @@ contract would freeze the mess behind a nicer signature. This contract IS the ta
 the WP3-extracted services; ambient `UserContext` remains at the HTTP layer and is resolved
 exactly once in `binder.bind()`.
 
-### 6.2 Target architecture diagram (post WP3–WP6)
+### 6.2 Architecture diagrams: current vs. target
+
+#### Current state (as-is) — tools welded to the engine
+
+```
+                                CLIENT (React UI)
+                                       │  REST
+                          API LAYER (FastAPI routers)
+                                       │
+                  APPLICATION SERVICES (Execution/Flow/CRUD)
+                                       │
+                  ENGINE FACTORY — exists, but only ONE adapter
+                                       ▼
+┌══════════════════════════════════════════════════════════════════════════════┐
+║  engines/crewai/  ← everything lives in here                                  ║
+║                                                                                ║
+║  orchestration (legitimate adapter code):                                      ║
+║    crew_preparation · flow_methods · callbacks · helpers · guardrails · HITL   ║
+║                                                                                ║
+║  tool_factory.py — per-tool wiring (~1,700 lines)                              ║
+║                                                                                ║
+║  tools/custom/ — 35 tools, ALL subclass crewai.BaseTool, and the DOMAIN        ║
+║  LOGIC (extraction, DAX, prompts, caching, retries, SQL) is INSIDE them:       ║
+║    powerbi_analysis 3,560 · fetcher 2,534 · dax 2,345 · references 2,099       ║
+║    · mquery 1,520 · reducer 1,266 · UCMV/Genie/mapper/dashboard …              ║
+╚═══════════════════════════════════════╪═══════════════════════════════════════╝
+                                        │ (post PR-52 the INFRASTRUCTURE is
+                                        ▼  shared — but not the domain logic)
+        converters/services (partial) · CORE (LLMManager, async_bridge,
+        ToolSessionProvider) · REPOSITORIES + UoW → DB
+
+  ⚠ Cost of a second engine TODAY: engines/langchain/ would need its own
+    tools/custom/ — the same ~21k lines re-implemented as langchain.BaseTool
+    subclasses, then maintained in lockstep forever (every fix applied twice,
+    permanent drift risk). Tools and engine are welded together; this is the
+    hidden price of F1, beyond code quality.
+```
+
+#### Target architecture (post WP3–WP6)
 
 ```
                                 CLIENT (React UI)
