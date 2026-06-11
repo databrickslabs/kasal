@@ -8,7 +8,7 @@ vi.mock('../utils/markdown', () => ({
 }));
 
 // --- Mock sessionDb ---
-vi.mock('../db/sessionDb', () => ({
+vi.mock('../db/sessionApi', () => ({
   initDb: vi.fn(),
   assignUngroupedSessions: vi.fn(),
   createSession: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../db/sessionDb', () => ({
 }));
 
 import { useSessionStore } from './sessionStore';
-import * as db from '../db/sessionDb';
+import * as db from '../db/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 
@@ -79,11 +79,11 @@ afterEach(() => {
 });
 
 describe('init', () => {
-  it('restores last active session when persisted id exists', async () => {
+  it('lands on a fresh chat even when a last-active session is persisted', async () => {
+    // Landing must NOT auto-restore the previous session — history stays in
+    // the rail; a new session is created lazily on the first message.
     const sessions = [makeSession('s1'), makeSession('s2')];
     (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue(sessions);
-    const msgs = [makeMsg('m1')];
-    (db.getSessionMessages as ReturnType<typeof vi.fn>).mockResolvedValue(msgs);
     localStorage.setItem(ACTIVE_SESSION_KEY, 's2');
 
     await useSessionStore.getState().init();
@@ -91,26 +91,22 @@ describe('init', () => {
     const state = useSessionStore.getState();
     expect(state.isDbReady).toBe(true);
     expect(state.sessions).toEqual(sessions);
-    expect(state.currentSessionId).toBe('s2');
-    expect(state.messages).toEqual(msgs);
-    expect(db.getSessionMessages).toHaveBeenCalledWith('s2');
+    expect(state.currentSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(db.getSessionMessages).not.toHaveBeenCalled();
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
   });
 
-  it('falls back to most recent session when persisted id missing but sessions exist', async () => {
+  it('lands on a fresh chat when sessions exist but none was active', async () => {
     const sessions = [makeSession('recent'), makeSession('older')];
     (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue(sessions);
-    const msgs = [makeMsg('m1')];
-    (db.getSessionMessages as ReturnType<typeof vi.fn>).mockResolvedValue(msgs);
-    // no persisted id, or persisted id not in list
-    localStorage.setItem(ACTIVE_SESSION_KEY, 'does-not-exist');
 
     await useSessionStore.getState().init();
 
     const state = useSessionStore.getState();
-    expect(state.currentSessionId).toBe('recent');
-    expect(state.messages).toEqual(msgs);
-    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('recent');
-    expect(db.getSessionMessages).toHaveBeenCalledWith('recent');
+    expect(state.currentSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(state.sessions).toEqual(sessions);
   });
 
   it('does nothing extra when there are no sessions', async () => {
@@ -495,15 +491,14 @@ describe('workspace scoping (per-group sessions)', () => {
     expect(db.listSessions).toHaveBeenCalledWith('group-x');
   });
 
-  it('reloadForGroup lists only the current group and picks its most recent session', async () => {
+  it('reloadForGroup lists only the current group and lands on a fresh chat', async () => {
     localStorage.setItem('selectedGroupId', 'group-y');
     (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('y1'), makeSession('y2')]);
-    (db.getSessionMessages as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     await useSessionStore.getState().reloadForGroup();
     expect(db.listSessions).toHaveBeenCalledWith('group-y');
     const s = useSessionStore.getState();
     expect(s.sessions.map((x) => x.id)).toEqual(['y1', 'y2']);
-    expect(s.currentSessionId).toBe('y1');
+    expect(s.currentSessionId).toBeNull();
   });
 
   it('reloadForGroup yields an empty state when the workspace has no sessions', async () => {

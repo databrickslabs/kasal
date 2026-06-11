@@ -25,6 +25,8 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         """
         super().__init__(session)
         self.repository = ChatHistoryRepository(session)
+        from src.repositories.chat_session_repository import ChatSessionRepository
+        self.session_repository = ChatSessionRepository(session)
     
 
     async def save_message(
@@ -36,7 +38,8 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         intent: Optional[str] = None,
         confidence: Optional[float] = None,
         generation_result: Optional[dict] = None,
-        group_context: Optional[GroupContext] = None
+        group_context: Optional[GroupContext] = None,
+        message_id_override: Optional[str] = None
     ) -> ChatHistoryResponse:
         """
         Save a chat message with group context.
@@ -55,7 +58,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             Created chat message response DTO (avoids async lazy-loading)
         """
         # Generate ID and timestamp up-front so we can return a DTO without touching ORM lazy-loaders
-        message_id = str(uuid4())
+        message_id = message_id_override or str(uuid4())
         ts = datetime.utcnow()
 
         message_data = {
@@ -79,6 +82,13 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
 
         # Persist to DB using the same ID/timestamp to keep DB and response consistent
         await self.repository.create(message_data)
+
+        # Keep the named session's updated_at in step with its latest message
+        # (no-op for sessions without a chat_sessions row, e.g. sidebar chat).
+        try:
+            await self.session_repository.touch(session_id)
+        except Exception:
+            pass
 
         # Return a pure Pydantic DTO built from the explicit data (no ORM access -> no MissingGreenlet)
         return ChatHistoryResponse(**message_data)
@@ -192,10 +202,17 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if not group_context or not group_context.group_ids:
             return False
 
-        return await self.repository.delete_session(
+        deleted_messages = await self.repository.delete_session(
             session_id=session_id,
             group_ids=group_context.group_ids
         )
+        # Also drop the named-session row (chat-mode sessions). Either part
+        # existing counts as a successful delete: an empty named session has
+        # no messages, a sidebar session has no chat_sessions row.
+        deleted_named = await self.session_repository.delete_by_id_and_group(
+            session_id, group_context.group_ids
+        )
+        return deleted_messages or deleted_named
 
     async def count_session_messages(
         self, 
@@ -228,3 +245,88 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             UUID string for new session
         """
         return str(uuid4())
+    # ------------------------------------------------------------------
+    # Named chat sessions (chat-mode workspace). Sessions live server-side
+    # (SQLite locally / Lakebase when active) instead of browser IndexedDB.
+    # ------------------------------------------------------------------
+
+    async def create_named_session(
+        self,
+        user_id: str,
+        title: str = "New Chat",
+        session_id: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ):
+        """Create a named chat session owned by user_id in the current group."""
+        data = {
+            "id": session_id or str(uuid4()),
+            "title": title or "New Chat",
+            "user_id": user_id,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        if group_context:
+            data.update({
+                "group_id": group_context.primary_group_id,
+                "group_email": group_context.group_email,
+            })
+        return await self.session_repository.create(data)
+
+    async def list_named_sessions(
+        self,
+        user_id: str,
+        page: int = 0,
+        per_page: int = 50,
+        group_context: Optional[GroupContext] = None,
+    ):
+        """List the user's named sessions in the current workspace, most recent first."""
+        if not group_context or not group_context.group_ids:
+            return []
+        return await self.session_repository.list_by_group_and_user(
+            group_ids=group_context.group_ids,
+            user_id=user_id,
+            page=page,
+            per_page=per_page,
+        )
+
+    async def rename_named_session(
+        self,
+        session_id: str,
+        title: str,
+        group_context: Optional[GroupContext] = None,
+    ):
+        """Rename a named session (group-checked). Returns None when not found."""
+        if not group_context or not group_context.group_ids:
+            return None
+        return await self.session_repository.update_title(
+            session_id, group_context.group_ids, title
+        )
+
+    async def update_message(
+        self,
+        message_id: str,
+        group_context: Optional[GroupContext] = None,
+        content: Optional[str] = None,
+        intent: Optional[str] = None,
+        generation_result: Optional[dict] = None,
+    ) -> Optional[ChatHistoryResponse]:
+        """Update a message in place (streaming append / attach result).
+
+        Group-checked: only messages belonging to the caller's groups are
+        touchable. Returns the updated DTO or None when not found.
+        """
+        if not group_context or not group_context.group_ids:
+            return None
+        record = await self.repository.get_by_id_and_group(
+            message_id, group_context.group_ids
+        )
+        if not record:
+            return None
+        if content is not None:
+            record.content = content
+        if intent is not None:
+            record.intent = intent
+        if generation_result is not None:
+            record.generation_result = generation_result
+        await self.session.flush()
+        return ChatHistoryResponse.model_validate(record)

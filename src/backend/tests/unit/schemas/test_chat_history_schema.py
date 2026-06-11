@@ -644,3 +644,56 @@ class TestSchemaIntegration:
         assert message_list.messages[0].session_id == "mgmt-session"
         assert message_list.session_id == "mgmt-session"
         assert message_list.total_messages == 1
+
+# ---------------------------------------------------------------------------
+# Named-session + message-update schemas (server-side chat-mode sessions)
+# ---------------------------------------------------------------------------
+
+class TestNamedSessionSchemas:
+    def test_save_message_accepts_client_id_and_system_type(self):
+        from src.schemas.chat_history import SaveMessageRequest
+        req = SaveMessageRequest(
+            session_id="s1", id="client-1", message_type="system", content="notice"
+        )
+        assert req.id == "client-1"
+        assert req.message_type == "system"
+
+    def test_save_message_id_optional(self):
+        from src.schemas.chat_history import SaveMessageRequest
+        req = SaveMessageRequest(session_id="s1", message_type="user", content="hi")
+        assert req.id is None
+
+    def test_save_message_rejects_unknown_type(self):
+        import pydantic
+        import pytest as _pytest
+        from src.schemas.chat_history import SaveMessageRequest
+        with _pytest.raises(pydantic.ValidationError):
+            SaveMessageRequest(session_id="s1", message_type="robot", content="x")
+
+    def test_update_message_request_all_optional(self):
+        from src.schemas.chat_history import UpdateMessageRequest
+        req = UpdateMessageRequest()
+        assert req.content is None and req.generation_result is None
+
+    def test_session_create_defaults(self):
+        from src.schemas.chat_history import ChatSessionCreateRequest
+        req = ChatSessionCreateRequest()
+        assert req.title == "New Chat" and req.id is None
+
+    def test_session_rename_requires_title(self):
+        import pydantic
+        import pytest as _pytest
+        from src.schemas.chat_history import ChatSessionRenameRequest
+        with _pytest.raises(pydantic.ValidationError):
+            ChatSessionRenameRequest(title="")
+
+    def test_named_session_response_from_orm_row(self):
+        from datetime import datetime
+        from src.schemas.chat_history import NamedChatSessionResponse
+        from src.models.chat_session import ChatSession
+        row = ChatSession(
+            id="s1", title="T", user_id="u@x.com", group_id="g1",
+            created_at=datetime(2026, 6, 11), updated_at=datetime(2026, 6, 11),
+        )
+        resp = NamedChatSessionResponse.model_validate(row)
+        assert resp.id == "s1" and resp.group_id == "g1"

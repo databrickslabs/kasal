@@ -77,6 +77,9 @@ def _build_service():
         RepoClass.return_value = repo_mock
         service = ChatHistoryService(session)
     # service.repository is now the AsyncMock returned by RepoClass()
+    # Replace the named-session repository too (delete/save touch it)
+    service.session_repository = AsyncMock()
+    service.session_repository.delete_by_id_and_group = AsyncMock(return_value=False)
     return service, service.repository
 
 
@@ -1044,3 +1047,138 @@ class TestEdgeCases:
 
         assert captured["group_id"] == "gx"
         assert captured["group_email"] == "a@b.com"
+
+
+# ========================================================================
+# Named chat sessions (chat-mode server-side session storage)
+# ========================================================================
+
+
+class TestNamedSessions:
+    """create/list/rename named sessions + message updates + id passthrough."""
+
+    @pytest.mark.asyncio
+    async def test_create_named_session_with_group(self):
+        svc, _ = _build_service()
+        svc.session_repository.create = AsyncMock(side_effect=lambda d: SimpleNamespace(**d))
+        ctx = _make_group_context()
+
+        record = await svc.create_named_session(
+            user_id="u@x.com", title="My Chat", session_id="sess-42", group_context=ctx
+        )
+
+        assert record.id == "sess-42"
+        assert record.title == "My Chat"
+        assert record.group_id == "grp-1"
+        assert record.user_id == "u@x.com"
+
+    @pytest.mark.asyncio
+    async def test_create_named_session_generates_id_and_default_title(self):
+        svc, _ = _build_service()
+        svc.session_repository.create = AsyncMock(side_effect=lambda d: SimpleNamespace(**d))
+
+        record = await svc.create_named_session(user_id="u@x.com", title="")
+
+        assert record.id  # generated
+        assert record.title == "New Chat"
+
+    @pytest.mark.asyncio
+    async def test_list_named_sessions_scoped_to_group_and_user(self):
+        svc, _ = _build_service()
+        rows = [SimpleNamespace(id="s1"), SimpleNamespace(id="s2")]
+        svc.session_repository.list_by_group_and_user = AsyncMock(return_value=rows)
+        ctx = _make_group_context(group_ids=["g1", "g2"])
+
+        result = await svc.list_named_sessions(user_id="u@x.com", group_context=ctx)
+
+        assert result == rows
+        svc.session_repository.list_by_group_and_user.assert_awaited_once_with(
+            group_ids=["g1", "g2"], user_id="u@x.com", page=0, per_page=50
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_named_sessions_no_group_returns_empty(self):
+        svc, _ = _build_service()
+        assert await svc.list_named_sessions(user_id="u@x.com", group_context=None) == []
+
+    @pytest.mark.asyncio
+    async def test_rename_named_session(self):
+        svc, _ = _build_service()
+        renamed = SimpleNamespace(id="s1", title="Renamed")
+        svc.session_repository.update_title = AsyncMock(return_value=renamed)
+        ctx = _make_group_context()
+
+        result = await svc.rename_named_session("s1", "Renamed", group_context=ctx)
+
+        assert result is renamed
+        svc.session_repository.update_title.assert_awaited_once_with(
+            "s1", ctx.group_ids, "Renamed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_save_message_honors_client_id_and_touches_session(self):
+        svc, repo = _build_service()
+        repo.create = AsyncMock(return_value=MagicMock())
+        ctx = _make_group_context()
+
+        result = await svc.save_message(
+            session_id="sess-1",
+            user_id="u@x.com",
+            message_type="user",
+            content="hi",
+            group_context=ctx,
+            message_id_override="client-msg-7",
+        )
+
+        assert result.id == "client-msg-7"
+        svc.session_repository.touch.assert_awaited_once_with("sess-1")
+
+    @pytest.mark.asyncio
+    async def test_save_message_touch_failure_does_not_break_save(self):
+        svc, repo = _build_service()
+        repo.create = AsyncMock(return_value=MagicMock())
+        svc.session_repository.touch = AsyncMock(side_effect=Exception("no session row"))
+        ctx = _make_group_context()
+
+        result = await svc.save_message(
+            session_id="sess-1", user_id="u", message_type="user",
+            content="hi", group_context=ctx,
+        )
+        assert result.content == "hi"
+
+    @pytest.mark.asyncio
+    async def test_delete_session_also_drops_named_row(self):
+        svc, repo = _build_service()
+        repo.delete_session = AsyncMock(return_value=False)  # no messages (empty session)
+        svc.session_repository.delete_by_id_and_group = AsyncMock(return_value=True)
+        ctx = _make_group_context()
+
+        assert await svc.delete_session("s1", group_context=ctx) is True
+        svc.session_repository.delete_by_id_and_group.assert_awaited_once_with(
+            "s1", ctx.group_ids
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_message_updates_fields(self):
+        svc, repo = _build_service()
+        row = _make_chat_history_row(content="old")
+        repo.get_by_id_and_group = AsyncMock(return_value=row)
+        svc.session = AsyncMock()
+        ctx = _make_group_context()
+
+        result = await svc.update_message(
+            "msg-1", group_context=ctx, content="new content",
+            generation_result={"k": "v"},
+        )
+
+        assert result is not None
+        assert row.content == "new content"
+        assert row.generation_result == {"k": "v"}
+
+    @pytest.mark.asyncio
+    async def test_update_message_not_found_returns_none(self):
+        svc, repo = _build_service()
+        repo.get_by_id_and_group = AsyncMock(return_value=None)
+        ctx = _make_group_context()
+
+        assert await svc.update_message("missing", group_context=ctx, content="x") is None

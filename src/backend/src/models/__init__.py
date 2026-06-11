@@ -26,5 +26,6 @@ from src.models.hitl_approval import HITLApproval, HITLWebhook, HITLApprovalStat
 from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 from src.models.chat_history import ChatHistory
+from src.models.chat_session import ChatSession
 from src.models.group_tool import GroupTool
 from src.models.ui_config import UIConfig
