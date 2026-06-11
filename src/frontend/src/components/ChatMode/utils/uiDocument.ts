@@ -275,6 +275,21 @@ export function inferSurfaceDeliverable(surface: UiSurface): string {
   return 'default';
 }
 
+/** True when every token the embedded theme defines equals that palette's —
+ *  i.e. the theme is a (possibly partial) copy of the palette rather than a
+ *  deliberate deviation. Color tokens compare case-insensitively. */
+function matchesPalette(theme: UiTheme, palette: UiTheme | null | undefined): boolean {
+  if (!palette) return false;
+  return (Object.keys(theme) as (keyof UiTheme)[]).every((key) => {
+    const own = theme[key];
+    const configured = palette[key];
+    if (typeof own === 'string' && typeof configured === 'string') {
+      return own.trim().toLowerCase() === configured.trim().toLowerCase();
+    }
+    return own === configured;
+  });
+}
+
 /**
  * Re-resolve a surface's theme from the workspace UI-Configurator palettes —
  * the source of truth. The agent is instructed to stamp the matching palette
@@ -282,6 +297,12 @@ export function inferSurfaceDeliverable(surface: UiSurface): string {
  * palette onto every surface (turning e.g. a themed deck white), so the
  * renderer must not trust the embedded theme when the configured palettes are
  * known. Resolving at render time also retroactively fixes persisted documents.
+ *
+ * EXCEPTION: an embedded theme that deviates from EVERY configured palette was
+ * changed on purpose — a refine like "make the background black" edits the
+ * embedded theme — and is kept as-is. The wrong-palette failure mode this
+ * function exists for is always a (possibly partial) COPY of a configured
+ * palette, so copies re-resolve and deviations survive.
  *
  * - `themes` unavailable (config disabled / fetch failed) → surface unchanged.
  * - Presentation with no own palette → theme cleared, so the built-in
@@ -294,6 +315,14 @@ export function applyConfiguredTheme(
   themes: WorkspaceThemes | null | undefined,
 ): UiSurface {
   if (!themes) return surface;
+  const embedded = surface.theme;
+  if (
+    embedded &&
+    Object.keys(embedded).length > 0 &&
+    !Object.values(themes).some((palette) => matchesPalette(embedded, palette))
+  ) {
+    return surface;
+  }
   const deliverable = inferSurfaceDeliverable(surface);
   if (deliverable === 'presentation') {
     return { ...surface, theme: themes.presentation };
