@@ -240,6 +240,107 @@ This table doubles as the WP6 estimation basis: rows 1–8 are the full scope of
 — and rows 5–7 presuppose the `engines/base/` ports exist (declared during WP4, first
 implemented by the CrewAI adapter).
 
+**Target folder structure — illustrated with LangChain as a second engine:**
+
+```
+src/backend/src/
+│
+├── api/                                  # FastAPI routers (unchanged)
+│
+├── schemas/
+│   ├── pipeline_contracts.py             # WP2: UCMVOutput, ReducedModelContext,
+│   └── …                                 #      VisualMappings, GenieSpaceConfig
+│
+├── services/                             # APPLICATION + DOMAIN services
+│   ├── execution_service.py              # picks engine via factory (unchanged role)
+│   ├── powerbi/                          # ◄ WP3: extracted from god-tools
+│   │   ├── semantic_model_service.py     #   (was fetcher_tool, 2,534 lines)
+│   │   ├── dax_generation_service.py     #   (was dax_tool, 2,345 lines)
+│   │   ├── metadata_reduction_service.py #   (was reducer_tool, 1,266 lines)
+│   │   ├── report_references_service.py
+│   │   └── analysis_service.py           #   (was analysis_tool, 3,560 lines)
+│   ├── uc_metrics/
+│   │   ├── metric_view_generation_service.py
+│   │   ├── metric_view_validation_service.py
+│   │   ├── genie_config_service.py
+│   │   └── visual_mapping_service.py
+│   ├── exporters/                        # ◄ moved out of engines/crewai
+│   └── memory_backends/                  # ◄ Databricks vector etc. (engine-free)
+│
+├── converters/                           # stays as-is (already the right shape)
+│   └── services/{mquery, powerbi, uc_metrics}/
+│
+├── core/                                 # INFRASTRUCTURE — zero business logic
+│   ├── llm_manager.py                    # model resolution, auth, providers
+│   ├── llm_port.py                       # ◄ §6.1: the injection seam
+│   ├── async_bridge.py                   # ◄ moved from engines/crewai/tools
+│   ├── unit_of_work.py                   # + absorbed ToolSessionProvider factories
+│   ├── security/                         # ◄ moved: scanner pipeline, detectors,
+│   │                                     #   LLM-judge + guardrail caching primitives
+│   ├── tooling/                          # ◄ §6.1: the generic tool contract
+│   │   ├── contract.py                   #   KasalTool, ToolContext protocols
+│   │   ├── registry.py                   #   ONE registry, all tools
+│   │   └── binder.py                     #   builds ToolContext (llm/db/identity)
+│   └── logger.py, telemetry, …
+│
+├── tools/                                # ◄ NEW: engine-independent tools
+│   ├── powerbi_fetcher_tool.py           #   each ≤ ~150 lines: schema + config
+│   ├── powerbi_dax_tool.py               #   merge + one service call — NO crewai,
+│   ├── metadata_reducer_tool.py          #   NO langchain imports anywhere here
+│   ├── ucmv_generator_tool.py
+│   ├── genie_config_tool.py
+│   ├── visual_mapper_tool.py
+│   └── … (35 total, registered in core/tooling/registry.py)
+│
+├── engines/
+│   ├── factory.py                        # engine_type → adapter ("the router")
+│   ├── base/                             # PORTS (interfaces only)
+│   │   ├── base_engine_service.py        #   exists today
+│   │   ├── memory_port.py                #   declared in WP4, used by all engines
+│   │   ├── guardrail_port.py
+│   │   ├── eventing_port.py
+│   │   └── hitl_port.py
+│   ├── common/                           # shared cross-engine glue (mcp_adapter…)
+│   │
+│   ├── crewai/                           # ADAPTER #1 (~20k lines, purified:
+│   │   ├── crewai_engine_service.py      #  every file here imports crewai)
+│   │   ├── config_adapter.py             #  Kasal config → Crew/Agent/Task
+│   │   ├── crew_preparation.py
+│   │   ├── execution_runner.py
+│   │   ├── flow/                         #  CrewAI Flow API driving (stays)
+│   │   ├── helpers/                      #  Agent/Task assembly (stays)
+│   │   ├── callbacks/                    #  CrewAI event hooks (scanning → core)
+│   │   ├── memory_wiring.py              #  implements base/memory_port
+│   │   ├── guardrail_wrappers.py         #  implements base/guardrail_port
+│   │   └── tool_adapter.py               #  to_crewai_tool(tool, binder) — ~30 lines,
+│   │                                     #  wraps ALL 35 tools automatically
+│   │
+│   └── langchain/                        # ADAPTER #2 — the ONLY new code for
+│       ├── langchain_engine_service.py   #  LangChain support (rows 1–8 of the
+│       ├── config_adapter.py             #  anatomy table, nothing else):
+│       ├── graph_runner.py               #  Kasal config → LangGraph state graph
+│       ├── callbacks.py                  #  LC callbacks → Kasal traces
+│       ├── memory_wiring.py              #  implements base/memory_port
+│       ├── guardrail_wrappers.py         #  implements base/guardrail_port
+│       └── tool_adapter.py               #  to_langchain_tool(tool, binder) — ~30
+│                                         #  lines → all 35 tools work instantly
+│
+├── repositories/  ·  models/  ·  db/     # unchanged
+```
+
+Reading notes:
+
+1. **`engines/langchain/` is the entire cost of adding LangChain** — the seven/eight files
+   implementing the anatomy-table rows. Not one tool, service, or schema changes elsewhere
+   (vs. today, where it would also require cloning the 42k-line `tools/custom/`).
+2. **`src/tools/` has no framework imports — the enforceable invariant:**
+   `grep -r "import crewai|import langchain" src/tools/` must return empty, forever. Each
+   engine's `tool_adapter.py` is the only place the two worlds touch.
+3. **`engines/base/` is where engines agree on vocabulary** (the ports). CrewAI implements
+   them first (WP4), any later engine second; factory + registry mean the application layer
+   never knows which engine runs. Choosing an engine becomes configuration, like choosing a
+   model today.
+
 ### WP5 — Small optimizations (S effort, opportunistic)
 
 - Short-TTL (60s) in-process cache for model-config + API-key resolution in
