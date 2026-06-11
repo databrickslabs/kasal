@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import GenieSpaceSelector from './GenieSpaceSelector';
 import { GenerationCompleteData } from '../../hooks/useGenerationStream';
+import { stripGenieTools } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
 
 /**
@@ -71,6 +72,21 @@ const GenieSpacePrompt: React.FC<GenieSpacePromptProps> = ({ data, messageId, on
             <path d="M8 5v14l11-7z" />
           </svg>
           {ran ? 'Running…' : selectedSpaceId ? 'Run crew' : 'Select a Genie space to run'}
+        </button>
+        {/* Skip: run WITHOUT Genie — the tool is stripped from the generated
+            crew so it doesn't run blind against an unconfigured space. */}
+        <button
+          type="button"
+          onClick={() => {
+            setRan(true);
+            persist({ ran: true });
+            onExecute?.(stripGenieTools(data));
+          }}
+          disabled={ran}
+          className="w-full rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Skip — run without Genie
         </button>
       </div>
     </div>
