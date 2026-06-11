@@ -441,7 +441,8 @@ const ChatWorkspace: React.FC = () => {
   }, [refreshLibrary]);
 
   // Populate the catalog library (rail) on mount. It's refreshed on workspace
-  // change (above) and after each save (handleSaveCrew / /save).
+  // change (above), after each chat save (handleSaveCrew / /save), and after
+  // agent-builder saves (SaveCrew calls useAppStore.getState().loadCatalog()).
   useEffect(() => {
     void refreshLibrary();
   }, [refreshLibrary]);
