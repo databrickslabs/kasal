@@ -224,3 +224,31 @@ tool wrappers. Acceptance: `engines/` never imported from `core/`, `services/`, 
 - WP2.3 changes tenant scoping of trace lookups from cross-tenant to group-scoped — verify no
   flow depends on reading another group's UCMV output (it should not; that was a latent
   isolation gap, not a feature).
+
+## 6. Outlook: engine pluggability (CrewAI → user-selectable agent provider)
+
+**The port already exists** — `engines/base/BaseEngineService` (ABC), `BaseToolRegistry`, and
+`engines/factory.py` dispatching on `engine_type == "crewai"` — but it has exactly one adapter,
+and the god-tools bypassed it. WP3/WP4 are what make a second adapter (LangChain/LangGraph, …)
+feasible:
+
+- **WP3 is ~80% of engine independence.** Today ~21k lines of PBI/UCMV domain logic live inside
+  `crewai.BaseTool` subclasses; a second engine would have to reimplement all of it. After WP3
+  the domain logic is engine-neutral (`services/`), and a new engine needs only thin per-tool
+  wrappers (e.g. LangChain `StructuredTool.from_function(service.execute)`).
+- **WP4's one-way import rule is the guarantee** that `engines/langchain/` can be added without
+  touching core/services/converters — and import-linter enforcement is what keeps the port from
+  rotting again.
+- **Workflow definitions are already engine-neutral** (nodes/edges + agents_yaml/tasks_yaml);
+  each engine's `config_adapter` interprets the same stored config.
+
+**Remaining gaps for a true second engine (future WP6, not next release):** explicit ports in
+`engines/base/` for memory backends, guardrails, callbacks/eventing, HITL gates, and trace
+emission — all currently CrewAI-shaped (`execution_callback`, `TaskOutput`, listener crews).
+Each needs a small interface with the CrewAI implementation as the first adapter.
+
+**Decision guidance:** a second engine is a permanent tax (feature parity, 2× test matrix,
+behavioral drift on identical flows). Build the *boundary* now (WP3/WP4 — wanted anyway), build
+the second *adapter* only on a concrete driver (CrewAI roadmap/licensing risk, customer
+requirement, engine-exclusive capability). The architectural value is optionality: when needed,
+a new engine is a bounded adapter project, not a rewrite.
