@@ -197,6 +197,27 @@ Move (imports only, no behavior change):
 tool wrappers. Acceptance: `engines/` never imported from `core/`, `services/`, `converters/`
 (one-way dependency, enforceable with import-linter).
 
+**Full triage map of `engines/crewai/` (~69k lines measured 2026-06-11).** Litmus test per
+file: *"would a second engine's adapter need to rewrite this?"* yes → stays; no → it moves.
+
+| Directory | Lines | Destination |
+|---|---|---|
+| `tools/` | 41,962 | split: domain → `services/` (WP3) · contract → generic tool layer · ~100-line adapters remain |
+| `flow/` | 7,804 | **stays** — drives CrewAI's Flow API (listener crews, injection) |
+| `exporters/` | 3,705 | → `services/` — pure domain logic, no CrewAI dependency |
+| `memory/` | 2,623 | backends → core/services (engine-agnostic); CrewAI memory wiring stays |
+| `helpers/` | 2,202 | **stays** — builds `crewai.Agent`/`Task` objects from config |
+| `guardrails/` | 1,796 | split: LLM-judge + caching → `core/`; CrewAI guardrail wrappers stay |
+| `callbacks/` | 1,735 | **stays** (CrewAI event API); embedded security scanning → `core/security` |
+| `security/` | 803 | → `core/security` — zero CrewAI in it |
+| `services/`, `config/`, root files | ~6,700 | **stays** — `CrewAIEngineService`, `config_adapter`, `crew_preparation`, `execution_runner` (the adapter's heart, implements `engines/base/BaseEngineService`) |
+
+Post-triage, `engines/crewai/` retains ~20k lines — "thin" means zero domain logic and zero
+infrastructure, not small in absolute terms; driving CrewAI properly is genuinely that much
+adapter work. A second engine re-implements only this responsibility set (likely less — much
+of `flow/` is CrewAI-specific workaround), and receives all tools via the registry for free.
+Ports (interfaces) live in `engines/base/`; shared cross-engine code in `engines/common/`.
+
 ### WP5 — Small optimizations (S effort, opportunistic)
 
 - Short-TTL (60s) in-process cache for model-config + API-key resolution in
