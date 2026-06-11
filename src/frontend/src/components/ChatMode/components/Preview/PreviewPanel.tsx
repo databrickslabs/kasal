@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { parseUiDocument, applyConfiguredTheme } from '../../utils/uiDocument';
 import { useWorkspaceThemes } from '../../hooks/useWorkspaceThemes';
+import { downloadSurfacePdf } from '../../utils/surfacePdf';
 import UiRenderer from './UiRenderer';
 
 // The preview pane renders structured A2UI documents ONLY — the UI document is
@@ -84,6 +85,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   const [refineValue, setRefineValue] = useState('');
   const asideRef = useRef<HTMLElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // TRUE browser full screen (hides the browser chrome / top menu) via the
   // Fullscreen API, kept in sync so an Esc / browser-driven exit also flips the
@@ -122,6 +124,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     const parsed = parseUiDocument(displayData);
     return parsed ? applyConfiguredTheme(parsed, workspaceThemes) : null;
   }, [displayData, workspaceThemes]);
+
+  // Download the rendered surface as a PDF file (no print dialog): decks land
+  // one slide per landscape page; other deliverables as one content-sized page.
+  const downloadPdf = async () => {
+    if (!uiSurface || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadSurfacePdf(uiSurface, content.title || 'kasal-app');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <aside
@@ -247,6 +261,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               Refine
             </button>
           )}
+          <button
+            onClick={downloadPdf}
+            disabled={downloading}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-40 disabled:cursor-wait"
+            style={{ color: 'var(--text-muted)' }}
+            title="Download as PDF"
+            aria-label="Download as PDF"
+          >
+            <svg
+              className={`w-4 h-4 ${downloading ? 'animate-pulse' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          </button>
           <button
             onClick={enterFullscreen}
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
