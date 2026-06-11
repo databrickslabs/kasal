@@ -1791,10 +1791,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               const deduplicatedMessages = messages;
 
               const filteredMessages = deduplicatedMessages.filter(message => {
-                // Filter out execution start and completion messages
+                // Filter out execution start/pending/completion messages — the
+                // run-activity container (below) is the live status indicator.
                 if (message.type === 'execution' && (
                   message.content.includes('🚀 Started execution:') ||
-                  message.content.includes('✅ Execution completed successfully')
+                  message.content.includes('✅ Execution completed successfully') ||
+                  message.content.includes('⏳ Preparing to execute')
                 )) {
                   return false;
                 }
@@ -1823,27 +1825,57 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 groupedMessages.push(currentTraceGroup);
               }
 
-              return groupedMessages.map((item, index) => {
-                if (Array.isArray(item)) {
-                  // It's a group of trace messages
-                  // Use first and last message IDs plus index for uniqueness
-                  const groupKey = `trace-group-${item[0].id}-${item[item.length - 1].id}-${index}`;
-                  return (
-                    <React.Fragment key={groupKey}>
-                      <GroupedTraceMessages messages={item} onOpenLogs={onOpenLogs} />
-                      {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
-                    </React.Fragment>
-                  );
-                } else {
-                  // It's a regular message
-                  return (
-                    <React.Fragment key={item.id}>
-                      <ChatMessageItem message={item} onOpenLogs={onOpenLogs} />
-                      {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
-                    </React.Fragment>
-                  );
-                }
-              });
+              // Live status: while a job executes its trace group shows
+              // "Working…" with a pulsing dot (run-activity container). Before
+              // any trace arrives — including the gap between pressing run and
+              // the jobCreated event — an empty live container stands in.
+              const hasLiveTraceGroup = Boolean(executingJobId) && groupedMessages.some(
+                item => Array.isArray(item) && item.some(m => m.jobId === executingJobId)
+              );
+              const lastRawMessage = deduplicatedMessages[deduplicatedMessages.length - 1];
+              const awaitingJobStart = lastRawMessage?.type === 'execution' &&
+                lastRawMessage.content.includes('⏳ Preparing to execute');
+              const showLivePlaceholder = (Boolean(executingJobId) && !hasLiveTraceGroup) ||
+                (awaitingJobStart && !executingJobId);
+
+              return (
+                <>
+                  {groupedMessages.map((item, index) => {
+                    // Skip the divider next to a run-activity card — it is a
+                    // self-contained bordered container, like in Chat mode.
+                    const nextIsTraceGroup = Array.isArray(groupedMessages[index + 1]);
+                    if (Array.isArray(item)) {
+                      // It's a group of trace messages. Key on the FIRST id
+                      // only — including the last id would remount (and
+                      // re-collapse) the container on every streamed trace.
+                      const groupKey = `trace-group-${item[0].id}-${index}`;
+                      const groupRunning = Boolean(executingJobId) &&
+                        item.some(m => m.jobId === executingJobId);
+                      return (
+                        <GroupedTraceMessages
+                          key={groupKey}
+                          messages={item}
+                          running={groupRunning}
+                          onOpenLogs={onOpenLogs}
+                        />
+                      );
+                    } else {
+                      // It's a regular message
+                      return (
+                        <React.Fragment key={item.id}>
+                          <ChatMessageItem message={item} onOpenLogs={onOpenLogs} />
+                          {index < groupedMessages.length - 1 && !nextIsTraceGroup && (
+                            <Divider component="li" sx={{ ml: 0 }} />
+                          )}
+                        </React.Fragment>
+                      );
+                    }
+                  })}
+                  {showLivePlaceholder && (
+                    <GroupedTraceMessages key="run-activity-live" messages={[]} running onOpenLogs={onOpenLogs} />
+                  )}
+                </>
+              );
             })()}
           </List>
         )}
