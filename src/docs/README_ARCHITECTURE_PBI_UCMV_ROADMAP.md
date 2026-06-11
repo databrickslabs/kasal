@@ -410,6 +410,35 @@ Reading notes:
 - **The headless right-hand path is the payoff of tools living below the engines:** the same
   tool is callable from a plain REST endpoint or MCP without any agent framework.
 
+### 6.3 Known trade-offs of the target architecture (accept deliberately)
+
+1. **Indirection tax (permanent):** features touch 3–4 files (schema, service, tool adapter,
+   registration) instead of one; deeper stack traces; harder onboarding. The trade is
+   write-time convenience for change-time safety — correct for a multi-tenant product, but a
+   real daily cost.
+2. **Engine abstraction designed at N=1:** engines are not truly interchangeable (tool
+   descriptions, streaming, state, HITL semantics differ). Keep the contract minimal until a
+   second engine exists; expect to re-cut the seam then. Do NOT generalize speculatively.
+3. **`LLMPort` is a deliberate ceiling:** completion-only. Tools wanting streaming/native
+   tool-calling/structured output must extend LLMManager, not the port — defend this rule or
+   the port becomes a litellm re-implementation.
+4. **`ToolContext` god-object risk:** DI contexts accrete members. Review rule: every new
+   context member requires written justification.
+5. **Boundary serialization cost:** validating/round-tripping large payloads (UCMV output is
+   ~340 KB) on every hop is measurable. Validate at edges only; pass objects, not JSON
+   strings, within a process.
+6. **Golden-test decay path:** LLM nondeterminism → flaky parity diffs → rubber-stamped
+   baseline refreshes → guard becomes theater. Compare with tolerances (set overlap, not
+   exact lists); every baseline refresh is a reviewed decision.
+7. **The architecture rotted once already:** `engines/base/` + factory existed and the
+   god-tools grew around it. The diagram is not the deliverable — the **CI enforcement**
+   (import-linter one-way rule, ≤500-line file check) is. Without it, this document gets
+   rewritten in two years.
+
+Most of the value (testability, headless/MCP, single-fix-single-place, structural immunity to
+context-propagation bugs) is captured even if a second engine never ships; the generality is
+a bonus, not the justification.
+
 ---
 
 ## 7. Implementation sequence & effort estimate
