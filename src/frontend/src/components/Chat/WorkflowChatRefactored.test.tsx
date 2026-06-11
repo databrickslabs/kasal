@@ -149,16 +149,21 @@ vi.mock('./hooks/useChatSession', () => ({
   }),
 }));
 
-vi.mock('./hooks/useExecutionMonitoring', () => ({
-  useExecutionMonitoring: () => ({
-    executingJobId: null,
-    setExecutingJobId: vi.fn(),
-    lastExecutionJobId: null,
-    setLastExecutionJobId: vi.fn(),
-    executionStartTime: null,
-    markPendingExecution: vi.fn(),
-  }),
-}));
+vi.mock('./hooks/useExecutionMonitoring', () => {
+  // Mutable handle so tests can simulate a running execution.
+  const execState: { executingJobId: string | null } = { executingJobId: null };
+  return {
+    useExecutionMonitoring: () => ({
+      executingJobId: execState.executingJobId,
+      setExecutingJobId: vi.fn(),
+      lastExecutionJobId: null,
+      setLastExecutionJobId: vi.fn(),
+      executionStartTime: null,
+      markPendingExecution: vi.fn(),
+    }),
+    __execState: execState,
+  };
+});
 
 vi.mock('./components/ChatMessageItem', () => ({
   ChatMessageItem: ({ message }: { message: { content: string } }) => (
@@ -167,8 +172,8 @@ vi.mock('./components/ChatMessageItem', () => ({
 }));
 
 vi.mock('./components/GroupedTraceMessages', () => ({
-  GroupedTraceMessages: ({ messages }: { messages: { id: string }[] }) => (
-    <div data-testid="grouped-trace-messages">
+  GroupedTraceMessages: ({ messages, running }: { messages: { id: string }[]; running?: boolean }) => (
+    <div data-testid="grouped-trace-messages" data-running={String(Boolean(running))}>
       {messages.length} trace messages
     </div>
   ),
@@ -1182,5 +1187,117 @@ describe('WorkflowChat - model display name mapping', () => {
   it('should preserve gpt-5-1-codex-max precedence over gpt-5-1', () => {
     expect(getDisplayName('databricks-gpt-5-1-codex-max')).toBe('GPT-5.1 Codex Max');
     expect(getDisplayName('databricks-gpt-5-1-codex-max')).not.toBe('GPT-5.1');
+  });
+});
+
+describe('Run activity rendering (trace groups + live placeholder)', () => {
+  const activityProps = {
+    onNodesGenerated: vi.fn(),
+    onLoadingStateChange: vi.fn(),
+    selectedModel: 'test-model',
+    selectedTools: [],
+    isVisible: true,
+    setSelectedModel: vi.fn(),
+    nodes: [] as Node[],
+    edges: [] as Edge[],
+    onExecuteCrew: vi.fn(),
+    onToggleCollapse: vi.fn(),
+    chatSessionId: 'test-session-123',
+    onOpenLogs: vi.fn(),
+  };
+
+  const getStore = async () =>
+    (await import('../../store/chatMessagesStore')) as unknown as {
+      __storeState: { messagesBySession: Record<string, unknown[]> };
+    };
+  const getExecState = async () =>
+    (await import('./hooks/useExecutionMonitoring')) as unknown as {
+      __execState: { executingJobId: string | null };
+    };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    (await getStore()).__storeState.messagesBySession = {};
+    (await getExecState()).__execState.executingJobId = null;
+  });
+
+  it('marks the trace group as running while its job executes', async () => {
+    (await getExecState()).__execState.executingJobId = 'job-1';
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 'u1', type: 'user', content: 'run crew', timestamp: new Date() },
+      { id: 't1', type: 'trace', content: 'step one', timestamp: new Date(), jobId: 'job-1' },
+      { id: 't2', type: 'trace', content: 'step two', timestamp: new Date(), jobId: 'job-1' },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    const groups = screen.getAllByTestId('grouped-trace-messages');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveAttribute('data-running', 'true');
+    expect(groups[0]).toHaveTextContent('2 trace messages');
+  });
+
+  it('shows the trace group as done once execution ends', async () => {
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 't1', type: 'trace', content: 'step one', timestamp: new Date(), jobId: 'job-1' },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    expect(screen.getByTestId('grouped-trace-messages')).toHaveAttribute('data-running', 'false');
+  });
+
+  it('replaces the "Preparing to execute" bubble with a live activity placeholder', async () => {
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 'exec-pending-1', type: 'execution', content: '⏳ Preparing to execute crew...', timestamp: new Date() },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    expect(screen.queryByText(/Preparing to execute/)).not.toBeInTheDocument();
+    const group = screen.getByTestId('grouped-trace-messages');
+    expect(group).toHaveAttribute('data-running', 'true');
+    expect(group).toHaveTextContent('0 trace messages');
+  });
+
+  it('shows an empty live placeholder while executing before any trace arrives', async () => {
+    (await getExecState()).__execState.executingJobId = 'job-1';
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 'u1', type: 'user', content: 'run crew', timestamp: new Date() },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    const group = screen.getByTestId('grouped-trace-messages');
+    expect(group).toHaveAttribute('data-running', 'true');
+    expect(group).toHaveTextContent('0 trace messages');
+  });
+
+  it('does not add an extra placeholder when the executing job already has traces', async () => {
+    (await getExecState()).__execState.executingJobId = 'job-1';
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 't1', type: 'trace', content: 'step', timestamp: new Date(), jobId: 'job-1' },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    expect(screen.getAllByTestId('grouped-trace-messages')).toHaveLength(1);
+  });
+
+  it('still filters execution start/complete noise messages', async () => {
+    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 'e1', type: 'execution', content: '🚀 Started execution: foo', timestamp: new Date() },
+      { id: 'e2', type: 'execution', content: '✅ Execution completed successfully', timestamp: new Date() },
+      { id: 'a1', type: 'assistant', content: 'All done', timestamp: new Date() },
+    ];
+
+    render(<WorkflowChat {...activityProps} />);
+
+    expect(screen.queryByText(/Started execution/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/completed successfully/)).not.toBeInTheDocument();
+    expect(screen.getByText('All done')).toBeInTheDocument();
   });
 });
