@@ -10,9 +10,18 @@ vi.mock('../../../../api/UIConfigService', () => ({
 }));
 const getConfigMock = vi.mocked(UIConfigService.getConfig);
 
+// The PDF export itself is exercised in surfacePdf.test.tsx — here we only
+// verify the panel wires the themed surface + title into it.
+const downloadSurfacePdfMock = vi.fn();
+vi.mock('../../utils/surfacePdf', () => ({
+  downloadSurfacePdf: (...args: unknown[]) => downloadSurfacePdfMock(...args),
+}));
+
 beforeEach(() => {
   getConfigMock.mockReset();
   getConfigMock.mockResolvedValue({ enabled: false, catalog_type: 'basic' } as never);
+  downloadSurfacePdfMock.mockReset();
+  downloadSurfacePdfMock.mockResolvedValue(undefined);
 });
 
 // A minimal A2UI document — the ONLY previewable content kind.
@@ -401,5 +410,50 @@ describe('PreviewPanel — full screen', () => {
     // no fullscreenchange fired → bar stays, no unhandled rejection
     expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
     expect(screen.getByText('App')).toBeInTheDocument();
+  });
+});
+
+describe('PreviewPanel — Download as PDF', () => {
+  it('downloads the THEMED surface as a PDF using the preview title', async () => {
+    renderPanel({ ...uiContent, title: 'Oil Report' });
+
+    const btn = screen.getByLabelText('Download as PDF');
+    // Icon-only control — no "PDF" text next to the arrow.
+    expect(btn.textContent).toBe('');
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1));
+    const [surface, title] = downloadSurfacePdfMock.mock.calls[0];
+    expect(title).toBe('Oil Report');
+    expect((surface as { components: Record<string, unknown> }).components.root).toBeDefined();
+  });
+
+  it('falls back to a default filename when the preview has no title', async () => {
+    renderPanel(uiContent);
+    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalled());
+    expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('kasal-app');
+  });
+
+  it('does nothing when the stored data is not a parseable A2UI document', () => {
+    renderPanel({ type: 'ui', data: 'not a ui document at all' });
+    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    expect(downloadSurfacePdfMock).not.toHaveBeenCalled();
+  });
+
+  it('disables the button while the export is in flight and re-enables after', async () => {
+    let release: () => void = () => undefined;
+    downloadSurfacePdfMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { release = resolve; }),
+    );
+    renderPanel(uiContent);
+    const btn = screen.getByLabelText('Download as PDF');
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn).toBeDisabled());
+    // a second click while exporting is ignored
+    fireEvent.click(btn);
+    expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1);
+    act(() => release());
+    await waitFor(() => expect(btn).not.toBeDisabled());
   });
 });
