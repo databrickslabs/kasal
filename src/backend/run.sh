@@ -261,7 +261,48 @@ if [ "$SHOW_CONFIG" = true ]; then
     print_config
 fi
 
+# ---------------------------------------------------------------------------
+# Clean up stale Kasal processes from previous runs.
+# A plain port-8000 kill misses three things that survive restarts:
+#   - the uvicorn --reload PARENT (not bound to the port; respawns workers)
+#   - orphaned crew/flow execution subprocesses (multiprocessing spawn_main)
+#   - their multiprocessing resource_tracker helpers
+# Orphans keep logging into crew.log and fail noisily mid-LLM-call
+# ("cannot schedule new futures after shutdown", event pairing warnings).
+# Scoped by process working directory so we never touch other projects.
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+STALE_PATTERNS=(
+    "uvicorn src.main:app"
+    "multiprocessing.spawn import spawn_main"
+    "multiprocessing.resource_tracker"
+)
+
+kill_stale_kasal() {
+    local signal="$1" killed=0 pid cwd
+    for pattern in "${STALE_PATTERNS[@]}"; do
+        for pid in $(pgrep -f "$pattern" 2>/dev/null); do
+            [ "$pid" = "$$" ] && continue
+            cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+            case "$cwd" in
+                "$SCRIPT_DIR"*)
+                    kill "$signal" "$pid" 2>/dev/null && killed=$((killed+1))
+                    ;;
+            esac
+        done
+    done
+    echo "$killed"
+}
+
+KILLED=$(kill_stale_kasal -TERM)
+if [ "$KILLED" -gt 0 ]; then
+    echo -e "${YELLOW}Killed $KILLED stale Kasal process(es) from a previous run${NC}"
+    sleep 1
+    kill_stale_kasal -9 >/dev/null  # escalate for anything that ignored SIGTERM
+fi
+
 # Check if port 8000 is already in use and kill any process using it
+# (final guard — catches a server started from another checkout/venv)
 PORT_PID=$(lsof -ti:8000 2>/dev/null)
 if [ -n "$PORT_PID" ]; then
     echo -e "${YELLOW}Port 8000 is already in use (PID: $PORT_PID). Killing existing process...${NC}"
@@ -278,9 +319,13 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
-# Sync dependencies with uv (best-effort — skips gracefully if offline)
+# Sync dependencies with uv (best-effort — skips gracefully if offline).
+# --frozen is REQUIRED: a plain `uv sync` re-resolves against the machine's
+# configured index (~/.config/uv/uv.toml points at the internal pypi proxy)
+# and rewrites uv.lock with proxy URLs that must never land in the public
+# repo. --frozen installs exactly what the committed lock says.
 echo -e "${BLUE}Syncing dependencies...${NC}"
-uv sync --quiet 2>/dev/null || echo -e "${YELLOW}Dependency sync skipped (offline or up to date)${NC}"
+uv sync --frozen --quiet 2>/dev/null || echo -e "${YELLOW}Dependency sync skipped (offline or up to date)${NC}"
 
 echo -e "${GREEN}Starting Kasal backend server...${NC}"
 echo -e "${BLUE}Logs will be written to ./logs/${NC}"
