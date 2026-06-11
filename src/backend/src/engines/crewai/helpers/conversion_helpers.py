@@ -43,7 +43,7 @@ def extract_crew_yaml_data(agents_yaml: Dict[str, Any], tasks_yaml: Dict[str, An
             for idx, source in enumerate(knowledge_sources):
                 logger.info(f"[extract_crew_yaml_data] Agent {agent_id} knowledge_source[{idx}]: {source}")
         else:
-            logger.warning(f"[extract_crew_yaml_data] Agent {agent_id} has NO knowledge_sources field")
+            logger.debug(f"[extract_crew_yaml_data] Agent {agent_id} has NO knowledge_sources field")
         
         agents_data.append(agent_data)
     

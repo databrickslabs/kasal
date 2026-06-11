@@ -930,3 +930,141 @@ class TestResponsesCache:
         # Cache failure must never break the call.
         assert out is resp
         handler.client.responses.create.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Cache-hit token accounting (regression: cached replays were re-counted into
+# the crew's total_tokens aggregate, inflating it by ~ the cache hit rate)
+# ---------------------------------------------------------------------------
+
+class TestCacheHitTokenAccounting:
+    def test_flag_false_on_miss_true_on_hit(self, handler, tmp_path):
+        import litellm
+        from openai.types.responses import Response
+
+        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
+        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        resp = MagicMock()
+        resp.model_dump.return_value = {"stored": True}
+        handler.client.responses.create.reset_mock()
+        handler.client.responses.create.return_value = resp
+
+        with patch.object(litellm, "cache", cache), patch.object(
+            Response, "construct", return_value=MagicMock()
+        ):
+            handler._cached_responses_create(params)  # miss
+            assert handler._last_response_from_cache is False
+            handler._cached_responses_create(params)  # hit
+            assert handler._last_response_from_cache is True
+            # A subsequent miss must reset the flag.
+            handler._cached_responses_create(
+                {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "other"}]}
+            )
+            assert handler._last_response_from_cache is False
+
+    def test_handle_responses_skips_tracking_on_cache_hit(self, handler, make_response):
+        resp = make_response(output_text="cached answer")
+        with patch.object(handler, "_cached_responses_create", return_value=resp), \
+             patch.object(handler, "_track_token_usage_internal") as mock_track, \
+             patch.object(handler, "_extract_responses_token_usage", return_value={"total_tokens": 123}), \
+             patch.object(handler, "_emit_call_completed_event"), \
+             patch.object(handler, "_log_response"):
+            handler._last_response_from_cache = True
+            handler._handle_responses({"model": "m", "input": []})
+
+        mock_track.assert_not_called()
+
+    def test_handle_responses_tracks_usage_on_live_response(self, handler, make_response):
+        resp = make_response(output_text="live answer")
+        with patch.object(handler, "_cached_responses_create", return_value=resp), \
+             patch.object(handler, "_track_token_usage_internal") as mock_track, \
+             patch.object(handler, "_extract_responses_token_usage", return_value={"total_tokens": 123}), \
+             patch.object(handler, "_emit_call_completed_event"), \
+             patch.object(handler, "_log_response"):
+            handler._last_response_from_cache = False
+            handler._handle_responses({"model": "m", "input": []})
+
+        mock_track.assert_called_once_with({"total_tokens": 123})
+
+
+# ---------------------------------------------------------------------------
+# Per-call usage emission (regression: the codex path bypasses litellm, so
+# without usage on LLMCallCompletedEvent it recorded zero token usage anywhere)
+# ---------------------------------------------------------------------------
+
+class TestUsageEmission:
+    def _run_handle(self, handler, make_response, from_cache):
+        resp = make_response(output_text="answer")
+        with patch.object(handler, "_cached_responses_create", return_value=resp), \
+             patch.object(handler, "_track_token_usage_internal"), \
+             patch.object(
+                 handler, "_extract_responses_token_usage",
+                 return_value={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
+             ), \
+             patch.object(handler, "_emit_call_completed_event") as mock_emit, \
+             patch.object(handler, "_log_response"):
+            handler._last_response_from_cache = from_cache
+            handler._handle_responses({"model": "m", "input": []})
+        return mock_emit
+
+    def test_live_response_emits_usage(self, handler, make_response):
+        mock_emit = self._run_handle(handler, make_response, from_cache=False)
+        assert mock_emit.call_args.kwargs["usage"] == {
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+        }
+
+    def test_cache_hit_emits_no_usage(self, handler, make_response):
+        mock_emit = self._run_handle(handler, make_response, from_cache=True)
+        assert mock_emit.call_args.kwargs["usage"] is None
+
+
+# ---------------------------------------------------------------------------
+# Output budget cap (LLM-018): model_configs carries the model CAPABILITY
+# (128k output tokens) which used to ship on every request — ~30x the largest
+# observed response and unbounded exposure to runaway generations.
+# ---------------------------------------------------------------------------
+
+class TestMaxOutputTokensCap:
+    def _params(self, handler):
+        return handler._prepare_responses_params(
+            messages=[{"role": "user", "content": "hi"}]
+        )
+
+    def test_capability_value_is_capped(self, monkeypatch):
+        monkeypatch.delenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", raising=False)
+        h = DatabricksCodexCompletion(
+            model="m", api_key="k", base_url="https://example.com", max_tokens=128000
+        )
+        assert self._params(h)["max_output_tokens"] == 16000
+
+    def test_smaller_explicit_budget_is_respected(self, monkeypatch):
+        monkeypatch.delenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", raising=False)
+        h = DatabricksCodexCompletion(
+            model="m", api_key="k", base_url="https://example.com", max_tokens=4000
+        )
+        assert self._params(h)["max_output_tokens"] == 4000
+
+    def test_env_override_raises_cap(self, monkeypatch):
+        monkeypatch.setenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", "64000")
+        h = DatabricksCodexCompletion(
+            model="m", api_key="k", base_url="https://example.com", max_tokens=128000
+        )
+        assert self._params(h)["max_output_tokens"] == 64000
+
+
+class TestSchemaLoggingOnce:
+    """Regression (LLM-031): full tool schemas were re-logged at INFO on every
+    request iteration (incl. cache hits); now once per handler instance."""
+
+    def test_schemas_logged_only_on_first_call(self, handler):
+        params = {"model": "m", "input": [], "tools": [{"name": "genie_tool", "parameters": {}}]}
+        with patch.object(_mod, "logger") as mock_logger:
+            handler._log_request_params(params)
+            handler._log_request_params(params)
+            handler._log_request_params(params)
+
+        schema_lines = [
+            c for c in mock_logger.info.call_args_list
+            if "Tool[%d] schema" in str(c.args[0])
+        ]
+        assert len(schema_lines) == 1  # once, not three times

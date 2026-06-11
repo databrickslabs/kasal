@@ -126,19 +126,22 @@ class TestCreateAgentBasic:
         assert "knowledge_sources" not in call_kwargs
 
     @pytest.mark.asyncio
-    async def test_security_preamble_in_system_prompt(self):
+    async def test_security_preamble_in_backstory(self):
+        # Preamble lives in backstory (embedded by CrewAI's default system
+        # prompt); 'system_prompt' is not a CrewAI field and must not be passed.
         agent, mock_cls, _ = await _make_agent()
         call_kwargs = mock_cls.call_args[1]
-        assert "SECURITY INSTRUCTION" in call_kwargs.get("system_prompt", "")
+        assert "system_prompt" not in call_kwargs
+        assert "SECURITY INSTRUCTION" in call_kwargs.get("backstory", "")
 
     @pytest.mark.asyncio
     async def test_custom_system_template_prepended_with_preamble(self):
         cfg = _base_config(system_template="You are a custom agent.")
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        prompt = call_kwargs.get("system_prompt", "")
-        assert "SECURITY INSTRUCTION" in prompt
-        assert "You are a custom agent." in prompt
+        template = call_kwargs.get("system_template", "")
+        assert "SECURITY INSTRUCTION" in template
+        assert "You are a custom agent." in template
 
     @pytest.mark.asyncio
     async def test_allow_code_execution_hardcoded_false(self):
@@ -577,17 +580,21 @@ class TestCreateAgentAdditionalParams:
 
     @pytest.mark.asyncio
     async def test_prompt_template_param(self):
+        # prompt_template is the real CrewAI field name (task_prompt was
+        # silently dropped by Pydantic).
         cfg = _base_config(prompt_template="Custom prompt {task}")
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("task_prompt") == "Custom prompt {task}"
+        assert call_kwargs.get("prompt_template") == "Custom prompt {task}"
 
     @pytest.mark.asyncio
     async def test_response_template_param(self):
+        # response_template is the real CrewAI field name (format_prompt was
+        # silently dropped by Pydantic).
         cfg = _base_config(response_template="Response: {response}")
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("format_prompt") == "Response: {response}"
+        assert call_kwargs.get("response_template") == "Response: {response}"
 
     @pytest.mark.asyncio
     async def test_genie_tool_debug_logging(self):

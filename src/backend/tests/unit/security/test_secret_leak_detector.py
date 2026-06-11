@@ -1,8 +1,7 @@
 """
 Unit tests for src.engines.crewai.security.secret_leak_detector.
 """
-import pytest
-from src.engines.crewai.security.secret_leak_detector import detect, SecretLeakResult
+from src.engines.crewai.security.secret_leak_detector import detect, redact, SecretLeakResult
 
 
 class TestSecretLeakDetectorCleanInputs:
@@ -206,3 +205,47 @@ class TestReturnType:
     def test_not_detected_has_empty_secret_types(self):
         result = detect("nothing suspicious here")
         assert result.secret_types == []
+
+
+class TestRedact:
+    """redact() masks matched secret tokens while preserving surrounding text."""
+
+    def test_empty_string_returned_unchanged(self):
+        assert redact("") == ""
+
+    def test_none_value_returned_unchanged(self):
+        # Falsy guard: redact(None) returns the input as-is, never raises
+        assert redact(None) is None
+
+    def test_clean_text_unchanged(self):
+        text = "The Q4 revenue was $1.2 million, up 10% year-over-year."
+        assert redact(text) == text
+
+    def test_databricks_pat_is_masked(self):
+        pat = "dapi" + "a" * 32
+        out = redact(f"Here is the token: {pat} — keep it safe")
+        assert pat not in out
+        assert "***REDACTED:databricks_pat***" in out
+        # Surrounding context is preserved
+        assert out.startswith("Here is the token: ")
+        assert out.endswith(" — keep it safe")
+
+    def test_redacted_output_has_no_residual_secret(self):
+        """The redacted text must itself be clean when re-scanned."""
+        pat = "dapi" + "a" * 32
+        out = redact(f"token={pat}")
+        assert detect(out).detected is False
+
+    def test_masks_multiple_secret_types(self):
+        text = "dapi" + "b" * 32 + " and AKIAIOSFODNN7EXAMPLE"  # gitleaks:allow
+        out = redact(text)
+        assert "dapi" + "b" * 32 not in out
+        assert "AKIAIOSFODNN7EXAMPLE" not in out  # gitleaks:allow
+        assert "***REDACTED:databricks_pat***" in out
+        assert "***REDACTED:aws_access_key***" in out
+
+    def test_idempotent(self):
+        pat = "dapi" + "c" * 32
+        once = redact(f"x {pat} y")
+        twice = redact(once)
+        assert once == twice

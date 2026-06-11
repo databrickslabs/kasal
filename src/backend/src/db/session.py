@@ -508,6 +508,59 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     except Exception as e:
         logger.warning(f"Could not ensure knowledge_embeddings table: {e}")
 
+    # Self-heal: knowledge_embeddings.created_by (per-user isolation of
+    # uploaded knowledge). checkfirst-create above never ALTERs a table that
+    # already exists, so pre-existing DBs need the column added here.
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(knowledge_embeddings)")
+            cols = {row[1] for row in res.fetchall()}
+            if cols and "created_by" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE knowledge_embeddings ADD COLUMN created_by VARCHAR(255)"
+                )
+                logger.info("Added knowledge_embeddings.created_by column (SQLite self-heal)")
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE knowledge_embeddings ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"
+            )
+        logger.info("Ensured knowledge_embeddings.created_by column")
+    except Exception as e:
+        logger.warning(f"Could not ensure knowledge_embeddings.created_by column: {e}")
+
+
+async def _ensure_chat_sessions_table(conn) -> None:
+    """Idempotently create the chat_sessions table (named chat-mode sessions).
+
+    create_all is skipped on existing DBs, so DBs created before this table
+    was added need it created explicitly here.
+    """
+    try:
+        from src.models.chat_session import ChatSession
+
+        def _create_chat_sessions_table(sync_conn):
+            ChatSession.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_chat_sessions_table)
+        logger.info("Ensured chat_sessions table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure chat_sessions table: {e}")
+
+
+async def _ensure_crew_feedback_table(conn) -> None:
+    """Idempotently create the crew_feedback table (thumbs feedback on
+    cataloged crews). create_all is skipped on existing DBs."""
+    try:
+        from src.models.crew_feedback import CrewFeedback
+
+        def _create_crew_feedback_table(sync_conn):
+            CrewFeedback.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_crew_feedback_table)
+        logger.info("Ensured crew_feedback table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure crew_feedback table: {e}")
+
 
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
@@ -718,6 +771,8 @@ async def init_db() -> None:
                 async with ensure_engine.begin() as conn:
                     await _ensure_documentation_embeddings_columns(conn)
                     await _ensure_databricks_config_columns(conn)
+                    await _ensure_chat_sessions_table(conn)
+                    await _ensure_crew_feedback_table(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

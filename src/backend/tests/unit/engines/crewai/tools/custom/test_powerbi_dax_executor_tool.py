@@ -52,8 +52,6 @@ def _mock_http_post(status=200, body=None):
 class TestPowerBIDaxExecutorSchema:
     def test_all_optional_fields(self):
         schema = PowerBIDaxExecutorSchema()
-        assert schema.workspace_id is None
-        assert schema.dataset_id is None
         assert schema.dax_query is None
         assert schema.output_format == "markdown"
 
@@ -61,29 +59,15 @@ class TestPowerBIDaxExecutorSchema:
         schema = PowerBIDaxExecutorSchema(dax_query=DAX_QUERY)
         assert schema.output_format == "markdown"
 
-    def test_service_principal_fields(self):
-        schema = PowerBIDaxExecutorSchema(
-            workspace_id=WORKSPACE_ID,
-            dataset_id=DATASET_ID,
-            dax_query=DAX_QUERY,
-            auth_method="service_principal",
-            tenant_id="tenant-123",
-            client_id="client-123",
-            client_secret="secret-abc",
-        )
-        assert schema.auth_method == "service_principal"
-        assert schema.client_secret == "secret-abc"
-
-    def test_user_oauth_fields(self):
-        schema = PowerBIDaxExecutorSchema(
-            workspace_id=WORKSPACE_ID,
-            dataset_id=DATASET_ID,
-            dax_query=DAX_QUERY,
-            auth_method="user_oauth",
-            access_token="eyJhbGci...",
-        )
-        assert schema.auth_method == "user_oauth"
-        assert schema.access_token == "eyJhbGci..."
+    def test_no_auth_or_plumbing_fields_exposed(self):
+        # Connection/auth plumbing is injected via tool_configs at construction
+        # time and must never be LLM-fillable schema fields.
+        forbidden = {
+            "workspace_id", "dataset_id", "auth_method", "tenant_id",
+            "client_id", "client_secret", "username", "password",
+            "access_token",
+        }
+        assert not forbidden & set(PowerBIDaxExecutorSchema.model_fields)
 
     def test_output_format_json(self):
         schema = PowerBIDaxExecutorSchema(output_format="json")

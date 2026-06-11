@@ -9,10 +9,14 @@ from src.models.chat_history import ChatHistory
 from src.schemas.chat_history import (
     ChatHistoryListResponse,
     ChatHistoryResponse,
+    ChatSessionCreateRequest,
     ChatSessionListResponse,
+    ChatSessionRenameRequest,
     GetSessionRequest,
     GetUserSessionsRequest,
+    NamedChatSessionResponse,
     SaveMessageRequest,
+    UpdateMessageRequest,
 )
 from src.services.chat_history_service import ChatHistoryService
 
@@ -78,6 +82,7 @@ async def save_chat_message(
         confidence=message_request.confidence,
         generation_result=message_request.generation_result,
         group_context=group_context,
+        message_id_override=message_request.id,
     )
 
 
@@ -238,3 +243,89 @@ async def create_new_chat_session(
     session_id = service.generate_session_id()
 
     return {"session_id": session_id}
+
+# ---------------------------------------------------------------------------
+# Named chat sessions (chat-mode workspace). Server-side replacement for the
+# browser IndexedDB session store: sessions live in SQLite locally and in
+# Lakebase when a Lakebase backend is active (smart-routed session).
+# ---------------------------------------------------------------------------
+
+@router.post("/sessions", response_model=NamedChatSessionResponse, status_code=status.HTTP_201_CREATED)
+async def create_named_session(
+    request: ChatSessionCreateRequest,
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Create a named chat session for the current user and workspace."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    user_id = group_context.group_email or "unknown_user"
+    record = await service.create_named_session(
+        user_id=user_id,
+        title=request.title,
+        session_id=request.id,
+        group_context=group_context,
+    )
+    return NamedChatSessionResponse.model_validate(record)
+
+
+@router.get("/sessions/named", response_model=List[NamedChatSessionResponse])
+async def list_named_sessions(
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+    page: int = Query(0, ge=0, description="Page number (0-based)"),
+    per_page: int = Query(50, ge=1, le=100, description="Sessions per page"),
+):
+    """List the current user's named sessions in this workspace (most recent first)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    user_id = group_context.group_email or "unknown_user"
+    records = await service.list_named_sessions(
+        user_id=user_id, page=page, per_page=per_page, group_context=group_context
+    )
+    return [NamedChatSessionResponse.model_validate(r) for r in records]
+
+
+@router.put("/sessions/{session_id}", response_model=NamedChatSessionResponse)
+async def rename_named_session(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    request: ChatSessionRenameRequest,
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Rename a named chat session (group-checked)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    record = await service.rename_named_session(
+        session_id=session_id, title=request.title, group_context=group_context
+    )
+    if not record:
+        raise NotFoundError("Chat session not found")
+    return NamedChatSessionResponse.model_validate(record)
+
+
+@router.put("/messages/{message_id}", response_model=ChatHistoryResponse)
+async def update_chat_message(
+    message_id: Annotated[str, Path(..., description="Message identifier")],
+    request: UpdateMessageRequest,
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Update a message in place (streaming append / result attach), group-checked."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    updated = await service.update_message(
+        message_id=message_id,
+        group_context=group_context,
+        content=request.content,
+        intent=request.intent,
+        generation_result=request.generation_result,
+    )
+    if not updated:
+        raise NotFoundError("Chat message not found")
+    return updated
+

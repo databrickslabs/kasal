@@ -49,11 +49,15 @@ async def execute_flow(
     # Use the CrewAIFlowService with database session
     service = CrewAIFlowService(db)
 
+    # SECURITY: pass the caller's group context so the flow's group ownership is
+    # enforced and the execution record is tagged with the caller's group_id.
     result = await service.run_flow(
         flow_id=request.flow_id,
         job_id=request.job_id,
         run_name=request.run_name,
         config=request.config,
+        group_context=group_context,
+        user_token=group_context.access_token if group_context else None,
         resume_from_flow_uuid=request.resume_from_flow_uuid,
         resume_from_execution_id=request.resume_from_execution_id,
     )
@@ -82,7 +86,10 @@ async def get_flow_execution(
     # Use the CrewAIFlowService with database session
     service = CrewAIFlowService(db)
 
-    result = await service.get_flow_execution(execution_id)
+    # SECURITY: scope to the caller's groups so a user cannot read another
+    # tenant's flow execution by enumerating IDs (returns 404 on mismatch).
+    group_ids = group_context.group_ids if group_context else None
+    result = await service.get_flow_execution(execution_id, group_ids=group_ids)
 
     if (
         not result.get("success", True) is False
@@ -109,7 +116,9 @@ async def get_flow_executions_by_flow(
     # Use the CrewAIFlowService with database session
     service = CrewAIFlowService(db)
 
-    result = await service.get_flow_executions_by_flow(flow_id)
+    # SECURITY: scope to the caller's groups (cross-tenant isolation)
+    group_ids = group_context.group_ids if group_context else None
+    result = await service.get_flow_executions_by_flow(flow_id, group_ids=group_ids)
 
     if (
         not result.get("success", True) is False

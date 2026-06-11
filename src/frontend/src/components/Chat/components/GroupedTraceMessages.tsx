@@ -1,228 +1,312 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
   ListItem,
-  ListItemAvatar,
-  Avatar,
-  Stack,
-  Chip,
+  ButtonBase,
   IconButton,
   Tooltip,
   Fade,
 } from '@mui/material';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import CheckIcon from '@mui/icons-material/Check';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { ChatMessage } from '../types';
-import { stripAnsiEscapes, isMarkdown } from '../utils/textProcessing';
-import { MessageContent } from './MessageRenderer';
+import { stripAnsiEscapes } from '../utils/textProcessing';
 
 interface GroupedTraceMessagesProps {
   messages: ChatMessage[];
+  /** True while the run that produced these traces is still executing. */
+  running?: boolean;
   onOpenLogs?: (jobId: string) => void;
 }
 
-export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({ messages, onOpenLogs }) => {
-  if (messages.length === 0) return null;
+const SUMMARY_MAX_CHARS = 140;
 
-  // Get the first message for metadata
-  const firstMessage = messages[0];
-  const jobId = firstMessage.jobId;
+/** "agent_execution" → "Agent Execution" */
+const humanizeEventType = (value?: string): string =>
+  value ? value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '';
+
+/** Derive the display pieces for one trace step: event name (agent/task/tool),
+ *  the task context, a one-line summary, and the full output (only when it
+ *  adds something beyond the summary). Shared by the timeline steps and the
+ *  live header line. */
+function describeTrace(message: ChatMessage): {
+  name: string;
+  meta: string;
+  summary: string;
+  context: string;
+} {
+  const name = humanizeEventType(message.eventType) || message.eventSource || 'Step';
+  const meta = message.eventContext || '';
+  const content = stripAnsiEscapes(message.content).trim();
+  const firstLine = content.split('\n').find((l) => l.trim() !== '') || '';
+  const summary =
+    firstLine.length > SUMMARY_MAX_CHARS
+      ? firstLine.substring(0, SUMMARY_MAX_CHARS) + '…'
+      : firstLine;
+  const context = content !== summary ? content : '';
+  return { name, meta, summary, context };
+}
+
+/** One step on the run-activity timeline: a dot on the left rail, the event
+ *  name in bold, its timestamp, a short summary line, and — behind a per-step
+ *  toggle — the full trace output (kept hidden so the timeline stays
+ *  scannable, matching the Chat-mode run-activity container). */
+const TimelineStep: React.FC<{ message: ChatMessage; last: boolean }> = ({ message, last }) => {
+  const [open, setOpen] = useState(false);
+  const { name, meta, summary, context } = describeTrace(message);
+
+  return (
+    <Box component="li" sx={{ position: 'relative', pl: 2.5, pb: last ? 0 : 1.5, listStyle: 'none' }}>
+      <Box
+        aria-hidden="true"
+        sx={{
+          position: 'absolute',
+          left: 0,
+          top: 5,
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          bgcolor: 'primary.main',
+        }}
+      />
+      {!last && (
+        <Box
+          aria-hidden="true"
+          sx={{
+            position: 'absolute',
+            left: '3.5px',
+            top: 14,
+            bottom: 0,
+            width: '1px',
+            bgcolor: 'divider',
+          }}
+        />
+      )}
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minWidth: 0 }}>
+        <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+          {name}
+        </Typography>
+        {meta && (
+          <Typography
+            variant="caption"
+            sx={{
+              color: 'text.secondary',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {meta}
+          </Typography>
+        )}
+        <Typography
+          variant="caption"
+          sx={{ fontFamily: 'monospace', fontSize: '0.625rem', color: 'text.disabled', flexShrink: 0 }}
+        >
+          {message.timestamp.toLocaleTimeString()}
+        </Typography>
+      </Box>
+      {summary && (
+        <Typography
+          variant="caption"
+          component="div"
+          sx={{ mt: 0.25, color: 'text.secondary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+        >
+          {summary}
+        </Typography>
+      )}
+      {context && (
+        <Box sx={{ mt: 0.5 }}>
+          <ButtonBase
+            onClick={() => setOpen((v) => !v)}
+            aria-label={`${open ? 'Hide' : 'Show'} context for ${name}`}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.25,
+              borderRadius: 0.5,
+              color: 'text.disabled',
+              fontSize: '0.625rem',
+              fontWeight: 500,
+              '&:hover': { color: 'text.secondary' },
+            }}
+          >
+            <ChevronRightIcon
+              sx={{
+                fontSize: 12,
+                transition: 'transform 0.15s',
+                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
+            />
+            {open ? 'Hide context' : 'Show context'}
+          </ButtonBase>
+          {open && (
+            <Box
+              sx={{
+                mt: 0.5,
+                p: 1,
+                maxHeight: 160,
+                overflowY: 'auto',
+                borderRadius: 1,
+                border: 1,
+                borderColor: 'divider',
+                bgcolor: 'action.hover',
+                color: 'text.secondary',
+                fontSize: '0.75rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {context}
+            </Box>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+/**
+ * The run-activity container for the Agent Builder chat — visually identical
+ * to Chat mode's RunProgress: a status row (pulsing dot + "Working…" while the
+ * run executes, a check + "Run activity" once done) with a chevron that
+ * expands into the timeline of trace steps. The full trace output lives
+ * behind per-step "Show context" toggles instead of being dumped into the
+ * conversation, so the chat stays readable while the crew runs.
+ */
+export const GroupedTraceMessages: React.FC<GroupedTraceMessagesProps> = ({
+  messages,
+  running = false,
+  onOpenLogs,
+}) => {
+  const [open, setOpen] = useState(false);
+  const hasTimeline = messages.length > 0;
+
+  // Nothing to show: no traces yet and the run is not live.
+  if (!hasTimeline && !running) return null;
+
+  const jobId = messages[0]?.jobId;
+  const label = running ? 'Working…' : 'Run activity';
+  // While the run is live, the header shows the LATEST step as a one-liner
+  // (agent/task/tool name + first line of its output) so the box visibly
+  // progresses; "Working…" only fills the gap before the first trace arrives.
+  const live = running && hasTimeline ? describeTrace(messages[messages.length - 1]) : null;
 
   return (
     <Fade in={true} timeout={300}>
-      <ListItem 
-        alignItems="flex-start"
-        sx={{
-          flexDirection: 'row',
-          gap: 1,
-          py: 1.5,
-          width: '100%',
-          maxWidth: '100%',
-          overflow: 'hidden',
-          minWidth: 0,
-          '& > *': {
+      <ListItem sx={{ py: 1, px: 1, width: '100%', maxWidth: '100%', minWidth: 0 }}>
+        <Box
+          sx={{
+            width: '100%',
             minWidth: 0,
-          }
-        }}
-      >
-        <ListItemAvatar sx={{ minWidth: 'auto' }}>
-          <Avatar
-            sx={{
-              bgcolor: 'warning.main',
-              width: 32,
-              height: 32,
-            }}
-          >
-            <SmartToyIcon sx={{ fontSize: 20 }} />
-          </Avatar>
-        </ListItemAvatar>
-        
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="column" spacing={1}>
-            {/* Header - shown only once */}
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="caption" color="text.secondary">
-                Trace Output
-              </Typography>
-              {firstMessage.eventSource && (
-                <Chip
-                  label={firstMessage.eventSource}
-                  size="small"
-                  variant="outlined"
-                  color="primary"
+            borderRadius: 3,
+            border: 1,
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
+            overflow: 'hidden',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1 }}>
+            {running ? (
+              <Box sx={{ position: 'relative', display: 'flex', width: 8, height: 8, flexShrink: 0 }} aria-hidden="true">
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '50%',
+                    bgcolor: 'primary.main',
+                    opacity: 0.6,
+                    animation: 'kasalRunPing 1.2s cubic-bezier(0, 0, 0.2, 1) infinite',
+                    '@keyframes kasalRunPing': {
+                      '75%, 100%': { transform: 'scale(2.5)', opacity: 0 },
+                    },
+                  }}
                 />
-              )}
-              {firstMessage.eventContext && (
-                <Chip
-                  label={firstMessage.eventContext}
-                  size="small"
-                  variant="outlined"
-                  color="secondary"
-                />
-              )}
-              {jobId && onOpenLogs && (
-                <Tooltip title="View execution logs">
-                  <IconButton
-                    size="small"
-                    onClick={() => onOpenLogs(jobId)}
-                    sx={{ ml: 1 }}
-                  >
-                    <OpenInNewIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Stack>
-
-            {/* Combined content for all trace messages */}
-            <Box
+                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main' }} />
+              </Box>
+            ) : (
+              <CheckIcon sx={{ fontSize: 14, color: 'primary.main', flexShrink: 0 }} />
+            )}
+            <ButtonBase
+              onClick={() => setOpen((v) => !v)}
+              disabled={!hasTimeline}
+              aria-label={hasTimeline ? (open ? 'Collapse run activity' : 'Expand run activity') : undefined}
               sx={{
-                color: 'text.primary',
-                wordBreak: 'break-word',
-                whiteSpace: 'pre-wrap',
-                maxWidth: '100%',
-                overflow: 'visible',
-                fontFamily: 'monospace',
-                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.75,
+                flex: 1,
+                minWidth: 0,
+                justifyContent: 'flex-start',
+                cursor: hasTimeline ? 'pointer' : 'default',
               }}
             >
-              {messages.map((message, index) => {
-                const processedContent = stripAnsiEscapes(message.content);
-                
-                // Check if content is wrapped in markdown code block
-                const codeBlockMatch = processedContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
-                let contentToProcess = processedContent;
-                if (codeBlockMatch) {
-                  contentToProcess = codeBlockMatch[1].trim();
-                }
-                
-                // Format the metadata line
-                const metadataLine = [
-                  message.eventType || message.eventSource || 'trace',
-                  message.eventContext,
-                  message.timestamp.toLocaleString('en-GB', { 
-                    day: '2-digit',
-                    month: '2-digit', 
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false
-                  })
-                ].filter(Boolean).join('\n');
-                
-                // Try to parse as JSON for better formatting
-                let contentElement;
-                try {
-                  const jsonContent = JSON.parse(contentToProcess);
-                  
-                  // Check if this is a JSON result (has suggestions, quality, or entities)
-                  const isJsonResult = jsonContent.suggestions || jsonContent.quality || jsonContent.entities;
-                  
-                  if (isJsonResult) {
-                    // JSON results get a box but still in grey since they're trace messages
-                    contentElement = (
-                      <Box
-                        component="pre"
-                        sx={{
-                          overflow: 'auto',
-                          maxHeight: '400px',
-                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                          p: 1,
-                          borderRadius: 1,
-                          border: '1px solid rgba(0, 0, 0, 0.1)',
-                          mt: 0.5,
-                          maxWidth: '100%',
-                          width: '100%',
-                          boxSizing: 'border-box',
-                          minWidth: 0,
-                          overflowX: 'auto',
-                          overflowY: 'auto',
-                          color: 'rgba(0, 0, 0, 0.4)', // Light grey for trace messages
-                        }}
-                      >
-                        <code>{JSON.stringify(jsonContent, null, 2)}</code>
-                      </Box>
-                    );
-                  } else {
-                    // Other JSON content without box in light grey
-                    contentElement = (
-                      <Box sx={{ whiteSpace: 'pre-wrap', color: 'rgba(0, 0, 0, 0.4)' }}>
-                        {JSON.stringify(jsonContent, null, 2)}
-                      </Box>
-                    );
-                  }
-                } catch (e) {
-                  // Not JSON - check if it's markdown (has code blocks, headers, etc.)
-                  if (isMarkdown(processedContent)) {
-                    // Render markdown content with proper formatting
-                    contentElement = (
-                      <Box sx={{
-                        color: 'text.primary',
-                        '& pre': {
-                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                          padding: '12px',
-                          borderRadius: '4px',
-                          overflow: 'auto',
-                          margin: '8px 0',
-                        },
-                        '& code': {
-                          fontFamily: 'monospace',
-                          fontSize: '0.875rem',
-                        },
-                        '& h1, & h2, & h3, & h4': {
-                          marginTop: '16px',
-                          marginBottom: '8px',
-                          fontWeight: 600,
-                        },
-                        '& p': {
-                          margin: '8px 0',
-                        },
-                      }}>
-                        <MessageContent content={processedContent} />
-                      </Box>
-                    );
-                  } else {
-                    // Regular text content in light grey
-                    contentElement = (
-                      <Box sx={{ whiteSpace: 'pre-wrap', color: 'rgba(0, 0, 0, 0.4)' }}>
-                        {processedContent}
-                      </Box>
-                    );
-                  }
-                }
-                
-                return (
-                  <Box key={message.id} sx={{ mb: index < messages.length - 1 ? 3 : 0 }}>
-                    <Box sx={{ color: 'rgba(0, 0, 0, 0.4)', fontSize: '0.813rem', mb: 0.5 }}>
-                      {metadataLine}
+              <Typography
+                variant="caption"
+                noWrap
+                title={live && live.summary ? `${live.name} — ${live.summary}` : undefined}
+                sx={{
+                  fontWeight: 500,
+                  color: 'text.secondary',
+                  minWidth: 0,
+                  ...(running && {
+                    animation: 'kasalRunPulse 2s ease-in-out infinite',
+                    '@keyframes kasalRunPulse': {
+                      '0%, 100%': { opacity: 1 },
+                      '50%': { opacity: 0.5 },
+                    },
+                  }),
+                }}
+              >
+                {live ? (
+                  <>
+                    <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                      {live.name}
                     </Box>
-                    {contentElement}
-                  </Box>
-                );
-              })}
+                    {live.summary ? ` — ${live.summary}` : ''}
+                  </>
+                ) : (
+                  label
+                )}
+              </Typography>
+              {hasTimeline && (
+                <ChevronRightIcon
+                  sx={{
+                    fontSize: 16,
+                    color: 'text.disabled',
+                    transition: 'transform 0.15s',
+                    transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+                  }}
+                />
+              )}
+            </ButtonBase>
+            {jobId && onOpenLogs && (
+              <Tooltip title="View execution logs">
+                <IconButton
+                  size="small"
+                  aria-label="View execution logs"
+                  onClick={() => onOpenLogs(jobId)}
+                  sx={{ ml: 'auto', flexShrink: 0 }}
+                >
+                  <OpenInNewIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+          {open && hasTimeline && (
+            <Box
+              component="ol"
+              sx={{ m: 0, px: 2, py: 1.5, borderTop: 1, borderColor: 'divider' }}
+            >
+              {messages.map((message, i) => (
+                <TimelineStep key={message.id} message={message} last={i === messages.length - 1} />
+              ))}
             </Box>
-          </Stack>
+          )}
         </Box>
       </ListItem>
     </Fade>

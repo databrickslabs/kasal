@@ -4906,3 +4906,94 @@ class TestSetupMlflowSyncInnerPaths:
         ):
             # Should NOT raise; the OTEL exception is caught
             captured_fn()
+
+
+class TestToolCatalogDiet:
+    """Regression (LLM-006): intent detection only needs to PICK tool names —
+    full descriptions added ~3.5k prompt tokens to every chat message."""
+
+    def test_long_descriptions_are_truncated(self):
+        from src.services.dispatcher_service import DispatcherService
+
+        tools = [
+            {"title": "GenieTool", "description": "x" * 800},
+            {"title": "SerperDevTool", "description": "short and sweet"},
+        ]
+        catalog = DispatcherService._build_tool_catalog(tools)
+
+        assert "GenieTool" in catalog and "SerperDevTool" in catalog
+        assert "short and sweet" in catalog          # short ones intact
+        assert "x" * 200 not in catalog              # long ones truncated
+        assert len(catalog) < 800                    # bounded total
+
+    def test_missing_description_is_tolerated(self):
+        from src.services.dispatcher_service import DispatcherService
+
+        catalog = DispatcherService._build_tool_catalog([{"title": "T"}])
+        assert "- T:" in catalog
+
+
+class TestMlflowTracingHardToggle:
+    """When setup decides tracing is off, mlflow's armed exporter must be
+    disabled too — otherwise every dispatcher LLM call attempts a doomed
+    export ('experiment_id is missing' warnings). Re-enabled on success."""
+
+    @pytest.mark.asyncio
+    async def test_workspace_disabled_disables_tracing(self):
+        svc = _build_service()
+        gc = _make_group_context()
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf, \
+             patch("src.services.dispatcher_service._set_mlflow_tracing") as mock_toggle:
+            MockMlf.return_value.is_enabled = AsyncMock(return_value=False)
+            await svc._maybe_enable_mlflow_tracing(gc)
+        mock_toggle.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
+    async def test_setup_false_disables_tracing(self):
+        svc = _build_service()
+        gc = _make_group_context()
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf, \
+             patch("src.services.dispatcher_service._set_mlflow_tracing") as mock_toggle, \
+             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=False):
+            MockMlf.return_value.is_enabled = AsyncMock(return_value=True)
+            result = await svc._maybe_enable_mlflow_tracing(gc)
+        assert result is False
+        mock_toggle.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
+    async def test_setup_exception_disables_tracing(self):
+        svc = _build_service()
+        gc = _make_group_context()
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf, \
+             patch("src.services.dispatcher_service._set_mlflow_tracing") as mock_toggle, \
+             patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+            MockMlf.return_value.is_enabled = AsyncMock(return_value=True)
+            result = await svc._maybe_enable_mlflow_tracing(gc)
+        assert result is False
+        mock_toggle.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
+    async def test_setup_success_enables_tracing(self):
+        svc = _build_service()
+        gc = _make_group_context()
+        with patch("src.services.dispatcher_service.MLflowService") as MockMlf, \
+             patch("src.services.dispatcher_service._set_mlflow_tracing") as mock_toggle, \
+             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=None):
+            MockMlf.return_value.is_enabled = AsyncMock(return_value=True)
+            result = await svc._maybe_enable_mlflow_tracing(gc)
+        assert result is True
+        mock_toggle.assert_called_once_with(True)
+
+    def test_toggle_calls_mlflow_tracing_api(self):
+        from src.services import dispatcher_service as m
+        fake_mlflow = MagicMock()
+        with patch.object(m, "_mlflow", fake_mlflow), patch.object(m, "_HAS_MLFLOW", True):
+            m._set_mlflow_tracing(False)
+            fake_mlflow.tracing.disable.assert_called_once()
+            m._set_mlflow_tracing(True)
+            fake_mlflow.tracing.enable.assert_called_once()
+
+    def test_toggle_noop_without_mlflow(self):
+        from src.services import dispatcher_service as m
+        with patch.object(m, "_HAS_MLFLOW", False):
+            m._set_mlflow_tracing(False)  # must not raise

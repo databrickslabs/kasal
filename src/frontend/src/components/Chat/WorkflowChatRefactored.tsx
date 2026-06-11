@@ -35,6 +35,7 @@ import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../store/modelConfig';
+import { useTabManagerStore } from '../../store/tabManager';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/ChatHistoryService';
 import { ModelService } from '../../api/ModelService';
@@ -429,6 +430,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     inputRef
   );
 
+  /** Detach the active tab from its saved crew before generated content
+   * replaces the canvas. Without this, the next Save updates the OLD crew
+   * record in place (overwriting its content, keeping its old name) instead
+   * of opening the save dialog to create a new crew. */
+  const detachTabFromSavedCrew = useCallback(() => {
+    const { activeTabId, getTab, clearTabCrewInfo } = useTabManagerStore.getState();
+    if (!activeTabId) return;
+    const tab = getTab(activeTabId);
+    if (tab?.savedCrewId) {
+      console.log(
+        `[WorkflowChat] Detaching tab ${activeTabId} from saved crew ${tab.savedCrewId} (new crew generated)`
+      );
+      clearTabCrewInfo(activeTabId);
+    }
+  }, []);
+
   // ── Progressive crew generation via SSE ──────────────────────────
   const [generationId, setGenerationId] = useState<string | null>(null);
   const indexMapRef = useRef<IndexNodeIdMap | null>(null);
@@ -448,6 +465,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const sseHandlers = useMemo<CrewGenerationSSEHandlers>(() => ({
     onPlanReady: (plan) => {
+      // The generated crew REPLACES the canvas content. Detach the tab from
+      // any previously loaded crew, otherwise the next Save silently
+      // overwrites that crew (content AND keeps its old name) instead of
+      // creating a new one.
+      detachTabFromSavedCrew();
       const buildSkeleton = createCrewSkeletonHandler(
         setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, layoutManagerRef
       );
@@ -553,7 +575,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         },
       ]);
     },
-  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine]);
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew]);
 
   useCrewGenerationSSE(generationId, sseHandlers);
 
@@ -1095,6 +1117,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               // Keep isLoading true — it will be cleared by onComplete/onFailed
             } else {
               // Legacy synchronous path (fallback)
+              detachTabFromSavedCrew();
               handleCrewGenerated(genResult as GeneratedCrew);
             }
             break;
@@ -1768,10 +1791,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               const deduplicatedMessages = messages;
 
               const filteredMessages = deduplicatedMessages.filter(message => {
-                // Filter out execution start and completion messages
+                // Filter out execution start/pending/completion messages — the
+                // run-activity container (below) is the live status indicator.
                 if (message.type === 'execution' && (
                   message.content.includes('🚀 Started execution:') ||
-                  message.content.includes('✅ Execution completed successfully')
+                  message.content.includes('✅ Execution completed successfully') ||
+                  message.content.includes('⏳ Preparing to execute')
                 )) {
                   return false;
                 }
@@ -1800,27 +1825,57 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 groupedMessages.push(currentTraceGroup);
               }
 
-              return groupedMessages.map((item, index) => {
-                if (Array.isArray(item)) {
-                  // It's a group of trace messages
-                  // Use first and last message IDs plus index for uniqueness
-                  const groupKey = `trace-group-${item[0].id}-${item[item.length - 1].id}-${index}`;
-                  return (
-                    <React.Fragment key={groupKey}>
-                      <GroupedTraceMessages messages={item} onOpenLogs={onOpenLogs} />
-                      {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
-                    </React.Fragment>
-                  );
-                } else {
-                  // It's a regular message
-                  return (
-                    <React.Fragment key={item.id}>
-                      <ChatMessageItem message={item} onOpenLogs={onOpenLogs} />
-                      {index < groupedMessages.length - 1 && <Divider component="li" sx={{ ml: 0 }} />}
-                    </React.Fragment>
-                  );
-                }
-              });
+              // Live status: while a job executes its trace group shows
+              // "Working…" with a pulsing dot (run-activity container). Before
+              // any trace arrives — including the gap between pressing run and
+              // the jobCreated event — an empty live container stands in.
+              const hasLiveTraceGroup = Boolean(executingJobId) && groupedMessages.some(
+                item => Array.isArray(item) && item.some(m => m.jobId === executingJobId)
+              );
+              const lastRawMessage = deduplicatedMessages[deduplicatedMessages.length - 1];
+              const awaitingJobStart = lastRawMessage?.type === 'execution' &&
+                lastRawMessage.content.includes('⏳ Preparing to execute');
+              const showLivePlaceholder = (Boolean(executingJobId) && !hasLiveTraceGroup) ||
+                (awaitingJobStart && !executingJobId);
+
+              return (
+                <>
+                  {groupedMessages.map((item, index) => {
+                    // Skip the divider next to a run-activity card — it is a
+                    // self-contained bordered container, like in Chat mode.
+                    const nextIsTraceGroup = Array.isArray(groupedMessages[index + 1]);
+                    if (Array.isArray(item)) {
+                      // It's a group of trace messages. Key on the FIRST id
+                      // only — including the last id would remount (and
+                      // re-collapse) the container on every streamed trace.
+                      const groupKey = `trace-group-${item[0].id}-${index}`;
+                      const groupRunning = Boolean(executingJobId) &&
+                        item.some(m => m.jobId === executingJobId);
+                      return (
+                        <GroupedTraceMessages
+                          key={groupKey}
+                          messages={item}
+                          running={groupRunning}
+                          onOpenLogs={onOpenLogs}
+                        />
+                      );
+                    } else {
+                      // It's a regular message
+                      return (
+                        <React.Fragment key={item.id}>
+                          <ChatMessageItem message={item} onOpenLogs={onOpenLogs} />
+                          {index < groupedMessages.length - 1 && !nextIsTraceGroup && (
+                            <Divider component="li" sx={{ ml: 0 }} />
+                          )}
+                        </React.Fragment>
+                      );
+                    }
+                  })}
+                  {showLivePlaceholder && (
+                    <GroupedTraceMessages key="run-activity-live" messages={[]} running onOpenLogs={onOpenLogs} />
+                  )}
+                </>
+              );
             })()}
           </List>
         )}

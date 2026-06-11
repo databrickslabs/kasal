@@ -264,18 +264,22 @@ async def create_task(
     
     # Use centralized MCP integration module for task MCP tools
     try:
-        from src.services.mcp_service import MCPService
         from src.engines.crewai.tools.mcp_integration import MCPIntegration
-        
-        from src.db.session import request_scoped_session
-        async with request_scoped_session() as session:
-            mcp_service = MCPService(session)
-            # This will automatically handle global + explicit servers
-            mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
-                task_config, task_key, mcp_service, config
-            )
-            task_tools.extend(mcp_tools)
-            logger.info(f"Added {len(mcp_tools)} MCP tools to task {task_key}")
+
+        # Cheap dict check FIRST: with no explicit servers the integration
+        # returns [] without ever touching the service, so opening a DB
+        # session + MCPService per task was pure waste (the 100% case when
+        # MCP is unused).
+        if MCPIntegration._extract_mcp_servers_from_config(task_config.get('tool_configs', {})):
+            from src.services.mcp_service import MCPService
+            from src.db.session import request_scoped_session
+            async with request_scoped_session() as session:
+                mcp_service = MCPService(session)
+                mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
+                    task_config, task_key, mcp_service, config
+                )
+                task_tools.extend(mcp_tools)
+                logger.info(f"Added {len(mcp_tools)} MCP tools to task {task_key}")
     except Exception as e:
         logger.error(f"Error processing MCP servers for task {task_key}: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")

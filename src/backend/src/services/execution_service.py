@@ -365,8 +365,6 @@ class ExecutionService:
             exec_logger = LoggerManager.get_instance().crew
 
         exec_logger.info(f"[run_crew_execution] Starting {execution_type} execution for execution_id: {execution_id}")
-        exec_logger.info(f"[run_crew_execution] Execution type: {execution_type}")
-        exec_logger.info(f"[run_crew_execution] Config attributes: {dir(config)}")
         
         try:
             # Execution is already created with RUNNING status, no need to update to PREPARING
@@ -866,7 +864,7 @@ class ExecutionService:
                     for idx, source in enumerate(knowledge_sources):
                         logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
                 else:
-                    logger.warning(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
+                    logger.debug(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
 
             # Ensure GroupContext is available in UserContext for authentication
             # This is critical for both OBO (user_token) and PAT (group_id) authentication

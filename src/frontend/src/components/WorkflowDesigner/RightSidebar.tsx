@@ -354,6 +354,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       Tooltip needs, so the tooltip listens on the span instead. */}
                   <span style={{ display: 'inline-flex' }}>
                   <IconButton
+                    aria-label={item.tooltip}
                     onClick={(e) => {
                       if (item.onClick && !item.disabled) {
                         item.onClick(e);

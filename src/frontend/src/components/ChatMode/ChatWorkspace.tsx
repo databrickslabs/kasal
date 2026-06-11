@@ -11,11 +11,10 @@ import { useExecutionStream } from './hooks/useExecutionStream';
 import { useGenerationStream, GenerationCompleteData } from './hooks/useGenerationStream';
 import { generateId } from './utils/markdown';
 import { buildCrewConfig, buildFlowConfig, buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
-import { detectVariablesFromNodes, detectVariablesFromGenerated, DetectedVariable } from './utils/variableDetector';
+import { detectVariablesFromNodes, detectVariablesFromGenerated } from './utils/variableDetector';
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
-import InputVariablesDialog from './components/InputVariablesDialog';
 import { saveSessionPreview, getSessionPreview } from './db/sessionDb';
 import { useThemeStore } from '../../store/theme';
 import './chat.css';
@@ -218,12 +217,7 @@ export function summarizeTaskOutput(
   }
 
   if (preview) {
-    const kind =
-      preview.type === 'html' ? 'an HTML output'
-        : preview.type === 'markdown' ? 'a report'
-          : preview.type === 'ui' ? 'an app'
-            : 'a result';
-    return `Generated ${kind}. View it in the preview pane.`;
+    return 'Generated an app. View it in the preview pane.';
   }
 
   // Long plain-text outputs get collapsed too, otherwise they take over the chat.
@@ -355,8 +349,6 @@ const ChatWorkspace: React.FC = () => {
   const [hasHiddenPreview, setHasHiddenPreview] = useState(false);
 
   // Input variables dialog state
-  const [variablesDialogOpen, setVariablesDialogOpen] = useState(false);
-  const [detectedVariables, setDetectedVariables] = useState<DetectedVariable[]>([]);
   const [pendingExecution, setPendingExecution] = useState<{
     type: 'crew' | 'generated';
     plan?: PlanData;
@@ -441,7 +433,8 @@ const ChatWorkspace: React.FC = () => {
   }, [refreshLibrary]);
 
   // Populate the catalog library (rail) on mount. It's refreshed on workspace
-  // change (above) and after each save (handleSaveCrew / /save).
+  // change (above), after each chat save (handleSaveCrew / /save), and after
+  // agent-builder saves (SaveCrew calls useAppStore.getState().loadCatalog()).
   useEffect(() => {
     void refreshLibrary();
   }, [refreshLibrary]);
@@ -602,9 +595,27 @@ const ChatWorkspace: React.FC = () => {
     }
     run();
   }, []);
+  // The bookmark/feedback actions row for the latest generated crew, parked
+  // until that crew's run finishes — feedback only makes sense once the
+  // result is visible. Cleared on post; a refine run never sets it.
+  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null } | null>(null);
+  const postPendingActionsRow = useCallback(() => {
+    const pending = pendingActionsRef.current;
+    if (!pending) return;
+    pendingActionsRef.current = null;
+    const sessionStore = useSessionStore.getState();
+    const extra = { id: generateId(), resultType: 'crew_actions', resultData: pending.data };
+    if (pending.ownerSession) sessionStore.addMessageToTargetSession(pending.ownerSession, 'assistant', '', extra);
+    else sessionStore.addMessage('assistant', '', extra);
+  }, []);
+
   const completeExecutionOnce = useCallback((resultText: string) => {
-    finishOnce(() => useExecutionStore.getState().completeExecution(resultText));
-  }, [finishOnce]);
+    finishOnce(() => {
+      useExecutionStore.getState().completeExecution(resultText);
+      // Result is in — now surface the bookmark/feedback row beneath it.
+      postPendingActionsRow();
+    });
+  }, [finishOnce, postPendingActionsRow]);
   const failExecutionOnce = useCallback((error: string) => {
     finishOnce(() => useExecutionStore.getState().failExecution(error));
   }, [finishOnce]);
@@ -671,34 +682,56 @@ const ChatWorkspace: React.FC = () => {
   }, [processTrace, completeExecutionOnce, failExecutionOnce]);
 
   // --- Generation Stream ---
+  // Generation steps fold into the SAME collapsible run-activity element as
+  // tool calls (no crew card in the conversation): each step posts a trace
+  // entry, and the only interactive remnant is the Genie-space prompt when a
+  // crew needs one. Final output renders in the preview pane as usual.
+  const addGenerationTrace = useCallback((label: string, sublabel?: string) => {
+    const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
+    const sessionStore = useSessionStore.getState();
+    const extra = {
+      resultType: 'trace',
+      resultData: {
+        label,
+        ...(sublabel ? { sublabel } : {}),
+        source: 'generation',
+        kind: 'event',
+        timestamp: Date.now(),
+      },
+    };
+    if (ownerSession) sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra);
+    else sessionStore.addMessage('assistant', '', extra);
+  }, []);
+
   const generationStream = useGenerationStream({
-    onPlanReady: () => {},
-    onAgentDetail: () => {},
-    onTaskDetail: () => {},
+    onPlanReady: (plan) => {
+      const agents = Array.isArray(plan?.agents) ? (plan.agents as unknown[]).length : 0;
+      const tasks = Array.isArray(plan?.tasks) ? (plan.tasks as unknown[]).length : 0;
+      addGenerationTrace('Crew planned', `${agents} agent${agents === 1 ? '' : 's'} · ${tasks} task${tasks === 1 ? '' : 's'}`);
+    },
+    onAgentDetail: (agent) => {
+      addGenerationTrace('Agent ready', String(agent?.name || agent?.role || ''));
+    },
+    onTaskDetail: (task) => {
+      addGenerationTrace('Task ready', String(task?.name || ''));
+    },
     onComplete: (data: GenerationCompleteData) => {
       const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
       const sessionStore = useSessionStore.getState();
-      const id = generateId();
       // A Genie crew can't run until the user picks a Genie space, so don't
-      // auto-run it — surface the space selector + a Run button on the card.
+      // auto-run it — surface a minimal space prompt (no crew card).
       const needsGenieSpace = usesGenieTool(data, useAppStore.getState().toolNameMap);
-      // No status text — the run-activity container + the crew card carry the
-      // state; the card itself shows the Genie space selector when needed.
-      const msgContent = '';
 
-      if (ownerSession) {
-        sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msgContent, {
-          id,
-          resultType: 'generation_complete',
-          resultData: data,
-        });
-      } else {
-        sessionStore.addMessage('assistant', msgContent, {
-          id,
-          resultType: 'generation_complete',
-          resultData: data,
-        });
+      if (needsGenieSpace) {
+        const id = generateId();
+        const extra = { id, resultType: 'genie_space_prompt', resultData: data };
+        if (ownerSession) sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra);
+        else sessionStore.addMessage('assistant', '', extra);
       }
+
+      // Park the actions row (bookmark + thumbs feedback) — it posts only
+      // AFTER the run's result comes back, so users rate what they've seen.
+      pendingActionsRef.current = { data, ownerSession: ownerSession ?? null };
 
       dispatcher.setLastGenerated(data);
       // Remember it as the /save target.
@@ -868,9 +901,11 @@ const ChatWorkspace: React.FC = () => {
     async (plan: PlanData) => {
       const vars = detectVariablesFromNodes(plan.nodes || []);
       if (vars.length > 0) {
-        setDetectedVariables(vars);
         setPendingExecution({ type: 'crew', plan });
-        setVariablesDialogOpen(true);
+        addMessage('assistant', 'This crew needs input variables before it can run.', {
+          resultType: 'input_variables',
+          resultData: { variables: vars },
+        });
         return;
       }
       doExecuteCrew(plan);
@@ -954,9 +989,11 @@ const ChatWorkspace: React.FC = () => {
     async (data: GenerationCompleteData, spaceId?: string, originSession?: string | null) => {
       const vars = detectVariablesFromGenerated(data.agents || [], data.tasks || []);
       if (vars.length > 0) {
-        setDetectedVariables(vars);
         setPendingExecution({ type: 'generated', data, spaceId, originSession });
-        setVariablesDialogOpen(true);
+        addMessage('assistant', 'This crew needs input variables before it can run.', {
+          resultType: 'input_variables',
+          resultData: { variables: vars },
+        });
         return;
       }
       doExecuteGenerated(data, spaceId, undefined, { originSession });
@@ -991,6 +1028,20 @@ const ChatWorkspace: React.FC = () => {
       }
 
       addMessage('user', `Refine: ${trimmed}`);
+      // Give the refine run its own activity section — same treatment as a
+      // regular prompt: this trace anchors the collapsible run container
+      // right under the Refine message, ABOVE the refined result, and it
+      // persists there after the run finishes.
+      useSessionStore.getState().addMessage('assistant', '', {
+        resultType: 'trace',
+        resultData: {
+          label: 'Refining artifact',
+          sublabel: trimmed.length > 80 ? `${trimmed.slice(0, 77)}…` : trimmed,
+          source: 'refine',
+          kind: 'event',
+          timestamp: Date.now(),
+        },
+      });
 
       const editorAgents = [
         {
@@ -1100,15 +1151,17 @@ const ChatWorkspace: React.FC = () => {
     [addMessage, handleStartExecutionStream, selectedModel],
   );
 
-  // --- Variables dialog handlers ---
-  const handleVariablesConfirm = useCallback(
-    (inputs: Record<string, string>) => {
-      setVariablesDialogOpen(false);
+  // --- Inline input-variables prompt (genie-style, in the chat flow) ---
+  const handleVariablesSubmit = useCallback(
+    (_messageId: string, inputs: Record<string, string>) => {
       const pending = pendingExecution;
       setPendingExecution(null);
-      setDetectedVariables([]);
 
-      if (!pending) return;
+      if (!pending) {
+        // Prompt outlived its parked run (e.g. page reload) — ask for a re-run.
+        addMessage('assistant', 'This run prompt has expired — run the crew again to use these variables.');
+        return;
+      }
       // pending is always a crew (carrying a plan) or a generated crew (carrying data).
       if (pending.type === 'crew') {
         doExecuteCrew(pending.plan as PlanData, inputs);
@@ -1116,14 +1169,8 @@ const ChatWorkspace: React.FC = () => {
         doExecuteGenerated(pending.data as GenerationCompleteData, pending.spaceId, inputs, { originSession: pending.originSession });
       }
     },
-    [pendingExecution, doExecuteCrew, doExecuteGenerated],
+    [pendingExecution, doExecuteCrew, doExecuteGenerated, addMessage],
   );
-
-  const handleVariablesCancel = useCallback(() => {
-    setVariablesDialogOpen(false);
-    setPendingExecution(null);
-    setDetectedVariables([]);
-  }, []);
 
   // --- Dispatcher ---
   const dispatcher = useDispatcher({
@@ -1556,6 +1603,7 @@ const ChatWorkspace: React.FC = () => {
               onExecuteFlow={handleExecuteFlow}
               onExecuteGenerated={handleExecuteGenerated}
               onSaveCrew={handleSaveCrew}
+              onSubmitVariables={handleVariablesSubmit}
               onStopExecution={handleStopExecution}
               isLoading={viewIsLoading}
               isExecuting={viewIsExecuting}
@@ -1597,13 +1645,6 @@ const ChatWorkspace: React.FC = () => {
         />
       )}
 
-      {/* Input variables dialog */}
-      <InputVariablesDialog
-        open={variablesDialogOpen}
-        variables={detectedVariables}
-        onConfirm={handleVariablesConfirm}
-        onCancel={handleVariablesCancel}
-      />
     </div>
   );
 };

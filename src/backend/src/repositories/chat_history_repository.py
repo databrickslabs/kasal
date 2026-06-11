@@ -228,3 +228,15 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
         except Exception as e:
             await self.session.rollback()
             raise
+    async def get_by_id_and_group(
+        self, message_id: str, group_ids: List[str]
+    ) -> Optional[ChatHistory]:
+        """Fetch a single message by id, restricted to the caller's groups."""
+        if not group_ids:
+            return None
+        stmt = select(ChatHistory).where(
+            ChatHistory.id == message_id,
+            ChatHistory.group_id.in_(group_ids),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()

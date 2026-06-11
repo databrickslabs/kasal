@@ -24,6 +24,7 @@ from pydantic import BaseModel
 # Usage: @persist() at class level or method level for state checkpointing
 
 from src.core.logger import LoggerManager
+from src.utils.safe_eval import safe_eval
 from src.engines.crewai.flow.modules.agent_config import AgentConfig
 from src.engines.crewai.flow.modules.task_config import TaskConfig
 from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
@@ -37,6 +38,12 @@ from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
+
+# Bare names that user-authored flow router/state expressions may call. These
+# mirror the safe numeric/string helpers injected into the evaluation context;
+# everything else is rejected by safe_eval (no dunder/introspection access).
+_FLOW_CONDITION_CALLS = frozenset({"int", "float", "str", "bool", "len", "abs", "min", "max"})
+
 
 class FlowBuilder:
     """
@@ -322,11 +329,14 @@ class FlowBuilder:
                 if expression:
                     # Evaluate the expression
                     try:
-                        # Create a safe evaluation context
+                        # Create a safe evaluation context with the same
+                        # restricted helpers permitted in router conditions.
                         eval_context = {
                             'state': flow_instance.state,
+                            'int': int, 'float': float, 'str': str, 'bool': bool,
+                            'len': len, 'abs': abs, 'min': min, 'max': max,
                         }
-                        computed_value = eval(expression, {"__builtins__": {}}, eval_context)
+                        computed_value = safe_eval(expression, eval_context, allowed_call_names=_FLOW_CONDITION_CALLS)
                         if hasattr(flow_instance.state, 'get'):
                             flow_instance.state[variable] = computed_value
                         else:
@@ -1009,7 +1019,7 @@ class FlowBuilder:
                                 if route_condition:
                                     logger.info(f"Evaluating condition for route '{route_name}': {route_condition}")
                                     try:
-                                        condition_result = eval(route_condition, {"__builtins__": {}}, eval_context)
+                                        condition_result = safe_eval(route_condition, eval_context, allowed_call_names=_FLOW_CONDITION_CALLS)
                                         logger.info(f"Route '{route_name}' condition evaluated to: {condition_result}")
                                         if condition_result:
                                             logger.info(f"Router {router_method_name} taking route: {route_name}")
@@ -1040,7 +1050,7 @@ class FlowBuilder:
                             logger.info(f"State contents: {eval_context.get('state', {})}")
 
                             # Evaluate the condition
-                            condition_result = eval(router_condition_expr, {"__builtins__": {}}, eval_context)
+                            condition_result = safe_eval(router_condition_expr, eval_context, allowed_call_names=_FLOW_CONDITION_CALLS)
                             logger.info(f"Condition evaluated to: {condition_result}")
 
                             # If condition is True, take the default route; otherwise don't route

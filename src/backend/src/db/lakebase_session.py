@@ -368,6 +368,10 @@ class LakebaseSessionFactory:
         except RuntimeError:
             return True
 
+    def _is_token_stale(self) -> bool:
+        """True when the holder's credential is older than the refresh window."""
+        return (time.time() - self._token_holder.get("refreshed_at", 0.0)) >= TOKEN_REFRESH_INTERVAL_SECONDS
+
     @asynccontextmanager
     async def get_session(self):
         """
@@ -386,6 +390,14 @@ class LakebaseSessionFactory:
             except Exception as e:
                 logger.error(f"Error creating Lakebase session: {e}")
                 raise
+        elif self._refresh_task is None and self._is_token_stale():
+            # NullPool mode has no background refresh task; with the engine now
+            # long-lived (PERF-013 stable bridge loop), refresh the credential
+            # lazily — do_connect injects the holder's token on each connect.
+            try:
+                await self._refresh_token()
+            except Exception as e:
+                logger.warning(f"[LAKEBASE SESSION] Lazy token refresh failed (will retry next op): {e}")
 
         try:
             async with self._session_factory() as session:

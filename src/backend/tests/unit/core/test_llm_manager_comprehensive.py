@@ -629,7 +629,7 @@ class TestGetEmbeddingCircuitBreaker:
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_http_session)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
         assert result == [0.1, 0.2, 0.3]
@@ -660,7 +660,7 @@ class TestGetEmbeddingCircuitBreaker:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="gem-key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
@@ -692,7 +692,7 @@ class TestGetEmbeddingCircuitBreaker:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
@@ -753,7 +753,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -798,7 +798,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -821,7 +821,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/se"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -846,7 +846,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/se"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -878,7 +878,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_llm_base_url", return_value="https://example.com/se"),
             patch("src.core.llm_manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_embeddings_url", return_value=("https://example.com/api", None)) as mock_emb_url,
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             # Use a model without databricks/ prefix
@@ -905,7 +905,7 @@ class TestGetEmbeddingOllama:
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(500, text_data="error")
 
-        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
 
@@ -915,7 +915,7 @@ class TestGetEmbeddingOllama:
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embeddings": []})
 
-        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
 
@@ -926,7 +926,7 @@ class TestGetEmbeddingOllama:
         LLMManager._embedding_failures["ollama"] = {"count": 2, "last_failure": 0}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embeddings": [[0.1, 0.2]]})
 
-        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
         assert result == [0.1, 0.2]
@@ -969,7 +969,7 @@ class TestGetEmbeddingGoogle:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
@@ -986,7 +986,7 @@ class TestGetEmbeddingGoogle:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
@@ -1004,7 +1004,7 @@ class TestGetEmbeddingGoogle:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result == [0.1, 0.2]
@@ -1047,7 +1047,7 @@ class TestGetEmbeddingOpenAI:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
@@ -1064,7 +1064,7 @@ class TestGetEmbeddingOpenAI:
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("aiohttp.ClientSession", return_value=mock_session_ctx),
+            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result is None
@@ -1270,3 +1270,53 @@ class TestConfigureLiteLLMCaching:
             finally:
                 for p in patches:
                     p.stop()
+
+
+class TestCompletionMaxTokensPolicy:
+    """Regression (LLM-033): completion() must not blanket-override the
+    model config's max_output_tokens (applied by configure_crewai_llm)
+    with a 4000 default. Explicit caller values still win; 4000 is only
+    a last-resort cap when neither caller nor model config sets a budget."""
+
+    def _mock_llm(self, max_tokens=None, max_completion_tokens=None):
+        llm = MagicMock()
+        llm.max_tokens = max_tokens
+        llm.max_completion_tokens = max_completion_tokens
+        return llm
+
+    async def _run_completion(self, mock_llm, **kwargs):
+        with (
+            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
+            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="ok"),
+        ):
+            await LLMManager.completion(
+                messages=[{"role": "user", "content": "hello"}],
+                model="test-model",
+                **kwargs,
+            )
+
+    @pytest.mark.asyncio
+    async def test_default_inherits_model_config_budget(self):
+        llm = self._mock_llm(max_tokens=64000)
+        await self._run_completion(llm)
+        assert llm.max_tokens == 64000  # NOT clobbered to 4000
+
+    @pytest.mark.asyncio
+    async def test_default_respects_max_completion_tokens_only_models(self):
+        # GPT-5-style configs set max_completion_tokens, not max_tokens
+        llm = self._mock_llm(max_completion_tokens=32000)
+        await self._run_completion(llm)
+        assert llm.max_tokens is None  # no 4000 fallback forced in
+
+    @pytest.mark.asyncio
+    async def test_explicit_value_still_wins(self):
+        llm = self._mock_llm(max_tokens=64000)
+        await self._run_completion(llm, max_tokens=100)
+        assert llm.max_tokens == 100
+
+    @pytest.mark.asyncio
+    async def test_last_resort_cap_when_nothing_configured(self):
+        llm = self._mock_llm()
+        await self._run_completion(llm)
+        assert llm.max_tokens == 4000

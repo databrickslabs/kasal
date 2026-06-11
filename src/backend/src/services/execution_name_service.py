@@ -101,12 +101,20 @@ class ExecutionNameService:
 Only return the name, no explanations or additional text."""
                 logger.warning("generate_job_name template not found, using fallback")
 
-            # Prepare the prompt with just the data
-            prompt = f"""Agents:
-{request.agents_yaml}
-
-Tasks:
-{request.tasks_yaml}"""
+            # Prepare the prompt with ONLY agent roles and task names: a 2-4
+            # word name needs no backstories, goals, or tool configs. Sending
+            # the full agents_yaml/tasks_yaml cost ~1.5-2.5k prompt tokens for
+            # ~7 output tokens (a 200-350:1 ratio) on EVERY execution start.
+            agent_roles = [
+                str(cfg.get("role") or cfg.get("name") or key)
+                for key, cfg in (request.agents_yaml or {}).items()
+            ]
+            task_names = [
+                str(cfg.get("name") or (cfg.get("description") or key)[:80])
+                for key, cfg in (request.tasks_yaml or {}).items()
+            ]
+            prompt = f"""Agents: {", ".join(agent_roles)}
+Tasks: {", ".join(task_names)}"""
 
             # Prepare messages for LLM
             messages = [

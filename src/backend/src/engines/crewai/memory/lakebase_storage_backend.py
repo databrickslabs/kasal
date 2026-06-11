@@ -13,9 +13,9 @@ demand it.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +25,18 @@ from sqlalchemy import text
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
+
+# SECURITY: ``table_name`` (from the LakebaseMemoryConfig.memory_table config
+# field) is interpolated into raw SQL throughout this backend. Validate it as a
+# strict SQL identifier so a crafted value cannot inject SQL / comment out the
+# appended tenant (group_id) filters.
+_SAFE_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_table_name(name: str) -> str:
+    if not name or not _SAFE_TABLE_NAME.match(str(name)):
+        raise ValueError(f"Invalid memory table name: {name!r}")
+    return name
 
 # CrewAI 1.10+ runs memory saves on a background thread pool; each save runs its
 # coroutine in a *fresh* event loop (see ``_run_sync``). A pooled async engine
@@ -60,7 +72,8 @@ class LakebaseStorageBackend:
         instance_name: str | None = None,
         workspace_wide: bool = True,
     ) -> None:
-        self.table_name = table_name
+        # SECURITY: validate before it reaches any interpolated raw SQL.
+        self.table_name = _validate_table_name(table_name)
         self.crew_id = crew_id
         self.group_id = group_id
         self.session_id = session_id
@@ -526,24 +539,18 @@ class LakebaseStorageBackend:
         return list(vector)
 
     def _run_sync(self, coro: Any) -> Any:
+        """Run a coroutine on the shared long-lived bridge loop (PERF-013).
+
+        A fresh loop per call made _is_engine_loop_stale() trip on EVERY
+        memory operation, forcing engine recreation + ~3 Databricks
+        control-plane calls (credential, instance lookup, username) before
+        each <10ms pgvector query. A stable loop keeps the engine cached;
+        token freshness is handled lazily by get_session.
+        """
         if not asyncio.iscoroutine(coro):
             return coro
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        def _runner(c: Any) -> Any:
-            new_loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(new_loop)
-                return new_loop.run_until_complete(c)
-            finally:
-                asyncio.set_event_loop(None)
-                new_loop.close()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_runner, coro).result()
+        from src.engines.crewai.memory.databricks_storage_backend import _get_bridge_loop
+        return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
 
 
 # ----------------------------------------------------------------------

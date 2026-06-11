@@ -561,3 +561,53 @@ describe('ExecutionHistoryService', () => {
     });
   });
 });
+
+describe('getRunByJobId (PERF-037)', () => {
+  // Regression: on a direct-endpoint miss this used to pull 100 full runs
+  // (plus a raw-history call) every reconciliation tick. It must now just
+  // return null and let callers handle "not found".
+
+  const getService = async () => {
+    const { RunService } = await import('./ExecutionHistoryService');
+    const service = RunService.getInstance();
+    // Skip the availability probe — we're testing the lookup behavior
+    (service as unknown as { apiAvailable: boolean }).apiAvailable = true;
+    return service;
+  };
+
+  it('returns the run from the direct endpoint', async () => {
+    const service = await getService();
+    // Key the mock by URL — stray async calls from earlier tests must not
+    // consume a *Once value meant for the direct lookup.
+    mockGet.mockImplementation((url: string) =>
+      url === '/executions/job-123'
+        ? Promise.resolve({
+            data: { id: 1, job_id: 'job-123', status: 'completed', created_at: '2026-01-01T00:00:00Z' },
+          })
+        : Promise.resolve({ data: {} })
+    );
+
+    const run = await service.getRunByJobId('job-123');
+
+    expect(run?.job_id).toBe('job-123');
+    expect(mockGet).toHaveBeenCalledWith('/executions/job-123');
+  });
+
+  it('returns null on direct-endpoint failure without bulk fallback', async () => {
+    const service = await getService();
+    mockGet.mockImplementation((url: string) =>
+      url === '/executions/missing-job'
+        ? Promise.reject(new Error('404'))
+        : Promise.resolve({ data: {} })
+    );
+
+    const run = await service.getRunByJobId('missing-job');
+
+    expect(run).toBeNull();
+    expect(mockGet).toHaveBeenCalledWith('/executions/missing-job');
+    // No getRuns(100, 0) sweep and no /executions/history fallback
+    const urls = mockGet.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.startsWith('/executions?'))).toBe(false);
+    expect(urls.some((u) => u.startsWith('/executions/history'))).toBe(false);
+  });
+});

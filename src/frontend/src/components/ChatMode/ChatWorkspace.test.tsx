@@ -191,6 +191,7 @@ vi.mock('./components/Chat/ChatContainer', () => ({
       <button data-testid="cc-exec-gen" onClick={() => props.onExecuteGenerated?.((globalThis as { __genData?: unknown }).__genData ?? { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>gen</button>
       <button data-testid="cc-save" onClick={() => props.onSaveCrew?.({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] })}>save</button>
       <button data-testid="cc-model" onClick={() => props.onModelChange?.('m2')}>model</button>
+      <button data-testid="cc-submit-vars" onClick={() => props.onSubmitVariables?.('msg-1', { topic: 'AI' })}>vars</button>
       {/* Surfaces the pending-run affordance: the label only renders when armed
           for the current session, and the button drives onRunPending. */}
       <span data-testid="cc-pending-label">{(props as { pendingRunLabel?: string }).pendingRunLabel ?? ''}</span>
@@ -208,19 +209,6 @@ vi.mock('./utils/crewConfigBuilder', () => ({
   buildFlowConfig: vi.fn(() => ({ cfg: 'flow' })),
   buildCrewConfigFromGenerated: vi.fn(() => ({ cfg: 'gen' })),
 }));
-vi.mock('./components/InputVariablesDialog', () => ({
-  default: (props: { open: boolean; onConfirm: (v: Record<string, string>) => void; onCancel: () => void }) => {
-    // Capture onConfirm so a test can invoke it directly (e.g. with no pending execution).
-    (h as { varsConfirm?: (v: Record<string, string>) => void }).varsConfirm = props.onConfirm;
-    return props.open ? (
-      <div data-testid="vars-dialog">
-        <button data-testid="vars-confirm" onClick={() => props.onConfirm({ topic: 'AI' })}>ok</button>
-        <button data-testid="vars-cancel" onClick={props.onCancel}>cancel</button>
-      </div>
-    ) : null;
-  },
-}));
-
 import ChatWorkspace, {
   toolMatchKey,
   summarizeArgs,
@@ -380,11 +368,10 @@ describe('summarizeTaskOutput', () => {
     expect(summarizeTaskOutput('Calling tools now', null)).toBeNull();
     expect(summarizeTaskOutput('Thinking...', null)).toBeNull();
   });
-  it('describes a preview when present (html/markdown/other)', () => {
-    expect(summarizeTaskOutput('x', { type: 'html', data: 'd' })).toMatch(/HTML output/);
-    expect(summarizeTaskOutput('x', { type: 'markdown', data: 'd' })).toMatch(/report/);
-    expect(summarizeTaskOutput('x', { type: 'ui', data: 'd' })).toMatch(/app/);
-    expect(summarizeTaskOutput('x', { type: 'json', data: 'd' })).toMatch(/result/);
+  it('describes a preview when present (always an app — A2UI is the only preview kind)', () => {
+    expect(summarizeTaskOutput('x', { type: 'ui', data: 'd' })).toBe(
+      'Generated an app. View it in the preview pane.',
+    );
   });
   it('truncates long plain text', () => {
     const long = 'z'.repeat(500);
@@ -463,7 +450,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('shows the preview panel only when previewOwnerSessionId matches the current session', () => {
-    h.exec.previewContent = { type: 'html', data: '<p>x</p>' };
+    h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
     h.exec.previewOwnerSessionId = 's2'; // different session
     const { rerender } = render(<ChatWorkspace />);
     expect(screen.queryByTestId('preview-panel')).not.toBeInTheDocument();
@@ -505,7 +492,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('onTaskOutput persists a preview and summarizes output', () => {
-    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     render(<ChatWorkspace />);
     act(() => {
       h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' });
@@ -587,23 +574,39 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('gen boom'));
   });
 
-  // --- variables dialog ---
-  it('opens the variables dialog when a crew needs variables, then confirms', async () => {
+  // --- inline input-variables prompt (genie-style, no modal) ---
+  it('posts an inline variables prompt when a crew needs variables, then runs on submit', async () => {
     h.detectVars.mockReturnValue([{ name: 'topic', required: true }]);
+    h.createExecution.mockResolvedValue({ job_id: 'j1' });
     render(<ChatWorkspace />);
+    h.session.addMessage.mockClear();
     fireEvent.click(screen.getByTestId('cc-exec-crew'));
-    expect(screen.getByTestId('vars-dialog')).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByTestId('vars-confirm')); });
+    // No execution yet — a chat message carrying the prompt is posted instead
+    expect(h.createExecution).not.toHaveBeenCalled();
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('input variables'),
+      expect.objectContaining({
+        resultType: 'input_variables',
+        resultData: { variables: [{ name: 'topic', required: true }] },
+      }),
+    );
+    // Submitting through the prompt runs the parked execution with the inputs
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-submit-vars')); });
     expect(h.createExecution).toHaveBeenCalled();
   });
 
-  it('opens the variables dialog for a generated crew, then cancels', () => {
+  it('posts the inline variables prompt for a generated crew too', () => {
     h.detectVars.mockReturnValue([{ name: 'topic', required: true }]);
     render(<ChatWorkspace />);
+    h.session.addMessage.mockClear();
     fireEvent.click(screen.getByTestId('cc-exec-gen'));
-    expect(screen.getByTestId('vars-dialog')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('vars-cancel'));
-    expect(screen.queryByTestId('vars-dialog')).not.toBeInTheDocument();
+    expect(h.createExecution).not.toHaveBeenCalled();
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.anything(),
+      expect.objectContaining({ resultType: 'input_variables' }),
+    );
   });
 
   // --- stop execution ---
@@ -685,10 +688,24 @@ describe('ChatWorkspace component', () => {
 
   it('/refine runs an editor crew on the current artifact', async () => {
     const artifact = '<html><body>old</body></html>';
-    h.exec.previewContent = { type: 'html', data: artifact };
+    h.exec.previewContent = { type: 'ui', data: artifact };
     render(<ChatWorkspace />);
     await send('/refine make the header blue');
     expect(h.session.addMessage).toHaveBeenCalledWith('user', 'Refine: make the header blue');
+    // The refine run gets its own activity section, anchored by this trace
+    // entry right under the Refine message (above the eventual result).
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({
+        resultType: 'trace',
+        resultData: expect.objectContaining({
+          label: 'Refining artifact',
+          sublabel: 'make the header blue',
+          kind: 'event',
+        }),
+      }),
+    );
     expect(h.createExecution).toHaveBeenCalled();
     // The editor agent is pinned to the selected model (avoids the gpt-4o default
     // that fails with no OpenAI key); the crew-level model arg is set too.
@@ -721,7 +738,7 @@ describe('ChatWorkspace component', () => {
   it('/refine omits the agent llm when no model is selected', async () => {
     const prevModel = h.app.selectedModel;
     h.app.selectedModel = '';
-    h.exec.previewContent = { type: 'html', data: '<html><body>old</body></html>' };
+    h.exec.previewContent = { type: 'ui', data: '<html><body>old</body></html>' };
     try {
       render(<ChatWorkspace />);
       await send('/refine make it pop');
@@ -734,7 +751,7 @@ describe('ChatWorkspace component', () => {
 
   it('/refine falls back to the persisted preview when none is live', async () => {
     h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue({ type: 'html', data: '<html>stored</html>' });
+    h.getSessionPreview.mockResolvedValue({ type: 'ui', data: '<html>stored</html>' });
     render(<ChatWorkspace />);
     await send('/refine tweak it');
     expect(h.createExecution).toHaveBeenCalled();
@@ -756,7 +773,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('refines via the preview pane onRefine handler', async () => {
-    h.exec.previewContent = { type: 'html', data: '<html><body>x</body></html>' };
+    h.exec.previewContent = { type: 'ui', data: '<html><body>x</body></html>' };
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
@@ -819,11 +836,12 @@ describe('ChatWorkspace component', () => {
     // generation finalized, but no execution kicked off
     expect(h.exec.completeGeneration).toHaveBeenCalled();
     expect(h.createExecution).not.toHaveBeenCalled();
+    // No crew card anymore — a slim Genie-space prompt is posted instead
     expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
       's1',
       'assistant',
-      '', // status text removed — the crew card (with the Genie space selector) carries it
-      expect.objectContaining({ resultType: 'generation_complete' }),
+      '',
+      expect.objectContaining({ resultType: 'genie_space_prompt' }),
     );
   });
 
@@ -877,7 +895,7 @@ describe('ChatWorkspace component', () => {
   // --- preview reopen + panel controls ---
   it('shows the "Show preview" reopen button when a hidden preview exists', async () => {
     h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue({ type: 'html', data: '<p>x</p>' });
+    h.getSessionPreview.mockResolvedValue({ type: 'ui', data: '<p>x</p>' });
     render(<ChatWorkspace />);
     expect(await screen.findByText('Show preview')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Show preview'));
@@ -885,7 +903,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('preview panel close + toggle-chat buttons call the store', () => {
-    h.exec.previewContent = { type: 'html', data: '<p>x</p>' };
+    h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     fireEvent.click(screen.getByTestId('preview-close'));
@@ -942,8 +960,8 @@ describe('ChatWorkspace component', () => {
   });
 
   it('each previewable task output is pushed to the preview store (history accumulates)', () => {
-    const first = { type: 'markdown' as const, data: '# first' };
-    const second = { type: 'html' as const, data: '<p>second</p>' };
+    const first = { type: 'ui' as const, data: '# first' };
+    const second = { type: 'ui' as const, data: '<p>second</p>' };
     h.parsePreview.mockReturnValueOnce(first).mockReturnValueOnce(second);
     h.exec.executionOwnerSessionId = 's1';
     h.session.currentSessionId = 's1';
@@ -1010,7 +1028,7 @@ describe('ChatWorkspace component', () => {
   it('backfills a hidden preview from an assistant message containing previewable content', async () => {
     h.exec.previewContent = null;
     h.getSessionPreview.mockResolvedValue(null);
-    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     h.session.messages = [
       { id: 'u', role: 'user', content: 'hi', timestamp: new Date() },
       { id: 'a', role: 'assistant', content: '<html>doc</html>', timestamp: new Date() },
@@ -1040,7 +1058,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('onTaskOutput sets the live preview when viewing the owner session', () => {
-    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     h.session.currentSessionId = 's1';
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
@@ -1093,11 +1111,26 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
   });
 
-  it('generation onComplete adds to addMessage when no owner session', async () => {
+  it('the actions row appears only AFTER the result comes back, not at generation complete', async () => {
     h.exec.executionOwnerSessionId = null;
     render(<ChatWorkspace />);
+    h.session.addMessage.mockClear();
     await act(async () => { h.genOpts.onComplete({ agents: [], tasks: [] }); });
-    expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.any(String), expect.any(Object));
+    // Generation done, run still in flight → no actions row yet
+    const typesAtGen = h.session.addMessage.mock.calls
+      .map((c: unknown[]) => (c[2] as { resultType?: string } | undefined)?.resultType)
+      .filter((t: string | undefined) => t !== 'trace');
+    expect(typesAtGen).toEqual([]);
+    expect(h.exec.completeGeneration).toHaveBeenCalled();
+
+    // The run's result arrives → bookmark/feedback row posts beneath it
+    h.exec.activeExecution = { jobId: 'job-done-1', status: 'running' };
+    await act(async () => { h.streamOpts.onComplete({ result: 'final output' }); });
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({ resultType: 'crew_actions' }),
+    );
   });
 
   it('onComplete handles a string result that JSON-parses to a non-object', () => {
@@ -1114,11 +1147,11 @@ describe('ChatWorkspace component', () => {
     expect(h.exec.completeExecution).toHaveBeenCalledWith('');
   });
 
-  it('confirms the variables dialog for a generated crew', async () => {
+  it('submitting the inline variables prompt runs a parked generated crew', async () => {
     h.detectVars.mockReturnValue([{ name: 'topic', required: true }]);
     render(<ChatWorkspace />);
     fireEvent.click(screen.getByTestId('cc-exec-gen'));
-    await act(async () => { fireEvent.click(screen.getByTestId('vars-confirm')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-submit-vars')); });
     expect(h.createExecution).toHaveBeenCalled();
   });
 
@@ -1171,7 +1204,7 @@ describe('ChatWorkspace component', () => {
     h.exec.isGenerating = true;
     h.exec.isLoading = true;
     h.exec.chatCollapsed = true;
-    h.exec.previewContent = { type: 'html', data: '<p>x</p>' };
+    h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
     h.exec.previewOwnerSessionId = 's1';
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
@@ -1187,7 +1220,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('onTaskOutput persists a preview but does not set the live one when viewing another session', () => {
-    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     h.session.currentSessionId = 's1';
     h.exec.executionOwnerSessionId = 's2';
     render(<ChatWorkspace />);
@@ -1197,7 +1230,7 @@ describe('ChatWorkspace component', () => {
   });
 
   it('onTaskOutput with a preview but no owner session neither sets nor persists it', () => {
-    h.parsePreview.mockReturnValue({ type: 'html', data: '<p>x</p>' });
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     h.exec.executionOwnerSessionId = null;
     h.session.currentSessionId = 's1';
     render(<ChatWorkspace />);
@@ -1274,7 +1307,7 @@ describe('ChatWorkspace component', () => {
 
   it('refining via the preview pane with an empty instruction is a no-op', async () => {
     (globalThis as { __refineMsg?: string }).__refineMsg = '   ';
-    h.exec.previewContent = { type: 'html', data: 'x' };
+    h.exec.previewContent = { type: 'ui', data: 'x' };
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
@@ -1417,11 +1450,13 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
   });
 
-  it('confirming the variables dialog with no pending execution is a no-op', async () => {
+  it('submitting variables with no pending execution posts an expired notice instead of running', async () => {
     render(<ChatWorkspace />);
-    // Invoke the captured onConfirm directly without ever opening a pending run.
+    h.session.addMessage.mockClear();
+    // The inline prompt's submit reaches the workspace through ChatContainer's
+    // onSubmitVariables prop; with no parked run it must not start an execution.
     await act(async () => {
-      (h as { varsConfirm?: (v: Record<string, string>) => void }).varsConfirm?.({ topic: 'AI' });
+      fireEvent.click(screen.getByTestId('cc-submit-vars'));
     });
     expect(h.createExecution).not.toHaveBeenCalled();
   });

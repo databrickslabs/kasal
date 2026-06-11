@@ -62,11 +62,13 @@ async def upload_knowledge_file(
     ],
     group_context: GroupContextDep,
     file: UploadFile = File(...),
-    volume_config: str = Form(...),
+    volume_config: str = Form("{}"),
     agent_ids: str = Form("[]"),  # JSON array of agent IDs
 ) -> Dict[str, Any]:
     """
-    Upload a file to Databricks Volume for knowledge source.
+    Ingest an uploaded knowledge file: staged in a temp file, embedded into
+    the local knowledge store (isolated per uploading user), then the temp
+    file is deleted. No Databricks Volume is required.
 
     Args:
         execution_id: Execution ID for scoping the file

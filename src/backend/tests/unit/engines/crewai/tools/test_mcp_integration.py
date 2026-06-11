@@ -264,7 +264,8 @@ class TestCreateToolsForServerAuth:
         """URLs with /api/2.0/mcp/ should use Databricks auth regardless of auth_type."""
         server = {
             "name": "my-server",
-            "server_url": "https://example.com/api/2.0/mcp/external/test",
+            # Databricks MCP proxy URLs live on the workspace (databricks) host.
+            "server_url": "https://adb-123.cloud.databricks.com/api/2.0/mcp/external/test",
             "auth_type": "api_key",  # Even though api_key, should use databricks auth
             "api_key": "tavily-key-123",
             "timeout_seconds": 30,
@@ -274,6 +275,7 @@ class TestCreateToolsForServerAuth:
         mock_auth = MagicMock()
         mock_auth.token = "db-token"
         mock_auth.auth_method = "service_principal"
+        mock_auth.workspace_url = "https://adb-123.cloud.databricks.com"
 
         mock_adapter = MagicMock()
         mock_adapter.tools = [{"name": "tool1", "description": "d"}]
@@ -406,7 +408,7 @@ class TestCreateToolsForServerAuth:
         """Databricks auth should set auth_type=databricks_spn in server_params."""
         server = {
             "name": "spn-override",
-            "server_url": "https://example.com/api/2.0/mcp/external/test",
+            "server_url": "https://adb-123.cloud.databricks.com/api/2.0/mcp/external/test",
             "auth_type": "api_key",
             "timeout_seconds": 30,
             "max_retries": 3,
@@ -415,6 +417,7 @@ class TestCreateToolsForServerAuth:
         mock_auth = MagicMock()
         mock_auth.token = "spn-tok"
         mock_auth.auth_method = "service_principal"
+        mock_auth.workspace_url = "https://adb-123.cloud.databricks.com"
 
         mock_adapter = MagicMock()
         mock_adapter.tools = []

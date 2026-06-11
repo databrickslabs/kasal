@@ -67,19 +67,13 @@ class PowerBIAnalysisSchema(BaseModel):
         description="The business question to answer using Power BI data. This should come from the task description or be pre-configured in tool_configs."
     )
 
-    # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) containing the semantic model."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID) to query."
-    )
-    report_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Optional Report ID (GUID) to auto-extract default filters from. Enables cross-page analysis with report-level filter context."
-    )
+    # NOTE: connection / auth / LLM plumbing (workspace_id, dataset_id,
+    # report_id, tenant_id, client_id, client_secret, username, password,
+    # auth_method, access_token, llm_*) is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__/_default_config) — exposing them as
+    # LLM-fillable parameters added ~KBs of schema to every LLM call and
+    # invited the model to hallucinate or echo credentials into transcripts.
 
     # ===== CONTEXT ENRICHMENT (Microsoft Copilot-style) =====
     business_mappings: Optional[Dict[str, str]] = Field(
@@ -105,54 +99,6 @@ class PowerBIAnalysisSchema(BaseModel):
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         None,
         description="[Context] Previous questions and answers in this session. Example: [{'question': 'What is total revenue?', 'answer': '1.5M', 'filters_used': {'BU': 'Italy'}}]"
-    )
-
-    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
-    tenant_id: Optional[str] = Field(
-        None,
-        description="[Auth] Azure AD tenant ID for Service Principal or Service Account."
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="[Auth] Application/Client ID (SemanticModel.ReadWrite.All permission)."
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="[Auth] Client secret for Service Principal."
-    )
-
-    # ===== SERVICE ACCOUNT AUTHENTICATION =====
-    username: Optional[str] = Field(
-        None,
-        description="[Auth] Service account username/UPN for Service Account authentication."
-    )
-    password: Optional[str] = Field(
-        None,
-        description="[Auth] Service account password for Service Account authentication."
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect."
-    )
-
-    # ===== OR USER OAUTH =====
-    access_token: Optional[str] = Field(
-        None,
-        description="[Auth] Access token for user OAuth authentication (alternative to SP/SA)."
-    )
-
-    # ===== LLM CONFIGURATION =====
-    llm_workspace_url: Optional[str] = Field(
-        None,
-        description="[LLM] Databricks workspace URL for LLM-based DAX generation."
-    )
-    llm_token: Optional[str] = Field(
-        None,
-        description="[LLM] Databricks token for LLM access."
-    )
-    llm_model: str = Field(
-        "databricks-claude-sonnet-4",
-        description="[LLM] Model to use for DAX generation."
     )
 
     # ===== OPTIONS =====

@@ -77,6 +77,11 @@ class PowerBIMetadataReducerSchema(BaseModel):
     need to pass any arguments — just call the tool directly.
     """
 
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
+
     # The only optional override — agent can pass this but doesn't need to
     model_context_json: Optional[str] = Field(
         None,

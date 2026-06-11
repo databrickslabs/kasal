@@ -40,11 +40,10 @@ class PBIVisualUCMVMapperSchema(BaseModel):
     catalog: Optional[str] = Field(None, description="UC catalog where metric views are deployed")
     schema_name: Optional[str] = Field(None, description="UC schema")
     dashboard_title: Optional[str] = Field(None, description="Title for the resulting dashboard")
-    databricks_host: Optional[str] = Field(None, description="Override workspace URL (optional)")
-    llm_model: Optional[str] = Field(
-        None,
-        description="LLM model for mapping (default: databricks-claude-sonnet-4)"
-    )
+    # NOTE: connection / LLM plumbing (databricks_host, llm_model) is
+    # deliberately NOT part of this schema. Those values are injected at
+    # tool-construction time from tool_configs (see __init__) — exposing them
+    # as LLM-fillable parameters bloats every LLM call.
 
 
 class PBIVisualUCMVMapperTool(BaseTool):

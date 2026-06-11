@@ -1,99 +1,99 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
+import { UIConfigService } from '../../../../api/UIConfigService';
 
-// react-markdown / remark-gfm are ESM-only; stub them.
-vi.mock('react-markdown', () => ({
-  default: ({ children }: { children: string }) => <div data-testid="md">{children}</div>,
+// The panel fetches the workspace UI-Configurator palettes on mount; stub the
+// service so tests control (or disable) the configured themes.
+vi.mock('../../../../api/UIConfigService', () => ({
+  UIConfigService: { getConfig: vi.fn() },
 }));
-vi.mock('remark-gfm', () => ({ default: () => {} }));
+const getConfigMock = vi.mocked(UIConfigService.getConfig);
 
-describe('parsePreviewContent', () => {
+// The PDF export itself is exercised in surfacePdf.test.tsx — here we only
+// verify the panel wires the themed surface + title into it.
+const downloadSurfacePdfMock = vi.fn();
+vi.mock('../../utils/surfacePdf', () => ({
+  downloadSurfacePdf: (...args: unknown[]) => downloadSurfacePdfMock(...args),
+}));
+
+beforeEach(() => {
+  getConfigMock.mockReset();
+  getConfigMock.mockResolvedValue({ enabled: false, catalog_type: 'basic' } as never);
+  downloadSurfacePdfMock.mockReset();
+  downloadSurfacePdfMock.mockResolvedValue(undefined);
+});
+
+// A minimal A2UI document — the ONLY previewable content kind.
+const uiDoc = JSON.stringify({
+  messages: [
+    {
+      updateComponents: {
+        surfaceId: 's1',
+        components: [{ id: 'root', component: 'Text', text: 'Hello App' }],
+      },
+    },
+  ],
+});
+const uiContent: PreviewContent = { type: 'ui', data: uiDoc };
+
+// A deck whose agent-stamped theme is the WRONG (Default/white) palette — the
+// regression that motivated re-resolving themes from the workspace config.
+const deckDoc = JSON.stringify({
+  messages: [
+    {
+      createSurface: {
+        surfaceId: 's1',
+        catalogId: 'basic',
+        theme: { accent: '#2272B4', background: '#FFFFFF' },
+      },
+    },
+    {
+      updateComponents: {
+        surfaceId: 's1',
+        components: [
+          { id: 'root', component: 'Slides', children: ['s1'] },
+          { id: 's1', component: 'Slide', title: 'T', children: ['t'] },
+          { id: 't', component: 'Text', text: 'Deck text' },
+        ],
+      },
+    },
+  ],
+});
+
+describe('parsePreviewContent — A2UI only', () => {
   it('returns null for empty or too-short input', () => {
     expect(parsePreviewContent('')).toBeNull();
     expect(parsePreviewContent('short')).toBeNull();
   });
 
-  it('detects full HTML documents (DOCTYPE, html tag, HTML upper)', () => {
-    expect(parsePreviewContent('<!DOCTYPE html><html><body>hi</body></html>')?.type).toBe('html');
-    expect(parsePreviewContent('<!doctype html><html></html>')?.type).toBe('html');
-    expect(parsePreviewContent('<html lang="en"><body>x</body></html>')?.type).toBe('html');
-    expect(parsePreviewContent('<HTML><body>x</body></HTML>')?.type).toBe('html');
+  it('classifies an A2UI document as ui (plain, fenced, and behind a **Title** prefix)', () => {
+    expect(parsePreviewContent(uiDoc)?.type).toBe('ui');
+    expect(parsePreviewContent('```json\n' + uiDoc + '\n```')?.type).toBe('ui');
+    // an inner fence surrounded by prose is unwrapped too
+    expect(parsePreviewContent('Here is the app:\n```json\n' + uiDoc + '\n```\nthanks')?.type).toBe('ui');
+    const out = parsePreviewContent('**My Task**\n\n' + uiDoc);
+    expect(out?.type).toBe('ui');
+    expect(out?.data).toBe(uiDoc);
   });
 
-  it('detects HTML via <script> and generic tag heuristics', () => {
-    expect(parsePreviewContent('<div><script>var x=1;</script></div>')?.type).toBe('html');
-    expect(parsePreviewContent('<section><p>hello world</p></section>')?.type).toBe('html');
+  it('does NOT preview raw HTML (A2UI-only by design)', () => {
+    // Raw HTML is deliberately not a preview type anymore — crews are steered
+    // toward A2UI documents; ad-hoc HTML output gets no preview pane.
+    expect(parsePreviewContent('<!DOCTYPE html><html><body>hi</body></html>')).toBeNull();
+    expect(parsePreviewContent('<html lang="en"><body>x</body></html>')).toBeNull();
+    expect(parsePreviewContent('<div><script>var x=1;</script></div>')).toBeNull();
+    // …including full HTML documents embedded in mixed text output.
+    const embedded =
+      'some text\n<!DOCTYPE html><body>' + 'b'.repeat(160) + '</body></html>\nmore';
+    expect(parsePreviewContent(embedded)).toBeNull();
   });
 
-  it('detects JSON objects and arrays', () => {
-    expect(parsePreviewContent('{"a":1,"b":2}')?.type).toBe('json');
-    expect(parsePreviewContent('[{"a":1},{"a":2}]')?.type).toBe('json');
-  });
-
-  it('falls through invalid JSON-looking content to text/null', () => {
-    // looks like json (starts { ends }) but invalid -> not json; also not html/markdown -> null
-    expect(parsePreviewContent('{not valid json at all}')).toBeNull();
-  });
-
-  it('detects markdown via headers + structure and headers + length', () => {
-    expect(parsePreviewContent('# Title\n\n- a\n- b')?.type).toBe('markdown');
-    expect(parsePreviewContent('## Title\n\n```\ncode\n```')?.type).toBe('markdown');
-    expect(parsePreviewContent('### T\n\n| a | b |')?.type).toBe('markdown');
-    const long = '# Big\n\n' + 'x'.repeat(600);
-    expect(parsePreviewContent(long)?.type).toBe('markdown');
-  });
-
-  it('returns null for a header with no structure and short length (plain text)', () => {
-    expect(parsePreviewContent('# Just a heading line only')).toBeNull();
-  });
-
-  it('strips a leading **Task title** prefix before parsing', () => {
-    const out = parsePreviewContent('**My Task**\n\n{"a":1,"b":2}');
-    expect(out?.type).toBe('json');
-    expect(out?.data).toBe('{"a":1,"b":2}');
-  });
-
-  it('strips full and inner code fences', () => {
-    const full = parsePreviewContent('```html\n<div><p>hi there</p></div>\n```');
-    expect(full?.type).toBe('html');
-    expect(full?.data).toContain('<div>');
-    const inner = parsePreviewContent('Here is output:\n```json\n{"a":1,"b":2}\n```\nthanks');
-    expect(inner?.type).toBe('json');
-  });
-
-  it('extracts the largest embedded DOCTYPE html document (reduce both arms)', () => {
-    // No standalone <html> opening tag -> detectContentType stays "text", so the
-    // DOCTYPE branch of extractEmbeddedHtml runs. Order small,big,smaller forces
-    // both arms of the `a.length >= b.length` reducer.
-    const small = '<!DOCTYPE html><body>' + 'a'.repeat(40) + '</body></html>';
-    const big = '<!DOCTYPE html><body>' + 'b'.repeat(160) + '</body></html>';
-    const smaller = '<!DOCTYPE html><body>' + 'c'.repeat(20) + '</body></html>';
-    const out = parsePreviewContent(`prefix filler text here\n${small}\n${big}\n${smaller}`);
-    expect(out?.type).toBe('html');
-    expect(out?.data).toContain('b'.repeat(160));
-  });
-
-  it('extracts embedded HTML via the <html> fallback (reduce both arms)', () => {
-    // A ```json fence makes the *cleaned* content "text" while the *body* still
-    // holds <html> docs with no DOCTYPE -> hits the htmlTag fallback + reduce.
-    const small = '<html><body>' + 'a'.repeat(40) + '</body></html>';
-    const big = '<html><body>' + 'b'.repeat(160) + '</body></html>';
-    const smaller = '<html><body>' + 'c'.repeat(20) + '</body></html>';
-    const raw = 'lead ```json\n{bad}\n``` ' + small + ' ' + big + ' ' + smaller;
-    const out = parsePreviewContent(raw);
-    expect(out?.type).toBe('html');
-    expect(out?.data).toContain('b'.repeat(160));
-  });
-
-  it('returns null when embedded html is too short (<=100 chars)', () => {
-    // No standalone <html> opening tag, so detectContentType stays "text" and
-    // extractEmbeddedHtml's DOCTYPE match (<=100 chars) hits the length guard.
-    const mixed = 'plain words with filler text to pass the length gate here ok\n<!DOCTYPE html><body>x</body></html>';
-    expect(parsePreviewContent(mixed)).toBeNull();
-  });
-
-  it('returns null for genuinely plain text', () => {
+  it('does NOT preview generic JSON, markdown, or plain text', () => {
+    expect(parsePreviewContent('{"a":1,"b":2}')).toBeNull();
+    expect(parsePreviewContent('[{"a":1},{"a":2}]')).toBeNull();
+    expect(parsePreviewContent('# Title\n\n- a\n- b')).toBeNull();
+    expect(parsePreviewContent('# Big\n\n' + 'x'.repeat(600))).toBeNull();
     expect(parsePreviewContent('just a normal sentence with nothing special here at all')).toBeNull();
   });
 });
@@ -109,85 +109,33 @@ function renderPanel(content: PreviewContent, props: Partial<typeof baseProps> =
 }
 
 describe('PreviewPanel component', () => {
-  it('renders an HTML preview into a sandboxed iframe (doc.write)', () => {
-    const { container } = renderPanel({ type: 'html', data: '<p>hello iframe</p>' });
-    const iframe = container.querySelector('iframe');
-    expect(iframe).toBeInTheDocument();
-    expect(iframe?.getAttribute('title')).toBe('Execution result preview');
-    expect(screen.getByText('Preview')).toBeInTheDocument(); // default html title
-    expect(screen.getByText('HTML')).toBeInTheDocument(); // type badge
-  });
-
-  it('renders a JSON array-of-objects as a table with unioned keys and value formatting', () => {
-    renderPanel({
-      type: 'json',
-      data: JSON.stringify([
-        { a: 1, b: { nested: true } },
-        { a: null, c: 'x' },
-      ]),
-    });
-    // header keys union: a, b, c
-    expect(screen.getByText('a')).toBeInTheDocument();
-    expect(screen.getByText('b')).toBeInTheDocument();
-    expect(screen.getByText('c')).toBeInTheDocument();
-    // object value JSON.stringify'd
-    expect(screen.getByText('{"nested":true}')).toBeInTheDocument();
-  });
-
-  it('handles array-of-objects rows that are null or non-object', () => {
-    // data[0] is an object so the table branch runs; later null/primitive rows
-    // exercise the `row && typeof row === 'object'` guard false arm + empty cell.
-    renderPanel({ type: 'json', data: JSON.stringify([{ a: 1 }, null, 'str']) });
-    expect(screen.getByText('a')).toBeInTheDocument();
-  });
-
-  it('renders a single JSON object as a key/value table', () => {
-    renderPanel({ type: 'json', data: JSON.stringify({ name: 'Kasal', meta: { x: 1 }, empty: null }) });
-    expect(screen.getByText('Key')).toBeInTheDocument();
-    expect(screen.getByText('Value')).toBeInTheDocument();
-    expect(screen.getByText('name')).toBeInTheDocument();
-    expect(screen.getByText('Kasal')).toBeInTheDocument();
-  });
-
-  it('renders a primitive JSON array via the <pre> fallback', () => {
-    const { container } = renderPanel({ type: 'json', data: JSON.stringify([1, 2, 3]) });
-    expect(container.querySelector('pre')).toBeInTheDocument();
-  });
-
-  it('renders nothing in body for invalid JSON (jsonData null)', () => {
-    const { container } = renderPanel({ type: 'json', data: '{invalid' });
-    expect(container.querySelector('table')).toBeNull();
-    expect(container.querySelector('pre')).toBeNull();
-  });
-
-  it('renders markdown via ReactMarkdown with Report default title', () => {
-    renderPanel({ type: 'markdown', data: '# Report body' });
-    expect(screen.getByTestId('md')).toHaveTextContent('# Report body');
-    expect(screen.getByText('Report')).toBeInTheDocument();
-  });
-
-  it('renders text type with the Result default title and no body content', () => {
-    const { container } = renderPanel({ type: 'text', data: 'plain' });
-    expect(screen.getByText('Result')).toBeInTheDocument();
-    expect(container.querySelector('iframe')).toBeNull();
-    expect(container.querySelector('table')).toBeNull();
+  it('renders an A2UI document via the brand renderer with an "App" label and UI chip', () => {
+    renderPanel(uiContent);
+    expect(screen.getByText('App')).toBeInTheDocument();
+    expect(screen.getByText('UI')).toBeInTheDocument(); // type badge
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
   });
 
   it('uses a provided title over the default', () => {
-    renderPanel({ type: 'html', data: '<p>x</p>', title: 'Custom Title' });
+    renderPanel({ ...uiContent, title: 'Custom Title' });
     expect(screen.getByText('Custom Title')).toBeInTheDocument();
   });
 
-  it('heals a stored **Title** prefix in displayData (markdown)', () => {
-    renderPanel({ type: 'markdown', data: '**Task X**\n\n# Body' });
-    expect(screen.getByTestId('md')).toHaveTextContent('# Body');
-    expect(screen.getByTestId('md')).not.toHaveTextContent('Task X');
+  it('heals a stored **Title** prefix in displayData', () => {
+    renderPanel({ type: 'ui', data: '**Task X**\n\n' + uiDoc });
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
+  });
+
+  it('renders an empty body when the stored data is not a parseable A2UI document', () => {
+    const { container } = renderPanel({ type: 'ui', data: 'not a ui document at all' });
+    expect(screen.getByText('App')).toBeInTheDocument(); // header still renders
+    expect(container.querySelector('.flex-1.overflow-auto')?.childElementCount).toBe(0);
   });
 
   it('close and toggle-chat buttons fire their callbacks', () => {
     const onClose = vi.fn();
     const onToggleChat = vi.fn();
-    renderPanel({ type: 'text', data: 'x' }, { onClose, onToggleChat });
+    renderPanel(uiContent, { onClose, onToggleChat });
     fireEvent.click(screen.getByTitle('Close preview'));
     expect(onClose).toHaveBeenCalled();
     fireEvent.click(screen.getByTitle('Hide chat'));
@@ -195,18 +143,33 @@ describe('PreviewPanel component', () => {
   });
 
   it('shows "Show chat" affordance when chatCollapsed is true', () => {
-    renderPanel({ type: 'text', data: 'x' }, { chatCollapsed: true });
+    renderPanel(uiContent, { chatCollapsed: true });
     expect(screen.getByTitle('Show chat')).toBeInTheDocument();
   });
 
+  it('expand/restore arrows match the preview position (right of chat)', () => {
+    // Preview expands LEFTWARD over the chat: "Hide chat" must point left
+    // (path M18.75...), restoring the chat must point right (path M11.25...).
+    const { unmount } = renderPanel(uiContent, { chatCollapsed: false });
+    expect(
+      screen.getByTitle('Hide chat').querySelector('path')?.getAttribute('d'),
+    ).toMatch(/^M18\.75/);
+    unmount();
+
+    renderPanel(uiContent, { chatCollapsed: true });
+    expect(
+      screen.getByTitle('Show chat').querySelector('path')?.getAttribute('d'),
+    ).toMatch(/^M11\.25/);
+  });
+
   it('does not render the Refine button when onRefine is not provided', () => {
-    renderPanel({ type: 'html', data: '<p>x</p>' });
+    renderPanel(uiContent);
     expect(screen.queryByText('Refine')).not.toBeInTheDocument();
   });
 
   it('opens the refine bar and submits an instruction via the button', () => {
     const onRefine = vi.fn();
-    render(<PreviewPanel content={{ type: 'html', data: '<p>x</p>' }} {...baseProps} onRefine={onRefine} />);
+    render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
     // toggle open
     fireEvent.click(screen.getByText('Refine'));
     const input = screen.getByPlaceholderText('Describe how to improve this result…');
@@ -221,7 +184,7 @@ describe('PreviewPanel component', () => {
 
   it('submits the refine instruction on Enter and ignores empty submits', () => {
     const onRefine = vi.fn();
-    render(<PreviewPanel content={{ type: 'html', data: '<p>x</p>' }} {...baseProps} onRefine={onRefine} />);
+    render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
     fireEvent.click(screen.getByText('Refine'));
     const input = screen.getByPlaceholderText('Describe how to improve this result…');
     // empty Enter -> no-op
@@ -235,7 +198,7 @@ describe('PreviewPanel component', () => {
 
   it('closes the refine bar on Escape without submitting', () => {
     const onRefine = vi.fn();
-    render(<PreviewPanel content={{ type: 'html', data: '<p>x</p>' }} {...baseProps} onRefine={onRefine} />);
+    render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
     fireEvent.click(screen.getByText('Refine'));
     const input = screen.getByPlaceholderText('Describe how to improve this result…');
     fireEvent.change(input, { target: { value: 'discard me' } });
@@ -246,8 +209,8 @@ describe('PreviewPanel component', () => {
 
   it('does not render the history nav when history has one or zero entries', () => {
     const onNavigate = vi.fn();
-    const single = [{ type: 'html' as const, data: '<p>x</p>' }];
-    renderPanel({ type: 'html', data: '<p>x</p>' }, {});
+    const single = [uiContent];
+    renderPanel(uiContent, {});
     expect(screen.queryByLabelText('Previous output')).not.toBeInTheDocument();
     // explicit single-entry history + onNavigate still hides the nav
     render(
@@ -264,11 +227,7 @@ describe('PreviewPanel component', () => {
 
   it('renders history nav, shows position, and navigates older/newer', () => {
     const onNavigate = vi.fn();
-    const history = [
-      { type: 'markdown' as const, data: '# first' },
-      { type: 'html' as const, data: '<p>second</p>' },
-      { type: 'json' as const, data: '{"a":1}' },
-    ];
+    const history: PreviewContent[] = [uiContent, { type: 'ui', data: deckDoc }, uiContent];
     render(
       <PreviewPanel
         content={history[2]}
@@ -291,10 +250,7 @@ describe('PreviewPanel component', () => {
 
   it('defaults the position to the latest when index is omitted and disables prev at the oldest', () => {
     const onNavigate = vi.fn();
-    const history = [
-      { type: 'markdown' as const, data: '# first' },
-      { type: 'html' as const, data: '<p>second</p>' },
-    ];
+    const history: PreviewContent[] = [uiContent, { type: 'ui', data: deckDoc }];
     // index omitted -> defaults to history.length - 1 (latest)
     render(
       <PreviewPanel
@@ -322,37 +278,79 @@ describe('PreviewPanel component', () => {
     fireEvent.click(next[next.length - 1]);
     expect(onNavigate).toHaveBeenCalledWith(1);
   });
+});
 
-  it('safely no-ops the iframe write when contentDocument is null (defensive branch)', () => {
-    const proto = window.HTMLIFrameElement.prototype;
-    const original = Object.getOwnPropertyDescriptor(proto, 'contentDocument');
-    Object.defineProperty(proto, 'contentDocument', { configurable: true, get: () => null });
-    try {
-      const { container } = renderPanel({ type: 'html', data: '<p>x</p>' });
-      // Renders without throwing even though doc is null
-      expect(container.querySelector('iframe')).toBeInTheDocument();
-    } finally {
-      if (original) Object.defineProperty(proto, 'contentDocument', original);
+describe('PreviewPanel — workspace palettes are the source of truth', () => {
+  const stage = (container: HTMLElement) =>
+    container.querySelector('[style*="--ui-stage"]') as HTMLElement | null;
+
+  it('re-themes a deck from the configured Presentation palette (agent-stamped Default palette overridden)', async () => {
+    getConfigMock.mockResolvedValue({
+      enabled: true,
+      catalog_type: 'basic',
+      style_json: JSON.stringify({
+        themes: {
+          default: { accent: '#2272B4', background: '#FFFFFF' },
+          presentation: { accent: '#FF3621', background: '#0E1B21' },
+        },
+      }),
+    } as never);
+    const { container } = renderPanel({ type: 'ui', data: deckDoc });
+    await waitFor(() => {
+      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#0E1B21');
+    });
+  });
+
+  it('clears an agent-stamped palette on a deck when no Presentation palette is configured (built-in deck identity wins)', async () => {
+    getConfigMock.mockResolvedValue({
+      enabled: true,
+      catalog_type: 'basic',
+      style_json: JSON.stringify({
+        themes: { default: { accent: '#2272B4', background: '#FFFFFF' } },
+      }),
+    } as never);
+    const { container } = renderPanel({ type: 'ui', data: deckDoc });
+    await waitFor(() => {
+      // The built-in deck stage (DECK_THEME_VARS) — not the agent's white.
+      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toContain('#162A34');
+    });
+  });
+
+  it('ignores a config whose style_json is malformed, non-object, or lacks a themes map', async () => {
+    const cases = [
+      '{bad json',                              // malformed → parse catch
+      'null',                                   // parses to null (not an object)
+      JSON.stringify({ accent: '#111' }),       // no themes key
+      JSON.stringify({ themes: null }),         // themes present but null
+    ];
+    for (const style_json of cases) {
+      getConfigMock.mockResolvedValue({ enabled: true, catalog_type: 'basic', style_json } as never);
+      const { container, unmount } = renderPanel({ type: 'ui', data: deckDoc });
+      await act(async () => {}); // flush the config fetch
+      // embedded (agent-stamped) theme stays in place
+      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
+      unmount();
     }
   });
 
-  it('detects an A2UI document and renders it via the brand renderer with an "App" label', () => {
-    const uiDoc = JSON.stringify({
-      messages: [{ updateComponents: { surfaceId: 's1', components: [
-        { id: 'root', component: 'Text', text: 'Hello App' },
-      ] } }],
+  it('keeps the embedded theme when the workspace config is disabled or unavailable', async () => {
+    // default beforeEach mock: { enabled: false } → no override
+    const { container } = renderPanel({ type: 'ui', data: deckDoc });
+    await waitFor(() => {
+      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
     });
-    // parsePreviewContent classifies it as 'ui' before generic JSON detection
-    expect(parsePreviewContent(uiDoc).type).toBe('ui');
-    // and the panel renders the UI (App title chip + the rendered text)
-    renderPanel({ type: 'ui', data: uiDoc });
-    expect(screen.getByText('App')).toBeInTheDocument();
-    expect(screen.getByText('Hello App')).toBeInTheDocument();
+
+    // a failing fetch also leaves the embedded theme in place
+    getConfigMock.mockRejectedValue(new Error('network'));
+    const second = renderPanel({ type: 'ui', data: deckDoc });
+    await waitFor(() => {
+      expect(stage(second.container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
+    });
   });
 });
 
 describe('PreviewPanel — full screen', () => {
-  const content: PreviewContent = { type: 'markdown', data: '# Hi\n\nsome text' };
+  const content: PreviewContent = uiContent;
   let fsEl: Element | null;
   const origReq = Element.prototype.requestFullscreen;
   const origExit = document.exitFullscreen;
@@ -361,6 +359,8 @@ describe('PreviewPanel — full screen', () => {
     fsEl = null;
     Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fsEl });
     Element.prototype.requestFullscreen = vi.fn(function (this: Element) {
+      // The fullscreen target IS the `this` element; capture it for the getter.
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       fsEl = this;
       document.dispatchEvent(new Event('fullscreenchange'));
       return Promise.resolve();
@@ -370,35 +370,35 @@ describe('PreviewPanel — full screen', () => {
       document.dispatchEvent(new Event('fullscreenchange'));
       return Promise.resolve();
     });
-  });
-  afterEach(() => {
-    Element.prototype.requestFullscreen = origReq;
-    document.exitFullscreen = origExit;
+    return () => {
+      Element.prototype.requestFullscreen = origReq;
+      document.exitFullscreen = origExit;
+    };
   });
 
   it('hides the ENTIRE header bar in full screen; the browser (Esc) restores it', () => {
     renderPanel(content, { onRefine: vi.fn() });
     // header visible: title, type chip, Refine, full-screen toggle, close
-    expect(screen.getByText('Report')).toBeInTheDocument();
-    expect(screen.getByText('MARKDOWN')).toBeInTheDocument();
+    expect(screen.getByText('App')).toBeInTheDocument();
+    expect(screen.getByText('UI')).toBeInTheDocument();
     expect(screen.getByText('Refine')).toBeInTheDocument();
     expect(screen.getByTitle('Close preview')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Full screen'));
     expect(Element.prototype.requestFullscreen).toHaveBeenCalled();
     // the whole bar is gone — no header controls at all
-    expect(screen.queryByText('Report')).toBeNull();
-    expect(screen.queryByText('MARKDOWN')).toBeNull();
+    expect(screen.queryByText('App')).toBeNull();
+    expect(screen.queryByText('UI')).toBeNull();
     expect(screen.queryByText('Refine')).toBeNull();
     expect(screen.queryByTitle('Close preview')).toBeNull();
     expect(screen.queryByLabelText('Full screen')).toBeNull();
     // ...but the content keeps rendering
-    expect(screen.getByTestId('md')).toBeInTheDocument();
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
 
     // browser exits full screen (Esc) → the bar returns
     fsEl = null;
     fireEvent(document, new Event('fullscreenchange'));
-    expect(screen.getByText('Report')).toBeInTheDocument();
+    expect(screen.getByText('App')).toBeInTheDocument();
     expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
   });
 
@@ -409,6 +409,51 @@ describe('PreviewPanel — full screen', () => {
     await Promise.resolve();
     // no fullscreenchange fired → bar stays, no unhandled rejection
     expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
-    expect(screen.getByText('Report')).toBeInTheDocument();
+    expect(screen.getByText('App')).toBeInTheDocument();
+  });
+});
+
+describe('PreviewPanel — Download as PDF', () => {
+  it('downloads the THEMED surface as a PDF using the preview title', async () => {
+    renderPanel({ ...uiContent, title: 'Oil Report' });
+
+    const btn = screen.getByLabelText('Download as PDF');
+    // Icon-only control — no "PDF" text next to the arrow.
+    expect(btn.textContent).toBe('');
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1));
+    const [surface, title] = downloadSurfacePdfMock.mock.calls[0];
+    expect(title).toBe('Oil Report');
+    expect((surface as { components: Record<string, unknown> }).components.root).toBeDefined();
+  });
+
+  it('falls back to a default filename when the preview has no title', async () => {
+    renderPanel(uiContent);
+    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalled());
+    expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('kasal-app');
+  });
+
+  it('does nothing when the stored data is not a parseable A2UI document', () => {
+    renderPanel({ type: 'ui', data: 'not a ui document at all' });
+    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    expect(downloadSurfacePdfMock).not.toHaveBeenCalled();
+  });
+
+  it('disables the button while the export is in flight and re-enables after', async () => {
+    let release: () => void = () => undefined;
+    downloadSurfacePdfMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { release = resolve; }),
+    );
+    renderPanel(uiContent);
+    const btn = screen.getByLabelText('Download as PDF');
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn).toBeDisabled());
+    // a second click while exporting is ignored
+    fireEvent.click(btn);
+    expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1);
+    act(() => release());
+    await waitFor(() => expect(btn).not.toBeDisabled());
   });
 });

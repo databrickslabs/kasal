@@ -64,7 +64,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
-uv.lock
+# NOTE: uv.lock is intentionally TRACKED (not ignored) so Databricks Apps deploys
+# install from a fully reproducible lock via `uv sync`. Build dirs that may hold
+# their own copies (databricksdist/, dist/, .venv/) are ignored separately.
 
 # Logs
 logs/

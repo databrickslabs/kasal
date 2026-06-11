@@ -97,13 +97,20 @@ class DatabricksSecretsService(BaseService):
     
     async def get_databricks_secrets(self, scope: str) -> List[Dict[str, str]]:
         """
-        Get all secrets from Databricks for a specific scope.
-        
+        Get secret METADATA (names only) from Databricks for a specific scope.
+
+        SECURITY: This intentionally returns metadata only — the plaintext
+        secret value is NEVER included (value is always ""). Secrets in the
+        configured scope are shared across the deployment, so returning values
+        here would expose every provider key / Databricks token to any
+        authenticated user. Use get_databricks_secret_value() server-side when
+        an actual value is genuinely needed for an outbound integration.
+
         Args:
             scope: Secret scope in Databricks
-            
+
         Returns:
-            List of secrets
+            List of secret metadata dicts (value field is always empty)
         """
         try:
             # If databricks_service is not set, we need to import it here
@@ -140,22 +147,24 @@ class DatabricksSecretsService(BaseService):
                     if response.status == 200:
                         result = await response.json()
                         secrets = result.get("secrets", [])
-                        
-                        # For each secret key, make another call to get its value
-                        secrets_with_values = []
+
+                        # SECURITY: Return metadata only — never the secret value.
+                        # We deliberately do NOT call get_databricks_secret_value
+                        # here (that would expose shared-scope secrets to any
+                        # authenticated caller).
+                        secrets_metadata = []
                         for secret in secrets:
                             secret_key = secret.get("key")
-                            secret_value = await self.get_databricks_secret_value(scope, secret_key)
-                            secrets_with_values.append({
+                            secrets_metadata.append({
                                 "id": hash(f"{scope}:{secret_key}") % 10000,  # Some "unique" ID
                                 "name": secret_key,
-                                "value": secret_value,
+                                "value": "",  # Never expose the value over the API
                                 "description": "",  # Databricks doesn't store descriptions
                                 "scope": scope,
                                 "source": "databricks"
                             })
-                        
-                        return secrets_with_values
+
+                        return secrets_metadata
                     else:
                         error_text = await response.text()
                         logger.error(f"Error listing Databricks secrets: {error_text}")

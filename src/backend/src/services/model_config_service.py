@@ -107,6 +107,7 @@ class ModelConfigService:
 
         # Invalidate cache - both default and group-specific if provided
         await model_config_cache.invalidate("__default__", "models")
+        await model_config_cache.invalidate("__default__", f"model:{model_dict.get('key', model_data.key)}")
         if group_id:
             await model_config_cache.invalidate(group_id, "models")
         logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after create")
@@ -143,6 +144,7 @@ class ModelConfigService:
 
         # Invalidate cache - both default and group-specific if provided
         await model_config_cache.invalidate("__default__", "models")
+        await model_config_cache.invalidate("__default__", f"model:{key}")
         if group_id:
             await model_config_cache.invalidate(group_id, "models")
         # Also invalidate the model's own group if it has one
@@ -176,6 +178,7 @@ class ModelConfigService:
 
             # Invalidate cache
             await model_config_cache.invalidate("__default__", "models")
+            await model_config_cache.invalidate("__default__", f"model:{key}")
             if group_id:
                 await model_config_cache.invalidate(group_id, "models")
             if result and result.group_id:
@@ -212,6 +215,7 @@ class ModelConfigService:
         if result:
             # Invalidate cache
             await model_config_cache.invalidate("__default__", "models")
+            await model_config_cache.invalidate("__default__", f"model:{key}")
             if group_id:
                 await model_config_cache.invalidate(group_id, "models")
             if model_group_id:
@@ -283,24 +287,34 @@ class ModelConfigService:
             # Normalize model key (handle provider-prefixed routes like "databricks/model-key")
             normalized_key = model.rsplit('/', 1)[-1] if isinstance(model, str) else model
 
-            # Try to get from repository first using normalized key
-            model_config = await self.repository.find_by_key(normalized_key)
-            if model_config:
-                config = {
-                    "key": model_config.key,
-                    "name": model_config.name,
-                    "provider": model_config.provider,
-                    "temperature": model_config.temperature,
-                    "context_window": model_config.context_window,
-                    "max_output_tokens": model_config.max_output_tokens,
-                    "extended_thinking": model_config.extended_thinking,
-                    "enabled": model_config.enabled
-                }
+            # Read-through TTL cache (PERF-005): this runs on EVERY LLM
+            # completion, which previously meant a DB round trip per call.
+            # find_by_key is global (not group-filtered), so the cache entry
+            # lives under "__default__" and mutations invalidate it exactly.
+            # API keys are never cached here — only the model row fields.
+            cached = await model_config_cache.get("__default__", f"model:{normalized_key}")
+            if cached is not None:
+                config = dict(cached)
             else:
-                # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
-                config = get_model_config(normalized_key)
-                if not config:
-                    raise ValueError(f"Model configuration not found for model: {model}")
+                # Try to get from repository first using normalized key
+                model_config = await self.repository.find_by_key(normalized_key)
+                if model_config:
+                    config = {
+                        "key": model_config.key,
+                        "name": model_config.name,
+                        "provider": model_config.provider,
+                        "temperature": model_config.temperature,
+                        "context_window": model_config.context_window,
+                        "max_output_tokens": model_config.max_output_tokens,
+                        "extended_thinking": model_config.extended_thinking,
+                        "enabled": model_config.enabled
+                    }
+                else:
+                    # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
+                    config = get_model_config(normalized_key)
+                    if not config:
+                        raise ValueError(f"Model configuration not found for model: {model}")
+                await model_config_cache.set("__default__", f"model:{normalized_key}", dict(config))
 
             # Get API key for the provider using class method
             provider = config["provider"].lower()

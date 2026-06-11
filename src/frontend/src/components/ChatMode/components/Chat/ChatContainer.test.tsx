@@ -134,14 +134,16 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       resultData: { label, kind: 'tool_call', durationMs: 100, ...extra },
     } as unknown as ChatMessageType);
 
-  it('shows a live "Generating crew…" indicator while generating (no traces, no Stop, nothing to expand)', () => {
+  it('shows a live "Thinking…" indicator with animated dots while generating', () => {
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q')]} isGenerating />);
-    expect(screen.getByText('Generating crew…')).toBeInTheDocument();
+    const label = screen.getByText(/Thinking/);
+    expect(label).toBeInTheDocument();
+    expect(label.querySelector('.kasal-thinking-dots')).not.toBeNull();
     expect(screen.queryByLabelText('Stop execution')).toBeNull();
     expect(screen.queryByTestId('trace-group')).toBeNull();
   });
 
-  it('while executing with traces: "Working…", Stop on the right, expandable timeline (dots + bold names + text)', () => {
+  it('while executing with traces: live latest-step header, Stop on the right, expandable timeline (dots + bold names + text)', () => {
     const onStop = vi.fn();
     render(
       <ChatContainer
@@ -156,10 +158,12 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         onStopExecution={onStop}
       />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    // The header tracks the LATEST step (no static "Working…" once traces exist).
+    expect(screen.queryByText('Working…')).toBeNull();
+    expect(screen.getByText('ScrapeTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // collapsed by default → no steps visible yet
+    // collapsed by default → no steps visible yet (only the live header line)
     expect(screen.queryByText('PerplexityTool')).toBeNull();
     // expand → chronological steps, bold names + their summary + duration
     fireEvent.click(screen.getByLabelText('Expand run activity'));
@@ -172,11 +176,49 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getByText('recalled 3 items')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Hide context for Memory'));
     expect(screen.queryByText('recalled 3 items')).toBeNull();
-    expect(screen.getByText('ScrapeTool')).toBeInTheDocument(); // no summary, no duration, no context
+    // Stop was pressed → the header shows "Stopping…", so the only ScrapeTool
+    // left is the timeline step (no summary, no duration, no context).
+    expect(screen.getAllByText('ScrapeTool')).toHaveLength(1);
     expect(screen.getByText('100ms')).toBeInTheDocument(); // first step's duration
     // toggling closed again (Collapse label)
     fireEvent.click(screen.getByLabelText('Collapse run activity'));
     expect(screen.queryByText('PerplexityTool')).toBeNull();
+  });
+
+  it('live header shows the latest step name + first line of its query (one-liner)', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          msg('u', 'q'),
+          traceMsg('t1', 'Search memory', { sublabel: 'oil price benchmarks\nsecond line ignored' }),
+        ]}
+        isExecuting
+      />,
+    );
+    expect(screen.getByText('Search memory')).toBeInTheDocument();
+    // Only the FIRST line of the sublabel, prefixed with an em dash.
+    expect(screen.getByText(/—\s*oil price benchmarks/)).toBeInTheDocument();
+    expect(screen.queryByText(/second line ignored/)).toBeNull();
+  });
+
+  it('live header shows the first line of the retrieved Memory context (not the generic sublabel)', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          msg('u', 'q'),
+          traceMsg('m1', 'Memory', {
+            sublabel: 'context retrieved',
+            detail: 'WTI closed at $78.12 yesterday\nBrent at $82.40',
+          }),
+        ]}
+        isExecuting
+      />,
+    );
+    expect(screen.getByText('Memory')).toBeInTheDocument();
+    expect(screen.getByText(/—\s*WTI closed at \$78\.12 yesterday/)).toBeInTheDocument();
+    expect(screen.queryByText(/Brent at/)).toBeNull();
   });
 
   it('shows no "Show context" toggle when a step\'s detail just duplicates its summary', () => {
@@ -214,7 +256,8 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
 
   it('executing without a stop handler shows no Stop button', () => {
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q'), traceMsg('t1', 'PerplexityTool')]} isExecuting />);
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    // Live header shows the latest step instead of a static "Working…".
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     expect(screen.queryByLabelText('Stop execution')).toBeNull();
   });
 
@@ -224,12 +267,14 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     const { rerender } = render(
       <ChatContainer {...baseProps} messages={stillRunning} isExecuting onStopExecution={onStop} />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // immediate feedback: "Stopping…" + the control becomes a disabled spinner
+    // immediate feedback: "Stopping…" replaces the live line + the control
+    // becomes a disabled spinner
     expect(screen.getByText('Stopping…')).toBeInTheDocument();
     expect(screen.queryByText('Working…')).toBeNull();
+    expect(screen.queryByText('PerplexityTool')).toBeNull();
     expect(screen.getByLabelText('Stopping…')).toBeDisabled();
     // run actually ends → state clears, container settles into the done view
     rerender(<ChatContainer {...baseProps} messages={stillRunning} />); // isExecuting now false
@@ -247,21 +292,19 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       resultData: { agents: [{ name: 'A' }], tasks: [{ name: 'T' }] },
     } as unknown as ChatMessageType);
 
-  it('mounts the generated crew card inside the container (not as a separate bubble) and labels it "Crew ready"', () => {
+  it('no longer mounts the crew card inside the run container', () => {
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q'), genMsg('gen1')]} />);
-    // crew card lives in the run-activity container...
-    expect(screen.getByTestId('crew-card-gen1')).toBeInTheDocument();
-    // ...and is NOT also rendered as its own chat bubble
-    expect(screen.queryByTestId('msg-gen1')).toBeNull();
-    // generated but not yet running, no traces → "Crew ready", no Stop, nothing to expand
-    expect(screen.getByText('Crew ready')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Stop execution')).toBeNull();
-    expect(screen.queryByLabelText('Expand run activity')).toBeNull();
+    // The run container no longer hosts a crew card (new generations never
+    // produce these messages; legacy ones flow through ChatMessage as a
+    // normal bubble instead).
+    expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
+    expect(screen.getByTestId('msg-gen1')).toBeInTheDocument();
+    expect(screen.queryByText('Crew ready')).toBeNull();
     // the user's prompt still renders normally
     expect(screen.getByTestId('msg-u')).toBeInTheDocument();
   });
 
-  it('keeps the crew card visible inside the container while executing, with the timeline collapsible below it', () => {
+  it('folds activity into the collapsible while executing — no crew card anywhere', () => {
     const onStop = vi.fn();
     render(
       <ChatContainer
@@ -271,15 +314,15 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         onStopExecution={onStop}
       />,
     );
-    expect(screen.getByText('Working…')).toBeInTheDocument();
-    expect(screen.getByTestId('crew-card-gen1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Stop execution')).toBeInTheDocument();
-    // timeline collapsed by default — but the crew card stays visible
-    expect(screen.queryByText('PerplexityTool')).toBeNull();
-    fireEvent.click(screen.getByLabelText('Expand run activity'));
+    // Live header shows the latest step name (the timeline itself stays collapsed).
     expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
+    expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
+    expect(screen.getByLabelText('Stop execution')).toBeInTheDocument();
+    // timeline collapsed by default; expands like tool activity
+    expect(screen.queryByText('find stock photos')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Expand run activity'));
+    expect(screen.getAllByText('PerplexityTool')).toHaveLength(2); // header + timeline step
     expect(screen.getByText('find stock photos')).toBeInTheDocument();
-    expect(screen.getByTestId('crew-card-gen1')).toBeInTheDocument(); // still there alongside the timeline
   });
 
   it('keeps an inline-rendered Genie answer in the chat (not inside the container)', () => {
@@ -296,7 +339,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getByTestId('msg-g1')).toBeInTheDocument();
   });
 
-  it('keeps the crew card ABOVE the result after the run completes (does not drop below it)', () => {
+  it('renders a completed run as plain conversation — no card, no leftover container', () => {
     // Regression: a completed run with an inline Genie answer + a result message
     // but NO trace groups. The run container (crew card) must stay anchored above
     // the result it produced, not pin to the bottom below it.
@@ -309,11 +352,92 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     render(
       <ChatContainer {...baseProps} messages={[msg('u', 'q'), genMsg('gen1'), genie, result]} />,
     );
-    const card = screen.getByTestId('crew-card-gen1');
-    const resultBubble = screen.getByTestId('msg-res');
-    // The result follows the crew card in document order (card is above it).
-    expect(
-      card.compareDocumentPosition(resultBubble) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    // No crew card and no leftover container chrome: the inline Genie answer
+    // and the result render as normal conversation, nothing pinned below.
+    expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
+    expect(screen.queryByText('Crew ready')).toBeNull();
+    expect(screen.getByTestId('msg-res')).toBeInTheDocument();
+  });
+});
+
+describe('ChatContainer — one run-activity section per prompt', () => {
+  const userMsg = (id: string, content: string) =>
+    ({ id, role: 'user', content, timestamp: new Date() } as unknown as ChatMessageType);
+  const trace = (id: string, label: string, sublabel?: string) =>
+    ({
+      id, role: 'assistant', content: '', timestamp: new Date(),
+      resultType: 'trace',
+      resultData: { label, ...(sublabel ? { sublabel } : {}), kind: 'event', timestamp: Date.now() },
+    } as unknown as ChatMessageType);
+
+  it('a second prompt gets its OWN activity section under it (not merged into the first)', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          userMsg('u1', 'first prompt'),
+          trace('t1', 'Crew planned', '1 agent · 2 tasks'),
+          trace('t2', 'Agent ready', 'Image Curator Agent'),
+          userMsg('u2', 'second prompt'),
+          trace('t3', 'Crew planned', '2 agents · 2 tasks'),
+          trace('t4', 'Agent ready', 'Image Collector'),
+        ]}
+      />,
+    );
+    // Two separate containers, both idle → both labelled "Run activity"
+    const containers = screen.getAllByText('Run activity');
+    expect(containers).toHaveLength(2);
+
+    // First section sits between prompt 1 and prompt 2; second sits after prompt 2
+    const [first, second] = containers;
+    const p2 = screen.getByText('second prompt');
+    expect(first.compareDocumentPosition(p2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(p2.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Each timeline contains only its own steps
+    fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
+    expect(screen.getByText('Image Curator Agent')).toBeInTheDocument();
+    expect(screen.queryByText('Image Collector')).toBeNull();
+    // The first toggle now reads "Collapse…" — the remaining Expand is section 2
+    fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
+    expect(screen.getByText('Image Collector')).toBeInTheDocument();
+  });
+
+  it('only the LATEST prompt section is live while running (Stop only there)', () => {
+    const onStop = vi.fn();
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          userMsg('u1', 'first prompt'),
+          trace('t1', 'Crew planned'),
+          userMsg('u2', 'second prompt'),
+          trace('t2', 'Crew planned'),
+        ]}
+        isExecuting
+        onStopExecution={onStop}
+      />,
+    );
+    // First container is finished; the second is live and shows its latest step
+    expect(screen.getByText('Run activity')).toBeInTheDocument();
+    expect(screen.getByText('Crew planned')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Stop execution')).toHaveLength(1);
+  });
+
+  it('a follow-up prompt with no traces yet shows a fresh Thinking section at the end', () => {
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          userMsg('u1', 'first prompt'),
+          trace('t1', 'Crew planned'),
+          userMsg('u2', 'second prompt'),
+        ]}
+        isGenerating
+      />,
+    );
+    // Previous run keeps its own finished section; the new one thinks fresh
+    expect(screen.getByText('Run activity')).toBeInTheDocument();
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
   });
 });

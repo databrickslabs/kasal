@@ -6,8 +6,25 @@ This module defines Pydantic schemas for HITL API requests and responses.
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from enum import Enum
+
+from src.utils.url_security import check_url_structure, UnsafeUrlError
+
+
+def _validate_webhook_url(value: Optional[str]) -> Optional[str]:
+    """
+    SECURITY: reject obviously-unsafe webhook URLs at creation time (non-https,
+    no host, blocked literal hosts, private/loopback IP literals). The
+    authoritative SSRF check (incl. DNS resolution) runs again at send time.
+    """
+    if value is None:
+        return value
+    try:
+        check_url_structure(value, require_https=True)
+    except UnsafeUrlError as exc:
+        raise ValueError(str(exc)) from exc
+    return value
 
 
 # =============================================================================
@@ -216,6 +233,12 @@ class HITLWebhookBase(BaseModel):
     """Base schema for HITL webhook."""
     name: str = Field(..., min_length=1, max_length=255, description="Webhook name")
     url: str = Field(..., min_length=1, max_length=1000, description="Webhook URL")
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        _validate_webhook_url(v)
+        return v
     flow_id: Optional[str] = Field(
         default=None,
         max_length=100,
@@ -247,6 +270,11 @@ class HITLWebhookUpdate(BaseModel):
     """Schema for updating an HITL webhook."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     url: Optional[str] = Field(None, min_length=1, max_length=1000)
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_webhook_url(v)
     flow_id: Optional[str] = Field(None, max_length=100, description="Flow ID to scope webhook to")
     enabled: Optional[bool] = None
     events: Optional[List[HITLWebhookEventEnum]] = None

@@ -701,3 +701,40 @@ class TestSwappableSessionFactoryProperty:
         factory.activate_lakebase(MagicMock())
         factory.deactivate_lakebase()
         assert factory.is_lakebase is False
+
+
+# ---------------------------------------------------------------------------
+# _ensure_chat_sessions_table: named chat-mode sessions (create_all is skipped
+# on existing DBs, so the table must be created explicitly by the self-heal)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureChatSessionsTable:
+    """Tests for _ensure_chat_sessions_table (new-table self-heal)."""
+
+    @pytest.mark.asyncio
+    async def test_creates_table_via_run_sync(self):
+        from src.db.session import _ensure_chat_sessions_table
+
+        conn = MagicMock()
+        conn.run_sync = AsyncMock()
+
+        await _ensure_chat_sessions_table(conn)
+
+        conn.run_sync.assert_awaited_once()
+        # The callable hands the table create (checkfirst) to the sync conn
+        create_fn = conn.run_sync.await_args.args[0]
+        sync_conn = MagicMock()
+        with patch("src.models.chat_session.ChatSession") as MockModel:
+            MockModel.__table__ = MagicMock()
+            create_fn(sync_conn)
+
+    @pytest.mark.asyncio
+    async def test_failure_is_swallowed(self):
+        """A create failure must not break startup — logged as a warning."""
+        from src.db.session import _ensure_chat_sessions_table
+
+        conn = MagicMock()
+        conn.run_sync = AsyncMock(side_effect=Exception("locked"))
+
+        await _ensure_chat_sessions_table(conn)  # must not raise

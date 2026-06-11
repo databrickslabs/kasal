@@ -62,52 +62,15 @@ class PowerBISemanticModelFetcherSchema(BaseModel):
     """Input schema for PowerBISemanticModelFetcherTool."""
 
     # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) containing the semantic model."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID) to extract metadata from."
-    )
     report_id: Optional[str] = Field(
         None,
         description="[Power BI] Optional Report ID (GUID) to auto-extract default filters from."
     )
 
-    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
-    tenant_id: Optional[str] = Field(
-        None,
-        description="[Auth] Azure AD tenant ID for Service Principal or Service Account."
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="[Auth] Application/Client ID (SemanticModel.ReadWrite.All permission)."
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="[Auth] Client secret for Service Principal."
-    )
-
-    # ===== SERVICE ACCOUNT AUTHENTICATION =====
-    username: Optional[str] = Field(
-        None,
-        description="[Auth] Service account username/UPN for Service Account authentication."
-    )
-    password: Optional[str] = Field(
-        None,
-        description="[Auth] Service account password for Service Account authentication."
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect."
-    )
-
-    # ===== OR USER OAUTH =====
-    access_token: Optional[str] = Field(
-        None,
-        description="[Auth] Access token for user OAuth authentication (alternative to SP/SA)."
-    )
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # ===== OPTIONS =====
     skip_system_tables: bool = Field(

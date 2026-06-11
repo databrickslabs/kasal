@@ -32,52 +32,15 @@ class PowerBIReportReferencesSchema(BaseModel):
     """Input schema for PowerBIReportReferencesTool."""
 
     # ===== POWER BI CONFIGURATION =====
-    workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID (GUID) containing the reports/dataset. Leave empty to use pre-configured value."
-    )
-    dataset_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Dataset/Semantic Model ID (GUID). When provided, discovers ALL reports using this dataset and extracts references from each. Recommended approach."
-    )
     report_id: Optional[str] = Field(
         None,
-        description="[Power BI] Single Report ID (GUID) to extract references from. Use dataset_id instead for comprehensive analysis across all reports."
+        description="[Power BI] Single Report ID (GUID) to extract references from. Leave empty to analyze all reports using the pre-configured dataset."
     )
 
-    # ===== SERVICE PRINCIPAL AUTHENTICATION =====
-    tenant_id: Optional[str] = Field(
-        None,
-        description="[Auth] Azure AD tenant ID for Service Principal or Service Account authentication."
-    )
-    client_id: Optional[str] = Field(
-        None,
-        description="[Auth] Application/Client ID for Service Principal or Service Account authentication."
-    )
-    client_secret: Optional[str] = Field(
-        None,
-        description="[Auth] Client secret for Service Principal authentication."
-    )
-
-    # ===== SERVICE ACCOUNT AUTHENTICATION =====
-    username: Optional[str] = Field(
-        None,
-        description="[Auth] Service account username/UPN (for Service Account authentication)"
-    )
-    password: Optional[str] = Field(
-        None,
-        description="[Auth] Service account password (for Service Account authentication)"
-    )
-    auth_method: Optional[str] = Field(
-        None,
-        description="[Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
-    )
-
-    # User OAuth token (alternative to Service Principal/Service Account)
-    access_token: Optional[str] = Field(
-        None,
-        description="[Auth] Pre-obtained OAuth access token (alternative to SP/Service Account)."
-    )
+    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
+    # schema. Those values are injected at tool-construction time from
+    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
+    # bloated every LLM call and invited the model to echo credentials.
 
     # ===== OUTPUT OPTIONS =====
     output_format: str = Field(

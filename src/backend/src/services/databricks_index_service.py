@@ -25,6 +25,26 @@ short_term_logger = LoggerManager.get_instance().databricks_short_term
 long_term_logger = LoggerManager.get_instance().databricks_long_term
 entity_logger = LoggerManager.get_instance().databricks_entity
 
+# Markers indicating an authentication/permission failure. These are
+# NON-RETRYABLE for polling purposes: an index check failing with 401/403 will
+# keep failing for the whole timeout, so callers should fail fast instead.
+_AUTH_ERROR_MARKERS = (
+    "401",
+    "403",
+    "unauthorized",
+    "forbidden",
+    "permission denied",
+    "invalid access token",
+    "invalid token",
+    "authentication",
+)
+
+
+def is_auth_or_permission_error(message: Optional[str]) -> bool:
+    """True when an error message indicates an auth/permission failure."""
+    msg = (message or "").lower()
+    return any(marker in msg for marker in _AUTH_ERROR_MARKERS)
+
 
 class DatabricksIndexService:
     """Service for managing Databricks Vector Search indexes."""
@@ -417,9 +437,36 @@ class DatabricksIndexService:
                         else:
                             logger.info(f"Index {index_name} not ready yet (state: {state})")
                     else:
+                        # Auth/permission failures won't heal within the
+                        # timeout — fail fast instead of polling for minutes.
+                        if is_auth_or_permission_error(response.message):
+                            logger.error(
+                                f"Index readiness check failed with auth/permission error, "
+                                f"aborting wait: {response.message}"
+                            )
+                            return {
+                                "success": False,
+                                "ready": False,
+                                "auth_error": True,
+                                "message": f"Auth/permission error checking index: {response.message}",
+                                "elapsed_time": elapsed_time,
+                                "attempts": attempt,
+                            }
                         logger.warning(f"Failed to get index info: {response.message}")
-                        
+
                 except Exception as e:
+                    if is_auth_or_permission_error(str(e)):
+                        logger.error(
+                            f"Index readiness check raised auth/permission error, aborting wait: {e}"
+                        )
+                        return {
+                            "success": False,
+                            "ready": False,
+                            "auth_error": True,
+                            "message": f"Auth/permission error checking index: {e}",
+                            "elapsed_time": elapsed_time,
+                            "attempts": attempt,
+                        }
                     logger.warning(f"Error checking index readiness (attempt {attempt}): {e}")
                 
                 # Wait before next check (unless we're about to exceed max time)
@@ -433,7 +480,18 @@ class DatabricksIndexService:
                         logger.info(f"Waiting {remaining_time:.1f}s (final check)...")
                         await asyncio.sleep(remaining_time)
                     break
-                    
+
+            # Loop exited via break (final-wait path) without the index ever
+            # becoming ready — previously this fell through and returned None.
+            logger.warning(f"Index {index_name} did not become ready within {max_wait_seconds} seconds")
+            return {
+                "success": False,
+                "ready": False,
+                "message": f"Index not ready after {max_wait_seconds} seconds",
+                "elapsed_time": asyncio.get_event_loop().time() - start_time,
+                "attempts": attempt
+            }
+
         except Exception as e:
             logger.error(f"Error waiting for index readiness: {e}")
             return {

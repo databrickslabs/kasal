@@ -90,22 +90,24 @@ def _make_measure_tmdl(table_name: str, measures: list) -> str:
 # ===========================================================================
 
 class TestPowerBIFieldParametersCalculationGroupsSchema:
-    def test_all_optional_except_targets(self):
+    def test_constructs_with_no_args(self):
+        # All remaining fields have defaults; plumbing comes from tool_configs.
         schema = PowerBIFieldParametersCalculationGroupsSchema()
-        assert schema.workspace_id is None
-        assert schema.dataset_id is None
+        assert schema is not None
 
-    def test_sp_auth_fields(self):
-        schema = PowerBIFieldParametersCalculationGroupsSchema(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+    def test_plumbing_fields_not_llm_fillable(self):
+        """Connection/auth/LLM plumbing is injected via tool_configs (__init__),
+        never exposed as LLM-fillable schema fields."""
+        forbidden = {
+            "client_secret", "password", "access_token", "llm_token",
+            "api_key", "token", "tenant_id", "client_id", "username",
+            "auth_method", "workspace_id", "dataset_id",
+            "llm_workspace_url", "llm_model",
+        }
+        leaked = forbidden & set(
+            PowerBIFieldParametersCalculationGroupsSchema.model_fields
         )
-        assert schema.tenant_id == TENANT_ID
-        assert schema.client_secret == CLIENT_SECRET
-
-    def test_access_token_field(self):
-        schema = PowerBIFieldParametersCalculationGroupsSchema(access_token=ACCESS_TOKEN)
-        assert schema.access_token == ACCESS_TOKEN
+        assert not leaked, f"plumbing fields leaked into schema: {sorted(leaked)}"
 
     def test_target_catalog_default(self):
         schema = PowerBIFieldParametersCalculationGroupsSchema()
@@ -114,10 +116,6 @@ class TestPowerBIFieldParametersCalculationGroupsSchema:
     def test_target_schema_default(self):
         schema = PowerBIFieldParametersCalculationGroupsSchema()
         assert schema.target_schema == "default"
-
-    def test_llm_model_default(self):
-        schema = PowerBIFieldParametersCalculationGroupsSchema()
-        assert schema.llm_model == "databricks-claude-sonnet-4"
 
     def test_translate_measures_default(self):
         schema = PowerBIFieldParametersCalculationGroupsSchema()
@@ -134,15 +132,6 @@ class TestPowerBIFieldParametersCalculationGroupsSchema:
     def test_output_format_default(self):
         schema = PowerBIFieldParametersCalculationGroupsSchema()
         assert schema.output_format == "markdown"
-
-    def test_sa_auth_fields(self):
-        schema = PowerBIFieldParametersCalculationGroupsSchema(
-            username="svc@example.com",
-            password="pass",
-            auth_method="service_account",
-        )
-        assert schema.username == "svc@example.com"
-        assert schema.auth_method == "service_account"
 
 
 # ===========================================================================

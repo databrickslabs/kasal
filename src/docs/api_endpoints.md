@@ -14,7 +14,7 @@ https://<your-app>.databricksapps.com/api/v1
 
 **Example:**
 ```
-https://kasal-dev-1444828305810485.aws.databricksapps.com/api/v1/executions
+https://<your-app>.aws.databricksapps.com/api/v1/executions
 ```
 
 **Local Development:**

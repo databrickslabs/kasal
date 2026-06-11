@@ -41,7 +41,7 @@ describe('uiLayout store — initial state', () => {
   it('uses defaults when nothing is persisted', async () => {
     const { useUILayoutStore } = await freshModule();
     const s = useUILayoutStore.getState();
-    expect(s.appMode).toBe('crew');
+    expect(s.appMode).toBe('chat');
     expect(s.areFlowsVisible).toBe(false);
     expect(s.chatPanelVisible).toBe(true);
     expect(s.chatPanelCollapsed).toBe(false);
@@ -84,7 +84,7 @@ describe('uiLayout store — initial state', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { useUILayoutStore } = await freshModule(undefined, { rawValue: '{not-json' });
     const s = useUILayoutStore.getState();
-    expect(s.appMode).toBe('crew');
+    expect(s.appMode).toBe('chat');
     expect(errSpy).toHaveBeenCalledWith('Failed to load persisted UI state:', expect.anything());
   });
 

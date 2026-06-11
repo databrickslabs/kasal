@@ -11,6 +11,12 @@ from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEnti
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context
 from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
+from src.schemas.crew_feedback import (
+    CrewFeedbackCreateRequest,
+    CrewFeedbackResponse,
+    CrewFeedbackSummaryEntry,
+)
+from src.services.crew_feedback_service import CrewFeedbackService
 from src.services.crew_service import CrewService
 
 router = APIRouter(
@@ -57,6 +63,54 @@ async def list_crews(
         )
         for crew in crews
     ]
+
+
+def get_crew_feedback_service(session: SessionDep) -> CrewFeedbackService:
+    return CrewFeedbackService(session)
+
+
+@router.get("/feedback-summary", response_model=List[CrewFeedbackSummaryEntry])
+async def crew_feedback_summary(
+    group_context: GroupContextDep,
+    service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
+):
+    """Per-crew thumbs up/down counts for this workspace's catalog view.
+
+    NOTE: registered BEFORE /{crew_id} — a literal segment would otherwise be
+    parsed (and rejected) as a UUID path param.
+    """
+    return [CrewFeedbackSummaryEntry(**row) for row in await service.summary(group_context)]
+
+
+@router.post("/{crew_id}/feedback", response_model=CrewFeedbackResponse, status_code=status.HTTP_201_CREATED)
+async def add_crew_feedback(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew")],
+    request: CrewFeedbackCreateRequest,
+    group_context: GroupContextDep,
+    service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
+):
+    """Record a thumbs up/down on a cataloged crew (down requires a comment)."""
+    try:
+        record = await service.add_feedback(
+            crew_id=str(crew_id),
+            rating=request.rating,
+            comment=request.comment,
+            group_context=group_context,
+        )
+    except ValueError as e:
+        raise UnprocessableEntityError(str(e))
+    return CrewFeedbackResponse.model_validate(record)
+
+
+@router.get("/{crew_id}/feedback", response_model=List[CrewFeedbackResponse])
+async def list_crew_feedback(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew")],
+    group_context: GroupContextDep,
+    service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
+):
+    """All feedback entries for a crew (newest first) — incl. down-vote comments."""
+    records = await service.list_for_crew(str(crew_id), group_context)
+    return [CrewFeedbackResponse.model_validate(r) for r in records]
 
 
 @router.get("/{crew_id}", response_model=CrewResponse)

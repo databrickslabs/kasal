@@ -336,7 +336,10 @@ class KasalDBSpanExporter(SpanExporter):
         # and floods the log with tracebacks — so drop late spans quietly.
         if self._shutdown:
             return SpanExportResult.SUCCESS
-        logger.info(
+        # DEBUG, not INFO (PERF-031): at one line per span (~7.3k per busy
+        # period) these two logs dominated log churn; batch-level outcomes
+        # are logged by _write_batch.
+        logger.debug(
             f"[OTel-DB][{self._job_id}] export() called with {len(spans)} span(s)"
         )
         records = []
@@ -345,7 +348,7 @@ class KasalDBSpanExporter(SpanExporter):
                 record = self._span_to_record(span)
                 if record:
                     records.append(record)
-                    logger.info(
+                    logger.debug(
                         f"[OTel-DB][{self._job_id}] Span: name={span.name}, "
                         f"event_type={record['event_type']}"
                     )
@@ -518,4 +521,22 @@ class KasalDBSpanExporter(SpanExporter):
         )
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return True
+        """Block until every queued write batch has been committed.
+
+        Previously a no-op (PERF-032), which meant BatchSpanProcessor's
+        shutdown-time flush had no real guarantee and a backed-up queue
+        could drop traces at subprocess exit. A no-op barrier submitted to
+        the single-worker pool completes only after everything queued
+        before it has been written.
+        """
+        if self._shutdown:
+            return True
+        try:
+            barrier = self._executor.submit(lambda: None)
+            barrier.result(timeout=timeout_millis / 1000.0)
+            return True
+        except Exception as e:
+            logger.warning(
+                f"[OTel-DB][{self._job_id}] force_flush did not complete: {e}"
+            )
+            return False

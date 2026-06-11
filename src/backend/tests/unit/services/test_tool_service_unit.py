@@ -8,6 +8,17 @@ from src.utils.user_context import GroupContext
 
 from datetime import datetime
 
+
+
+@pytest.fixture(autouse=True)
+def _clear_tool_list_cache():
+    """The enabled-tools cache is module-global (PERF: burst polling);
+    clear it around every test so suites stay independent."""
+    from src.core.cache import tool_list_cache
+    tool_list_cache._cache.clear()
+    yield
+    tool_list_cache._cache.clear()
+
 def mk_tool(id=1, title="T", enabled=True, group_id=None, config=None, icon="i", description="d"):
     now = datetime.utcnow()
     return SimpleNamespace(id=id, title=title, enabled=enabled, group_id=group_id, config=config or {}, icon=icon, description=description, created_at=now, updated_at=now)
@@ -251,3 +262,90 @@ async def test_config_endpoints():
     svc.repository.create = AsyncMock(return_value=mk_tool(10, title="A", group_id="g1", config={"n": 1}, enabled=True))
     out4 = await svc.update_tool_configuration_group_scoped("A", {"n": 1}, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
     assert out4.config == {"n": 1}
+
+
+# ---------------------------------------------------------------------------
+# Enabled-tools list cache (log-audit fix): the frontend polls this endpoint
+# in same-second bursts; repeated calls must not re-walk tools + group_tools.
+# ---------------------------------------------------------------------------
+
+def _make_cached_service():
+    svc = ToolService(session=SimpleNamespace())
+    svc.repository = AsyncMock()
+    svc.repository.find_enabled = AsyncMock(return_value=[mk_tool(1, title="A", enabled=True)])
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_enabled_tools_second_call_served_from_cache():
+    svc = _make_cached_service()
+    out1 = await svc.get_enabled_tools_for_group(None)
+    out2 = await svc.get_enabled_tools_for_group(None)
+    assert out1.count == out2.count == 1
+    svc.repository.find_enabled.assert_awaited_once()  # only the first call hit the DB
+
+
+@pytest.mark.asyncio
+async def test_enabled_tools_cache_is_group_scoped():
+    svc = _make_cached_service()
+    gc1 = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc2 = GroupContext(group_ids=["g2"], group_email="u@x", email_domain="x.com", user_role="admin")
+
+    from src.services import tool_service as module
+    class FakeGRepo:
+        def __init__(self, session): ...
+        async def list_enabled_for_group(self, gid):
+            return [SimpleNamespace(tool_id=1, config={})]
+    orig = module.GroupToolRepository
+    module.GroupToolRepository = FakeGRepo
+    try:
+        await svc.get_enabled_tools_for_group(gc1)
+        await svc.get_enabled_tools_for_group(gc2)
+        assert svc.repository.find_enabled.await_count == 2  # different groups, separate entries
+        await svc.get_enabled_tools_for_group(gc1)
+        assert svc.repository.find_enabled.await_count == 2  # g1 repeat is a cache hit
+    finally:
+        module.GroupToolRepository = orig
+
+
+@pytest.mark.asyncio
+async def test_enabled_tools_cached_entry_isolated_from_caller_mutation():
+    svc = _make_cached_service()
+    out1 = await svc.get_enabled_tools_for_group(None)
+    out1.tools[0].config["injected"] = True  # caller mutates its copy
+    out2 = await svc.get_enabled_tools_for_group(None)
+    assert "injected" not in (out2.tools[0].config or {})
+
+
+@pytest.mark.asyncio
+async def test_tool_mutation_invalidates_enabled_tools_cache():
+    svc = _make_cached_service()
+    await svc.get_enabled_tools_for_group(None)
+
+    svc.repository.toggle_enabled = AsyncMock(return_value=mk_tool(1, enabled=False))
+    await svc.toggle_tool_enabled(1)
+
+    await svc.get_enabled_tools_for_group(None)
+    assert svc.repository.find_enabled.await_count == 2  # cache was cleared by the toggle
+
+
+@pytest.mark.asyncio
+async def test_group_tool_mutation_invalidates_enabled_tools_cache():
+    from src.services.group_tool_service import GroupToolService
+    svc = _make_cached_service()
+    await svc.get_enabled_tools_for_group(None)
+
+    gsvc = GroupToolService(session=SimpleNamespace())
+    gsvc.group_tool_repo = AsyncMock()
+    now = datetime.utcnow()
+    gsvc.group_tool_repo.set_enabled = AsyncMock(
+        return_value=SimpleNamespace(
+            id=1, tool_id=1, group_id="g1", enabled=True, config={},
+            credentials_status="ok", created_at=now, updated_at=now,
+        )
+    )
+    gc = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    await gsvc.set_group_tool_enabled(1, True, gc)
+
+    await svc.get_enabled_tools_for_group(None)
+    assert svc.repository.find_enabled.await_count == 2  # mapping change cleared the cache

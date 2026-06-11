@@ -244,7 +244,9 @@ class TestGetDatabricksSecrets:
     """Tests for get_databricks_secrets."""
 
     @pytest.mark.asyncio
-    async def test_returns_secrets_with_values(self):
+    async def test_returns_metadata_only_never_values(self):
+        """SECURITY: the list endpoint must return metadata only — never the
+        plaintext secret value — and must not fetch per-secret values."""
         service = _make_service()
         mock_ds = AsyncMock()
         mock_ds.get_databricks_config = AsyncMock(return_value=_make_config())
@@ -258,15 +260,18 @@ class TestGetDatabricksSecrets:
         with patch(
             _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
         ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
-            # Mock get_databricks_secret_value for the nested calls
+            # If this were called the value would leak — assert it is NOT.
             service.get_databricks_secret_value = AsyncMock(return_value="secret-val")
             result = await service.get_databricks_secrets("my-scope")
 
         assert len(result) == 1
         assert result[0]["name"] == "MY_KEY"
-        assert result[0]["value"] == "secret-val"
+        # Value must always be empty — never the real secret.
+        assert result[0]["value"] == ""
         assert result[0]["scope"] == "my-scope"
         assert result[0]["source"] == "databricks"
+        # The per-secret value fetch must NOT be invoked by the list path.
+        service.get_databricks_secret_value.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_config_missing(self):

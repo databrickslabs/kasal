@@ -45,6 +45,19 @@ ENCRYPTED_PREFIX = "ENC:"
 # Redacted placeholder for masked values
 REDACTED_PLACEHOLDER = "***REDACTED***"
 
+# HTTP header names whose VALUES carry credentials and must never be logged.
+# Matched as case-insensitive substrings so e.g. "X-Forwarded-Access-Token"
+# and "X-Auth-Request-Access-Token" are caught by "token".
+SENSITIVE_HEADER_PATTERNS: Set[str] = {
+    'authorization',
+    'cookie',
+    'token',
+    'api-key',
+    'apikey',
+    'secret',
+    'x-databricks',
+}
+
 
 def is_sensitive_key(key: str) -> bool:
     """
@@ -236,6 +249,36 @@ def mask_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Dict[
             result[key] = value
 
     return result
+
+
+def mask_sensitive_headers(headers: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Return a copy of an HTTP header mapping with credential-bearing values
+    redacted, safe for logging.
+
+    SECURITY: full header dicts must never be logged because they carry
+    `Authorization: Bearer <token>` (OBO user token / PAT / SPN token),
+    `X-Forwarded-Access-Token`, cookies, etc. Any header whose name matches a
+    SENSITIVE_HEADER_PATTERN has its value replaced with a placeholder.
+
+    Args:
+        headers: The HTTP header mapping to sanitize.
+
+    Returns:
+        A new dict with sensitive header values redacted (non-dict input is
+        returned unchanged).
+    """
+    if not isinstance(headers, dict):
+        return {}
+
+    masked: Dict[str, Any] = {}
+    for key, value in headers.items():
+        key_lower = str(key).lower()
+        if any(pattern in key_lower for pattern in SENSITIVE_HEADER_PATTERNS):
+            masked[key] = REDACTED_PLACEHOLDER
+        else:
+            masked[key] = value
+    return masked
 
 
 def mask_sensitive_string(text: str) -> str:

@@ -45,8 +45,6 @@ from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, u
 from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
 from src.engines.crewai.crew_preparation import CrewPreparation
-from src.services.tool_service import ToolService
-from src.engines.crewai.tools.tool_factory import ToolFactory
 
 # Import the logging callbacks
 from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener, TaskCompletionEventListener
@@ -220,6 +218,12 @@ class CrewAIEngineService(BaseEngineService):
             if group_context and group_context.primary_group_id:
                 execution_config["group_id"] = group_context.primary_group_id
                 logger.info(f"[CrewAIEngineService] Added group_id to config: {group_context.primary_group_id}")
+
+            # Propagate the executing user's email so tools can isolate
+            # per-user data (e.g. knowledge search returns only the chunks
+            # this user uploaded).
+            if group_context and group_context.group_email:
+                execution_config["user_email"] = group_context.group_email
             
             # Extract crew definition sections from config
             crew_config = execution_config.get("crew", {})
@@ -235,7 +239,7 @@ class CrewAIEngineService(BaseEngineService):
                     ks = agent_config['knowledge_sources']
                     logger.info(f"[CrewAIEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}")
                 else:
-                    logger.info(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
+                    logger.debug(f"[CrewAIEngineService] Agent {agent_id} has NO knowledge_sources")
             
             # We assume the execution record is already created by the caller
             # We will only update the status
@@ -246,31 +250,10 @@ class CrewAIEngineService(BaseEngineService):
             logger.info(f"[CrewAIEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)")
             
             try:
-                # Create services using the passed session
-                from src.services.tool_service import ToolService
-                from src.services.api_keys_service import ApiKeysService
-
-                # Extract group_id for API keys service
-                group_id = group_context.primary_group_id if group_context else None
-
-                # Use the passed session for services
-                if session:
-                    # Create services directly with session
-                    tool_service = ToolService(session)
-                    api_keys_service = ApiKeysService(session, group_id=group_id)
-                else:
-                    # Fallback: create a new session if none provided
-                    from src.db.session import request_scoped_session
-                    async with request_scoped_session() as db_session:
-                        tool_service = ToolService(db_session)
-                        api_keys_service = ApiKeysService(db_session, group_id=group_id)
-
-                # Extract user token from group context for tool factory
-                user_token = group_context.access_token if group_context else None
-
-                # Create a tool factory instance with API keys service and user token
-                tool_factory = await ToolFactory.create(execution_config, api_keys_service, user_token)
-                logger.info(f"[CrewAIEngineService] Created ToolFactory for {execution_id} with user token: {bool(user_token)}")
+                # NOTE: no ToolFactory/ToolService is built here. The subprocess
+                # builds its own fully-initialized ToolFactory (see
+                # process_crew_executor.run_crew_in_process); the parent-side
+                # factory was dead work (~1s + 5 DB round-trips per execution).
 
                 # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
                 # The subprocess will prepare its own crew with the full config including knowledge_sources

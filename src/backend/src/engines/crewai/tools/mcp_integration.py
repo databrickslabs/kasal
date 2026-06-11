@@ -412,8 +412,31 @@ class MCPIntegration:
             if is_databricks_mcp or auth_type in ('databricks_spn', 'databricks_obo'):
                 # Databricks MCP proxy endpoints require Databricks auth (OBO → PAT → SPN)
                 from src.utils.databricks_auth import get_auth_context
+                from src.utils.url_security import is_trusted_databricks_host
                 auth_context = await get_auth_context(user_token=user_token, group_id=group_id)
                 if auth_context and auth_context.token:
+                    # SECURITY (SSRF / confused deputy): only ever forward a
+                    # Databricks credential to a verified Databricks host. The
+                    # server_url is tenant-controlled, so without this check a
+                    # registered URL pointing at an attacker host would receive
+                    # the OBO/PAT/SPN token and could replay it against the
+                    # workspace.
+                    workspace_host = getattr(auth_context, 'workspace_url', None)
+                    if not is_trusted_databricks_host(server_url, workspace_host):
+                        mcp_err = MCPConnectionError(
+                            server_name=server_name,
+                            server_url=server_url,
+                            detail=(
+                                f"MCP server '{server_name}': refusing to send Databricks "
+                                f"credentials to non-Databricks host '{server_url}'. "
+                                f"Databricks authentication is only permitted for the "
+                                f"configured workspace host or *.databricks.com endpoints. "
+                                f"Use api_key authentication for third-party MCP servers."
+                            ),
+                        )
+                        logger.error(mcp_err.detail)
+                        MCPIntegration.add_warning(mcp_err.detail)
+                        return []
                     server_params["headers"]["Authorization"] = f"Bearer {auth_context.token}"
                     # Override auth_type so the adapter knows SPN fallback is available
                     server_params["auth_type"] = "databricks_spn"
