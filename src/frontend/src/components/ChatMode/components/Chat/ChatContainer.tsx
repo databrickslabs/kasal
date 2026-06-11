@@ -3,7 +3,7 @@ import { ChatMessage as ChatMessageType } from '../../types/chat';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import { GenerationCompleteData } from '../../hooks/useGenerationStream';
-import ChatMessageComponent, { TraceEntryData, formatDurationMs, GenerationCompleteCard } from './ChatMessage';
+import ChatMessageComponent, { TraceEntryData, formatDurationMs } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
 
@@ -134,9 +134,8 @@ const RunProgress: React.FC<{
   groups: TraceGroupItem[];
   running: boolean;
   generating: boolean;
-  crewCard?: React.ReactNode;
   onStop?: () => void;
-}> = ({ groups, running, generating, crewCard, onStop }) => {
+}> = ({ groups, running, generating, onStop }) => {
   const [open, setOpen] = useState(false);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
@@ -148,7 +147,7 @@ const RunProgress: React.FC<{
   const label = stopping
     ? 'Stopping…'
     : generating
-      ? 'Generating crew…'
+      ? 'Thinking'
       : running
         ? 'Working…'
         : hasTimeline
@@ -197,6 +196,13 @@ const RunProgress: React.FC<{
               style={{ color: 'var(--text-secondary)' }}
             >
               {label}
+              {generating && !stopping && (
+                <span className="kasal-thinking-dots" aria-hidden="true">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              )}
             </span>
             {hasTimeline && (
               <svg
@@ -238,14 +244,6 @@ const RunProgress: React.FC<{
             </button>
           )}
         </div>
-        {/* Crew structure (agents/tasks + Genie selector + Run) — always visible
-            so the Genie space can be picked / the crew run even while the activity
-            timeline below stays collapsed. */}
-        {crewCard && (
-          <div className="px-3 pb-3" style={{ borderTop: '1px solid var(--border-color)' }}>
-            {crewCard}
-          </div>
-        )}
         {open && hasTimeline && (
           <ol className="list-none flex flex-col px-4 py-3" style={{ borderTop: '1px solid var(--border-color)' }}>
             {groups
@@ -277,6 +275,7 @@ interface ChatContainerProps {
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
+  onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
   onStopExecution?: () => void;
   isLoading: boolean;
   isExecuting?: boolean;
@@ -305,6 +304,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onExecuteFlow,
   onExecuteGenerated,
   onSaveCrew,
+  onSubmitVariables,
   onStopExecution,
   isLoading,
   isExecuting,
@@ -389,59 +389,55 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       <div className="flex-1 overflow-y-auto">
         <div className="py-6 max-w-3xl mx-auto w-full">
           {(() => {
-            // The generated crew structure lives INSIDE the run-activity container
-            // (not as its own bubble), so the whole "working" experience reads as
-            // one unit. Pull the latest generation_complete out of the flow and
-            // mount its card in the container.
-            const genMsg = messages.filter((m) => m.resultType === 'generation_complete').pop();
-            const crewCard = genMsg ? (
-              <GenerationCompleteCard
-                data={genMsg.resultData as GenerationCompleteData}
-                messageId={genMsg.id}
-                onExecute={onExecuteGenerated}
-                onSaveCrew={onSaveCrew}
-              />
-            ) : undefined;
-
-            const items = groupChatItems(messages.filter((m) => m.resultType !== 'generation_complete'));
-            const traceGroups = items.filter((i): i is TraceGroupItem => i.kind === 'traceGroup');
+            // Generation/tool steps arrive as trace entries and fold into a
+            // run-activity container — ONE PER PROMPT: each user message
+            // starts a new run segment, so a follow-up prompt in the same
+            // session gets its own activity section instead of merging into
+            // the previous one. Legacy generation_complete messages render
+            // as normal bubbles (ChatMessage decides what they show).
+            const items = groupChatItems(messages);
             const running = Boolean(isExecuting || isGenerating);
-            const runProgress = (
-              <RunProgress
-                key="run-progress"
-                groups={traceGroups}
-                running={running}
-                generating={Boolean(isGenerating)}
-                crewCard={crewCard}
-                onStop={isExecuting && onStopExecution ? onStopExecution : undefined}
-              />
-            );
 
-            // The run container (crew card + folded trace activity) is anchored
-            // just ABOVE the first answer/result its generation produced, so it
-            // never drops below the result. `afterGenId` is the first message
-            // following the latest generation; a later run therefore anchors
-            // above its OWN result while staying below earlier runs' results.
-            const afterGenId = genMsg
-              ? messages
-                  .slice(messages.indexOf(genMsg) + 1)
-                  .find((m) => m.resultType !== 'generation_complete')?.id
-              : undefined;
-            let placed = false;
-            const placeRunProgress = () => {
-              if (placed) return null;
-              placed = true;
-              return runProgress;
+            // Assign each item to the run segment opened by the latest user
+            // message, then merge that segment's trace groups into one timeline.
+            let seg = 0;
+            const itemsWithSeg = items.map((item) => {
+              if (item.kind === 'msg' && item.msg.role === 'user') seg += 1;
+              return { item, seg };
+            });
+            const lastSeg = seg;
+            const segTraces = new Map<number, ChatMessageType[]>();
+            for (const { item, seg: s } of itemsWithSeg) {
+              if (item.kind === 'traceGroup') {
+                const arr = segTraces.get(s) ?? [];
+                arr.push(...item.msgs);
+                segTraces.set(s, arr);
+              }
+            }
+            const placedSegs = new Set<number>();
+            const renderRunProgress = (s: number) => {
+              const live = running && s === lastSeg;
+              const msgs = segTraces.get(s) ?? [];
+              return (
+                <RunProgress
+                  key={`run-progress-${s}`}
+                  groups={msgs.length > 0 ? [{ kind: 'traceGroup', key: `seg-${s}`, label: 'run', msgs }] : []}
+                  running={live}
+                  generating={live && Boolean(isGenerating)}
+                  onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
+                />
+              );
             };
 
             return (
               <>
-                {items.map((item) => {
-                  // All background trace activity folds into the single run
-                  // container; everything else — incl. the inline Genie answer —
-                  // renders in the conversation as usual.
+                {itemsWithSeg.map(({ item, seg: s }) => {
+                  // A segment's whole trace activity renders once, anchored at
+                  // its first trace position; inline answers render as usual.
                   if (item.kind === 'traceGroup') {
-                    return placeRunProgress();
+                    if (placedSegs.has(s)) return null;
+                    placedSegs.add(s);
+                    return renderRunProgress(s);
                   }
                   const msg = item.msg;
                   const bubble = (
@@ -453,23 +449,14 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                       onExecuteFlow={onExecuteFlow}
                       onExecuteGenerated={onExecuteGenerated}
                       onSaveCrew={onSaveCrew}
+                      onSubmitVariables={onSubmitVariables}
                     />
                   );
-                  // Anchor the container right above the first thing the
-                  // generation produced (Genie answer / final result).
-                  if (msg.id === afterGenId) {
-                    return (
-                      <React.Fragment key={`run-${msg.id}`}>
-                        {placeRunProgress()}
-                        {bubble}
-                      </React.Fragment>
-                    );
-                  }
                   return bubble;
                 })}
-                {/* Crew ready / still working with nothing after it yet → the
-                    container sits at the end of the response. */}
-                {(running || crewCard) && placeRunProgress()}
+                {/* Working with no trace for the current prompt yet → a fresh
+                    container (Thinking…) sits at the end of the response. */}
+                {running && !placedSegs.has(lastSeg) && renderRunProgress(lastSeg)}
                 <div ref={messagesEndRef} />
               </>
             );

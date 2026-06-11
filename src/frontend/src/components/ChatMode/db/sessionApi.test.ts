@@ -172,3 +172,53 @@ describe('sessionApi - migration', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 });
+
+describe('sessionApi - card message persistence', () => {
+  it('persists card-only messages (empty content) with the sentinel', async () => {
+    mockPost.mockResolvedValue({ data: {} });
+
+    await api.addMessageToSession('s1', {
+      id: 'm-card', role: 'assistant', content: '', timestamp: new Date(),
+      resultType: 'generation_complete',
+      resultData: { agents: [{ name: 'A' }] },
+    });
+
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/messages', expect.objectContaining({
+      id: 'm-card',
+      content: '[ui-card]',
+      generation_result: {
+        __chatmode: {
+          resultType: 'generation_complete',
+          resultData: { agents: [{ name: 'A' }] },
+        },
+      },
+    }));
+  });
+
+  it('strips the sentinel back to empty content on load', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [{
+          id: 'm-card', session_id: 's1', message_type: 'assistant',
+          content: '[ui-card]',
+          generation_result: { __chatmode: { resultType: 'generation_complete', resultData: { genieSpaceId: 'sp-1', genieRan: true } } },
+          timestamp: '2026-06-11T07:00:00',
+        }],
+      },
+    });
+
+    const [msg] = await api.getSessionMessages('s1');
+    expect(msg.content).toBe('');
+    expect(msg.resultType).toBe('generation_complete');
+    // Genie pick + ran-state round-trip inside resultData
+    expect((msg.resultData as { genieSpaceId?: string }).genieSpaceId).toBe('sp-1');
+    expect((msg.resultData as { genieRan?: boolean }).genieRan).toBe(true);
+  });
+
+  it('still skips truly empty messages (no content, no card)', async () => {
+    await api.addMessageToSession('s1', {
+      id: 'm-empty', role: 'assistant', content: '', timestamp: new Date(),
+    });
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+});
