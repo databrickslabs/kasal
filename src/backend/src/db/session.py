@@ -527,6 +527,21 @@ async def _ensure_chat_sessions_table(conn) -> None:
         logger.warning(f"Could not ensure chat_sessions table: {e}")
 
 
+async def _ensure_crew_feedback_table(conn) -> None:
+    """Idempotently create the crew_feedback table (thumbs feedback on
+    cataloged crews). create_all is skipped on existing DBs."""
+    try:
+        from src.models.crew_feedback import CrewFeedback
+
+        def _create_crew_feedback_table(sync_conn):
+            CrewFeedback.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_crew_feedback_table)
+        logger.info("Ensured crew_feedback table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure crew_feedback table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -737,6 +752,7 @@ async def init_db() -> None:
                     await _ensure_documentation_embeddings_columns(conn)
                     await _ensure_databricks_config_columns(conn)
                     await _ensure_chat_sessions_table(conn)
+                    await _ensure_crew_feedback_table(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:
