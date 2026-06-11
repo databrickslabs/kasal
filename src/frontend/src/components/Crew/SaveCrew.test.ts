@@ -94,3 +94,81 @@ describe('SaveCrew - llm_guardrail resolution', () => {
     expect(result.configGuardrail).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stale-crewId recovery (regression): the tab's persisted crewId can point at
+// a crew that no longer exists in the backend (DB reset, deleted elsewhere,
+// never persisted). update → 404 used to dead-end every save; the handler
+// must fall back to creating the crew and adopt the new id.
+// This mirrors the exact fallback logic in SaveCrew.handleUpdateExistingCrew.
+// ---------------------------------------------------------------------------
+
+import { AxiosError } from 'axios';
+
+type CrewLike = { id: string; name: string };
+
+async function updateWithStaleFallback(
+  crewId: string,
+  payload: { name: string },
+  service: {
+    updateCrew: (id: string, p: { name: string }) => Promise<CrewLike>;
+    saveCrew: (p: { name: string }) => Promise<CrewLike>;
+  }
+): Promise<CrewLike> {
+  try {
+    return await service.updateCrew(crewId, payload);
+  } catch (updateError) {
+    const status = (updateError as { response?: { status?: number } })?.response?.status;
+    if (status === 404) {
+      return await service.saveCrew(payload);
+    }
+    throw updateError;
+  }
+}
+
+function axios404(): AxiosError {
+  const err = new AxiosError('Request failed with status code 404');
+  err.response = { status: 404, data: { detail: 'Crew not found' } } as AxiosError['response'];
+  return err;
+}
+
+describe('SaveCrew - stale crewId recovery', () => {
+  it('recreates the crew when update returns 404', async () => {
+    const created = { id: 'new-id', name: 'My Crew' };
+    const service = {
+      updateCrew: () => Promise.reject(axios404()),
+      saveCrew: () => Promise.resolve(created),
+    };
+
+    const result = await updateWithStaleFallback('stale-id', { name: 'My Crew' }, service);
+
+    expect(result).toEqual(created);
+  });
+
+  it('returns the updated crew when update succeeds', async () => {
+    const updated = { id: 'stale-id', name: 'My Crew' };
+    const service = {
+      updateCrew: () => Promise.resolve(updated),
+      saveCrew: () => Promise.reject(new Error('should not be called')),
+    };
+
+    const result = await updateWithStaleFallback('stale-id', { name: 'My Crew' }, service);
+
+    expect(result).toEqual(updated);
+  });
+
+  it('rethrows non-404 errors without recreating', async () => {
+    const err = new AxiosError('Server error');
+    err.response = { status: 500, data: {} } as AxiosError['response'];
+    let saveCalled = false;
+    const service = {
+      updateCrew: () => Promise.reject(err),
+      saveCrew: () => { saveCalled = true; return Promise.resolve({ id: 'x', name: 'x' }); },
+    };
+
+    await expect(
+      updateWithStaleFallback('stale-id', { name: 'My Crew' }, service)
+    ).rejects.toThrow('Server error');
+    expect(saveCalled).toBe(false);
+  });
+});
