@@ -140,7 +140,7 @@ async def create_execution(
                         f"[create_execution] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}"
                     )
                 else:
-                    exec_logger.warning(
+                    exec_logger.debug(
                         f"[create_execution] Agent {agent_id} has NO knowledge_sources"
                     )
 

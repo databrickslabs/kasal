@@ -58,7 +58,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
         message="CrewAI execution is running",
         only_if_changed=True
     )
-    logger.info(f"Set status to RUNNING for execution {execution_id}")
+    logger.info(f"Ensured RUNNING status for execution {execution_id}")
     
     final_status = ExecutionStatus.FAILED.value # Default to FAILED
     final_message = "An unexpected error occurred during crew execution."
@@ -588,7 +588,7 @@ async def run_crew_in_process(
         message="CrewAI execution is running in isolated process",
         only_if_changed=True
     )
-    logger.info(f"[run_crew_in_process] Set status to RUNNING for process execution {execution_id}")
+    logger.info(f"[run_crew_in_process] Ensured RUNNING status for process execution {execution_id}")
     
     final_status = ExecutionStatus.FAILED.value  # Default to FAILED
     final_message = "An unexpected error occurred during crew execution."

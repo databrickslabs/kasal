@@ -362,7 +362,7 @@ class CrewPreparation:
                     ks = agent_config['knowledge_sources']
                     logger.info(f"[CrewPreparation] Agent {agent_name} has {len(ks)} knowledge_sources: {ks}")
                 else:
-                    logger.info(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
+                    logger.debug(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
 
                 # Add MCP requirements from assigned tasks to agent config
                 # Try multiple keys: collect_agent_mcp_requirements() uses

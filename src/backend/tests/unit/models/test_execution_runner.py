@@ -115,7 +115,8 @@ class TestRunCrew:
             mock_status_service.update_status.assert_any_call(
                 job_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,
-                message="CrewAI execution is running"
+                message="CrewAI execution is running",
+                only_if_changed=True
             )
             
             # Verify crew execution
