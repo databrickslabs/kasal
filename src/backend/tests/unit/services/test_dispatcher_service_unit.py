@@ -4906,3 +4906,28 @@ class TestSetupMlflowSyncInnerPaths:
         ):
             # Should NOT raise; the OTEL exception is caught
             captured_fn()
+
+
+class TestToolCatalogDiet:
+    """Regression (LLM-006): intent detection only needs to PICK tool names —
+    full descriptions added ~3.5k prompt tokens to every chat message."""
+
+    def test_long_descriptions_are_truncated(self):
+        from src.services.dispatcher_service import DispatcherService
+
+        tools = [
+            {"title": "GenieTool", "description": "x" * 800},
+            {"title": "SerperDevTool", "description": "short and sweet"},
+        ]
+        catalog = DispatcherService._build_tool_catalog(tools)
+
+        assert "GenieTool" in catalog and "SerperDevTool" in catalog
+        assert "short and sweet" in catalog          # short ones intact
+        assert "x" * 200 not in catalog              # long ones truncated
+        assert len(catalog) < 800                    # bounded total
+
+    def test_missing_description_is_tolerated(self):
+        from src.services.dispatcher_service import DispatcherService
+
+        catalog = DispatcherService._build_tool_catalog([{"title": "T"}])
+        assert "- T:" in catalog

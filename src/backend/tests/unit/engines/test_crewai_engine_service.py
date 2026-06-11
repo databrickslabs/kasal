@@ -296,12 +296,6 @@ class TestRunExecution:
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.crewai.crewai_engine_service.ToolService",
-        ), patch(
-            "src.engines.crewai.crewai_engine_service.ToolFactory.create",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ), patch(
             "src.engines.crewai.crewai_engine_service.run_crew_in_process",
             new_callable=AsyncMock,
         ) as mock_run:
@@ -311,6 +305,31 @@ class TestRunExecution:
             assert result == "exec_1"
             assert "exec_1" in service._running_jobs
             assert service._running_jobs["exec_1"]["execution_mode"] == "process"
+
+    @pytest.mark.asyncio
+    async def test_no_parent_side_tool_factory(self, service, sample_execution_config, group_context):
+        """Regression (PERF-015): the parent process must NOT build a ToolFactory —
+        the subprocess builds its own; the parent-side one was ~1s of dead work
+        plus 5 DB round-trips per execution."""
+        mock_session = AsyncMock()
+
+        with patch(
+            "src.engines.crewai.crewai_engine_service.normalize_config",
+            return_value=sample_execution_config,
+        ), patch(
+            "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
+            new_callable=AsyncMock,
+        ), patch(
+            "src.engines.crewai.tools.tool_factory.ToolFactory.create",
+            new_callable=AsyncMock,
+        ) as mock_factory_create, patch(
+            "src.engines.crewai.crewai_engine_service.run_crew_in_process",
+            new_callable=AsyncMock,
+        ):
+            await service.run_execution(
+                "exec_notf", sample_execution_config, group_context, session=mock_session
+            )
+            mock_factory_create.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_adds_group_id_to_config(self, service, sample_execution_config, group_context):
@@ -328,12 +347,6 @@ class TestRunExecution:
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.crewai.crewai_engine_service.ToolService",
-        ), patch(
-            "src.engines.crewai.crewai_engine_service.ToolFactory.create",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ), patch(
             "src.engines.crewai.crewai_engine_service.run_crew_in_process",
             new_callable=AsyncMock,
         ):
@@ -348,6 +361,11 @@ class TestRunExecution:
     async def test_updates_status_on_prep_failure(self, service, sample_execution_config):
         mock_session = AsyncMock()
 
+        # Raise from inside the prep try-block (the pre-subprocess debug log).
+        def raise_in_prep(msg, *args, **kwargs):
+            if "DEBUG: Config before subprocess" in str(msg):
+                raise Exception("prep fail")
+
         with patch(
             "src.engines.crewai.crewai_engine_service.normalize_config",
             return_value=sample_execution_config,
@@ -355,12 +373,12 @@ class TestRunExecution:
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.crewai.crewai_engine_service.ToolFactory",
-        ) as mock_tf_cls, patch.object(
+            "src.engines.crewai.crewai_engine_service.logger.info",
+            side_effect=raise_in_prep,
+        ), patch.object(
             service, "_update_execution_status", new_callable=AsyncMock
         ) as mock_update:
-            mock_tf_cls.create = AsyncMock(side_effect=Exception("tool fail"))
-            with pytest.raises(Exception, match="tool fail"):
+            with pytest.raises(Exception, match="prep fail"):
                 await service.run_execution(
                     "exec_fail", sample_execution_config, session=mock_session
                 )

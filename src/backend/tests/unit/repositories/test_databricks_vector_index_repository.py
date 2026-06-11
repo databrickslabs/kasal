@@ -122,7 +122,7 @@ class TestDatabricksVectorIndexRepository:
         with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_token
 
-            with patch('src.repositories.databricks_vector_index_repository.aiohttp') as mock_aiohttp:
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
                 mock_response = AsyncMock()
                 mock_response.status = 200
                 mock_response.json = AsyncMock(return_value=expected_results)
@@ -136,7 +136,7 @@ class TestDatabricksVectorIndexRepository:
                 mock_session_cm = MagicMock()
                 mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-                mock_aiohttp.ClientSession = MagicMock(return_value=mock_session_cm)
+                mock_scs.return_value = mock_session_cm
 
                 result = await repository.similarity_search(
                     index_name=index_name,
@@ -173,7 +173,7 @@ class TestDatabricksVectorIndexRepository:
         with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_token
 
-            with patch('src.repositories.databricks_vector_index_repository.aiohttp') as mock_aiohttp:
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
                 mock_response = AsyncMock()
                 mock_response.status = 200
                 mock_response.json = AsyncMock(return_value=expected_results)
@@ -187,7 +187,7 @@ class TestDatabricksVectorIndexRepository:
                 mock_session_cm = MagicMock()
                 mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-                mock_aiohttp.ClientSession = MagicMock(return_value=mock_session_cm)
+                mock_scs.return_value = mock_session_cm
 
                 result = await repository.similarity_search(
                     index_name=index_name,
@@ -208,7 +208,7 @@ class TestDatabricksVectorIndexRepository:
         with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_token
 
-            with patch('src.repositories.databricks_vector_index_repository.aiohttp') as mock_aiohttp:
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
                 mock_response = AsyncMock()
                 mock_response.status = 500
                 mock_response.text = AsyncMock(return_value="Internal Server Error")
@@ -222,7 +222,7 @@ class TestDatabricksVectorIndexRepository:
                 mock_session_cm = MagicMock()
                 mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-                mock_aiohttp.ClientSession = MagicMock(return_value=mock_session_cm)
+                mock_scs.return_value = mock_session_cm
 
                 result = await repository.similarity_search(
                     index_name="catalog.schema.test_index",
@@ -281,7 +281,7 @@ class TestDatabricksVectorIndexRepository:
         with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_token
 
-            with patch('src.repositories.databricks_vector_index_repository.aiohttp') as mock_aiohttp:
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
                 mock_response = AsyncMock()
                 mock_response.status = 200
                 mock_response.text = AsyncMock(return_value="Success")
@@ -295,7 +295,7 @@ class TestDatabricksVectorIndexRepository:
                 mock_session_cm = MagicMock()
                 mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-                mock_aiohttp.ClientSession = MagicMock(return_value=mock_session_cm)
+                mock_scs.return_value = mock_session_cm
 
                 result = await repository.upsert(
                     index_name="catalog.schema.test_index",
@@ -318,7 +318,7 @@ class TestDatabricksVectorIndexRepository:
         with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_token
 
-            with patch('src.repositories.databricks_vector_index_repository.aiohttp') as mock_aiohttp:
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
                 mock_response = AsyncMock()
                 mock_response.status = 204
 
@@ -331,7 +331,7 @@ class TestDatabricksVectorIndexRepository:
                 mock_session_cm = MagicMock()
                 mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_session_cm.__aexit__ = AsyncMock(return_value=None)
-                mock_aiohttp.ClientSession = MagicMock(return_value=mock_session_cm)
+                mock_scs.return_value = mock_session_cm
 
                 result = await repository.delete_records(
                     index_name="catalog.schema.test_index",
@@ -507,7 +507,7 @@ class TestCreateIndex:
                 success=True, index=sample_index_info, message="ok"
             )
             session_cm, _, _ = make_aiohttp_ctx(201, text_data="created")
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.create_index(sample_index_create)
 
@@ -517,7 +517,7 @@ class TestCreateIndex:
     async def test_create_index_failure(self, repository, sample_index_create):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(400, text_data="Bad request")
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.create_index(sample_index_create)
 
@@ -544,7 +544,7 @@ class TestGetIndex:
         }
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(200, json_data=data)
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.get_index("catalog.schema.idx", "ep")
 
@@ -555,7 +555,7 @@ class TestGetIndex:
     async def test_get_index_not_found(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(404)
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.get_index("missing.idx", "ep")
 
@@ -585,7 +585,7 @@ class TestListIndexes:
         }
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(200, json_data=data)
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.list_indexes("my_endpoint")
 
@@ -596,7 +596,7 @@ class TestListIndexes:
     async def test_list_indexes_empty(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(200, json_data={"indexes": []})
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.list_indexes("ep")
 
@@ -607,7 +607,7 @@ class TestListIndexes:
     async def test_list_indexes_api_error(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(500, text_data="Server error")
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.list_indexes("ep")
 
@@ -630,7 +630,7 @@ class TestDeleteIndex:
     async def test_delete_index_success(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(200)
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.delete_index("catalog.schema.idx", "ep")
 
@@ -640,7 +640,7 @@ class TestDeleteIndex:
     async def test_delete_index_not_found(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(404)
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.delete_index("missing.idx", "ep")
 
@@ -663,7 +663,7 @@ class TestUpsert:
     async def test_upsert_api_error(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(400, text_data="Bad request")
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.upsert(
                     index_name="catalog.schema.idx",
@@ -692,7 +692,7 @@ class TestDeleteRecords:
     async def test_delete_records_api_error(self, repository):
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
             session_cm, _, _ = make_aiohttp_ctx(500, text_data="Error")
-            with patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+            with patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                        return_value=session_cm):
                 result = await repository.delete_records(
                     index_name="idx", endpoint_name="ep", primary_keys=["k1"]
@@ -753,8 +753,10 @@ class TestSimilaritySearchException:
 
 class TestSimilaritySearchDebugPath:
     @pytest.mark.asyncio
-    async def test_empty_results_with_filters_triggers_debug_search(self, repository):
-        """When 0 results returned with filters, a debug search without filters is triggered."""
+    async def test_empty_results_with_filters_triggers_debug_search(self, repository, monkeypatch):
+        """With KASAL_VS_DEBUG opted in, 0 filtered results trigger the
+        unfiltered diagnostic re-query (default-off since PERF-029)."""
+        monkeypatch.setenv("KASAL_VS_DEBUG", "1")
         # First call: main search - 0 results
         main_results = {"result": {"data_array": [], "row_count": 0}}
         # Second call: debug search - some results
@@ -803,7 +805,7 @@ class TestSimilaritySearchDebugPath:
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+             patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                    return_value=session_cm):
             result = await repository.similarity_search(
                 index_name="catalog.schema.idx",
@@ -852,7 +854,7 @@ class TestSimilaritySearchDebugPath:
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+             patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                    return_value=session_cm):
             result = await repository.similarity_search(
                 index_name="catalog.schema.idx",
@@ -923,7 +925,7 @@ class TestEmptyIndex:
         mock_schema = {"columns": [{"name": "id", "type": "string"}], "primary_key": "id"}
 
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+             patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                    return_value=session_cm), \
              patch("src.schemas.databricks_index_schemas.DatabricksIndexSchemas.get_schema",
                    return_value=mock_schema):
@@ -989,7 +991,7 @@ class TestEmptyIndex:
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(repository, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch("src.repositories.databricks_vector_index_repository.aiohttp.ClientSession",
+             patch("src.repositories.databricks_vector_index_repository.shared_client_session",
                    return_value=session_cm):
             result = await repository.empty_index(
                 index_name="catalog.schema.idx",
@@ -998,3 +1000,62 @@ class TestEmptyIndex:
             )
 
         assert "success" in result
+
+
+class TestDebugRequeryGate:
+    """Regression (PERF-029): the unfiltered diagnostic re-query must be
+    OPT-IN. It used to fire on EVERY filtered search that returned zero rows
+    (the hottest cold-start path), doubling vector-search round trips and
+    reading other tenants' crew_ids into the logs."""
+
+    def _empty_result_session(self):
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"result": {"data_array": []}})
+
+        mock_session = MagicMock()
+        mock_post_cm = MagicMock()
+        mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_session.post = MagicMock(return_value=mock_post_cm)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+        return mock_session, mock_session_cm
+
+    async def _search_with_empty_filtered_result(self, repository, mock_auth_token, monkeypatch, debug_env):
+        if debug_env is None:
+            monkeypatch.delenv("KASAL_VS_DEBUG", raising=False)
+        else:
+            monkeypatch.setenv("KASAL_VS_DEBUG", debug_env)
+
+        with patch.object(repository, '_get_auth_token', new_callable=AsyncMock) as mock_get_auth:
+            mock_get_auth.return_value = mock_auth_token
+            with patch('src.repositories.databricks_vector_index_repository.shared_client_session') as mock_scs:
+                mock_session, mock_session_cm = self._empty_result_session()
+                mock_scs.return_value = mock_session_cm
+
+                await repository.similarity_search(
+                    index_name="catalog.schema.test_index",
+                    endpoint_name="test_endpoint",
+                    query_vector=[0.1, 0.2],
+                    columns=["id", "content"],
+                    num_results=5,
+                    filters={"crew_id": "crew-1", "group_id": "g-1"},
+                )
+                return mock_session.post.call_count
+
+    @pytest.mark.asyncio
+    async def test_no_debug_requery_by_default(self, repository, mock_auth_token, monkeypatch):
+        post_calls = await self._search_with_empty_filtered_result(
+            repository, mock_auth_token, monkeypatch, debug_env=None
+        )
+        assert post_calls == 1  # the real query only — no unfiltered re-query
+
+    @pytest.mark.asyncio
+    async def test_debug_requery_fires_when_opted_in(self, repository, mock_auth_token, monkeypatch):
+        post_calls = await self._search_with_empty_filtered_result(
+            repository, mock_auth_token, monkeypatch, debug_env="1"
+        )
+        assert post_calls == 2  # real query + diagnostic re-query

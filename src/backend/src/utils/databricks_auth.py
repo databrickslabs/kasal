@@ -207,16 +207,82 @@ This pattern allows graceful fallback and clear error reporting.
 - Encryption: EncryptionUtils for secure token storage
 """
 
+import asyncio
+import hashlib
 import os
 import logging
 import httpx
 import json
 import contextlib
+import time
 from typing import Optional, Tuple, Dict
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
 
 logger = logging.getLogger(__name__)
+
+# OBO token validation cache (PERF-006). The SCIM me() call only derives
+# user_identity, which doesn't need revalidation on every LLM/embedding call —
+# without this, each call paid a 100-500ms blocking round trip on the event loop.
+# Keyed by SHA-256 of the user token; values are (user_identity, expires_at).
+_OBO_VALIDATION_CACHE: Dict[str, Tuple[Optional[str], float]] = {}
+_OBO_VALIDATION_TTL_SECONDS = 300.0
+_OBO_VALIDATION_CACHE_MAX = 512
+
+
+def _obo_cache_get(token_hash: str) -> Optional[Tuple[Optional[str]]]:
+    """Return a 1-tuple with the cached identity (which may be None), or None on miss."""
+    entry = _OBO_VALIDATION_CACHE.get(token_hash)
+    if not entry:
+        return None
+    identity, expires_at = entry
+    if time.time() >= expires_at:
+        _OBO_VALIDATION_CACHE.pop(token_hash, None)
+        return None
+    return (identity,)
+
+
+def _obo_cache_put(token_hash: str, identity: Optional[str]) -> None:
+    if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
+        now = time.time()
+        for key in [k for k, (_, exp) in _OBO_VALIDATION_CACHE.items() if exp <= now]:
+            _OBO_VALIDATION_CACHE.pop(key, None)
+        if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
+            _OBO_VALIDATION_CACHE.clear()
+    _OBO_VALIDATION_CACHE[token_hash] = (identity, time.time() + _OBO_VALIDATION_TTL_SECONDS)
+
+
+# PAT lookup cache (PERF-005). Without it, every LLM completion paid a fresh
+# DB session + up to 2 api_keys queries + a Fernet decrypt inside
+# get_auth_context. Keyed by group_id; "no PAT configured" (None) is cached
+# too, so groups relying on env/SPN auth skip the DB round trip as well.
+# ApiKeysService mutations call invalidate_pat_cache() on any key change.
+_PAT_TOKEN_CACHE: Dict[str, Tuple[Optional[str], float]] = {}
+_PAT_TOKEN_TTL_SECONDS = 60.0
+
+
+def _pat_cache_get(group_id: str) -> Optional[Tuple[Optional[str]]]:
+    """Return a 1-tuple with the cached PAT (which may be None), or None on miss."""
+    entry = _PAT_TOKEN_CACHE.get(group_id)
+    if not entry:
+        return None
+    token, expires_at = entry
+    if time.time() >= expires_at:
+        _PAT_TOKEN_CACHE.pop(group_id, None)
+        return None
+    return (token,)
+
+
+def _pat_cache_put(group_id: str, token: Optional[str]) -> None:
+    _PAT_TOKEN_CACHE[group_id] = (token, time.time() + _PAT_TOKEN_TTL_SECONDS)
+
+
+def invalidate_pat_cache(group_id: Optional[str] = None) -> None:
+    """Drop cached PAT lookups — call after API key mutations."""
+    if group_id is None:
+        _PAT_TOKEN_CACHE.clear()
+    else:
+        _PAT_TOKEN_CACHE.pop(group_id, None)
 
 
 class AuthContext:
@@ -1004,13 +1070,32 @@ async def get_auth_context(
         # Priority 1: Try OBO (On-Behalf-Of) if user token provided
         if user_token:
             logger.debug("[AUTH] Priority 1: Attempting OBO authentication with user token")
-            user_identity = None
+            token_hash = hashlib.sha256(user_token.encode()).hexdigest()
+            cached = _obo_cache_get(token_hash)
+            if cached is not None:
+                logger.debug("[AUTH] Priority 1: ✓ OBO validation cache hit")
+                return AuthContext(
+                    token=user_token,
+                    workspace_url=workspace_url,
+                    auth_method="obo",
+                    user_identity=cached[0]
+                )
             try:
-                with _clean_environment():
-                    client = WorkspaceClient(host=workspace_url, token=user_token)
+                def _validate_obo_token() -> Optional[str]:
+                    # auth_type="pat" pins token auth explicitly so SPN env vars
+                    # can't hijack the client — no _clean_environment os.environ
+                    # mutation needed (which raced across threads).
+                    client = WorkspaceClient(
+                        host=workspace_url, token=user_token, auth_type="pat"
+                    )
                     current_user = client.current_user.me()
-                    user_identity = getattr(current_user, 'user_name', None) or \
-                                  getattr(current_user, 'application_id', None)
+                    return getattr(current_user, 'user_name', None) or \
+                        getattr(current_user, 'application_id', None)
+
+                # SCIM round trip runs in a worker thread so the event loop
+                # is never blocked (PERF-006).
+                user_identity = await asyncio.to_thread(_validate_obo_token)
+                _obo_cache_put(token_hash, user_identity)
                 logger.info(f"[AUTH] Priority 1: ✓ OBO authentication successful for user: {user_identity}")
                 return AuthContext(
                     token=user_token,
@@ -1056,27 +1141,31 @@ async def get_auth_context(
                     logger.debug(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
 
                 if effective_group_id:
-                    logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
-                    logger.info("[AUTH PAT] ABOUT TO CREATE async_session_factory() - if hang occurs, it's here")
-                    async with async_session_factory() as session:
-                        logger.info("[AUTH PAT] async_session_factory() created successfully")
-                        api_service = ApiKeysService(session, group_id=effective_group_id)
+                    cached_pat = _pat_cache_get(effective_group_id)
+                    if cached_pat is not None:
+                        pat_token = cached_pat[0]
+                        logger.debug(f"[AUTH PAT] ✓ PAT cache hit for group_id={effective_group_id}")
+                    else:
+                        logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
+                        async with async_session_factory() as session:
+                            api_service = ApiKeysService(session, group_id=effective_group_id)
 
-                        for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                            try:
-                                logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
-                                api_key = await api_service.find_by_name(key_name)
-                                logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
-                                if api_key and api_key.encrypted_value:
-                                    from src.utils.encryption_utils import EncryptionUtils
-                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                    logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
-                                    break
-                            except Exception as e:
-                                logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
+                            for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                                try:
+                                    logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
+                                    api_key = await api_service.find_by_name(key_name)
+                                    logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
+                                    if api_key and api_key.encrypted_value:
+                                        from src.utils.encryption_utils import EncryptionUtils
+                                        pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                        logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
+                                        break
+                                except Exception as e:
+                                    logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
 
-                    if not pat_token:
-                        logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
+                        _pat_cache_put(effective_group_id, pat_token)
+                        if not pat_token:
+                            logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
                 else:
                     logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
 

@@ -508,3 +508,82 @@ class TestCacheStatsIntegration:
 
         final_stats = model_config_cache.stats()
         assert final_stats["misses"] == initial_misses + 1
+
+
+class TestGetModelConfigCaching:
+    """get_model_config read-through cache (PERF-005): this runs on every LLM
+    completion and previously paid a DB round trip per call."""
+
+    def _svc(self, model=None):
+        svc = ModelConfigService(session=SimpleNamespace())
+        repo = svc.repository = AsyncMock()
+        repo.find_by_key = AsyncMock(return_value=model or mk_model("mkey", provider="databricks"))
+        return svc, repo
+
+    @pytest.mark.asyncio
+    async def test_second_lookup_served_from_cache(self, clean_model_cache):
+        svc, repo = self._svc()
+        c1 = await svc.get_model_config("mkey")
+        c2 = await svc.get_model_config("mkey")
+        assert repo.find_by_key.await_count == 1
+        assert c1["key"] == c2["key"] == "mkey"
+        assert c2["max_output_tokens"] == 2048
+
+    @pytest.mark.asyncio
+    async def test_provider_prefixed_key_shares_cache_entry(self, clean_model_cache):
+        svc, repo = self._svc()
+        await svc.get_model_config("databricks/mkey")
+        await svc.get_model_config("mkey")
+        assert repo.find_by_key.await_count == 1  # normalized to the same entry
+
+    @pytest.mark.asyncio
+    async def test_caller_mutation_does_not_corrupt_cache(self, clean_model_cache):
+        svc, repo = self._svc()
+        c1 = await svc.get_model_config("mkey")
+        c1["max_output_tokens"] = 999999  # caller mutates its copy
+        c2 = await svc.get_model_config("mkey")
+        assert c2["max_output_tokens"] == 2048
+
+    @pytest.mark.asyncio
+    async def test_update_invalidates_model_entry(self, clean_model_cache):
+        svc, repo = self._svc()
+        await svc.get_model_config("mkey")
+        repo.update = AsyncMock(return_value=mk_model("mkey"))
+        await svc.update_model_config("mkey", {"name": "Updated"})
+        await svc.get_model_config("mkey")
+        # find_by_key: 1 (initial get) + 1 (update existence check) + 1 (refetch after invalidation)
+        assert repo.find_by_key.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_toggle_invalidates_model_entry(self, clean_model_cache):
+        svc, repo = self._svc()
+        await svc.get_model_config("mkey")
+        repo.toggle_enabled = AsyncMock(return_value=True)
+        await svc.toggle_model_enabled("mkey", False)
+        await svc.get_model_config("mkey")
+        # find_by_key: 1 (initial get) + 1 (toggle refetch) + 1 (refetch after invalidation)
+        assert repo.find_by_key.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_delete_invalidates_model_entry(self, clean_model_cache):
+        svc, repo = self._svc()
+        await svc.get_model_config("mkey")
+        repo.delete_by_key = AsyncMock(return_value=True)
+        await svc.delete_model_config("mkey")
+        repo.find_by_key.reset_mock()
+        await svc.get_model_config("mkey")
+        repo.find_by_key.assert_awaited()  # cache entry was dropped
+
+    @pytest.mark.asyncio
+    async def test_create_invalidates_model_entry(self, clean_model_cache):
+        svc, repo = self._svc()
+        await svc.get_model_config("mkey")
+        # Simulate the key not existing yet for the create-existence check
+        repo.find_by_key = AsyncMock(return_value=None)
+        repo.create = AsyncMock(return_value=mk_model("mkey"))
+        model_data = SimpleNamespace(key="mkey")
+        model_data.model_dump = lambda: {"key": "mkey", "name": "N", "provider": "databricks"}
+        await svc.create_model_config(model_data)
+        repo.find_by_key = AsyncMock(return_value=mk_model("mkey", provider="databricks"))
+        await svc.get_model_config("mkey")
+        repo.find_by_key.assert_awaited()  # refetched after create invalidated

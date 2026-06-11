@@ -647,6 +647,18 @@ class TestExtractUserToken:
 # ── get_auth_context ───────────────────────────────────
 
 class TestGetAuthContext:
+    @pytest.fixture(autouse=True)
+    def _clear_obo_cache(self):
+        # The OBO validation cache (PERF-006) is module-global and keyed by
+        # token hash; tests in this class reuse token strings, so clear it
+        # around every test to keep them independent.
+        from src.utils import databricks_auth as m
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+        yield
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+
     def _save(self):
         return {k: getattr(_databricks_auth, f"_{k}") for k in
                 ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
@@ -1449,3 +1461,219 @@ class TestDatabricksAuthHttpxMethods:
             M.return_value.__aenter__ = AsyncMock(return_value=mc)
             M.return_value.__aexit__ = AsyncMock(return_value=False)
             assert await auth._validate_token() is False
+
+
+# ── OBO validation cache (PERF-006) ───────────────────────────────────
+
+class TestOboValidationCache:
+    """The SCIM me() round trip must run at most once per token per TTL,
+    and never block the event loop (it runs via asyncio.to_thread)."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_obo_cache(self):
+        from src.utils import databricks_auth as m
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+        yield
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+
+    def _save(self):
+        return {k: getattr(_databricks_auth, f"_{k}") for k in
+                ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
+
+    def _restore(self, s):
+        for k, v in s.items():
+            setattr(_databricks_auth, f"_{k}", v)
+
+    def _mock_client(self, user_name="u@x.com"):
+        mock_user = MagicMock()
+        mock_user.user_name = user_name
+        mock_user.application_id = None
+        client = MagicMock()
+        client.current_user.me.return_value = mock_user
+        return client
+
+    @pytest.mark.asyncio
+    async def test_second_call_same_token_skips_scim(self):
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+                r1 = await get_auth_context(user_token="cache-tok-1")
+                r2 = await get_auth_context(user_token="cache-tok-1")
+            assert r1.user_identity == "u@x.com"
+            assert r2.user_identity == "u@x.com"
+            assert r2.auth_method == "obo"
+            assert mock_wc.call_count == 1  # cached on second call
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_different_token_revalidates(self):
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+                await get_auth_context(user_token="cache-tok-A")
+                await get_auth_context(user_token="cache-tok-B")
+            assert mock_wc.call_count == 2
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_expired_entry_revalidates(self):
+        import hashlib as _hashlib
+        from src.utils import databricks_auth as m
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+                await get_auth_context(user_token="cache-tok-exp")
+                th = _hashlib.sha256(b"cache-tok-exp").hexdigest()
+                identity, _ = m._OBO_VALIDATION_CACHE[th]
+                m._OBO_VALIDATION_CACHE[th] = (identity, 0.0)  # force expiry
+                await get_auth_context(user_token="cache-tok-exp")
+            assert mock_wc.call_count == 2
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_failed_validation_not_cached(self):
+        from src.utils import databricks_auth as m
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("bad token")) as mock_wc, \
+                 patch.dict("os.environ", {}, clear=False):
+                # Both calls must attempt SCIM — failures are never cached
+                await get_auth_context(user_token="cache-tok-bad", skip_db_auth=True)
+                await get_auth_context(user_token="cache-tok-bad", skip_db_auth=True)
+            assert mock_wc.call_count == 2
+            assert m._OBO_VALIDATION_CACHE == {}
+        finally:
+            self._restore(s)
+
+    def test_cache_put_prunes_expired_then_clears_at_cap(self):
+        from src.utils import databricks_auth as m
+        # Fill with expired entries up to the cap: put() prunes them
+        for i in range(m._OBO_VALIDATION_CACHE_MAX):
+            m._OBO_VALIDATION_CACHE[f"h{i}"] = (None, 0.0)
+        m._obo_cache_put("fresh", "id@x.com")
+        assert list(m._OBO_VALIDATION_CACHE) == ["fresh"]
+        # Fill with live entries up to the cap: put() clears rather than grow unbounded
+        import time as _time
+        live = _time.time() + 1000
+        for i in range(m._OBO_VALIDATION_CACHE_MAX):
+            m._OBO_VALIDATION_CACHE[f"l{i}"] = (None, live)
+        m._obo_cache_put("fresh2", "id2@x.com")
+        assert list(m._OBO_VALIDATION_CACHE) == ["fresh2"]
+
+
+# ── PAT lookup cache (PERF-005) ───────────────────────────────────
+
+class TestPatLookupCache:
+    """The api_keys DB lookup inside get_auth_context must run at most once
+    per group per TTL; 'no PAT configured' is cached too."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_caches(self):
+        from src.utils import databricks_auth as m
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+        yield
+        m._OBO_VALIDATION_CACHE.clear()
+        m._PAT_TOKEN_CACHE.clear()
+
+    def _save(self):
+        return {k: getattr(_databricks_auth, f"_{k}") for k in
+                ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
+
+    def _restore(self, s):
+        for k, v in s.items():
+            setattr(_databricks_auth, f"_{k}", v)
+
+    def _make_session_and_service(self, encrypted=None):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        key = None
+        if encrypted is not None:
+            key = MagicMock()
+            key.encrypted_value = encrypted
+        svc = MagicMock()
+        svc.find_by_name = AsyncMock(return_value=key)
+        return mock_session, svc
+
+    @pytest.mark.asyncio
+    async def test_second_call_same_group_skips_db(self):
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        mock_session, svc = self._make_session_and_service(encrypted="enc")
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
+                mock_enc.decrypt_value.return_value = "decrypted-pat"
+                r1 = await get_auth_context(group_id="grp-cache")
+                r2 = await get_auth_context(group_id="grp-cache")
+            assert r1.token == "decrypted-pat" and r1.auth_method == "pat"
+            assert r2.token == "decrypted-pat" and r2.auth_method == "pat"
+            assert svc.find_by_name.await_count == 1  # only the first call hits the DB
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_no_pat_result_is_cached_too(self, monkeypatch):
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+        monkeypatch.delenv("DATABRICKS_API_KEY", raising=False)
+        mock_session, svc = self._make_session_and_service(encrypted=None)
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.db.session.async_session_factory", return_value=mock_session):
+                r1 = await get_auth_context(group_id="grp-none")
+                r2 = await get_auth_context(group_id="grp-none")
+            assert r1 is None and r2 is None
+            # 2 key names tried on first call only; second call is a cache hit
+            assert svc.find_by_name.await_count == 2
+        finally:
+            self._restore(s)
+
+    @pytest.mark.asyncio
+    async def test_invalidate_pat_cache_forces_refetch(self):
+        from src.utils.databricks_auth import invalidate_pat_cache
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        mock_session, svc = self._make_session_and_service(encrypted="enc")
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
+                mock_enc.decrypt_value.return_value = "decrypted-pat"
+                await get_auth_context(group_id="grp-inv")
+                invalidate_pat_cache("grp-inv")
+                await get_auth_context(group_id="grp-inv")
+            assert svc.find_by_name.await_count == 2
+        finally:
+            self._restore(s)
+
+    def test_invalidate_without_group_clears_all(self):
+        from src.utils import databricks_auth as m
+        import time as _time
+        m._PAT_TOKEN_CACHE["g1"] = ("t1", _time.time() + 60)
+        m._PAT_TOKEN_CACHE["g2"] = ("t2", _time.time() + 60)
+        m.invalidate_pat_cache()
+        assert m._PAT_TOKEN_CACHE == {}

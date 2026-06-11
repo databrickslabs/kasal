@@ -59,8 +59,10 @@ class TestUpdateExecutionStatusWithRetry:
         with patch(
             "src.services.execution_status_service.ExecutionStatusService"
         ) as mock_svc:
+            # update_status returns True on success; the wrapper honors the
+            # boolean (PERF-008), so a None return would count as failure.
             mock_svc.update_status = AsyncMock(
-                side_effect=[Exception("transient"), None]
+                side_effect=[Exception("transient"), True]
             )
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = await update_execution_status_with_retry(

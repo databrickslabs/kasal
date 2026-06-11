@@ -11,6 +11,9 @@ rather than a simple string, which requires special handling for CrewAI integrat
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from crewai import LLM
+from crewai.utilities.exceptions.context_window_exceeding_exception import (
+    LLMContextLengthExceededError,
+)
 import litellm
 
 # Use centralized logger
@@ -465,7 +468,12 @@ class DatabricksRetryLLM(LLM):
         """Actionable message when the prompt exceeds the model's context window
         (commonly a tool such as ScrapeWebsiteTool returning a whole web page).
         Returns None when the error is not a context-length error. Retrying the
-        same oversized prompt can't help, so we surface guidance instead."""
+        same oversized prompt can't help, so we surface guidance instead.
+
+        The returned text deliberately starts with "context length exceeded" —
+        CrewAI's recovery (summarize-and-continue under respect_context_window)
+        is triggered by PHRASE-matching str(exception) against its
+        CONTEXT_LIMIT_ERRORS list, not by exception type alone."""
         markers = (
             "prompt is too long",
             "context length",
@@ -474,13 +482,17 @@ class DatabricksRetryLLM(LLM):
             "context window",
             "tokens > ",
             "too many tokens",
+            "input is too long",
+            "exceeds token limit",
+            "expected a string with maximum length",
         )
         if any(m in error_str for m in markers):
             return (
-                "The crew's input exceeded the model's context window. This usually "
-                "means a tool returned too much content (e.g. ScrapeWebsiteTool "
-                "scraped an entire web page). Reduce tool output — scrape fewer / "
-                "smaller pages, or split the work into more focused tasks — then retry."
+                "Context length exceeded: the crew's input exceeded the model's "
+                "context window. This usually means a tool returned too much "
+                "content (e.g. ScrapeWebsiteTool scraped an entire web page). "
+                "Reduce tool output — scrape fewer / smaller pages, or split the "
+                "work into more focused tasks — then retry."
             )
         return None
 
@@ -930,7 +942,11 @@ class DatabricksRetryLLM(LLM):
                         crew_log.error(
                             f"[DatabricksRetryLLM] Context window exceeded: {e}"
                         )
-                        raise ValueError(hint) from e
+                        # Must be CrewAI's context-length exception (with a
+                        # CONTEXT_LIMIT_ERRORS-matching message) so that
+                        # respect_context_window summarization fires instead of
+                        # the agent replaying the whole task max_retry times.
+                        raise LLMContextLengthExceededError(hint) from e
                     crew_log.error(f"[DatabricksRetryLLM] Non-retryable error: {e}")
                     if attempt > 0:
                         self._record_retry_summary(attempt + 1, total_backoff, "call")
@@ -1075,7 +1091,9 @@ class DatabricksRetryLLM(LLM):
                         crew_log.error(
                             f"[DatabricksRetryLLM] Context window exceeded in _handle_non_streaming: {e}"
                         )
-                        raise ValueError(hint) from e
+                        # See call(): CrewAI's summarize-and-continue recovery
+                        # requires this exception type/message.
+                        raise LLMContextLengthExceededError(hint) from e
                     crew_log.error(
                         f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}"
                     )

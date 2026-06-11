@@ -1508,3 +1508,41 @@ class TestAvailableTools:
         # evaluates to False.
         # This is the actual service behavior: empty list means "no filtering".
         assert isinstance(result.tools, list)
+
+
+class TestGenieDirectiveNotDuplicated:
+    """Regression (LLM-035): GENERATE_TASK_TEMPLATE already carries GenieTool
+    routing guidance; the service must not append the ~1.2KB directive again."""
+
+    def _build_service(self):
+        session = MagicMock()
+        svc = TaskGenerationService(session)
+        svc.log_service = MagicMock()
+        svc.log_service.create_log = AsyncMock()
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_no_runtime_directive_append_when_genie_available(self):
+        svc = self._build_service()
+        request = TaskGenerationRequest(
+            text="top customers by revenue",
+            available_tools=[
+                {"name": "GenieTool", "description": "internal data"},
+                {"name": "SerperDevTool", "description": "web search"},
+            ],
+        )
+
+        with patch("src.services.task_generation_service.TemplateService") as MockTS, \
+             patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockTS.get_effective_template_content = AsyncMock(return_value="System prompt here")
+            MockLLM.completion = AsyncMock(return_value=_valid_task_json())
+
+            await svc.generate_task(request)
+
+            system_message = MockLLM.completion.call_args.kwargs["messages"][0]["content"]
+
+        # Tool list still present so the LLM knows what it may assign
+        assert "GenieTool" in system_message
+        assert "SerperDevTool" in system_message
+        # ...but the bulk routing directive is NOT re-appended at runtime
+        assert "TOOL ROUTING — READ CAREFULLY" not in system_message

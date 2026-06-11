@@ -71,25 +71,20 @@ class TestPowerBIAnalysisSchema:
     def test_all_fields_optional(self):
         schema = PowerBIAnalysisSchema()
         assert schema.user_question is None
-        assert schema.workspace_id is None
-        assert schema.dataset_id is None
 
     def test_user_question_stored(self):
         schema = PowerBIAnalysisSchema(user_question="How many customers?")
         assert schema.user_question == "How many customers?"
 
-    def test_sp_auth_fields(self):
-        schema = PowerBIAnalysisSchema(
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-        )
-        assert schema.tenant_id == TENANT_ID
-        assert schema.client_secret == CLIENT_SECRET
-
-    def test_access_token_field(self):
-        schema = PowerBIAnalysisSchema(access_token=ACCESS_TOKEN)
-        assert schema.access_token == ACCESS_TOKEN
+    def test_no_auth_or_plumbing_fields_exposed(self):
+        # Regression (LLM-015): auth/connection/LLM plumbing must never be
+        # LLM-fillable — it is injected via tool_configs in __init__.
+        forbidden = {
+            "tenant_id", "client_id", "client_secret", "username", "password",
+            "auth_method", "access_token", "workspace_id", "dataset_id",
+            "report_id", "llm_workspace_url", "llm_token", "llm_model",
+        }
+        assert not forbidden & set(PowerBIAnalysisSchema.model_fields)
 
     def test_business_mappings_field(self):
         schema = PowerBIAnalysisSchema(
@@ -124,9 +119,11 @@ class TestPowerBIAnalysisSchema:
         schema = PowerBIAnalysisSchema()
         assert schema.include_visual_references is True
 
-    def test_llm_model_default(self):
-        schema = PowerBIAnalysisSchema()
-        assert schema.llm_model == "databricks-claude-sonnet-4"
+    def test_llm_model_default_in_tool_config(self):
+        # llm_model moved out of the LLM-facing schema; the default lives in
+        # the tool's _default_config (tool_configs injection path).
+        tool = PowerBIAnalysisTool()
+        assert tool._default_config["llm_model"] == "databricks-claude-sonnet-4"
 
 
 # ===========================================================================

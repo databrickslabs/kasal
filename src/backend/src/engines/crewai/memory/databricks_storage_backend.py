@@ -13,7 +13,6 @@ index and preserves multi-tenant isolation via ``crew_id`` / ``group_id`` /
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import os
 import threading
@@ -41,6 +40,26 @@ memory_logger = LoggerManager.get_instance().databricks_vector_search
 _SCHEMA_VERSION = 1
 _DEFAULT_EMBEDDING_MODEL = "databricks-gte-large-en"
 _SCHEMA_COLUMNS = DatabricksIndexSchemas.get_search_columns("unified")
+
+# Long-lived background loop for the sync->async bridge (PERF-012). One loop
+# on one daemon thread serves every memory operation, instead of a fresh
+# ThreadPoolExecutor + event loop per call. It also gives loop-bound resources
+# (the shared aiohttp session, cached auth) a stable home across operations.
+_BRIDGE_LOOP: asyncio.AbstractEventLoop | None = None
+_BRIDGE_LOCK = threading.Lock()
+
+
+def _get_bridge_loop() -> asyncio.AbstractEventLoop:
+    global _BRIDGE_LOOP
+    with _BRIDGE_LOCK:
+        if _BRIDGE_LOOP is None or _BRIDGE_LOOP.is_closed():
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=loop.run_forever, name="kasal-memory-bridge", daemon=True
+            )
+            thread.start()
+            _BRIDGE_LOOP = loop
+        return _BRIDGE_LOOP
 
 
 class DatabricksStorageBackend:
@@ -430,7 +449,16 @@ class DatabricksStorageBackend:
             filters=filters,
             user_token=self.user_token,
         )
-        result = (response or {}).get("result", {})
+        # Repository contract: {"success": bool, "results": <raw API json>}
+        # with rows at results["result"]["data_array"].
+        response = response or {}
+        if not response.get("success", False):
+            memory_logger.warning(
+                "Vector similarity search failed: %s",
+                response.get("message") or response.get("error") or "unknown error",
+            )
+            return []
+        result = (response.get("results") or {}).get("result") or {}
         data_array = result.get("data_array") or []
         positions = DatabricksIndexSchemas.get_column_positions("unified")
         score_index = len(_SCHEMA_COLUMNS)  # score is appended after requested columns
@@ -511,28 +539,14 @@ class DatabricksStorageBackend:
     def _run_sync(self, coro: Any) -> Any:
         """Run an async coroutine from sync context without clobbering the caller's loop.
 
-        When invoked from a running event loop, delegates to a fresh loop on a
-        worker thread (unified Memory's ThreadPoolExecutor-based save path
-        exercises both code paths).
+        All coroutines run on one long-lived background loop (PERF-012):
+        the previous per-call ThreadPoolExecutor + fresh event loop paid
+        thread/loop setup on every memory operation AND gave loop-bound
+        resources (shared aiohttp session, auth caches) no stable home.
         """
         if not asyncio.iscoroutine(coro):
             return coro
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        def _runner(c: Any) -> Any:
-            new_loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(new_loop)
-                return new_loop.run_until_complete(c)
-            finally:
-                asyncio.set_event_loop(None)
-                new_loop.close()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_runner, coro).result()
+        return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
 
 
 # ----------------------------------------------------------------------

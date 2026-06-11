@@ -651,6 +651,26 @@ class OTelEventBridge:
         if total_tokens is not None:
             span.set_attribute("kasal.extra.total_tokens", int(total_tokens))
 
+        # ── Per-call token usage ──
+        # LLMCallCompletedEvent carries a usage dict (prompt/completion/total
+        # tokens). Persisting it on llm_response spans is what makes token
+        # spend attributable per call/model/agent/task — without this, only
+        # the crew-level aggregate above survives to the database.
+        usage = getattr(event, "usage", None)
+        if isinstance(usage, dict):
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "cached_prompt_tokens",
+            ):
+                value = usage.get(key)
+                if value is not None:
+                    try:
+                        span.set_attribute(f"kasal.extra.{key}", int(value))
+                    except (TypeError, ValueError):
+                        pass
+
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)
         if task_prompt:

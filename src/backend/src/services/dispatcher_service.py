@@ -798,7 +798,17 @@ class DispatcherService:
         Returns:
             A string to append to the user message with tool catalog and instructions.
         """
-        lines = [f"- {t['title']}: {t['description']}" for t in available_tools]
+        # Intent classification only needs to PICK tool names from a list —
+        # full descriptions added ~3.5k prompt tokens to EVERY chat message
+        # (downstream crew/task generation receives the full tool details
+        # anyway). Keep a short hint per tool for disambiguation.
+        max_desc = 100
+
+        def _short(desc: str) -> str:
+            desc = (desc or "").strip()
+            return desc if len(desc) <= max_desc else desc[: max_desc - 1] + "…"
+
+        lines = [f"- {t['title']}: {_short(t.get('description', ''))}" for t in available_tools]
         return (
             "\n\nAvailable tools in the workspace:\n"
             + "\n".join(lines)

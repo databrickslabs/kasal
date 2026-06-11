@@ -148,8 +148,11 @@ class TestSecurityPreambleInjection:
             await create_agent("test_key", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
 
         preamble = _build_security_preamble()
-        assert "system_prompt" in captured
-        assert captured["system_prompt"].startswith(preamble)
+        # The preamble lives in backstory (embedded by CrewAI's default system
+        # prompt); 'system_prompt' is not a CrewAI Agent field and was being
+        # silently dropped by Pydantic.
+        assert "system_prompt" not in captured
+        assert captured["backstory"].startswith(preamble)
 
     @pytest.mark.asyncio
     async def test_system_prompt_prepends_preamble_to_custom_template(self):
@@ -177,8 +180,8 @@ class TestSecurityPreambleInjection:
             await create_agent("test_key", agent_config, config=GLOBAL_CONFIG)
 
         preamble = _build_security_preamble()
-        assert captured["system_prompt"].startswith(preamble)
-        assert custom_template in captured["system_prompt"]
+        assert captured["system_template"].startswith(preamble)
+        assert custom_template in captured["system_template"]
 
     @pytest.mark.asyncio
     async def test_allow_code_execution_always_false(self):
@@ -379,7 +382,10 @@ class TestToolResolution:
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.engines.crewai.helpers.agent_helpers import create_agent
-            await create_agent("k", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
+            # MCP servers must be declared in tool_configs — without them the
+            # helper skips the DB session + MCP integration entirely (PERF-027).
+            agent_config = {**BASE_CONFIG, "tool_configs": {"MCP_SERVERS": ["server1"]}}
+            await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert mcp_tool in captured["tools"]
 
@@ -559,8 +565,11 @@ class TestAdditionalAgentParams:
 
 class TestPromptTemplates:
 
+    # NOTE: templates map to CrewAI's real field names (system_template /
+    # prompt_template / response_template). The old system_prompt/task_prompt/
+    # format_prompt kwargs were silently dropped by Pydantic.
     @pytest.mark.asyncio
-    async def test_system_template_set_as_system_prompt(self):
+    async def test_system_template_passed_through(self):
         captured = {}
 
         def capture_agent(**kwargs):
@@ -582,10 +591,13 @@ class TestPromptTemplates:
             from src.engines.crewai.helpers.agent_helpers import create_agent
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
-        assert "Custom system template." in captured["system_prompt"]
+        assert "Custom system template." in captured["system_template"]
+        # Lone system_template requires a passthrough user template, or CrewAI
+        # ignores both and falls back to the default format.
+        assert captured.get("prompt_template") == "{{ .Prompt }}"
 
     @pytest.mark.asyncio
-    async def test_prompt_template_set_as_task_prompt(self):
+    async def test_prompt_template_passed_through(self):
         captured = {}
 
         def capture_agent(**kwargs):
@@ -607,10 +619,10 @@ class TestPromptTemplates:
             from src.engines.crewai.helpers.agent_helpers import create_agent
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
-        assert captured.get("task_prompt") == "Task prompt here."
+        assert captured.get("prompt_template") == "Task prompt here."
 
     @pytest.mark.asyncio
-    async def test_response_template_set_as_format_prompt(self):
+    async def test_response_template_passed_through(self):
         captured = {}
 
         def capture_agent(**kwargs):
@@ -632,7 +644,7 @@ class TestPromptTemplates:
             from src.engines.crewai.helpers.agent_helpers import create_agent
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
-        assert captured.get("format_prompt") == "Response format."
+        assert captured.get("response_template") == "Response format."
 
 
 # ============================================================================

@@ -37,7 +37,18 @@ class ApiKeysService(BaseService):
         self.group_id = group_id
         self.session = None  # For compatibility with older code
         self.is_async = True  # Always async now
-    
+
+    def _invalidate_pat_cache(self) -> None:
+        """Drop the cached PAT lookup for this group after a key mutation
+        (PERF-005) — get_auth_context caches DATABRICKS_TOKEN/API_KEY lookups."""
+        try:
+            from src.utils.databricks_auth import invalidate_pat_cache
+            invalidate_pat_cache(self.group_id)
+        except Exception:
+            # Cache invalidation must never break a key mutation; the entry
+            # expires on its own TTL anyway.
+            pass
+
     async def find_by_name(self, name: str) -> Optional[ApiKey]:
         """
         Find an API key by name within the current group context.
@@ -123,11 +134,13 @@ class ApiKeysService(BaseService):
         
         # Save to database
         created_key = await self.repository.create(api_key_dict)
-        
+
+        self._invalidate_pat_cache()
+
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
         created_key.value = api_key_data.value
-        
+
         return created_key
     
     async def update_api_key(self, name: str, api_key_data: ApiKeyUpdate) -> Optional[ApiKey]:
@@ -156,11 +169,13 @@ class ApiKeysService(BaseService):
         
         # Update in database
         updated_key = await self.repository.update(api_key.id, update_dict)
-        
+
+        self._invalidate_pat_cache()
+
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
         updated_key.value = api_key_data.value
-        
+
         return updated_key
     
     async def delete_api_key(self, name: str) -> bool:
@@ -177,9 +192,12 @@ class ApiKeysService(BaseService):
         api_key = await self.find_by_name(name)
         if not api_key:
             return False
-        
+
         # Delete from database
-        return await self.repository.delete(api_key.id)
+        deleted = await self.repository.delete(api_key.id)
+        if deleted:
+            self._invalidate_pat_cache()
+        return deleted
     
     async def get_all_api_keys(self) -> List[ApiKey]:
         """

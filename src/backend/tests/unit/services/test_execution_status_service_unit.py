@@ -254,3 +254,96 @@ async def test_broadcast_execution_created_swallows_sse_errors(monkeypatch):
     # Must not raise
     await Svc._broadcast_execution_created(execution_data)
 
+
+
+# ---------------------------------------------------------------------------
+# only_if_changed short-circuit (PERF-043): the RUNNING write at execution
+# start is a no-op for API-created records (born RUNNING) but must still
+# transition scheduler-created records (born "pending").
+# ---------------------------------------------------------------------------
+
+def _make_repo_and_session(current_status: str):
+    calls = {}
+
+    class Record(SimpleNamespace):
+        pass
+
+    class FakeRepo:
+        def __init__(self, session):
+            self.session = session
+        async def get_execution_by_job_id(self, job_id: str):
+            return Record(id=42, status=current_status, group_id="g1")
+        async def update_execution(self, execution_id: int, data: dict):
+            calls["args"] = (execution_id, data)
+            return Record(id=42, status=data["status"], group_id="g1", completed_at=None)
+
+    class FakeSession(SimpleNamespace):
+        async def flush(self):
+            calls.setdefault("flushed", True)
+        async def commit(self):
+            calls.setdefault("committed", True)
+        async def rollback(self):
+            calls.setdefault("rolled_back", True)
+
+    return FakeRepo, FakeSession(), calls
+
+
+@pytest.mark.asyncio
+async def test_only_if_changed_skips_write_when_status_already_matches(monkeypatch):
+    from src.services import execution_status_service as module
+    FakeRepo, session, calls = _make_repo_and_session(current_status="RUNNING")
+    monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
+
+    ok = await Svc.update_status(
+        job_id="jid", status="RUNNING", message="m",
+        session=session, only_if_changed=True,
+    )
+
+    assert ok is True
+    assert "args" not in calls       # no UPDATE issued
+    assert "committed" not in calls  # no commit issued
+
+
+@pytest.mark.asyncio
+async def test_only_if_changed_is_case_insensitive(monkeypatch):
+    from src.services import execution_status_service as module
+    FakeRepo, session, calls = _make_repo_and_session(current_status="running")
+    monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
+
+    ok = await Svc.update_status(
+        job_id="jid", status="RUNNING", message="m",
+        session=session, only_if_changed=True,
+    )
+
+    assert ok is True
+    assert "args" not in calls
+
+
+@pytest.mark.asyncio
+async def test_only_if_changed_still_writes_on_real_transition(monkeypatch):
+    from src.services import execution_status_service as module
+    FakeRepo, session, calls = _make_repo_and_session(current_status="pending")
+    monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
+
+    ok = await Svc.update_status(
+        job_id="jid", status="RUNNING", message="m",
+        session=session, only_if_changed=True,
+    )
+
+    assert ok is True
+    eid, data = calls["args"]
+    assert eid == 42
+    assert data["status"] == "RUNNING"
+    assert calls.get("committed") is True
+
+
+@pytest.mark.asyncio
+async def test_default_behavior_still_writes_even_when_status_matches(monkeypatch):
+    from src.services import execution_status_service as module
+    FakeRepo, session, calls = _make_repo_and_session(current_status="RUNNING")
+    monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
+
+    ok = await Svc.update_status(job_id="jid", status="RUNNING", message="m", session=session)
+
+    assert ok is True
+    assert "args" in calls  # default (only_if_changed=False) keeps writing
