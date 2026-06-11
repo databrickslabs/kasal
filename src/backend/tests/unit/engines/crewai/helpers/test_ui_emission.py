@@ -273,6 +273,32 @@ def test_theme_block_narrows_to_deliverable_plus_default():
     assert not any("Presentation" in ln for ln in palette_lines)
 
 
+def test_theme_block_lists_deliverable_palette_before_default():
+    """Regression: agents copy whichever palette is listed first, so the
+    deliverable's own palette must come BEFORE the Default fallback (a deck was
+    rendering white because the Default palette led the list)."""
+    lines = _build_theme_block(_ALL_THEMES, deliverable="presentation")
+    palette_lines = [ln for ln in lines if ln.startswith("- ")]
+    assert "Presentation" in palette_lines[0]
+    assert "Default" in palette_lines[1]
+    # deliverable == "default" emits just the one palette, not a duplicate
+    only_default = [
+        ln for ln in _build_theme_block(_ALL_THEMES, deliverable="default") if ln.startswith("- ")
+    ]
+    assert len(only_default) == 1
+    assert "Default" in only_default[0]
+
+
+def test_theme_block_example_does_not_anchor_a_concrete_palette():
+    """Regression: the example JSON used literal colors (background #ffffff),
+    which agents copied verbatim instead of the configured palette. The example
+    must use placeholders and demand the MATCHING palette."""
+    block = "\n".join(_build_theme_block(_ALL_THEMES, deliverable="presentation"))
+    assert '"background": "#ffffff"' not in block
+    assert '"background": "<background>"' in block
+    assert "MATCHES the deliverable" in block
+
+
 def test_directives_block_narrows_to_single_deliverable():
     all_lines = [ln for ln in _build_directives_block(_ALL_DIRECTIVES) if ln.startswith("- ")]
     assert len(all_lines) == 7

@@ -71,7 +71,9 @@ def _build_theme_block(
         return []
     keys = _THEME_ORDER
     if deliverable:
-        keys = [k for k in _THEME_ORDER if k in (deliverable, "default")]
+        # Deliverable-specific palette FIRST, Default as the explicit fallback —
+        # models tend to copy whichever palette is listed first.
+        keys = [deliverable] if deliverable == "default" else [deliverable, "default"]
     palette_lines: List[str] = []
     for key in keys:
         theme = themes.get(key)
@@ -83,13 +85,15 @@ def _build_theme_block(
         return []
     return [
         "",
-        'THEME / BRANDING — add a "theme" object to createSurface using the palette',
-        "that matches the deliverable you build. The renderer applies it as the stage",
-        "background, accent, text colors and font, so honor these exactly:",
+        'THEME / BRANDING — createSurface MUST carry a "theme" object copied from the',
+        "palette below that MATCHES the deliverable you build (e.g. Slides → the",
+        "Presentation palette; use the Default palette ONLY when no specific palette",
+        "matches). The renderer applies it as the stage background, accent, text",
+        "colors and font, so copy the matching palette's values exactly:",
         '  { "createSurface": { "surfaceId": "s1", "catalogId": "basic", "theme":',
-        '    { "accent": "#2563eb", "background": "#ffffff", "surface": "#f8fafc",',
-        '      "text": "#0f172a", "heading": "#0f172a", "muted": "#64748b",',
-        '      "font": "sans", "density": "comfortable" } } }',
+        '    { "accent": "<accent>", "background": "<background>", "surface": "<surface>",',
+        '      "text": "<text>", "heading": "<heading>", "muted": "<muted>",',
+        '      "font": "<font>", "density": "<density>" } } }',
         '("font" is one of sans/serif/rounded/mono; "density" is comfortable/compact.)',
         "Use the palette for what you build:",
         *palette_lines,
