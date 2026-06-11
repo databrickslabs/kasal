@@ -439,6 +439,37 @@ Most of the value (testability, headless/MCP, single-fix-single-place, structura
 context-propagation bugs) is captured even if a second engine never ships; the generality is
 a bonus, not the justification.
 
+### 6.4 Why the modifications are still worth it (the counter-case)
+
+Each pro is evidenced by a concrete incident from the 2026-06 validation week:
+
+1. **Bug-class elimination** — the group-id bug existed in 3 copies, the retry-condition bug
+   was a copy-paste casualty, 5 tools duplicated `_authenticate`. One resolver/bridge/helper
+   makes these bugs structurally impossible. The current architecture re-charges this week's
+   multi-day forensics cost on every future incident.
+2. **Silent degradation becomes visible** — C1 (LLM path dead, flows green) survived for weeks
+   because logic, fallback and invisibility shared one blob. Thin tools + `emit` + golden
+   baselines turn the next C1 into a failing test within minutes.
+3. **Testing cost collapses** — `execute(request, FakeContext())` replaces patch/mock-session/
+   thread-bridge scaffolding; the stale-patch failure mode that masked C1 disappears.
+4. **Tenant isolation by construction** — identity injected once in the binder; a tool cannot
+   leak across tenants by forgetting contextvars semantics (4 tools had).
+5. **Headless/MCP surface is near-term product value** — PBI/UCMV/Genie tools callable from
+   REST/MCP/notebooks without an agent crew, at ~zero marginal cost once tools sit below the
+   engines (unlike the second engine, this is not speculative).
+6. **Velocity compounds instead of decaying** — ≤500-line services reverse the god-file slowdown
+   curve; AI-assisted development and code review both work dramatically better on small,
+   focused files guarded by golden tests.
+7. **Cheap framework insurance** — CrewAI churn (e.g. the 1.14-vs-1.9 Codex handler break,
+   2026-06-11) becomes a one-directory concern instead of touching everything.
+
+**Decision logic:** costs are bounded and front-loaded (~6–8 wks + modest indirection tax);
+the cost of not acting is unbounded and compounding (every new tool deepens the welding, every
+incident repeats the forensics, migration price grows per god-tool added — hence the tool-layer
+growth freeze). The target shape is already proven inside this repo: the converters are built
+exactly this way and caused the least trouble of the entire pipeline. WP3 promotes the proven
+pattern from one slice to the whole.
+
 ---
 
 ## 7. Implementation sequence & effort estimate
