@@ -129,7 +129,9 @@ class PowerBIMetadataReducerTool(BaseTool):
             "enable_value_normalization": kwargs.get("enable_value_normalization", True),
             "dataset_id": kwargs.get("dataset_id"),
             "workspace_id": kwargs.get("workspace_id"),
-            "group_id": kwargs.get("group_id", "default"),
+            # No "default" here — leave unset so _resolve_group_id can fall
+            # back to trace context / UserContext (multi-tenant cache scoping).
+            "group_id": kwargs.get("group_id"),
             "report_id": kwargs.get("report_id"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
@@ -147,6 +149,23 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         self._instance_id = instance_id
         self._default_config = default_config
+
+    def _resolve_group_id(self, config: Dict[str, Any]) -> str:
+        """Resolve the tenant group for cache scoping.
+
+        Order: explicit config → trace context → UserContext → 'default'.
+        The Fetcher caches under the UserContext group, so the Reducer must
+        resolve the same way or every cache lookup misses.
+        """
+        from src.utils.user_context import UserContext
+
+        gc = UserContext.get_group_context()
+        return (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
+            or (gc.primary_group_id if gc else None)
+            or "default"
+        )
 
     # ─── Entry Point ────────────────────────────────────────────────────
 
@@ -790,7 +809,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         # without relying on the agent to pass model_context_json.
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
-        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+        group_id = self._resolve_group_id(config)
         cache_saved = False
         if dataset_id and workspace_id:
             try:
@@ -891,7 +910,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         workspace_id = config.get("workspace_id")
 
         if dataset_id and workspace_id:
-            group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+            group_id = self._resolve_group_id(config)
             logger.info(
                 f"[MetadataReducer] Cache lookup: group_id={group_id}, "
                 f"dataset={dataset_id}, workspace={workspace_id}"
