@@ -693,3 +693,39 @@ Notes for whenever this is picked up:
   §6.4). Pre-GA platform APIs churn; pin versions, prototype behind flags, commit nothing to
   the roadmap until stable. This section is the "big opportunity" trigger condition for WP6 —
   documented so the option is exercised deliberately, not rediscovered.
+
+### 8.1 Why Kasal's own tool governance cannot contain a coding agent (security rationale)
+
+Kasal's existing security model — per-agent tool allowlists, the `ToolCapability` manifest
+with trifecta detection, `PERFORMS_DESTRUCTIVE_OPERATIONS` flags, prompt-injection scanning —
+is **intent-level** governance, and it is sound *because tools are enumerable, fixed-function
+capabilities*: each tool's effects are known at registration, so limiting = subsetting a
+closed list and reasoning about combinations.
+
+A code-execution capability breaks this model **categorically, not incrementally**: arbitrary
+code is a *tool factory* that synthesizes any capability at runtime. Remove the HTTP tool —
+`import requests` brings it back; assign zero Databricks tools — the code reads ambient env
+tokens and calls the REST API directly; no file tools — `open()`. Pre-execution code
+inspection cannot close this (undecidable in general, trivially obfuscated in practice). In
+manifest terms, a code-exec tool holds **every capability flag simultaneously, including
+undefined ones** — a permanent trifecta alarm by construction.
+
+| | Intent-level (Kasal today) | Effect-level (required for code exec) |
+|---|---|---|
+| Governs | which capabilities the agent may *invoke* | what any code may actually *do* |
+| Mechanism | tool allowlists, capability manifest, injection scanning | sandboxing (filesystem/network/syscall isolation), per-action runtime interception, credential isolation, egress control |
+| Binds | the agent's requests | the code's execution |
+
+**Consequences (binding for any future coding feature):**
+
+1. Kasal must **never ship a naive code-execution tool** under its own governance — the
+   correct number of code-exec tools in Kasal's registry, absent an effect-level containment
+   layer, is zero (the current number).
+2. The coding surface (§8 "coding in" vector) is shippable **if and only if** it arrives
+   inside a governed runtime providing effect-level containment (sandboxed execution tiers,
+   per-action policy interception, credential isolation) — Kasal supplies tenancy and the
+   permission matrix on top; it does not rebuild containment.
+3. Generated code additionally remains subject to **data-plane enforcement (Unity Catalog)**
+   at execution time — the third governance layer (action-level runtime policies →
+   tenant-level Kasal groups → data-level UC) that makes governed coding for non-developers
+   viable at all.
