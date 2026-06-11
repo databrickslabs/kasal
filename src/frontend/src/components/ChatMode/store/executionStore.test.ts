@@ -72,7 +72,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const preview = { type: 'html' as const, data: '<p>hi</p>', title: 'T' };
+const preview = { type: 'ui' as const, data: '<p>hi</p>', title: 'T' };
 
 describe('executionStore - basic setters & log', () => {
   it('appendLog adds entry with generated id/timestamp and clearLog empties it', () => {
@@ -156,8 +156,8 @@ describe('executionStore - basic setters & log', () => {
 });
 
 describe('executionStore - preview history', () => {
-  const a = { type: 'markdown' as const, data: '# A', title: 'A' };
-  const b = { type: 'html' as const, data: '<p>B</p>', title: 'B' };
+  const a = { type: 'ui' as const, data: '# A', title: 'A' };
+  const b = { type: 'ui' as const, data: '<p>B</p>', title: 'B' };
 
   it('setPreviewContent appends each distinct preview and points index at the latest', () => {
     setCurrentSessionId('sess-A');
@@ -292,11 +292,11 @@ describe('executionStore - reopenPreview', () => {
 
   it('applies stored preview when still on same session', async () => {
     setCurrentSessionId('sess-A');
-    mockedGet.mockResolvedValue({ type: 'json', data: '{}', title: 'JT' });
+    mockedGet.mockResolvedValue({ type: 'ui', data: '{}', title: 'JT' });
     useExecutionStore.getState().reopenPreview();
     await vi.waitFor(() => {
       expect(useExecutionStore.getState().previewContent).toEqual({
-        type: 'json',
+        type: 'ui',
         data: '{}',
         title: 'JT',
       });
@@ -306,27 +306,27 @@ describe('executionStore - reopenPreview', () => {
 
   it('seeds preview history when empty', async () => {
     setCurrentSessionId('sess-A');
-    mockedGet.mockResolvedValue({ type: 'json', data: '{}', title: 'JT' });
+    mockedGet.mockResolvedValue({ type: 'ui', data: '{}', title: 'JT' });
     useExecutionStore.getState().reopenPreview();
     await vi.waitFor(() => {
       expect(useExecutionStore.getState().previewHistory).toHaveLength(1);
     });
     const s = useExecutionStore.getState();
-    expect(s.previewHistory[0]).toEqual({ type: 'json', data: '{}', title: 'JT' });
+    expect(s.previewHistory[0]).toEqual({ type: 'ui', data: '{}', title: 'JT' });
     expect(s.previewIndex).toBe(0);
   });
 
   it('keeps existing preview history when reopening', async () => {
     setCurrentSessionId('sess-A');
     const existing = [
-      { type: 'markdown', data: '# x', title: 'X' },
-      { type: 'html', data: '<p>y</p>', title: 'Y' },
+      { type: 'ui', data: '# x', title: 'X' },
+      { type: 'ui', data: '<p>y</p>', title: 'Y' },
     ];
     useExecutionStore.setState({ previewHistory: existing as any, previewIndex: 1 });
-    mockedGet.mockResolvedValue({ type: 'json', data: '{}', title: 'JT' });
+    mockedGet.mockResolvedValue({ type: 'ui', data: '{}', title: 'JT' });
     useExecutionStore.getState().reopenPreview();
     await vi.waitFor(() => {
-      expect(useExecutionStore.getState().previewContent).toEqual({ type: 'json', data: '{}', title: 'JT' });
+      expect(useExecutionStore.getState().previewContent).toEqual({ type: 'ui', data: '{}', title: 'JT' });
     });
     expect(useExecutionStore.getState().previewHistory).toEqual(existing);
   });
@@ -336,7 +336,7 @@ describe('executionStore - reopenPreview', () => {
     mockedGet.mockImplementation(() => {
       // switch session before promise resolves
       setCurrentSessionId('sess-B');
-      return Promise.resolve({ type: 'html', data: 'x', title: 't' });
+      return Promise.resolve({ type: 'ui', data: 'x', title: 't' });
     });
     useExecutionStore.getState().reopenPreview();
     await Promise.resolve();
@@ -806,13 +806,13 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
 
   it('restoreSessionState with no snapshot resets and loads persisted preview', async () => {
     setCurrentSessionId('sess-NONE');
-    mockedGet.mockResolvedValue({ type: 'markdown', data: '# hi', title: 'MD' });
+    mockedGet.mockResolvedValue({ type: 'ui', data: '# hi', title: 'MD' });
     useExecutionStore.getState().restoreSessionState('sess-NONE');
     // synchronous reset first
     expect(useExecutionStore.getState().previewContent).toBeNull();
     await vi.waitFor(() => {
       expect(useExecutionStore.getState().previewContent).toEqual({
-        type: 'markdown',
+        type: 'ui',
         data: '# hi',
         title: 'MD',
       });
@@ -824,7 +824,7 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
     setCurrentSessionId('sess-NONE');
     mockedGet.mockImplementation(() => {
       setCurrentSessionId('sess-OTHER');
-      return Promise.resolve({ type: 'html', data: 'x', title: 't' });
+      return Promise.resolve({ type: 'ui', data: 'x', title: 't' });
     });
     useExecutionStore.getState().restoreSessionState('sess-NONE');
     await Promise.resolve();

@@ -48,19 +48,11 @@ const SLASH_COMMANDS = [
   { command: '/clear', description: 'Clear chat history' },
 ];
 
-// Per-message output format. "auto" lets the crew infer; the others append a
-// directive so the generated crew + the structured-UI renderer target that type.
-type FormatKey = 'auto' | 'presentation' | 'quiz' | 'dashboard' | 'album' | 'mindmap' | 'report' | 'genie';
-const FORMAT_OPTIONS: { key: FormatKey; label: string; directive: string }[] = [
-  { key: 'auto', label: 'Auto format', directive: '' },
-  { key: 'presentation', label: 'Presentation', directive: 'Produce the final result as a slide presentation (a deck of slides).' },
-  { key: 'quiz', label: 'Interactive quiz', directive: 'Produce the final result as an interactive multiple-choice quiz that tracks the score.' },
-  { key: 'dashboard', label: 'Dashboard', directive: 'Produce the final result as a metrics dashboard with KPI tiles and charts.' },
-  { key: 'album', label: 'Album', directive: 'Produce the final result as an album: a responsive image gallery built from the EXISTING image links (an Album with images:[{url, caption}]). Use the real image URLs — do not invent images.' },
-  { key: 'mindmap', label: 'Mindmap', directive: 'Produce the final result as a mindmap: a central topic that branches into sub-topics and details (a Mindmap whose nested root has label + children).' },
-  { key: 'report', label: 'Report', directive: 'Produce the final result as a structured, readable report.' },
-  { key: 'genie', label: 'Data answer (Genie)', directive: 'This is a structured-data question answered from a Genie space. Use the GenieTool to query the data — assign GenieTool to the task(s) that gather or analyze data. Do NOT use web-search tools (PerplexityTool, ScrapeWebsiteTool) and do NOT add web-research tasks: ALL data comes from Genie. Keep the crew minimal (ideally a single agent that queries Genie). Produce the final result as a data answer: a short answer, the result Table from the Genie query, and a chart when useful.' },
-];
+// NOTE: there is deliberately NO per-message output-format picker. The
+// deliverable type (presentation, dashboard, quiz, …) is derived from the
+// request's content by crew generation + deliverable inference (backend
+// ui_emission.py); an enumerated format list would not scale as output
+// varieties grow.
 
 interface ChatInputProps {
   onSend: (message: string, meta?: SendMeta) => void;
@@ -117,8 +109,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [value, setValue] = useState('');
   const [showCommands, setShowCommands] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [showFormatPicker, setShowFormatPicker] = useState(false);
-  const [format, setFormat] = useState<FormatKey>('auto');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -126,7 +116,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
-  const formatPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const hydratedRef = useRef(false);
@@ -243,21 +232,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [value, filteredCommands.length]);
 
-  // Close model / format pickers on outside click
+  // Close the model picker on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
         setShowModelPicker(false);
       }
-      if (formatPickerRef.current && !formatPickerRef.current.contains(e.target as Node)) {
-        setShowFormatPicker(false);
-      }
     };
-    if (showModelPicker || showFormatPicker) {
+    if (showModelPicker) {
       document.addEventListener('mousedown', handleClick);
       return () => document.removeEventListener('mousedown', handleClick);
     }
-  }, [showModelPicker, showFormatPicker]);
+  }, [showModelPicker]);
 
   const handleSend = () => {
     const trimmed = value.trim();
@@ -265,21 +251,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     setCommandHistory((prev) => [...prev.slice(-50), trimmed]);
     setHistoryIndex(-1);
-    // Slash commands are literal; only natural-language prompts get a format hint.
+    // Slash commands are literal; only natural-language prompts get extras.
     const isSlash = trimmed.startsWith('/');
-    const directive = isSlash
-      ? ''
-      : (FORMAT_OPTIONS.find((f) => f.key === format)?.directive || '');
-    // Neither the output-format hint nor the knowledge note is appended to the
-    // VISIBLE message — the chat shows only what the user typed. Both ride along
-    // with the dispatch payload via dispatchSuffix so they still steer the crew.
+    // The knowledge note is not appended to the VISIBLE message — the chat shows
+    // only what the user typed. It rides along with the dispatch payload via
+    // dispatchSuffix so it still steers the crew.
     let dispatchSuffix = '';
     const tools: string[] = [];
     let attachments: string[] | undefined;
 
-    if (directive) {
-      dispatchSuffix += `\n\n[Output format: ${directive}]`;
-    }
     // Attach uploaded knowledge: include the knowledge-search tool + a steering note.
     if (!isSlash && readyAttachments.length > 0) {
       attachments = readyAttachments.map((a) => a.name);
@@ -435,7 +415,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
       {showModelPicker && models.length > 0 && (
         <div
           ref={modelPickerRef}
-          className="kasal-popover absolute top-full mt-2 right-4 w-72 rounded-xl overflow-hidden z-10 animate-slide-up"
+          // Opens UPWARD like the command/format popovers: the input is pinned
+          // to the bottom once a conversation starts, so a downward dropdown
+          // rendered off-screen ("model selector stopped working" after the
+          // first prompt).
+          className="kasal-popover absolute bottom-full mb-2 right-4 w-72 rounded-xl overflow-hidden z-10 animate-slide-up"
           style={{
             backgroundColor: 'var(--bg-input)',
             border: '1px solid var(--border-color)',
@@ -627,7 +611,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
         {/* Bottom row — controls + attach + send, all right-aligned */}
         <div className="flex items-center justify-end px-4 py-2.5">
-          {/* format + model selector + attach + send */}
+          {/* memory + model selector + attach + send */}
           <div className="flex items-center gap-2">
             {/* Memory mode toggle — cycles through three states:
                   Workspace memory → Session memory → No memory → (repeat)
@@ -687,58 +671,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     : 'Session memory'}
               </span>
             </button>
-
-            {/* Output format selector */}
-            <div className="relative" ref={formatPickerRef}>
-              <button
-                onClick={() => {
-                  setShowFormatPicker((v) => !v);
-                  setShowModelPicker(false);
-                  setShowCommands(false);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-                style={{
-                  color: format === 'auto' ? 'var(--text-secondary)' : 'var(--accent)',
-                  backgroundColor: 'var(--bg-secondary)',
-                }}
-                title="Choose the output format the crew should produce"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                </svg>
-                <span className="max-w-[120px] truncate">
-                  {FORMAT_OPTIONS.find((f) => f.key === format)?.label}
-                </span>
-                <svg className={`w-3 h-3 transition-transform ${showFormatPicker ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </button>
-              {showFormatPicker && (
-                <div
-                  className="absolute bottom-full right-0 mb-1 w-56 rounded-lg shadow-lg overflow-hidden z-50 py-1"
-                  style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
-                >
-                  {FORMAT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.key}
-                      onClick={() => { setFormat(opt.key); setShowFormatPicker(false); }}
-                      className="w-full text-left px-3 py-2 text-xs transition-colors hover:opacity-80 flex items-center justify-between gap-2"
-                      style={{
-                        color: 'var(--text-primary)',
-                        backgroundColor: opt.key === format ? 'var(--bg-secondary)' : 'transparent',
-                      }}
-                    >
-                      <span>{opt.label}</span>
-                      {opt.key === format && (
-                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {/* Model selector button */}
             {models.length > 0 && (

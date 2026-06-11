@@ -76,7 +76,7 @@ const toMessage = (w: MessageWire): ChatMessage => {
     id: w.id,
     sessionId: w.session_id,
     role,
-    content: w.content,
+    content: w.content === '[ui-card]' ? '' : w.content,
     timestamp: parseUtc(w.timestamp),
     ...(w.intent ? { intent: w.intent as ChatMessage['intent'] } : {}),
     ...(extras.resultType ? { resultType: extras.resultType } : {}),
@@ -138,16 +138,22 @@ export async function getSessionMessages(sessionId: string): Promise<ChatMessage
   return (res.data?.messages || []).map(toMessage);
 }
 
+// Card-only messages (crew cards, prompts) carry no text — the backend
+// requires non-empty content, so they persist with this sentinel and it is
+// stripped again on load.
+const CARD_PLACEHOLDER = '[ui-card]';
+
 export async function addMessageToSession(
   sessionId: string,
   msg: ChatMessage,
 ): Promise<void> {
-  if (!msg.content) return; // backend requires non-empty content
+  const hasCard = Boolean(msg.resultType || msg.resultData !== undefined);
+  if (!msg.content && !hasCard) return; // nothing to persist
   await getClient().post(`${BASE}/messages`, {
     id: msg.id,
     session_id: sessionId,
     message_type: msg.role,
-    content: msg.content,
+    content: msg.content || CARD_PLACEHOLDER,
     intent: msg.intent ?? null,
     generation_result: packExtras(msg) ?? null,
   });

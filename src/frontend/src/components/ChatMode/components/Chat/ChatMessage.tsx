@@ -22,6 +22,11 @@ import CrewDetailCard from '../Cards/CrewDetailCard';
 import FlowDetailCard from '../Cards/FlowDetailCard';
 import HelpCard from '../Cards/HelpCard';
 import GenieSpaceSelector from '../Cards/GenieSpaceSelector';
+import { useSessionStore } from '../../store/sessionStore';
+import InputVariablesPrompt from '../Cards/InputVariablesPrompt';
+import GenieSpacePrompt from '../Cards/GenieSpacePrompt';
+import CrewActionsBar from '../Cards/CrewActionsBar';
+import { DetectedVariable } from '../../utils/variableDetector';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -31,6 +36,8 @@ interface ChatMessageProps {
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Save this generated crew's plan to the catalog. Resolves to the saved name. */
   onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
+  /** Run the parked execution with the user-provided {variable} inputs. */
+  onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
 }
 
 /** Resolve a tool identifier (ID or name) to its display name */
@@ -46,6 +53,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   onExecuteFlow,
   onExecuteGenerated,
   onSaveCrew,
+  onSubmitVariables,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -132,12 +140,45 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         return null;
       }
       case 'generation_complete': {
+        // NEW generations no longer produce these messages (steps fold into
+        // the run-activity element; genie crews get a slim space prompt).
+        // The card remains only for LEGACY persisted messages and for crews
+        // explicitly loaded from the catalog (catalog_load above).
         return (
           <GenerationCompleteCard
             data={message.resultData as GenerationCompleteData}
             messageId={message.id}
             onExecute={onExecuteGenerated}
             onSaveCrew={onSaveCrew}
+          />
+        );
+      }
+      case 'crew_actions': {
+        return (
+          <CrewActionsBar
+            data={message.resultData as GenerationCompleteData}
+            messageId={message.id}
+            onSaveCrew={onSaveCrew}
+          />
+        );
+      }
+      case 'genie_space_prompt': {
+        return (
+          <GenieSpacePrompt
+            data={message.resultData as GenerationCompleteData}
+            messageId={message.id}
+            onExecute={onExecuteGenerated}
+          />
+        );
+      }
+      case 'input_variables': {
+        const varsData = message.resultData as { variables?: DetectedVariable[] };
+        if (!varsData.variables?.length) return null;
+        return (
+          <InputVariablesPrompt
+            variables={varsData.variables}
+            messageId={message.id}
+            onSubmit={(inputs) => onSubmitVariables?.(message.id, inputs)}
           />
         );
       }
@@ -391,14 +432,32 @@ export const GenerationCompleteCard: React.FC<{
 }> = ({ data, messageId, onExecute, onSaveCrew }) => {
   const { agents, tasks } = normalizeGenerationData(data);
   const toolNameMap = useAppStore((s) => s.toolNameMap);
+  // Genie selection hydrates from (1) the in-memory store (survives remounts
+  // within the session) then (2) the persisted message resultData (survives
+  // session switches and reloads — stored server-side with the message).
+  const persisted = data as GenerationCompleteData & { genieSpaceId?: string; genieRan?: boolean };
   const [selectedSpaceId, setSelectedSpaceId] = useState(
-    () => genieSelectionStore.get(messageId)?.spaceId ?? '',
+    () => genieSelectionStore.get(messageId)?.spaceId ?? persisted.genieSpaceId ?? '',
   );
-  const [ran, setRan] = useState(() => genieSelectionStore.get(messageId)?.ran ?? false);
+  const [ran, setRan] = useState(
+    () => genieSelectionStore.get(messageId)?.ran ?? persisted.genieRan ?? false,
+  );
 
   const persistGenie = (next: { spaceId?: string; ran?: boolean }) => {
     const prev = genieSelectionStore.get(messageId) ?? { spaceId: selectedSpaceId, ran };
-    genieSelectionStore.set(messageId, { ...prev, ...next });
+    const merged = { ...prev, ...next };
+    genieSelectionStore.set(messageId, merged);
+    // Write through to the message itself (server-side) so the selection and
+    // ran-state survive leaving the session. resultType must be re-sent: the
+    // backend replaces generation_result wholesale on update.
+    try {
+      useSessionStore.getState().updateMessage(messageId, {
+        resultType: 'generation_complete',
+        resultData: { ...data, genieSpaceId: merged.spaceId, genieRan: merged.ran },
+      });
+    } catch {
+      /* persistence is best-effort; the in-memory store still covers the session */
+    }
   };
   // idle → saving → saved (terminal). 'exists' offers Overwrite; error → hint.
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'exists' | 'error'>('idle');
