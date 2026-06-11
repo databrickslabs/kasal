@@ -205,7 +205,46 @@ def install_remember_many_patch() -> bool:
     return True
 
 
+def log_runtime_versions() -> str:
+    """Log the actual installed versions of the CrewAI stack.
+
+    Diagnostic for environment skew: a deployed app whose dependency build
+    diverged from uv.lock (e.g. a stale requirements.txt, partial env reuse)
+    produces version-mismatch failures like ``'Agent' object has no attribute
+    'i18n'`` that are impossible to attribute without knowing the runtime
+    versions. This line lands in every subprocess/app log.
+    """
+    import importlib
+    import importlib.metadata
+
+    versions = {}
+    for pkg, dist in (
+        ("crewai", "crewai"),
+        ("crewai_core", "crewai-core"),
+        ("litellm", "litellm"),
+        ("mlflow", "mlflow"),
+        ("openinference_crewai", "openinference-instrumentation-crewai"),
+    ):
+        try:
+            # Not every package exposes __version__ (litellm doesn't) — fall
+            # back to the installed distribution metadata.
+            module = importlib.import_module(pkg) if "-" not in pkg else None
+            versions[pkg] = (
+                getattr(module, "__version__", None)
+                or importlib.metadata.version(dist)
+            )
+        except Exception:
+            try:
+                versions[pkg] = importlib.metadata.version(dist)
+            except Exception:
+                versions[pkg] = "absent"
+    summary = " ".join(f"{k}={v}" for k, v in versions.items())
+    logger.info(f"[CrewAIPatches] Runtime versions: {summary}")
+    return summary
+
+
 def install_all_patches() -> None:
     """Entry point called once from the FastAPI lifespan startup."""
+    log_runtime_versions()
     install_memory_event_patches()
     install_remember_many_patch()
