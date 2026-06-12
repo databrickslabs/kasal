@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
-import { saveGeneratedCrew, usesGenieTool, CrewNameConflictError } from './api/crews';
+import { saveGeneratedCrew, usesGenieTool, stripGenieTools, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
@@ -105,6 +105,24 @@ export function buildTraceEntry(
 
   // Hard-filter known noise events.
   if (eventType === 'llm_retry' || eventType === 'task_started') return null;
+
+  // Tool/MCP failures (e.g. HTTP 403 connecting to a selected MCP server).
+  // The run continues without those tools, so surface the error in the
+  // activity instead of leaving it buried in backend logs.
+  if (eventType === 'tool_error') {
+    const errorText =
+      (typeof output.content === 'string' && output.content.trim()) ||
+      (typeof output.error === 'string' && output.error.trim()) ||
+      message.trim() ||
+      'Tool error';
+    return {
+      kind: 'event',
+      label: errorText.length > 80 ? `⚠ ${errorText.slice(0, 77)}…` : `⚠ ${errorText}`,
+      detail: errorText.length > 80 ? errorText : undefined,
+      source: eventSource || undefined,
+      timestamp: now,
+    };
+  }
 
   // Tool invocation (start of a call).
   if (eventType === 'tool_usage') {
@@ -500,6 +518,9 @@ const ChatWorkspace: React.FC = () => {
   // The most recent generated crew in this session — the target for `/save`.
   // (The bookmark on each crew card saves its own specific crew directly.)
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
+  // The chat prompt that triggered the in-flight generation — attached to the
+  // generation result so the executed run answers the user's actual request.
+  const lastUserPromptRef = useRef<string>('');
 
   // Render a task's output: surface previewable content in the preview pane
   // (scoped to the owning session) and append a concise chat message. Shared by
@@ -759,9 +780,24 @@ const ChatWorkspace: React.FC = () => {
     onTaskDetail: (task) => {
       addGenerationTrace('Task ready', String(task?.name || ''));
     },
-    onComplete: (data: GenerationCompleteData) => {
+    onComplete: (raw: GenerationCompleteData) => {
       const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
       const sessionStore = useSessionStore.getState();
+      // When a Genie MCP server is selected for this run, the crew reaches
+      // Genie through MCP — drop the auto-detected GenieTool so the legacy
+      // tool (and its space prompt) doesn't double up with the MCP server.
+      const genieViaMcp = useExecutionStore
+        .getState()
+        .selectedMcpServers.some((name) => name.startsWith('Databricks Genie:'));
+      const stripped = genieViaMcp
+        ? stripGenieTools(raw, useAppStore.getState().toolNameMap)
+        : raw;
+      // Ground the run with the chat prompt that asked for it: generated task
+      // descriptions are often generic mission statements, so without this the
+      // crew runs with no actual question (and never queries tools like Genie).
+      const data: GenerationCompleteData = lastUserPromptRef.current
+        ? { ...stripped, user_request: lastUserPromptRef.current }
+        : stripped;
       // A Genie crew can't run until the user picks a Genie space, so don't
       // auto-run it — surface a minimal space prompt (no crew card).
       const needsGenieSpace = usesGenieTool(data, useAppStore.getState().toolNameMap);
@@ -1009,6 +1045,12 @@ const ChatWorkspace: React.FC = () => {
           useExecutionStore.getState().workspaceMemory,
           // "No memory" mode → agents are built without memory.
           useExecutionStore.getState().memoryEnabled,
+          // MCP servers picked via the chat input's "+" menu.
+          useExecutionStore.getState().selectedMcpServers,
+          // The chat prompt that asked for this crew — appended to the task
+          // descriptions so the run answers it (instead of running a generic
+          // mission with no actual question).
+          data.user_request,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1369,6 +1411,10 @@ const ChatWorkspace: React.FC = () => {
 
       const handled = await handleLocalCommand(message);
       if (handled) return;
+
+      // Remember the prompt: if this message triggers a crew generation, the
+      // executed run is grounded with it (see onComplete / doExecuteGenerated).
+      lastUserPromptRef.current = message;
 
       useExecutionStore.getState().setIsLoading(true);
       try {

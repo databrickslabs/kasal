@@ -164,15 +164,16 @@ const RunProgress: React.FC<{
     !stopping && (running || generating) && steps.length > 0
       ? liveStepLine(steps[steps.length - 1])
       : null;
+  // Done state is always "Run activity": the container only renders for
+  // segments that HAVE trace activity (or while live, which the arms above
+  // handle), so there is no idle/no-timeline rendering to label.
   const label = stopping
     ? 'Stopping…'
     : generating
       ? 'Thinking'
       : running
         ? 'Working…'
-        : hasTimeline
-          ? 'Run activity'
-          : 'Crew ready';
+        : 'Run activity';
 
   return (
     <div className="px-4 my-2 max-w-3xl animate-fade-in">

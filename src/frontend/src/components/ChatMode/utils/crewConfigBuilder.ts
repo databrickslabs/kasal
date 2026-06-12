@@ -220,6 +220,8 @@ export function buildCrewConfigFromGenerated(
   sessionId?: string | null,
   workspaceMemory: boolean = true,
   memoryEnabled: boolean = true,
+  mcpServers: string[] = [],
+  userRequest?: string,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -260,6 +262,13 @@ export function buildCrewConfigFromGenerated(
 
     // Inject tool_configs for tools that have overrides (e.g. GenieTool spaceId)
     const agentApplicable = applicableToolConfigs(agentTools);
+    // MCP servers picked in the chat's "+" menu: every agent gets the
+    // selection via tool_configs.MCP_SERVERS — the backend MCP integration
+    // resolves these names against the registered (enabled) servers and
+    // equips the agent with their tools.
+    if (mcpServers.length > 0) {
+      agentApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
     if (Object.keys(agentApplicable).length > 0) {
       agentConfig.tool_configs = agentApplicable;
     }
@@ -306,9 +315,26 @@ export function buildCrewConfigFromGenerated(
     }
 
     const taskTools: string[] = Array.isArray(task.tools) ? task.tools as string[] : [];
+    // Generated task descriptions are often generic mission statements
+    // ("process diverse user inquiries…"). Ground the run with the chat prompt
+    // that asked for it and the attached MCP data sources — without these,
+    // agents have no concrete question and never query tools (e.g. Genie).
+    const baseDescription = String(task.description || '');
+    const groundingParts: string[] = [];
+    if (userRequest) {
+      groundingParts.push(`USER REQUEST — this run exists to answer it:\n${userRequest}`);
+    }
+    if (mcpServers.length > 0) {
+      groundingParts.push(
+        `MCP data sources attached — query them for data questions: ${mcpServers.join(', ')}`,
+      );
+    }
+    const description = groundingParts.length > 0
+      ? `${baseDescription}\n\n${groundingParts.join('\n\n')}`
+      : baseDescription;
     const taskEntry: Record<string, unknown> = {
       id,
-      description: task.description || '',
+      description,
       expected_output: task.expected_output || '',
       tools: taskTools,
       context,
@@ -319,6 +345,14 @@ export function buildCrewConfigFromGenerated(
 
     // Inject tool_configs for tasks that have matching tools
     const taskApplicable = applicableToolConfigs(taskTools);
+    // TASKS need the MCP selection too: CrewAI replaces the agent's tools with
+    // the task's own tools whenever a task lists any (generated tasks usually
+    // do), which would mask the agent-level MCP tools entirely — the run would
+    // never see them. create_task() merges tool_configs.MCP_SERVERS into the
+    // task's tools, keeping the MCP tools visible alongside the task's own.
+    if (mcpServers.length > 0) {
+      taskApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
     if (Object.keys(taskApplicable).length > 0) {
       taskEntry.tool_configs = taskApplicable;
     }

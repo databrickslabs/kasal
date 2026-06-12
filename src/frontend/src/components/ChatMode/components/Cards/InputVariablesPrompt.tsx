@@ -38,7 +38,6 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
   onSubmit,
 }) => {
   const [values, setValues] = useState<Record<string, string>>({});
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(
     () => variablesPromptStore.get(messageId)?.submitted ?? false,
@@ -46,13 +45,6 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
 
   const handleChange = useCallback((name: string, value: string) => {
     setValues((prev) => ({ ...prev, [name]: value }));
-    if (value) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-    }
   }, []);
 
   const toggleVisibility = useCallback((name: string) => {
@@ -63,19 +55,9 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
     (v) => !v.required || Boolean(values[v.name]?.trim()),
   );
 
+  // The Run button is disabled until every required variable is filled, so no
+  // per-field validation is needed here — only trimmed non-empty values ship.
   const handleRun = () => {
-    const newErrors: Record<string, boolean> = {};
-    let hasError = false;
-    for (const v of variables) {
-      if (v.required && !values[v.name]?.trim()) {
-        newErrors[v.name] = true;
-        hasError = true;
-      }
-    }
-    if (hasError) {
-      setErrors(newErrors);
-      return;
-    }
     const inputs: Record<string, string> = {};
     for (const [k, v] of Object.entries(values)) {
       if (v.trim()) inputs[k] = v.trim();
@@ -105,7 +87,7 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
           <div key={v.name}>
             <label
               className="block text-[10px] font-semibold uppercase tracking-wider mb-1 px-1"
-              style={{ color: errors[v.name] ? '#ef4444' : 'var(--text-muted)' }}
+              style={{ color: 'var(--text-muted)' }}
             >
               {v.name.replace(/[_-]/g, ' ')}
               {v.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -121,9 +103,7 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
                 style={{
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
-                  border: errors[v.name]
-                    ? '1px solid #ef4444'
-                    : '1px solid var(--border-color)',
+                  border: '1px solid var(--border-color)',
                   paddingRight: sensitive ? '2.5rem' : undefined,
                 }}
               />
@@ -148,11 +128,6 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
                 </button>
               )}
             </div>
-            {errors[v.name] && (
-              <p className="text-[11px] mt-0.5 px-1" style={{ color: '#ef4444' }}>
-                This variable is required
-              </p>
-            )}
           </div>
         );
       })}

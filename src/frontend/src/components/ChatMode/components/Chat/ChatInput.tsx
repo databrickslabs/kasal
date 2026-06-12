@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
+import McpPicker from './McpPicker';
+import { useExecutionStore } from '../../store/executionStore';
 
 // The crew tool that searches uploaded knowledge. Passed to the dispatcher so a
 // generated crew can read files attached in chat.
@@ -267,6 +269,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
       dispatchSuffix += `\n\n[Knowledge files attached: ${attachments.join(', ')}. Use the ${KNOWLEDGE_TOOL} to search the uploaded documents before answering.]`;
     }
 
+    // MCP servers picked via the "+" menu: steer the crew GENERATION around
+    // them. The picker only equips tools at run time — without this note an
+    // ambiguous prompt ("what can I ask here?") generates a crew unrelated to
+    // the selected data sources, which then never queries them.
+    const selectedMcp = useExecutionStore.getState().selectedMcpServers;
+    if (!isSlash && selectedMcp.length > 0) {
+      dispatchSuffix += `\n\n[MCP data sources attached: ${selectedMcp.join(', ')}. Design the crew to answer using these sources — references like "here" or "this data" mean them.]`;
+    }
+
     // The "Workspace memory" scope is owned by the store (read at execution
     // time), so meta only carries per-message extras. Omit the arg entirely
     // when there are none, so a plain message is a clean single-arg send.
@@ -493,9 +504,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
         aria-hidden="true"
       />
 
-      {/* Input container — two-row layout, also a drop target */}
+      {/* Input container — two-row layout, also a drop target.
+          No `overflow-hidden`: the MCP picker's popover is an absolutely-
+          positioned menu that must escape the container's bounds (same
+          decision as the run-activity container's Genie dropdown). The
+          rounded border + bg already round the corners without clipping. */}
       <div
-        className="kasal-input-shell rounded-3xl overflow-hidden relative transition-all"
+        className="kasal-input-shell rounded-3xl relative transition-all"
         style={{
           backgroundColor: 'var(--bg-input)',
           border: `1px solid ${isDragging ? 'var(--accent)' : 'var(--border-color)'}`,
@@ -733,6 +748,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 </span>
               )}
             </button>
+
+            {/* MCP picker ("+") — select the MCP servers (Kasal-configured and
+                Databricks managed) the next crew gets equipped with. */}
+            <McpPicker disabled={disabled} />
 
             {/* Send — submit only. Stop lives in the run-activity container above.
                 When a catalog crew/flow is loaded and the input is empty, the

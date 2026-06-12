@@ -302,6 +302,39 @@ class DatabricksGPTOSSHandler:
             logger.error(f"Failed to apply GPT-OSS patch: {e}")
 
 
+# Placeholder injected into tool-call-only assistant HISTORY messages — the
+# Databricks API rejects assistant messages whose content is empty when they
+# carry tool_calls (see _sanitize_messages_for_databricks). After many tool
+# turns the model — Haiku especially — can MIMIC the pattern and emit this
+# placeholder as its actual final text answer (observed: crews answering
+# literally "Calling tools."). Any response that is just this placeholder is
+# therefore treated as EMPTY and retried with a corrective nudge.
+TOOL_CALL_PLACEHOLDER = "Calling tools."
+
+_PLACEHOLDER_NUDGE = (
+    'Your previous reply was just "Calling tools." — that is a placeholder, '
+    "not an answer. Using the tool results already gathered above, write your "
+    "complete final answer now. Do not repeat that phrase."
+)
+
+
+def _is_placeholder_response(response) -> bool:
+    """True when the model's text answer is only the tool-call placeholder."""
+    if not isinstance(response, str):
+        return False
+    return response.strip().rstrip(".").strip().lower() == "calling tools"
+
+
+def _append_placeholder_nudge(messages) -> None:
+    """Append the corrective nudge (once) so the retry breaks the mimicry."""
+    if not isinstance(messages, list):
+        return
+    last = messages[-1] if messages else None
+    if isinstance(last, dict) and last.get("content") == _PLACEHOLDER_NUDGE:
+        return
+    messages.append({"role": "user", "content": _PLACEHOLDER_NUDGE})
+
+
 class DatabricksRetryLLM(LLM):
     """
     Custom LLM wrapper for Databricks models that adds retry logic for empty responses.
@@ -730,7 +763,7 @@ class DatabricksRetryLLM(LLM):
                 )
 
                 if content_is_empty and has_tool_calls:
-                    messages[i] = {**msg, "content": "Calling tools."}
+                    messages[i] = {**msg, "content": TOOL_CALL_PLACEHOLDER}
                     i += 1
                 elif content_is_empty and not has_tool_calls:
                     messages.pop(i)
@@ -866,12 +899,18 @@ class DatabricksRetryLLM(LLM):
                     **kwargs,
                 )
 
-                # Check if response is empty
-                if result is None or result == "":
+                # Check if response is empty — a bare "Calling tools."
+                # placeholder echo is treated the same (it is never an answer).
+                is_placeholder = _is_placeholder_response(result)
+                if result is None or result == "" or is_placeholder:
                     if attempt < max_retries - 1:
+                        if is_placeholder:
+                            _append_placeholder_nudge(fixed_messages)
                         backoff = self._get_backoff_time(attempt, is_rate_limit=False)
                         crew_log.warning(
-                            f"[DatabricksRetryLLM] Empty response (attempt {attempt + 1}/{max_retries}). "
+                            f"[DatabricksRetryLLM] "
+                            f"{'Placeholder (Calling tools.)' if is_placeholder else 'Empty'} "
+                            f"response (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {backoff}s..."
                         )
                         self._emit_retry_span(
@@ -879,7 +918,11 @@ class DatabricksRetryLLM(LLM):
                             max_retries=max_retries,
                             backoff=backoff,
                             error_type="empty_response",
-                            error_message="LLM returned empty response",
+                            error_message=(
+                                "LLM echoed the tool-call placeholder"
+                                if is_placeholder
+                                else "LLM returned empty response"
+                            ),
                             is_rate_limit=False,
                             method="call",
                         )
@@ -1015,12 +1058,18 @@ class DatabricksRetryLLM(LLM):
                     **kwargs,
                 )
 
-                # Check if response is empty
-                if response is None or response == "":
+                # Check if response is empty — a bare "Calling tools."
+                # placeholder echo is treated the same (it is never an answer).
+                is_placeholder = _is_placeholder_response(response)
+                if response is None or response == "" or is_placeholder:
                     if attempt < max_retries - 1:
+                        if is_placeholder and isinstance(params, dict):
+                            _append_placeholder_nudge(params.get("messages"))
                         backoff = self._get_backoff_time(attempt, is_rate_limit=False)
                         crew_log.warning(
-                            f"[DatabricksRetryLLM] Empty in _handle_non_streaming (attempt {attempt + 1}/{max_retries}). "
+                            f"[DatabricksRetryLLM] "
+                            f"{'Placeholder (Calling tools.)' if is_placeholder else 'Empty'} "
+                            f"in _handle_non_streaming (attempt {attempt + 1}/{max_retries}). "
                             f"Retrying in {backoff}s..."
                         )
                         self._emit_retry_span(
@@ -1028,7 +1077,11 @@ class DatabricksRetryLLM(LLM):
                             max_retries=max_retries,
                             backoff=backoff,
                             error_type="empty_response",
-                            error_message="LLM returned empty response",
+                            error_message=(
+                                "LLM echoed the tool-call placeholder"
+                                if is_placeholder
+                                else "LLM returned empty response"
+                            ),
                             is_rate_limit=False,
                             method="_handle_non_streaming_response",
                         )

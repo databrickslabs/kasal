@@ -5,6 +5,13 @@ import { GeneratedAgent, GeneratedTask } from '../types/dispatcher';
 export interface GenerationCompleteData {
   agents: Record<string, unknown>[];
   tasks: Record<string, unknown>[];
+  /**
+   * The chat prompt that triggered this generation. Generated task
+   * descriptions are often generic mission statements; the executed config
+   * appends this so the run answers the user's ACTUAL request (and tools like
+   * Genie get queried with it) instead of asking for a question.
+   */
+  user_request?: string;
 }
 
 interface UseGenerationStreamOptions {

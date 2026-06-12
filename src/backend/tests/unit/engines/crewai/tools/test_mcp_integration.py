@@ -33,6 +33,58 @@ class TestMCPIntegrationWarnings:
         MCPIntegration.add_warning("warn2")
         assert len(MCPIntegration.get_warnings()) == 2
 
+    def test_add_warning_emits_tool_error_span(self):
+        """Warnings surface in the run activity as tool_error trace spans —
+        otherwise a 403 on a selected MCP server is invisible to the user."""
+        span = MagicMock()
+        span.is_recording.return_value = True
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=span)
+        cm.__exit__ = MagicMock(return_value=False)
+        tracer = MagicMock()
+        tracer.start_as_current_span.return_value = cm
+
+        with patch("opentelemetry.trace.get_tracer", return_value=tracer):
+            MCPIntegration.add_warning(
+                "MCP server 'pz_web_search': HTTP 403 - Client error"
+            )
+
+        tracer.start_as_current_span.assert_called_once_with("kasal.mcp.error")
+        attrs = {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}
+        assert attrs["kasal.event_type"] == "tool_error"
+        assert attrs["kasal.output_content"] == (
+            "MCP server 'pz_web_search': HTTP 403 - Client error"
+        )
+        span.set_status.assert_called_once()
+        # The warning is still collected for the completion payload.
+        assert MCPIntegration.get_warnings() == [
+            "MCP server 'pz_web_search': HTTP 403 - Client error"
+        ]
+
+    def test_add_warning_span_skipped_when_not_recording(self):
+        """A NoOp tracer (OTel disabled) skips attributes without crashing."""
+        span = MagicMock()
+        span.is_recording.return_value = False
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=span)
+        cm.__exit__ = MagicMock(return_value=False)
+        tracer = MagicMock()
+        tracer.start_as_current_span.return_value = cm
+
+        with patch("opentelemetry.trace.get_tracer", return_value=tracer):
+            MCPIntegration.add_warning("warn")
+
+        span.set_attribute.assert_not_called()
+        assert MCPIntegration.get_warnings() == ["warn"]
+
+    def test_add_warning_survives_tracer_failures(self):
+        """Trace plumbing must never break tool creation."""
+        with patch(
+            "opentelemetry.trace.get_tracer", side_effect=RuntimeError("no otel")
+        ):
+            MCPIntegration.add_warning("warn")
+        assert MCPIntegration.get_warnings() == ["warn"]
+
 
 class TestResolveEffectiveMcpServers:
     """Test resolve_effective_mcp_servers changes."""

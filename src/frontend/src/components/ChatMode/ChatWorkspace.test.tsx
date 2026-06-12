@@ -46,6 +46,7 @@ const h = vi.hoisted(() => {
       chatCollapsed: false,
       executionOwnerSessionId: 's1',
       activeExecution: null as unknown,
+      selectedMcpServers: [] as string[],
       hasActiveExecution: vi.fn(() => false),
       setIsLoading: vi.fn(),
       setExecutionContext: vi.fn(),
@@ -163,6 +164,18 @@ vi.mock('./api/crews', () => ({
     const items = [...(data?.agents ?? []), ...(data?.tasks ?? [])];
     return items.some((x) => Array.isArray(x?.tools) && x.tools.includes('GenieTool'));
   },
+  // Faithful-enough stand-in: drops the 'GenieTool' name from tool lists.
+  stripGenieTools: (data: { agents?: { tools?: unknown[] }[]; tasks?: { tools?: unknown[] }[] }) => ({
+    ...data,
+    agents: (data?.agents ?? []).map((a) => ({
+      ...a,
+      tools: (a.tools ?? []).filter((t) => t !== 'GenieTool'),
+    })),
+    tasks: (data?.tasks ?? []).map((t) => ({
+      ...t,
+      tools: (t.tools ?? []).filter((x) => x !== 'GenieTool'),
+    })),
+  }),
 }));
 vi.mock('./db/sessionDb', () => ({
   saveSessionPreview: (...a: unknown[]) => h.saveSessionPreview(...a),
@@ -278,6 +291,35 @@ describe('buildTraceEntry', () => {
     });
     expect(e?.kind).toBe('tool_call');
     expect(e?.label).toBe('Search');
+  });
+  it('surfaces tool_error events (e.g. MCP 403) with a warning label', () => {
+    const e = buildTraceEntry('', {
+      event_type: 'tool_error',
+      event_source: 'MCP',
+      output: { content: "MCP server 'pz_web_search': HTTP 403 - Forbidden" },
+    });
+    expect(e?.kind).toBe('event');
+    expect(e?.label).toBe("⚠ MCP server 'pz_web_search': HTTP 403 - Forbidden");
+    expect(e?.source).toBe('MCP');
+    expect(e?.detail).toBeUndefined(); // short message fits in the label
+  });
+  it('truncates long tool_error messages into the detail', () => {
+    const long = `MCP server 'x': ${'e'.repeat(100)}`;
+    const e = buildTraceEntry('', { event_type: 'tool_error', output: { content: long } });
+    expect(e?.label).toBe(`⚠ ${long.slice(0, 77)}…`);
+    expect(e?.detail).toBe(long);
+    expect(e?.source).toBeUndefined();
+  });
+  it('tool_error falls back to output.error, then the message, then a default', () => {
+    expect(
+      buildTraceEntry('', { event_type: 'tool_error', output: { error: 'connect failed' } })?.label,
+    ).toBe('⚠ connect failed');
+    expect(
+      buildTraceEntry('queue message', { event_type: 'tool_error', output: {} })?.label,
+    ).toBe('⚠ queue message');
+    expect(buildTraceEntry('', { event_type: 'tool_error', output: {} })?.label).toBe(
+      '⚠ Tool error',
+    );
   });
   it('uses default tool label when missing', () => {
     const e = buildTraceEntry('', { event_type: 'tool_usage', output: {} });
@@ -429,6 +471,16 @@ describe('extractResultText / stripEmbeddedUiDocument', () => {
     );
   });
 
+  it('keeps fenced blocks and bare JSON that only MENTION the UI markers', () => {
+    // Fenced json that is not a UI document stays put (and the bare-JSON pass
+    // re-checks it without stripping).
+    const fencedNonUi = 'Use createSurface like this:\n```json\n{"x": 1}\n```';
+    expect(stripEmbeddedUiDocument(fencedNonUi)).toBe(fencedNonUi);
+    // Marker mentioned but no opening brace anywhere.
+    const noBrace = 'createSurface mentioned without any document';
+    expect(stripEmbeddedUiDocument(noBrace)).toBe(noBrace);
+  });
+
   it('end-to-end: the {value: prose+doc} payload renders prose only', () => {
     const payload = JSON.stringify({ value: 'Based on my research, here it is.\n\n```json\n' + uiDoc + '\n```' });
     expect(extractResultText({ result: payload })).toBe('Based on my research, here it is.');
@@ -483,6 +535,7 @@ describe('ChatWorkspace component', () => {
     h.exec.isLoading = false;
     h.exec.chatCollapsed = false;
     h.exec.activeExecution = null;
+    h.exec.selectedMcpServers = [];
     h.exec.hasActiveExecution = vi.fn(() => false);
     h.app.selectedModel = 'm1';
     h.theme.isDarkMode = false;
@@ -819,6 +872,21 @@ describe('ChatWorkspace component', () => {
     expect(h.createExecution).not.toHaveBeenCalled();
   });
 
+  it('/refine truncates long instructions in the activity sublabel', async () => {
+    const long = 'x'.repeat(100);
+    h.exec.previewContent = { type: 'ui', data: '<p>old</p>' };
+    render(<ChatWorkspace />);
+    await send(`/refine ${long}`);
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({
+        resultType: 'trace',
+        resultData: expect.objectContaining({ sublabel: `${'x'.repeat(77)}…` }),
+      }),
+    );
+  });
+
   it('/refine with no instruction shows usage', async () => {
     render(<ChatWorkspace />);
     await send('/refine');
@@ -895,6 +963,92 @@ describe('ChatWorkspace component', () => {
       'assistant',
       '',
       expect.objectContaining({ resultType: 'genie_space_prompt' }),
+    );
+  });
+
+  it('a selected Genie MCP server strips the auto-detected GenieTool and auto-runs', async () => {
+    h.exec.selectedMcpServers = ['Databricks Genie: Sales Space'];
+    render(<ChatWorkspace />);
+    await act(async () => {
+      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool', 'OtherTool'] }], tasks: [] });
+    });
+    // Genie rides in through MCP — no space prompt, the crew auto-runs…
+    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalledWith(
+      's1',
+      'assistant',
+      '',
+      expect.objectContaining({ resultType: 'genie_space_prompt' }),
+    );
+    expect(h.createExecution).toHaveBeenCalled();
+    // …and the crew handed to the config builder no longer carries the
+    // legacy GenieTool (the MCP server covers Genie instead).
+    const builtFrom = JSON.stringify(mockedBuildGenerated.mock.calls[0][0]);
+    expect(builtFrom).not.toContain('GenieTool');
+    expect(builtFrom).toContain('OtherTool');
+  });
+
+  it('generation progress traces carry agent/task counts and route to the owner session', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onPlanReady({ agents: [{}], tasks: [{}] }); });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
+      's1',
+      'assistant',
+      '',
+      expect.objectContaining({
+        resultType: 'trace',
+        resultData: expect.objectContaining({ label: 'Crew planned', sublabel: '1 agent · 1 task' }),
+      }),
+    );
+  });
+
+  it('generation traces and the genie prompt fall back to the current session without an owner', async () => {
+    h.exec.executionOwnerSessionId = null;
+    render(<ChatWorkspace />);
+    await act(async () => {
+      h.genOpts.onPlanReady({ agents: [{}, {}], tasks: [] });
+      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
+    });
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({
+        resultType: 'trace',
+        resultData: expect.objectContaining({ label: 'Crew planned', sublabel: '2 agents · 0 tasks' }),
+      }),
+    );
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({ resultType: 'genie_space_prompt' }),
+    );
+  });
+
+  it('grounds the auto-run with the chat prompt that asked for the crew', async () => {
+    render(<ChatWorkspace />);
+    (globalThis as { __ccMsg?: string }).__ccMsg = 'top customers from bakehouse?';
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-send')); });
+    await act(async () => {
+      h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] });
+    });
+    const args = mockedBuildGenerated.mock.calls.at(-1) as unknown[];
+    // 11th positional arg = userRequest, appended to task descriptions so the
+    // run answers the user's actual question.
+    expect(args[10]).toBe('top customers from bakehouse?');
+    // The prompt also rides on the generation data (persists through the
+    // genie-space prompt for later runs).
+    expect((args[0] as unknown[])).toEqual([{ id: 'a1' }]);
+  });
+
+  it('the actions row posts to the owner session when one exists', async () => {
+    render(<ChatWorkspace />);
+    await act(async () => { h.genOpts.onComplete({ agents: [], tasks: [] }); });
+    h.exec.activeExecution = { jobId: 'job-act-1', status: 'running' };
+    await act(async () => { h.streamOpts.onComplete({ result: 'final output' }); });
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
+      's1',
+      'assistant',
+      '',
+      expect.objectContaining({ resultType: 'crew_actions' }),
     );
   });
 

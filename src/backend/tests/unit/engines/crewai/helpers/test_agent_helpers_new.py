@@ -878,3 +878,27 @@ class TestCreateAgentLLMConfigExtended:
                 config={"group_id": "grp-1"},
             )
         assert agent is not None
+
+
+class TestRedactLlmRepr:
+    """api_key must never reach the (user-downloadable) execution logs."""
+
+    def test_redacts_api_key_and_keeps_the_rest(self):
+        from src.engines.crewai.helpers.agent_helpers import redact_llm_repr
+
+        class FakeLLM:
+            def __repr__(self):
+                return (
+                    "LLM(model='databricks/claude' api_key='dapi-secret-123' "
+                    "api_base='https://ws.example.com')"
+                )
+
+        redacted = redact_llm_repr(FakeLLM())
+        assert 'dapi-secret-123' not in redacted
+        assert "api_key='***REDACTED***'" in redacted
+        assert "model='databricks/claude'" in redacted
+
+    def test_tolerates_reprs_without_an_api_key(self):
+        from src.engines.crewai.helpers.agent_helpers import redact_llm_repr
+
+        assert redact_llm_repr("plain-model-string") == "'plain-model-string'"

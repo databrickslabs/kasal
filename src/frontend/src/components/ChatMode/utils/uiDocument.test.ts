@@ -314,6 +314,32 @@ describe('applyConfiguredTheme — workspace palettes are the source of truth', 
     expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
   });
 
+  it('treats a token the palette does not define as a deviation (kept)', () => {
+    // `font` exists on the embedded theme but on no configured palette —
+    // a non-string vs undefined comparison → deviation → keep the theme.
+    const themed = { accent: '#2272B4', background: '#FFFFFF', font: 'serif' as const };
+    const deck = surfaceOf({ root: 'Slides' }, themed);
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(themed);
+  });
+
+  it('skips undefined palettes in the themes map when matching copies', () => {
+    // A map entry can be explicitly undefined (e.g. no Presentation palette
+    // configured): matchesPalette must treat it as "no match", not crash —
+    // the embedded Default copy still re-resolves through the other entries.
+    const sparse = { presentation: undefined, default: themes.default } as WorkspaceThemes;
+    const deck = surfaceOf({ root: 'Slides' }, { ...themes.default });
+    expect(applyConfiguredTheme(deck, sparse).theme).toBeUndefined(); // presentation rule
+  });
+
+  it('falls back to the embedded theme when the map has no palette for the deliverable', () => {
+    // The embedded theme is a COPY of a configured palette (so it re-resolves),
+    // but the map has neither a matching deliverable palette nor a Default —
+    // the embedded theme is kept by the final fallback.
+    const onlyGenie = { genie: { background: '#FFFFFF' } } as WorkspaceThemes;
+    const docSurface = surfaceOf({ root: 'Column', t: 'Text' }, { background: '#FFFFFF' });
+    expect(applyConfiguredTheme(docSurface, onlyGenie).theme).toEqual({ background: '#FFFFFF' });
+  });
+
   it('re-resolves when the embedded theme is an empty object', () => {
     const deck = surfaceOf({ root: 'Slides' }, {});
     expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);

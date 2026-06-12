@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
+import { useExecutionStore } from '../../store/executionStore';
 
 vi.mock('../../api/knowledge', () => ({ uploadKnowledgeFile: vi.fn() }));
 const mockUpload = vi.mocked(uploadKnowledgeFile);
@@ -23,6 +24,7 @@ const ta = () => screen.getByPlaceholderText('Ask a question...') as HTMLTextAre
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useExecutionStore.setState({ selectedMcpServers: [] });
 });
 
 describe('ChatInput — typing & send', () => {
@@ -260,6 +262,32 @@ describe('ChatInput — no output-format picker', () => {
     fireEvent.change(ta(), { target: { value: 'make slides' } });
     fireEvent.keyDown(ta(), { key: 'Enter' });
     expect(onSend).toHaveBeenCalledWith('make slides'); // single-arg, no meta
+  });
+
+  it('selected MCP servers ride along as a hidden dispatch-only steering note', () => {
+    useExecutionStore.setState({
+      selectedMcpServers: ['Databricks Genie: API Request Performance Analytics'],
+    });
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+    fireEvent.change(ta(), { target: { value: 'what can I ask here?' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+
+    const [message, meta] = onSend.mock.calls[0];
+    // Displayed message stays clean — the note steers only the generation.
+    expect(message).toBe('what can I ask here?');
+    expect(meta.dispatchSuffix).toContain(
+      'MCP data sources attached: Databricks Genie: API Request Performance Analytics',
+    );
+  });
+
+  it('slash commands stay literal even with MCP servers selected', () => {
+    useExecutionStore.setState({ selectedMcpServers: ['My MCP'] });
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+    fireEvent.change(ta(), { target: { value: '/help' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledWith('/help'); // no meta
   });
 });
 

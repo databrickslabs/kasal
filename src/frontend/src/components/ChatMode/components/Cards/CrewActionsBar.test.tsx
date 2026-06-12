@@ -18,6 +18,7 @@ vi.mock('../../api/crews', async (importOriginal) => {
 });
 
 import CrewActionsBar from './CrewActionsBar';
+import { CrewNameConflictError } from '../../api/crews';
 
 const DATA = { agents: [{ name: 'A' }], tasks: [{ name: 'T' }] } as never;
 
@@ -73,5 +74,78 @@ describe('CrewActionsBar', () => {
     render(<CrewActionsBar data={persisted} messageId={`a-${Math.random()}`} onSaveCrew={vi.fn()} />);
     expect(screen.getByText(/Saved — Kept/)).toBeInTheDocument();
     expect(screen.getByLabelText('Thumbs up')).toBeDisabled();
+  });
+
+  it('voting on an already-saved crew skips re-saving (and "Saved" shows without a name)', async () => {
+    // Persisted save without a savedName: button reads just "Saved".
+    const persisted = { ...(DATA as object), savedCrewId: 'c9' } as never;
+    const onSaveCrew = vi.fn();
+    render(<CrewActionsBar data={persisted} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Thumbs up'));
+    await waitFor(() => expect(postCrewFeedback).toHaveBeenCalledWith('c9', 'up', undefined));
+    expect(onSaveCrew).not.toHaveBeenCalled();
+  });
+
+  it('bookmark without an onSaveCrew handler reports the error', async () => {
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} />);
+    fireEvent.click(screen.getByText('Save to catalog'));
+    await waitFor(() => expect(screen.getByText('Could not save the crew')).toBeInTheDocument());
+  });
+
+  it('bookmark retries with overwrite when the crew name already exists', async () => {
+    const onSaveCrew = vi.fn()
+      .mockRejectedValueOnce(new CrewNameConflictError('Oil Crew'))
+      .mockResolvedValueOnce({ id: 'crew-4', name: 'Oil Crew' });
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+
+    fireEvent.click(screen.getByText('Save to catalog'));
+    await waitFor(() => expect(screen.getByText(/Saved — Oil Crew/)).toBeInTheDocument());
+    expect(onSaveCrew).toHaveBeenNthCalledWith(1, DATA, undefined);
+    expect(onSaveCrew).toHaveBeenNthCalledWith(2, DATA, { overwrite: true });
+  });
+
+  it('bookmark reports the error when the overwrite retry also fails', async () => {
+    const onSaveCrew = vi.fn()
+      .mockRejectedValueOnce(new CrewNameConflictError('Oil Crew'))
+      .mockRejectedValueOnce(new Error('still broken'));
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+
+    fireEvent.click(screen.getByText('Save to catalog'));
+    await waitFor(() => expect(screen.getByText('Could not save the crew')).toBeInTheDocument());
+  });
+
+  it('voting retries the save with overwrite on a name conflict, then posts the vote', async () => {
+    const onSaveCrew = vi.fn()
+      .mockRejectedValueOnce(new CrewNameConflictError('N'))
+      .mockResolvedValueOnce({ id: 'crew-5', name: 'N' });
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+
+    fireEvent.click(screen.getByLabelText('Thumbs up'));
+    await waitFor(() => expect(postCrewFeedback).toHaveBeenCalledWith('crew-5', 'up', undefined));
+    expect(onSaveCrew).toHaveBeenNthCalledWith(2, DATA, { overwrite: true });
+  });
+
+  it('voting reports the error when the save fails for a non-conflict reason', async () => {
+    const onSaveCrew = vi.fn().mockRejectedValue(new Error('nope'));
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+
+    fireEvent.click(screen.getByLabelText('Thumbs up'));
+    await waitFor(() =>
+      expect(screen.getByText('Could not record the feedback')).toBeInTheDocument(),
+    );
+    expect(postCrewFeedback).not.toHaveBeenCalled();
+  });
+
+  it('voting reports the error when the feedback post fails', async () => {
+    postCrewFeedback.mockRejectedValueOnce(new Error('db down'));
+    const onSaveCrew = vi.fn(async () => ({ id: 'crew-6', name: 'N' }));
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={onSaveCrew} />);
+
+    fireEvent.click(screen.getByLabelText('Thumbs up'));
+    await waitFor(() =>
+      expect(screen.getByText('Could not record the feedback')).toBeInTheDocument(),
+    );
   });
 });
