@@ -52,19 +52,28 @@ def custom_ignore_function(excluded_dirs, excluded_patterns):
         return ignored
     return _ignore
 
-def build_frontend(root_dir):
+def build_frontend(root_dir, api_url=None):
     """Build the frontend locally so every deploy ships fresh static assets.
 
     Runs the root package.json npm lifecycle (prebuild → build → postbuild):
     docs are copied into frontend/public/docs, the React app is built with
     npm install + npm run build, and frontend_static/ is recreated from the
     build output (including docs). Aborts the deployment if the build fails.
+
+    VITE_API_URL is pinned via the process environment, which in Vite takes
+    precedence over .env/.env.local files — otherwise a developer's local
+    `frontend/.env.local` (e.g. VITE_API_URL=http://localhost:3003/api/v1)
+    would be baked into the deployed bundle and the app UI would silently
+    call localhost instead of the backend.
     """
     logger.info("=" * 60)
     logger.info("🔨 Building frontend (npm run build)...")
     logger.info("=" * 60)
+    effective_api_url = api_url or "/api/v1"
+    logger.info(f"Pinning VITE_API_URL={effective_api_url} for the production build")
+    build_env = {**os.environ, "VITE_API_URL": effective_api_url}
     try:
-        subprocess.run(["npm", "run", "build"], cwd=str(root_dir), check=True)
+        subprocess.run(["npm", "run", "build"], cwd=str(root_dir), check=True, env=build_env)
     except FileNotFoundError:
         logger.error("npm not found on PATH — install Node.js to build the frontend.")
         raise
@@ -262,7 +271,7 @@ def deploy_source_to_databricks(
         if not (root_dir / "package.json").exists():
             logger.error("package.json not found. Required to run the local npm build.")
             raise FileNotFoundError("package.json not found")
-        build_frontend(root_dir)
+        build_frontend(root_dir, api_url=api_url)
 
     # Check that docs directory exists
     docs_dir = root_dir / "docs"
