@@ -107,18 +107,25 @@ async def _list_external_mcp_options(
     for conn in payload.get("connections") or []:
         if str(conn.get("connection_type", "")).upper() != "HTTP":
             continue
+        name = str(conn.get("name", ""))
+        if not name:
+            continue
         # The MCP flag is an option on the HTTP connection ("Is MCP connection"
         # in the UI). Match any mcp-ish option key so naming variants
         # (is_mcp / is_mcp_connection) all register.
+        # Databricks' system-managed AI-agent connections (system_ai_agent_*)
+        # are deliberately NOT special-cased: the REST-backed ones (gmail,
+        # calendar, drive, sharepoint) answer an MCP handshake with the
+        # vendor's 404 ("Session terminated"), and even the MCP-backed ones
+        # (slack/atlassian) are AgentBricks-internal — they stay out of the
+        # picker. Per-user services like Gmail are exposed as dedicated Kasal
+        # tools instead (see gmail_tool.py).
         conn_options = conn.get("options") or {}
         is_mcp = any(
             "mcp" in str(key).lower() and str(value).strip().lower() in ("true", "1", "yes")
             for key, value in conn_options.items()
         )
         if not is_mcp:
-            continue
-        name = str(conn.get("name", ""))
-        if not name:
             continue
         options.append(
             {

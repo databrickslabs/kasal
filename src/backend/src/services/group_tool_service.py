@@ -66,6 +66,10 @@ class GroupToolService:
         mapped_tool_ids = {m.tool_id for m in mappings}
 
         to_add = [t for t in base_global_available if t.id not in mapped_tool_ids]
+        # Personal-workspace-only tools (Gmail) cannot be added to a shared
+        # workspace — keep them out of the "available to add" list there.
+        from src.services.tool_service import _filter_personal_workspace_tools
+        to_add = _filter_personal_workspace_tools(to_add, group_context)
         return ToolListResponse(tools=[ToolResponse.model_validate(t) for t in to_add], count=len(to_add))
 
     async def add_tool_to_group(self, tool_id: int, group_context: GroupContext, defaults: Optional[Dict[str, Any]] = None) -> GroupToolResponse:
@@ -82,6 +86,22 @@ class GroupToolService:
         if not getattr(tool, "enabled", False):
             # Global availability is controlled by base tool enabled flag (for now)
             raise BadRequestError(detail="Tool is not globally available")
+        # Defense in depth: personal-workspace-only tools (Gmail) must never be
+        # enabled in a shared workspace, even via a crafted request.
+        from src.services.tool_service import (
+            PERSONAL_WORKSPACE_ONLY_TOOLS,
+            _is_personal_workspace,
+        )
+        if (
+            getattr(tool, "title", None) in PERSONAL_WORKSPACE_ONLY_TOOLS
+            and not _is_personal_workspace(group_context)
+        ):
+            raise ForbiddenError(
+                detail=(
+                    f"'{tool.title}' reads a single user's personal data and can "
+                    "only be added in a personal workspace, not a shared one."
+                )
+            )
 
         # Adding a tool to a workspace ENABLES it by default — the admin added
         # it to use it, so a separate "enable" step is redundant. Callers may

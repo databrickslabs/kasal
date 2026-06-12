@@ -19,6 +19,7 @@ const client = {
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
+  put: vi.fn(),
 };
 
 beforeEach(() => {
@@ -132,31 +133,59 @@ describe('listAiSearchMcpIndexes', () => {
 });
 
 describe('databricksMcpServerName', () => {
-  it('prefixes Genie and AI Search instances and keeps other kinds as-is', () => {
-    expect(databricksMcpServerName(genieOption)).toBe('Databricks Genie: Sales Space');
+  it('prefixes Genie and AI Search instances and lowercases every name', () => {
+    expect(databricksMcpServerName(genieOption)).toBe('databricks genie: sales space');
     expect(databricksMcpServerName(aiSearchOption)).toBe(
-      'Databricks AI Search: main.gold.docs_idx',
+      'databricks ai search: main.gold.docs_idx',
     );
     expect(
       databricksMcpServerName({ id: 'sql', kind: 'sql', name: 'Databricks SQL', server_url: 'u' }),
-    ).toBe('Databricks SQL');
+    ).toBe('databricks sql');
   });
 });
 
 describe('ensureDatabricksMcpServer', () => {
-  it('reuses an existing enabled registration by name (no writes)', async () => {
+  it('reuses an exact lowercase registration without any writes', async () => {
     client.get.mockResolvedValue({
-      data: { servers: [{ id: 7, name: 'Databricks Genie: Sales Space', enabled: true }] },
+      data: { servers: [{ id: 7, name: 'databricks genie: sales space', enabled: true }] },
     });
 
     const name = await ensureDatabricksMcpServer(genieOption);
 
-    expect(name).toBe('Databricks Genie: Sales Space');
+    expect(name).toBe('databricks genie: sales space');
     expect(client.post).not.toHaveBeenCalled();
     expect(client.patch).not.toHaveBeenCalled();
+    expect(client.put).not.toHaveBeenCalled();
   });
 
-  it('re-enables an existing registration matched by URL', async () => {
+  it('renames legacy mixed-case registrations to the lowercase name', async () => {
+    client.get.mockResolvedValue({
+      data: { servers: [{ id: 7, name: 'Databricks Genie: Sales Space', enabled: true }] },
+    });
+    client.put.mockResolvedValue({ data: {} });
+
+    const name = await ensureDatabricksMcpServer(genieOption);
+
+    expect(name).toBe('databricks genie: sales space');
+    expect(client.put).toHaveBeenCalledWith('/mcp/servers/7', {
+      name: 'databricks genie: sales space',
+    });
+    expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the stored name when the rename is not permitted', async () => {
+    client.get.mockResolvedValue({
+      data: { servers: [{ id: 7, name: 'Databricks Genie: Sales Space', enabled: true }] },
+    });
+    client.put.mockRejectedValue({ response: { status: 403 } });
+
+    const name = await ensureDatabricksMcpServer(genieOption);
+
+    // Crews resolve by the REGISTERED name, so the stored casing wins.
+    expect(name).toBe('Databricks Genie: Sales Space');
+  });
+
+  it('re-enables an existing registration matched by URL and normalizes its name', async () => {
     client.get.mockResolvedValue({
       data: {
         servers: [
@@ -165,23 +194,27 @@ describe('ensureDatabricksMcpServer', () => {
       },
     });
     client.patch.mockResolvedValue({ data: {} });
+    client.put.mockResolvedValue({ data: {} });
 
     const name = await ensureDatabricksMcpServer(genieOption);
 
-    expect(name).toBe('Old name');
+    expect(name).toBe('databricks genie: sales space');
     expect(client.patch).toHaveBeenCalledWith('/mcp/servers/9/toggle-enabled');
+    expect(client.put).toHaveBeenCalledWith('/mcp/servers/9', {
+      name: 'databricks genie: sales space',
+    });
     expect(client.post).not.toHaveBeenCalled();
   });
 
-  it('registers a new Kasal server (streamable + databricks_spn) when none exists', async () => {
+  it('registers a new Kasal server (streamable + databricks_spn, lowercase name)', async () => {
     client.get.mockResolvedValue({ data: { servers: [] } });
     client.post.mockResolvedValue({ data: {} });
 
     const name = await ensureDatabricksMcpServer(genieOption);
 
-    expect(name).toBe('Databricks Genie: Sales Space');
+    expect(name).toBe('databricks genie: sales space');
     expect(client.post).toHaveBeenCalledWith('/mcp/servers', {
-      name: 'Databricks Genie: Sales Space',
+      name: 'databricks genie: sales space',
       server_url: genieOption.server_url,
       server_type: 'streamable',
       auth_type: 'databricks_spn',

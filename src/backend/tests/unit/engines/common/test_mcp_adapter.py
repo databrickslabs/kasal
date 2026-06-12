@@ -1655,3 +1655,76 @@ class TestHardDeadlines:
         # The deadline fired on each attempt: retried once (transient), then
         # surfaced — instead of hanging the agent until a force stop.
         assert calls['count'] == 2
+
+
+class TestMcpErrorShortCircuit:
+    """A server-side McpError is authoritative — surface it, skip fallbacks.
+
+    The lenses_mcp case: streamable HTTP got a proper UNAUTHENTICATED McpError
+    ("login to the connection first…"), but the SSE fallback then failed with
+    "Expected text/event-stream, got application/json" and MASKED it. The
+    actionable server message must win.
+    """
+
+    def _adapter(self) -> MCPAdapter:
+        return MCPAdapter({
+            'url': 'https://ws.example.com/api/2.0/mcp/external/lenses_mcp',
+            'timeout_seconds': 5,
+            'max_retries': 1,
+            'rate_limit': 0,
+            'headers': {'Authorization': 'Bearer t'},
+        })
+
+    def _mcp_error(self, message: str):
+        from mcp.shared.exceptions import McpError
+        from mcp.types import ErrorData
+        inner = McpError(ErrorData(code=-32001, message=message))
+        # The SDK raises inside anyio task groups — wrap it like production.
+        return ExceptionGroup('tg', [ExceptionGroup('tg', [inner])])
+
+    @pytest.mark.asyncio
+    async def test_streamable_mcp_error_skips_sse_and_surfaces_server_message(self):
+        adapter = self._adapter()
+        message = (
+            "Credential for user identity('123') is not found for the "
+            "connection 'lenses_mcp'. Please login first to the connection"
+        )
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse:
+            mock_sh.side_effect = self._mcp_error(message)
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {'Authorization': 'Bearer t'}
+            )
+
+        assert result == []
+        mock_sse.assert_not_called()  # transport works — no pointless fallback
+        assert adapter.initialization_error is not None
+        assert message in adapter.initialization_error.detail
+        assert 'text/event-stream' not in adapter.initialization_error.detail
+
+    @pytest.mark.asyncio
+    async def test_sse_mcp_error_is_surfaced_too(self):
+        adapter = self._adapter()
+        with patch.object(adapter, '_discover_via_streamable_http', new_callable=AsyncMock) as mock_sh, \
+             patch.object(adapter, '_discover_via_sse', new_callable=AsyncMock) as mock_sse:
+            mock_sh.side_effect = ConnectionError('transport down')  # genuine transport issue
+            mock_sse.side_effect = self._mcp_error('UNAUTHENTICATED via sse')
+
+            result = await adapter._discover_tools_with_mcp_client(
+                {'Authorization': 'Bearer t'}
+            )
+
+        assert result == []
+        assert 'UNAUTHENTICATED via sse' in adapter.initialization_error.detail
+
+    def test_extract_mcp_error_walks_groups_and_ignores_others(self):
+        from src.engines.common.mcp_adapter import _extract_mcp_error
+        from mcp.shared.exceptions import McpError
+        from mcp.types import ErrorData
+
+        inner = McpError(ErrorData(code=-32001, message='boom'))
+        wrapped = ExceptionGroup('a', [ValueError('x'), ExceptionGroup('b', [inner])])
+        assert _extract_mcp_error(wrapped) is inner
+        assert _extract_mcp_error(ValueError('not mcp')) is None
+        assert _extract_mcp_error(ExceptionGroup('c', [ValueError('y')])) is None

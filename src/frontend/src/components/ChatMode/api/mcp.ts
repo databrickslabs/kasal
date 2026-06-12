@@ -88,13 +88,15 @@ export async function listAiSearchMcpIndexes(): Promise<DatabricksMcpOption[]> {
   return res.data.options ?? [];
 }
 
-/** The Kasal MCP server name a Databricks option registers under. */
+/** The Kasal MCP server name a Databricks option registers under.
+ *  Always LOWERCASE: server resolution matches by exact name, so one
+ *  canonical casing prevents duplicate registrations of the same server. */
 export function databricksMcpServerName(
   option: Pick<DatabricksMcpOption, 'kind' | 'name'>,
 ): string {
-  if (option.kind === 'genie') return `Databricks Genie: ${option.name}`;
-  if (option.kind === 'ai-search') return `Databricks AI Search: ${option.name}`;
-  return option.name;
+  if (option.kind === 'genie') return `databricks genie: ${option.name}`.toLowerCase();
+  if (option.kind === 'ai-search') return `databricks ai search: ${option.name}`.toLowerCase();
+  return option.name.toLowerCase();
 }
 
 /**
@@ -109,12 +111,27 @@ export async function ensureDatabricksMcpServer(
 ): Promise<string> {
   const name = databricksMcpServerName(option);
   const existing = await listKasalMcpServers();
+  // Match case-insensitively so legacy mixed-case registrations
+  // ("Databricks SQL") are reused instead of duplicated.
   const match = existing.find(
-    (s) => s.name === name || (s.server_url && s.server_url === option.server_url),
+    (s) =>
+      s.name.toLowerCase() === name ||
+      (s.server_url && s.server_url === option.server_url),
   );
   if (match) {
     if (!match.enabled) {
       await getClient().patch(`/mcp/servers/${match.id}/toggle-enabled`);
+    }
+    // Normalize legacy mixed-case registrations ("Databricks SQL") to the
+    // lowercase canonical name. If the rename is not permitted, fall back to
+    // the stored name — crews resolve servers by their registered name.
+    if (match.name !== name) {
+      try {
+        await getClient().put(`/mcp/servers/${match.id}`, { name });
+        return name;
+      } catch {
+        return match.name;
+      }
     }
     return match.name;
   }

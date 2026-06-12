@@ -10,6 +10,35 @@ from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
+# Tools that read a SINGLE user's personal data and must never appear in a
+# SHARED workspace, where crews and their output are visible to other members.
+# Matched by tool title. The tool also enforces this at execution time
+# (defense in depth); this filter keeps it out of the catalog/picker entirely.
+PERSONAL_WORKSPACE_ONLY_TOOLS = {"Gmail"}
+
+
+def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
+    """True only when the active (primary) group IS the caller's personal
+    workspace, i.e. the group derived from their own email."""
+    if not group_context:
+        return False
+    primary = getattr(group_context, "primary_group_id", None)
+    email = getattr(group_context, "group_email", None)
+    if not primary or not email:
+        return False
+    try:
+        return primary.lower() == GroupContext.generate_individual_group_id(email).lower()
+    except Exception:
+        return False
+
+
+def _filter_personal_workspace_tools(tools: list, group_context: Optional[GroupContext]) -> list:
+    """Drop personal-workspace-only tools unless this IS a personal workspace."""
+    if _is_personal_workspace(group_context):
+        return tools
+    return [t for t in tools if getattr(t, "title", None) not in PERSONAL_WORKSPACE_ONLY_TOOLS]
+
+
 class ToolService:
     """
     Service for Tool business logic and error handling.
@@ -95,8 +124,11 @@ class ToolService:
                 # This will override the default if it exists
                 tools_by_title[tool.title] = tool
 
-        # Convert back to list
-        final_tools = list(tools_by_title.values())
+        # Convert back to list, dropping personal-workspace-only tools (Gmail)
+        # outside the caller's personal workspace.
+        final_tools = _filter_personal_workspace_tools(
+            list(tools_by_title.values()), group_context
+        )
 
         return ToolListResponse(
             tools=[ToolResponse.model_validate(tool) for tool in final_tools],
@@ -164,6 +196,8 @@ class ToolService:
         mappings = await group_repo.list_enabled_for_group(primary_group_id)
         mapping_by_tool: Dict[int, Any] = {m.tool_id: m for m in mappings}
         eligible_base = [t for t in base_enabled if t.id in mapping_by_tool]
+        # Hide personal-workspace-only tools (Gmail) outside the personal workspace.
+        eligible_base = _filter_personal_workspace_tools(eligible_base, group_context)
 
         # Build ToolResponse list with merged config (base < group)
         responses: List[ToolResponse] = []

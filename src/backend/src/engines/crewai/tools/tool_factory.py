@@ -63,6 +63,12 @@ except ImportError:
         logging.warning("Could not import DatabricksKnowledgeSearchTool")
 
 try:
+    from .custom.gmail_tool import GmailTool
+except ImportError:
+    GmailTool = None
+    logging.warning("Could not import GmailTool")
+
+try:
     from .custom.powerbi_analysis_tool import PowerBIAnalysisTool
 except ImportError:
     try:
@@ -260,6 +266,8 @@ class ToolFactory:
             "AgentBricksTool": AgentBricksTool,
             "DatabricksJobsTool": DatabricksJobsTool,
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
+            "Gmail": GmailTool,
+            "GmailTool": GmailTool,  # alias used when referenced by class name
             "Power BI Comprehensive Analysis Tool": PowerBIAnalysisTool,  # New display name
             "PowerBIAnalysisTool": PowerBIAnalysisTool,  # Keep old name for backward compatibility
         }
@@ -1439,6 +1447,42 @@ class ToolFactory:
                     )
                 except Exception as e:
                     logger.error(f"Error creating GenieTool: {e}")
+                    return None
+
+            elif tool_name in ("Gmail", "GmailTool"):
+                # Gmail via the UC connections proxy. STRICTLY OBO: the proxy
+                # resolves the Google account from the calling identity, and
+                # Kasal's PAT/SPN credentials are group-SHARED — a fallback
+                # would map every caller in a group to one mailbox. The tool
+                # refuses to run without the per-user OBO token.
+                tool_id = tool_config.get('tool_id', None)
+                gmail_config = {**tool_config, **(tool_config_override or {})}
+
+                user_token = tool_config.get('user_token') or self.user_token
+                group_id = self.config.get('group_id') if isinstance(self.config, dict) else None
+                user_email = self.config.get('user_email') if isinstance(self.config, dict) else None
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+                        user_token = UserContext.get_user_token()
+                        if not user_token:
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                    except Exception as e:
+                        logger.warning(f"Could not extract user token from context for Gmail: {e}")
+
+                try:
+                    return tool_class(
+                        tool_config=gmail_config,
+                        tool_id=tool_id,
+                        user_token=user_token,
+                        group_id=group_id,
+                        user_email=user_email,
+                        result_as_answer=result_as_answer,
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating Gmail tool: {e}")
                     return None
 
             elif tool_name == "AgentBricksTool":

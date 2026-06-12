@@ -54,6 +54,26 @@ def _extract_http_status(exc: BaseException) -> Optional[int]:
             return found
     return None
 
+
+def _extract_mcp_error(exc: BaseException) -> Optional[BaseException]:
+    """Find a protocol-level McpError anywhere in an ExceptionGroup tree.
+
+    The MCP SDK raises inside anyio task groups, so the McpError carrying the
+    server's actual error payload (e.g. UNAUTHENTICATED: "login to the
+    connection first") arrives wrapped in one or more ExceptionGroups.
+    """
+    try:
+        from mcp.shared.exceptions import McpError
+    except ImportError:  # pragma: no cover - mcp is a hard dependency
+        return None
+    if isinstance(exc, McpError):
+        return exc
+    for sub in getattr(exc, "exceptions", None) or []:
+        found = _extract_mcp_error(sub)
+        if found is not None:
+            return found
+    return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -200,6 +220,14 @@ class MCPAdapter:
                 self._transport = "streamable_http"
                 return tools
         except Exception as e:
+            # A protocol-level McpError means the server RECEIVED and answered
+            # our MCP request — the transport works. Falling back to SSE can
+            # only fail with a less useful transport error that masks the real
+            # one (e.g. UNAUTHENTICATED: "login to the connection first" was
+            # hidden behind "Expected text/event-stream, got application/json").
+            mcp_error = _extract_mcp_error(e)
+            if mcp_error is not None:
+                return self._fail_discovery_with(mcp_error, e)
             last_error = e
             _log_exception_group(e, "Streamable HTTP discovery failed")
             logger.info("Falling back to SSE transport for tool discovery")
@@ -211,6 +239,9 @@ class MCPAdapter:
                 self._transport = "sse"
                 return tools
         except Exception as e:
+            mcp_error = _extract_mcp_error(e)
+            if mcp_error is not None:
+                return self._fail_discovery_with(mcp_error, e)
             last_error = e
             _log_exception_group(e, "SSE discovery also failed")
 
@@ -258,6 +289,23 @@ class MCPAdapter:
             cause=last_error,
         )
         logger.error(f"All MCP transports failed for {self.server_url}: {summary}")
+        return []
+
+    def _fail_discovery_with(self, mcp_error: BaseException, cause: Exception) -> List[Dict[str, Any]]:
+        """Record a server-side McpError as the discovery failure and stop.
+
+        The error payload is the server's own message (error_code + remedial
+        action, e.g. the connection login URL for per-user credentials), so it
+        is surfaced verbatim instead of being masked by transport fallbacks.
+        """
+        detail = f"MCP server '{self.server_url}': {mcp_error}"
+        self.initialization_error = MCPConnectionError(
+            server_name=self.server_url,
+            server_url=self.server_url,
+            detail=detail,
+            cause=cause,
+        )
+        logger.error(detail)
         return []
 
     async def _discover_via_streamable_http(self, clean_headers: Dict[str, str]) -> List[Dict[str, Any]]:

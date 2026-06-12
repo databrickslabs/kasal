@@ -101,8 +101,11 @@ async def list_global_tools(
     group_context: GroupContextDep = None,
 ) -> ToolListResponse:
     """List globally cataloged tools (base tools with no group_id)."""
+    from src.services.tool_service import _filter_personal_workspace_tools
     all_tools = await service.get_all_tools()
     base_tools = [t for t in all_tools.tools if getattr(t, "group_id", None) is None]
+    # Hide personal-workspace-only tools (Gmail) outside the personal workspace.
+    base_tools = _filter_personal_workspace_tools(base_tools, group_context)
     return ToolListResponse(tools=base_tools, count=len(base_tools))
 
 
