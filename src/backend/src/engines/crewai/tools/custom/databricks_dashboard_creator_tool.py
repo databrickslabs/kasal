@@ -111,6 +111,37 @@ class DatabricksDashboardCreatorTool(BaseTool):
     # Visual mappings parsing
     # ──────────────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _fetch_latest_mapper_output_from_db() -> str:
+        """Fetch the latest PBI Visual-UCMV Mapper output from execution traces.
+
+        Same DB-fallback pattern as the UCMV validator / Genie config generator:
+        covers resumed flows and runs where flow-state injection did not deliver
+        the mapper output. Returns the raw JSON string ('' if none found).
+        """
+        from sqlalchemy import text
+
+        async def _query() -> str:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            async with ToolSessionProvider.session() as session:
+                result = await session.execute(text(
+                    "SELECT et.output::text FROM execution_trace et "
+                    "WHERE et.span_name LIKE 'PBI Visual-UCMV Mapper%run' "
+                    "ORDER BY et.created_at DESC LIMIT 1"
+                ))
+                row = result.fetchone()
+                if not row or not row[0]:
+                    return ''
+                data = json.loads(row[0])
+                content = data.get('content', '')
+                if isinstance(content, str) and 'visual_mappings' in content:
+                    return content
+                return ''
+
+        from src.engines.crewai.tools.async_bridge import run_sync_with_context
+        from src.utils.asyncio_utils import create_and_run_loop
+        return run_sync_with_context(lambda: create_and_run_loop(_query()), timeout=15)
+
     def _parse_visual_mappings(self, raw: Any) -> tuple[list, str, str, str]:
         """Parse visual_mappings_json — may be a string with the full tool 94 output.
 
@@ -472,7 +503,19 @@ class DatabricksDashboardCreatorTool(BaseTool):
         # ── 1. Parse visual_mappings_json ────────────────────────────────────
         raw = _get('visual_mappings_json')
         if not raw:
-            return json.dumps({"error": "No visual_mappings_json available — required to create dashboard"})
+            # DB fallback (same pattern as mapper/Genie/validator): pull the
+            # latest PBI Visual-UCMV Mapper output from the execution traces —
+            # covers resumed flows and runs where flow-state injection did not
+            # deliver the mapper output to this tool.
+            try:
+                latest = self._fetch_latest_mapper_output_from_db()
+                if latest:
+                    logger.info("[DashboardCreator] visual_mappings_json not injected — using latest mapper output from DB")
+                    raw = latest
+            except Exception as e:
+                logger.warning(f"[DashboardCreator] DB fallback for visual_mappings_json failed: {e}")
+        if not raw:
+            return json.dumps({"error": "No visual_mappings_json available — run the PBI Visual-UCMV Mapper first (flow injection or a prior run in this workspace)"})
 
         visual_mappings, injected_title, injected_catalog, injected_schema = self._parse_visual_mappings(raw)
         if not visual_mappings:
