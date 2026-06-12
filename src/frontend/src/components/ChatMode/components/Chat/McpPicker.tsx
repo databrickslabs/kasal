@@ -458,15 +458,15 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
 
           {/* The managed SQL MCP executes arbitrary statements with the
               caller's warehouse permissions — selecting it deserves an
-              explicit heads-up, not silent power. */}
+              explicit, plain-language heads-up, not silent power. */}
           {selected.some((n) => n.toLowerCase() === 'databricks sql') && (
             <div
               className="px-3 py-2 text-[11px]"
               style={{ color: '#d97706', borderTop: '1px solid var(--border-color)' }}
             >
-              ⚠ Databricks SQL has CRUD rights: agents can modify or delete data
-              with your permissions, not just read it. Review your prompt and the
-              model's actions with care — content the agent reads can steer it.
+              ⚠ Databricks SQL lets the agent change your data, not just read it —
+              it can add, update or permanently delete records using your access.
+              Be careful what you ask for and check what it did before trusting it.
             </div>
           )}
           {error && (

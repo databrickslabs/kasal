@@ -245,6 +245,48 @@ describe('ChatMode crews api', () => {
         expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
       });
     });
+
+    describe('MCP server persistence', () => {
+      const data = {
+        agents: [{ id: 'a1', name: 'A', tools: ['SomeTool'] }],
+        tasks: [{ id: 't1', name: 'T', tools: [], agent_id: 'a1' }],
+      };
+
+      it('persists the selected MCP servers on EVERY agent and task node', async () => {
+        await saveGeneratedCrew(data as never, undefined, {
+          mcpServers: ['databricks sql', 'databricks genie: sales'],
+        });
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        const expected = { MCP_SERVERS: { servers: ['databricks sql', 'databricks genie: sales'] } };
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toEqual(expected);
+        expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toEqual(expected);
+      });
+
+      it('merges the Genie space override with the MCP servers on Genie nodes', async () => {
+        const genieData = {
+          agents: [{ id: 'a1', name: 'G', tools: ['GenieTool'] }],
+          tasks: [{ id: 't1', name: 'Ask', tools: ['GenieTool'], agent_id: 'a1' }],
+        };
+        await saveGeneratedCrew(genieData as never, undefined, {
+          spaceId: 'space-xyz',
+          mcpServers: ['my mcp'],
+        });
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        const expected = {
+          GenieTool: { spaceId: 'space-xyz' },
+          MCP_SERVERS: { servers: ['my mcp'] },
+        };
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toEqual(expected);
+        expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toEqual(expected);
+      });
+
+      it('adds no tool_configs when no MCP servers are selected and no spaceId is set', async () => {
+        await saveGeneratedCrew(data as never, undefined, { mcpServers: [] });
+        const nodes = post.mock.calls[0][1].nodes as Array<{ type: string; data: Record<string, unknown> }>;
+        expect(nodes.find((n) => n.type === 'agentNode')!.data.tool_configs).toBeUndefined();
+        expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
+      });
+    });
   });
 
   describe('listSavedCrews', () => {

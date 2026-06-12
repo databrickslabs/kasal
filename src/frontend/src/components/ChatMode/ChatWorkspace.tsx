@@ -1197,6 +1197,8 @@ const ChatWorkspace: React.FC = () => {
       saveGeneratedCrew(data, undefined, {
         ...opts,
         memoryEnabled: useExecutionStore.getState().memoryEnabled,
+        // Persist the MCP servers selected for the run so the saved crew keeps them.
+        mcpServers: useExecutionStore.getState().selectedMcpServers,
       }).then((r) => {
         // Surface the freshly saved crew in the rail library.
         void refreshLibrary();
@@ -1376,8 +1378,9 @@ const ChatWorkspace: React.FC = () => {
         }
         const name = arg;
         const memoryEnabled = useExecutionStore.getState().memoryEnabled;
+        const mcpServers = useExecutionStore.getState().selectedMcpServers;
         try {
-          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled });
+          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled, mcpServers });
           void refreshLibrary();
           addMessage(
             'assistant',
