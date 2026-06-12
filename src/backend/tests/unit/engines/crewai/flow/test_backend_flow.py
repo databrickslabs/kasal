@@ -10,6 +10,16 @@ from src.engines.crewai.flow.backend_flow import BackendFlow
 from src.repositories.flow_repository import FlowRepository
 
 
+@pytest.fixture(autouse=True)
+def _clear_user_context():
+    """BackendFlow sets raw config values (possibly dicts) into UserContext;
+    clear the ContextVars after each test so they don't leak into later test
+    modules (this previously broke 24 reducer tests in full-suite runs)."""
+    yield
+    from src.utils.user_context import UserContext
+    UserContext.clear_context()
+
+
 class MockCrewAIFlowClass:
     """
     A mock CrewAI flow that properly supports dir() inspection.

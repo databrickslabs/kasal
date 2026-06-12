@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-import httpx
-
 logger = logging.getLogger(__name__)
 
 
@@ -143,20 +141,19 @@ class QuestionPreprocessor:
         question: str,
         known_measures: Optional[List[str]] = None,
         known_dimensions: Optional[List[str]] = None,
-        llm_workspace_url: Optional[str] = None,
-        llm_token: Optional[str] = None,
+        use_llm: bool = True,
         llm_model: str = "databricks-claude-sonnet-4",
     ) -> QuestionIntent:
         """Extract structured intent from the user question.
 
-        First runs deterministic extraction, then optionally refines with LLM.
+        First runs deterministic extraction, then optionally refines with LLM
+        (authentication is handled internally by LLMManager).
 
         Args:
             question: The user's natural language question.
             known_measures: List of known measure names from the model.
             known_dimensions: List of known dimension column names.
-            llm_workspace_url: Optional Databricks workspace URL for LLM.
-            llm_token: Optional Databricks token for LLM.
+            use_llm: Whether to refine the deterministic intent with an LLM.
             llm_model: LLM model name.
 
         Returns:
@@ -164,11 +161,11 @@ class QuestionPreprocessor:
         """
         intent = self._deterministic_extract(question, known_measures, known_dimensions)
 
-        # Optionally refine with LLM
-        if llm_workspace_url and llm_token:
+        # Optionally refine with LLM (fail-open to deterministic intent)
+        if use_llm:
             try:
                 intent = self._llm_extract(
-                    intent, question, llm_workspace_url, llm_token, llm_model,
+                    intent, question, llm_model,
                     known_measures, known_dimensions,
                 )
             except Exception as e:
@@ -301,8 +298,6 @@ class QuestionPreprocessor:
         self,
         deterministic_intent: QuestionIntent,
         question: str,
-        llm_workspace_url: str,
-        llm_token: str,
         llm_model: str,
         known_measures: Optional[List[str]] = None,
         known_dimensions: Optional[List[str]] = None,
@@ -311,6 +306,9 @@ class QuestionPreprocessor:
         import asyncio
 
         async def _call():
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+
             measure_hint = ""
             if known_measures:
                 measure_hint = f"\nKnown measures: {', '.join(known_measures[:30])}"
@@ -326,22 +324,13 @@ Question: "{question}"
 Return JSON:
 {{"measures": ["measure names from question"], "dimensions": ["dimension/grouping columns"], "time_grain": "year|quarter|month|week|day|null", "output_shape": "single_value|top_n|trend|comparison|list"}}"""
 
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
-            from src.utils.databricks_url_utils import DatabricksURLUtils
-            url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
-            headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-            payload = {
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 500,
-                "temperature": 0.0,
-            }
-            if _gw_model:
-                payload["model"] = _gw_model
-
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=0.0,
+                max_tokens=500,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
             # Parse LLM response
             try:

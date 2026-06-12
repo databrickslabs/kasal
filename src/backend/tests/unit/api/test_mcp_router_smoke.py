@@ -60,13 +60,13 @@ async def test_create_update_delete_permissions_and_success():
     svc = AsyncMock()
     # Create forbidden for non-admin
     with pytest.raises(ForbiddenError) as ei:
-        await create_mcp_server(MCPServerCreate(name="n", server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
+        await create_mcp_server(MCPServerCreate(name="n", server_url="https://example.com/mcp", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
     assert ei.value.status_code == 403
 
     # Create success for admin; scoped by group
     from types import SimpleNamespace
     svc.create_server = AsyncMock(return_value=SimpleNamespace(id=1, name="n"))
-    out = await create_mcp_server(MCPServerCreate(name="n", server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="admin", primary_group_id="g1"))
+    out = await create_mcp_server(MCPServerCreate(name="n", server_url="https://example.com/mcp", api_key="k"), service=svc, group_context=Ctx(user_role="admin", primary_group_id="g1"))
     assert out.id == 1
 
     # Update forbidden for non-admin
@@ -135,17 +135,17 @@ async def test_test_connection_admin_success_and_error_path():
     # Non-admin forbidden
     m = importlib.import_module('src.api.mcp_router')
     with pytest.raises(ForbiddenError):
-        await m.test_mcp_connection(MCPTestConnectionRequest(server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
+        await m.test_mcp_connection(MCPTestConnectionRequest(server_url="https://example.com/mcp", api_key="k"), service=svc, group_context=Ctx(user_role="user"))
 
     # Admin success
     from types import SimpleNamespace
     svc.test_connection = AsyncMock(return_value=SimpleNamespace(success=True, message="ok"))
-    out = await m.test_mcp_connection(MCPTestConnectionRequest(server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="admin"))
+    out = await m.test_mcp_connection(MCPTestConnectionRequest(server_url="https://example.com/mcp", api_key="k"), service=svc, group_context=Ctx(user_role="admin"))
     assert out.success is True
 
     # Admin error -> function returns structured error (no raise)
     svc.test_connection = AsyncMock(side_effect=Exception("boom"))
-    out2 = await m.test_mcp_connection(MCPTestConnectionRequest(server_url="u", api_key="k"), service=svc, group_context=Ctx(user_role="admin"))
+    out2 = await m.test_mcp_connection(MCPTestConnectionRequest(server_url="https://example.com/mcp", api_key="k"), service=svc, group_context=Ctx(user_role="admin"))
     assert out2.success is False and "Error testing connection" in out2.message
 
 

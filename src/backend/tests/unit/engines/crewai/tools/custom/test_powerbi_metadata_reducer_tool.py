@@ -8,6 +8,18 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool import (
     PowerBIMetadataReducerTool,
 )
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+
+
+def _mock_cache_service_ctx(mock_service):
+    """Return an async context manager that yields mock_service (for ToolSessionProvider.cache_service)."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_service
+
+    return _ctx
 
 
 def _make_model_context():
@@ -267,28 +279,15 @@ class TestLLMSelection:
         )
         ctx = _make_model_context()
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "tables": ["Sales", "Geography"],
-                        "measures": ["Total Revenue"],
-                        "reasoning": "test reasoning",
-                    })
-                }
-            }]
-        }
-        mock_response.raise_for_status = MagicMock()
+        llm_content = json.dumps({
+            "tables": ["Sales", "Geography"],
+            "measures": ["Total Revenue"],
+            "reasoning": "test reasoning",
+        })
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        mock_completion = AsyncMock(return_value=llm_content)
 
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
                 user_question="What is the total revenue by country?",
@@ -568,16 +567,8 @@ class TestCacheFallback:
         mock_cache_service = MagicMock()
         mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             tool._run(user_question="test")
 
@@ -600,16 +591,8 @@ class TestCacheFallback:
         mock_cache_service = MagicMock()
         mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             result = tool._run(user_question="total revenue by country")
 
@@ -632,16 +615,8 @@ class TestCacheFallback:
         mock_cache_service = MagicMock()
         mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             result = tool._run(user_question="total revenue by country")
 
@@ -664,16 +639,8 @@ class TestCacheFallback:
         mock_cache_service = MagicMock()
         mock_cache_service.get_cached_metadata = AsyncMock(return_value=None)
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             result = tool._run(user_question="test")
 
@@ -716,16 +683,8 @@ class TestCacheSaving:
         mock_cache_service = MagicMock()
         mock_cache_service.save_metadata = AsyncMock(return_value=None)
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
@@ -750,16 +709,8 @@ class TestCacheSaving:
         mock_cache_service = MagicMock()
         mock_cache_service.save_metadata = AsyncMock(side_effect=Exception("DB down"))
 
-        @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            return_value=mock_cache_service,
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
         ):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
@@ -1128,15 +1079,12 @@ class TestParseModelContextEdgeCases:
         )
 
         @asynccontextmanager
-        async def mock_session_factory():
-            yield MagicMock()
+        async def _exploding_ctx():
+            raise Exception("Cache explosion")
+            yield  # pragma: no cover
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.async_session_factory",
-            mock_session_factory,
-        ), patch(
-            "src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool.PowerBISemanticModelCacheService",
-            side_effect=Exception("Cache explosion"),
+        with patch.object(
+            ToolSessionProvider, "cache_service", _exploding_ctx
         ):
             result = tool._run(user_question="revenue")
 

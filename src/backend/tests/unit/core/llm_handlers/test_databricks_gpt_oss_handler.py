@@ -77,7 +77,7 @@ class TestCallRaisesRecognizableOverflow:
         overflow = Exception("prompt is too long: 2523462 tokens > 1000000 maximum")
 
         with patch(
-            "crewai.LLM.call", side_effect=overflow
+            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call", side_effect=overflow
         ), pytest.raises(LLMContextLengthExceededError) as exc_info:
             handler.call(messages=[{"role": "user", "content": "hi"}])
 
@@ -91,6 +91,6 @@ class TestCallRaisesRecognizableOverflow:
 
         # Non-retryable, non-auth, non-overflow error must propagate unwrapped.
         with patch(
-            "crewai.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
+            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
         ), pytest.raises(RuntimeError):
             handler.call(messages=[{"role": "user", "content": "hi"}])

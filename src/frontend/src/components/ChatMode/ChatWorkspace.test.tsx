@@ -215,6 +215,8 @@ import ChatWorkspace, {
   buildTraceEntry,
   summarizeTaskOutput,
   cleanTaskLabel,
+  extractResultText,
+  stripEmbeddedUiDocument,
 } from './ChatWorkspace';
 import { buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 
@@ -379,6 +381,57 @@ describe('summarizeTaskOutput', () => {
   });
   it('returns normal short text unchanged', () => {
     expect(summarizeTaskOutput('a normal result', null)).toBe('a normal result');
+  });
+});
+
+describe('extractResultText / stripEmbeddedUiDocument', () => {
+  const uiDoc = JSON.stringify({
+    messages: [
+      { createSurface: { surfaceId: 's1', catalogId: 'basic' } },
+      {
+        updateComponents: {
+          surfaceId: 's1',
+          components: [
+            { id: 'root', component: 'Column', children: ['t'] },
+            { id: 't', component: 'Text', variant: 'h1', text: 'Hello' },
+          ],
+        },
+      },
+    ],
+  });
+
+  it('unwraps the {value: ...} result shape', () => {
+    expect(extractResultText({ result: JSON.stringify({ value: 'plain answer' }) })).toBe(
+      'plain answer',
+    );
+    expect(extractResultText({ result: { value: 'obj answer' } })).toBe('obj answer');
+  });
+
+  it('strips a fenced A2UI document but keeps the prose', () => {
+    const text = 'Here is your dashboard.\n\n```json\n' + uiDoc + '\n```\n';
+    expect(stripEmbeddedUiDocument(text)).toBe('Here is your dashboard.');
+  });
+
+  it('strips an unfenced A2UI document', () => {
+    const text = 'Delivering the analytics view now.\n\njson\n' + uiDoc + '\n';
+    expect(stripEmbeddedUiDocument(text)).toBe('Delivering the analytics view now.');
+  });
+
+  it('falls back to a friendly line when only the document was present', () => {
+    expect(stripEmbeddedUiDocument(uiDoc)).toBe(
+      'Generated an app. View it in the preview pane.',
+    );
+  });
+
+  it('leaves text without UI documents untouched', () => {
+    expect(stripEmbeddedUiDocument('just a normal answer { not: ui }')).toBe(
+      'just a normal answer { not: ui }',
+    );
+  });
+
+  it('end-to-end: the {value: prose+doc} payload renders prose only', () => {
+    const payload = JSON.stringify({ value: 'Based on my research, here it is.\n\n```json\n' + uiDoc + '\n```' });
+    expect(extractResultText({ result: payload })).toBe('Based on my research, here it is.');
   });
 });
 

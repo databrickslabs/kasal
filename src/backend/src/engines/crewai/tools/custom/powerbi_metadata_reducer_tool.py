@@ -31,10 +31,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
-import httpx
 
-from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 from .metadata_reduction.fuzzy_scorer import FuzzyScorer
 from .metadata_reduction.dependency_resolver import MeasureDependencyResolver
@@ -136,7 +134,9 @@ class PowerBIMetadataReducerTool(BaseTool):
             "enable_value_normalization": kwargs.get("enable_value_normalization", True),
             "dataset_id": kwargs.get("dataset_id"),
             "workspace_id": kwargs.get("workspace_id"),
-            "group_id": kwargs.get("group_id", "default"),
+            # No "default" here — leave unset so _resolve_group_id can fall
+            # back to trace context / UserContext (multi-tenant cache scoping).
+            "group_id": kwargs.get("group_id"),
             "report_id": kwargs.get("report_id"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
@@ -154,6 +154,29 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         self._instance_id = instance_id
         self._default_config = default_config
+
+    def _resolve_group_id(self, config: Dict[str, Any]) -> str:
+        """Resolve the tenant group for cache scoping.
+
+        Order: explicit config → trace context → UserContext → 'default'.
+        The Fetcher caches under the UserContext group, so the Reducer must
+        resolve the same way or every cache lookup misses.
+        """
+        from src.utils.user_context import UserContext
+
+        gc = UserContext.get_group_context()
+        # backend_flow.py sets the raw config value into UserContext, which
+        # may be a dict rather than a GroupContext — handle both shapes.
+        if isinstance(gc, dict):
+            gc_group = gc.get("primary_group_id") or gc.get("group_id")
+        else:
+            gc_group = gc.primary_group_id if gc else None
+        return (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
+            or gc_group
+            or "default"
+        )
 
     # ─── Entry Point ────────────────────────────────────────────────────
 
@@ -281,8 +304,6 @@ class PowerBIMetadataReducerTool(BaseTool):
             boost_min=config.get("synonym_boost_min", 60.0),
         )
         threshold = config.get("synonym_threshold", 70)
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
 
         # Parse business_terms: {"BU": ["Business Unit"], "CGR": ["Complete Good Receipt"]}
         business_terms_raw = config.get("business_terms", {})
@@ -311,8 +332,6 @@ class PowerBIMetadataReducerTool(BaseTool):
             user_question,
             known_measures=known_measure_names,
             known_dimensions=known_dimension_names,
-            llm_workspace_url=config.get("llm_workspace_url"),
-            llm_token=config.get("llm_token"),
             llm_model=config.get("llm_model", "databricks-claude-sonnet-4"),
         )
 
@@ -373,10 +392,7 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         elif strategy == "llm":
             # ── LLM-only: send full catalog to LLM without fuzzy hints ──
-            if not llm_workspace_url or not llm_token:
-                return json.dumps({
-                    "error": "LLM strategy requires llm_workspace_url and llm_token to be configured."
-                })
+            # (LLMManager authenticates internally — no credentials needed)
             logger.info(f"[MetadataReducer][LLM_SELECTION] LLM-only selection (model={config.get('llm_model')})...")
             ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms, question_intent=question_intent)
             ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms, question_intent=question_intent)
@@ -404,31 +420,19 @@ class PowerBIMetadataReducerTool(BaseTool):
             top_tables = [(r["table"]["name"], r["score"], r["likely_relevant"]) for r in ranked_tables[:8]]
             logger.info(f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_tables}")
 
-            if llm_workspace_url and llm_token:
-                t3 = time.time()
-                logger.info(f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})...")
-                selected = await self._llm_select_tables_and_measures(
-                    user_question, ranked_tables, ranked_measures, config
-                )
-                selected_table_names = selected.get("tables", [])
-                selected_measure_names = selected.get("measures", [])
-                selection_reasoning = selected.get("reasoning", "Combined fuzzy + LLM selection")
-                logger.info(
-                    f"[MetadataReducer][LLM_SELECTION] Done in {time.time()-t3:.2f}s — "
-                    f"selected {len(selected_table_names)} tables: {selected_table_names}, "
-                    f"{len(selected_measure_names)} measures: {selected_measure_names}"
-                )
-            else:
-                logger.warning(
-                    "[MetadataReducer] Combined strategy but LLM not configured — falling back to fuzzy-only"
-                )
-                selected_table_names = [
-                    r["table"]["name"] for r in ranked_tables if r["score"] >= threshold
-                ]
-                selected_measure_names = [
-                    r["measure"]["name"] for r in ranked_measures if r["score"] >= threshold
-                ]
-                selection_reasoning = f"Combined strategy fallback to fuzzy-only (LLM not configured, threshold={threshold})"
+            t3 = time.time()
+            logger.info(f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})...")
+            selected = await self._llm_select_tables_and_measures(
+                user_question, ranked_tables, ranked_measures, config
+            )
+            selected_table_names = selected.get("tables", [])
+            selected_measure_names = selected.get("measures", [])
+            selection_reasoning = selected.get("reasoning", "Combined fuzzy + LLM selection")
+            logger.info(
+                f"[MetadataReducer][LLM_SELECTION] Done in {time.time()-t3:.2f}s — "
+                f"selected {len(selected_table_names)} tables: {selected_table_names}, "
+                f"{len(selected_measure_names)} measures: {selected_measure_names}"
+            )
         else:
             return json.dumps({
                 "error": f"Unknown strategy '{strategy}'. Use: fuzzy, llm, combined, or passthrough."
@@ -816,12 +820,11 @@ class PowerBIMetadataReducerTool(BaseTool):
         # without relying on the agent to pass model_context_json.
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
-        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+        group_id = self._resolve_group_id(config)
         cache_saved = False
         if dataset_id and workspace_id:
             try:
-                async with async_session_factory() as session:
-                    cache_service = PowerBISemanticModelCacheService(session)
+                async with ToolSessionProvider.cache_service() as cache_service:
                     await cache_service.save_metadata(
                         group_id=group_id,
                         dataset_id=dataset_id,
@@ -918,14 +921,13 @@ class PowerBIMetadataReducerTool(BaseTool):
         workspace_id = config.get("workspace_id")
 
         if dataset_id and workspace_id:
-            group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+            group_id = self._resolve_group_id(config)
             logger.info(
                 f"[MetadataReducer] Cache lookup: group_id={group_id}, "
                 f"dataset={dataset_id}, workspace={workspace_id}"
             )
             try:
-                async with async_session_factory() as session:
-                    cache_service = PowerBISemanticModelCacheService(session)
+                async with ToolSessionProvider.cache_service() as cache_service:
                     # Use any_report_id=True because the Reducer doesn't care
                     # which report_id the cache was saved with — it just needs
                     # the model metadata (tables, measures, relationships, etc.)
@@ -1098,8 +1100,6 @@ class PowerBIMetadataReducerTool(BaseTool):
         Provides fuzzy pre-screening hints to guide the LLM.
         Falls back to fuzzy-only if LLM call fails.
         """
-        llm_workspace_url = config["llm_workspace_url"]
-        llm_token = config["llm_token"]
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
 
         # Build table catalog for the prompt
@@ -1165,17 +1165,8 @@ Return ONLY valid JSON (no markdown, no explanation):
         llm_temperature = config.get("llm_temperature", 0.1)
         llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        from src.utils.databricks_url_utils import DatabricksURLUtils
-        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(llm_workspace_url, llm_model)
-        headers = {"Authorization": f"Bearer {llm_token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-        payload = {
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 2000,
-            "temperature": llm_temperature,
-        }
-        if _gw_model:
-            payload["model"] = _gw_model
 
         logger.info(
             f"[MetadataReducer] LLM call: model={llm_model}, "
@@ -1185,28 +1176,29 @@ Return ONLY valid JSON (no markdown, no explanation):
 
         try:
             t_llm = time.time()
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                usage = result.get("usage", {})
+            content = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=llm_model,
+                temperature=llm_temperature,
+                max_tokens=2000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-                logger.info(
-                    f"[MetadataReducer] LLM responded in {time.time()-t_llm:.2f}s — "
-                    f"{len(content)} chars, tokens: {usage}"
-                )
+            logger.info(
+                f"[MetadataReducer] LLM responded in {time.time()-t_llm:.2f}s — "
+                f"{len(content)} chars"
+            )
 
-                parsed = self._extract_json_from_response(content)
-                if parsed and "tables" in parsed:
-                    # Normalize: handle both plain strings and {name, confidence} objects
-                    parsed = self._normalize_llm_selection(parsed, llm_confidence_threshold)
-                    return parsed
+            parsed = self._extract_json_from_response(content)
+            if parsed and "tables" in parsed:
+                # Normalize: handle both plain strings and {name, confidence} objects
+                parsed = self._normalize_llm_selection(parsed, llm_confidence_threshold)
+                return parsed
 
-                logger.warning(
-                    f"[MetadataReducer] LLM response did not contain valid selection JSON. "
-                    f"Response preview: {content[:300]}"
-                )
+            logger.warning(
+                f"[MetadataReducer] LLM response did not contain valid selection JSON. "
+                f"Response preview: {content[:300]}"
+            )
 
         except Exception as e:
             logger.warning(f"[MetadataReducer] LLM selection failed, falling back to fuzzy: {e}")

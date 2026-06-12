@@ -1,6 +1,6 @@
 """Unit tests for PBIVisualUCMVMapperTool (Tool 94)."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -126,12 +126,6 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
     return auth
 
 
-def _mock_litellm_response(content=SAMPLE_LLM_RESPONSE):
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = content
-    return mock_completion
-
-
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
@@ -197,12 +191,33 @@ class TestErrorCases:
         assert "report_references" in data["error"]
 
     def test_no_ucmv_output_returns_error(self):
-        """No ucmv_output → error."""
+        """No ucmv_output anywhere (injection or DB) → error."""
         tool = PBIVisualUCMVMapperTool()
-        result = tool._run(report_references_json=SAMPLE_REPORT_REFERENCES)
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value={},
+        ):
+            result = tool._run(report_references_json=SAMPLE_REPORT_REFERENCES)
         data = json.loads(result)
         assert "error" in data
         assert "ucmv_output" in data["error"]
+
+    def test_no_ucmv_output_falls_back_to_db(self):
+        """No injected ucmv_output but a prior UCMV run in the DB → uses it."""
+        tool = PBIVisualUCMVMapperTool()
+        db_ucmv = json.loads(SAMPLE_UCMV_OUTPUT)
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value=db_ucmv,
+        ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
+            result = tool._run(report_references_json=SAMPLE_REPORT_REFERENCES)
+        data = json.loads(result)
+        assert "error" not in data
+        assert "visual_mappings" in data
 
     def test_empty_visuals_returns_error(self):
         """report_references_json with no visuals → error."""
@@ -309,13 +324,15 @@ class TestUcmvSummaries:
 
 class TestLLMIntegration:
     def test_llm_called_for_mapping(self):
-        """Mock litellm, verify it's called with visual + UCMV summaries."""
+        """Mock LLMManager, verify it's called with visual + UCMV summaries."""
+        from unittest.mock import AsyncMock
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
+
+        mock_completion = AsyncMock(return_value=SAMPLE_LLM_RESPONSE)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp) as mock_llm:
+             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -327,12 +344,12 @@ class TestLLMIntegration:
 
     def test_llm_response_parsed_correctly(self):
         """Mock LLM returns JSON array → visual_mappings populated."""
+        from unittest.mock import AsyncMock
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response(SAMPLE_LLM_RESPONSE)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -345,12 +362,13 @@ class TestLLMIntegration:
         assert len(data["visual_mappings"]) == 3
 
     def test_fallback_mapping_when_llm_fails(self):
-        """litellm raises → fallback_mapping used."""
+        """LLMManager.completion raises → fallback_mapping used."""
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", side_effect=RuntimeError("LLM unavailable")):
+             patch("src.core.llm_manager.LLMManager.completion",
+                   AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,

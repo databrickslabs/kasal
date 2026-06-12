@@ -1,6 +1,6 @@
 """Unit tests for UCMVGenieConfigGeneratorTool (Tool 93)."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -72,10 +72,9 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
     return auth
 
 
-def _mock_litellm_response(content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}'):
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = content
-    return mock_completion
+def _mock_llm_completion(content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}'):
+    """AsyncMock for LLMManager.completion (the tool's actual LLM seam)."""
+    return AsyncMock(return_value=content)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +147,7 @@ class TestGenieConfigOverride:
             "example_sqls_json": "[]",
         })
         tool = UCMVGenieConfigGeneratorTool()
-        with patch("litellm.completion") as mock_llm:
+        with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_llm:
             result = tool._run(
                 genie_config_override=override,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -191,12 +190,37 @@ class TestGenieConfigOverride:
 
 class TestErrorCases:
     def test_no_ucmv_output_returns_error(self):
-        """Neither ucmv_output nor override → error JSON."""
+        """Neither ucmv_output, override, nor a prior UCMV run in the DB → error JSON."""
         tool = UCMVGenieConfigGeneratorTool()
-        result = tool._run()
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value={},
+        ):
+            result = tool._run()
         data = json.loads(result)
         assert "error" in data
         assert "ucmv_output" in data["error"]
+
+    def test_no_ucmv_output_falls_back_to_db(self):
+        """No injected ucmv_output but a prior UCMV run exists in the DB → uses it."""
+        tool = UCMVGenieConfigGeneratorTool()
+        db_ucmv = {"yaml": {"fact_sales": SAMPLE_YAML}, "sql": {}}
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validator_tool"
+            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+            return_value=db_ucmv,
+        ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   _mock_llm_completion(json.dumps({
+                       "text_instructions": "Test instructions",
+                       "sample_questions": "Q1",
+                       "example_sqls": [],
+                   }))):
+            result = tool._run(catalog="main", schema_name="metrics")
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["text_instructions"] == "Test instructions"
 
     def test_empty_ucmv_output_returns_error(self):
         """ucmv_output with empty yaml dict → error."""
@@ -276,10 +300,9 @@ class TestJoinSpecsExtraction:
         """YAML with joins section → join_specs_json populated in output."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -321,10 +344,9 @@ class TestDimTableFiltering:
         ucmv = json.dumps({"yaml": {"fact_test": yaml_with_filtered}, "sql": {}})
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=ucmv, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -341,28 +363,31 @@ class TestDimTableFiltering:
 
 class TestLLMIntegration:
     def test_llm_called_with_correct_model(self):
-        """Mock litellm, verify model used."""
+        """Mock LLMManager.completion, verify model used."""
         tool = UCMVGenieConfigGeneratorTool(llm_model="databricks-claude-sonnet-4")
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
+        llm_content = '{"text_instructions": "Test", "sample_questions": "Q1\\nQ2", "example_sqls": [], "join_specs": []}'
+
+        from unittest.mock import AsyncMock
+        mock_completion = AsyncMock(return_value=llm_content)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp) as mock_llm:
+             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         mock_llm.assert_called_once()
         call_kwargs = mock_llm.call_args
-        # Model should be prefixed with databricks/
-        model_arg = call_kwargs[1].get("model") or call_kwargs[0][0]
-        assert "databricks" in model_arg
+        model_arg = call_kwargs[1].get("model") or call_kwargs[0][1]
+        assert "claude-sonnet" in model_arg
 
     def test_llm_failure_returns_partial_config(self):
-        """litellm raises exception → falls back to empty generated, still returns valid output."""
+        """LLMManager raises exception → falls back to empty generated, still returns valid output."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
+        from unittest.mock import AsyncMock
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", side_effect=RuntimeError("LLM unavailable")):
+             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -377,10 +402,9 @@ class TestLLMIntegration:
         """Output JSON has 'ucmv_output' key with original ucmv_raw."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -391,10 +415,9 @@ class TestLLMIntegration:
         """Output JSON has catalog, schema_name, warehouse_id, space_title."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
-        llm_resp = _mock_litellm_response()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("litellm.completion", return_value=llm_resp):
+             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
                 catalog="mycat",

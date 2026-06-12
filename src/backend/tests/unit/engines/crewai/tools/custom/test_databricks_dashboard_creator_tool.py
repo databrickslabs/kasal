@@ -201,12 +201,33 @@ class TestToolInit:
 
 class TestErrorCases:
     def test_no_visual_mappings_returns_error(self):
-        """Empty/None visual_mappings → error."""
+        """Empty/None visual_mappings anywhere (injection or DB) → error."""
         tool = DatabricksDashboardCreatorTool()
-        result = tool._run()
+        with patch.object(
+            DatabricksDashboardCreatorTool,
+            "_fetch_latest_mapper_output_from_db",
+            return_value="",
+        ):
+            result = tool._run()
         data = json.loads(result)
         assert "error" in data
         assert "visual_mappings" in data["error"]
+
+    def test_no_visual_mappings_falls_back_to_db(self):
+        """No injected visual_mappings_json but a prior mapper run in the DB → uses it."""
+        tool = DatabricksDashboardCreatorTool()
+        db_output = json.dumps({"visual_mappings": SAMPLE_VISUAL_MAPPINGS,
+                                "dashboard_title": "T", "catalog": "c", "schema_name": "s"})
+        with patch.object(
+            DatabricksDashboardCreatorTool,
+            "_fetch_latest_mapper_output_from_db",
+            return_value=db_output,
+        ):
+            result = tool._run()
+        data = json.loads(result)
+        # Proceeds past the missing-input error (may fail later at auth/API,
+        # but must NOT report missing visual_mappings_json)
+        assert "No visual_mappings_json available" not in json.dumps(data)
 
     def test_no_mapped_visuals_with_sql_returns_error(self):
         """visual_mappings with no ucmv_view/sql → error."""

@@ -914,56 +914,112 @@ class FlowMethodFactory:
                             )
                             _inject_source = _candidate
 
+                # ── Collect ALL parseable JSON outputs from the flow state ──
+                # In multi-crew flows (A→B→C), crew C needs data from crew A,
+                # not just from the immediately preceding crew B.
+                import json as _json
+
+                def _extract_json(raw: str) -> dict | None:
+                    """Try to extract a JSON dict from a string (handles agent narrative wrapping)."""
+                    if not raw or not isinstance(raw, str):
+                        return None
+                    s = raw.strip()
+                    # Direct JSON
+                    if s.startswith('{'):
+                        try:
+                            return _json.loads(s)
+                        except _json.JSONDecodeError:
+                            pass
+                    # Extract JSON from "Final Answer: {...}" or narrative wrapping
+                    import re as _re
+                    match = _re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', s)
+                    if match:
+                        try:
+                            return _json.loads(match.group(0))
+                        except _json.JSONDecodeError:
+                            pass
+                    return None
+
+                # Build a list of all parsed outputs from flow state + current results
+                all_outputs: list[dict] = []
+                all_output_sources: list[str] = []
+
+                # Add immediate predecessor output
                 if _inject_source:
-                    try:
-                        import json as _json
-                        first_result_str = _inject_source
-                        prev_data = _json.loads(first_result_str) if first_result_str.strip().startswith('{') else None
-                        if prev_data and isinstance(prev_data, dict):
-                            # Detect pipeline config shape (from Config Proposer / Config Editor)
-                            is_pipeline_config = any(
-                                k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
-                            )
-                            injected_count = 0
-                            for agent in agents:
-                                for tool in (agent.tools or []):
-                                    if hasattr(tool, '_default_config') and isinstance(tool._default_config, dict):
-                                        # If previous output is a pipeline config and tool has config_json,
-                                        # inject ONLY when user hasn't already provided a config override
-                                        if is_pipeline_config and 'config_json' in tool._default_config:
-                                            existing_config = tool._default_config.get('config_json') or ''
-                                            if existing_config and len(existing_config) > 10:
-                                                logger.info(
-                                                    f"⏭️ Skipping pipeline config injection into {type(tool).__name__}.config_json "
-                                                    f"— user-provided config already present ({len(existing_config):,} chars)"
-                                                )
-                                            else:
-                                                tool._default_config['config_json'] = first_result_str
-                                                injected_count += 1
-                                                logger.info(f"📥 Injected pipeline config ({len(first_result_str):,} chars) into {type(tool).__name__}.config_json")
-                                        elif 'ucmv_output' in tool._default_config and 'yaml' in prev_data:
-                                            # Skip injection if tool already has manual yaml_specs_json override
-                                            has_manual_yaml = bool(
-                                                tool._default_config.get('yaml_specs_json') and
-                                                tool._default_config['yaml_specs_json'] not in ('{}', None, '')
-                                            )
-                                            if has_manual_yaml:
-                                                logger.info(f"⏭️ Skipping UCMV output injection into {type(tool).__name__} — yaml_specs_json override already set")
-                                            else:
-                                                # UCMV Generator output → Validator/Deployer: inject full output as ucmv_output
-                                                tool._default_config['ucmv_output'] = first_result_str
-                                                injected_count += 1
-                                                logger.info(f"📥 Injected UCMV output ({len(first_result_str):,} chars) into {type(tool).__name__}.ucmv_output")
-                                        else:
-                                            # Generic injection: inject matching keys
-                                            for key, value in prev_data.items():
-                                                if key in tool._default_config:
-                                                    tool._default_config[key] = value if isinstance(value, str) else _json.dumps(value)
-                                                    injected_count += 1
-                            if injected_count > 0:
-                                logger.info(f"📥 Total: injected {injected_count} key(s) from previous output into tool _default_config(s)")
-                    except (_json.JSONDecodeError, Exception) as inject_err:
-                        logger.debug(f"Previous output is not injectable JSON (ok): {inject_err}")
+                    parsed = _extract_json(_inject_source)
+                    if parsed:
+                        all_outputs.append(parsed)
+                        all_output_sources.append(f"immediate predecessor ({len(_inject_source):,} chars)")
+
+                # Add all stored state outputs (from earlier crews in the chain)
+                if hasattr(self, 'state') and isinstance(self.state, dict):
+                    for _sk, _sv in sorted(self.state.items()):
+                        if not _sv or _sk.startswith('_'):
+                            continue
+                        sv_str = str(_sv) if not isinstance(_sv, str) else _sv
+                        parsed = _extract_json(sv_str)
+                        if parsed and parsed not in all_outputs:
+                            all_outputs.append(parsed)
+                            all_output_sources.append(f"state[{_sk}]")
+
+                logger.info(f"📦 Collected {len(all_outputs)} parseable JSON outputs from flow chain")
+
+                try:
+                    injected_count = 0
+                    for agent in agents:
+                        for tool in (agent.tools or []):
+                            if not hasattr(tool, '_default_config') or not isinstance(tool._default_config, dict):
+                                continue
+                            tool_name = type(tool).__name__
+                            cfg = tool._default_config
+
+                            for out_idx, prev_data in enumerate(all_outputs):
+                                source_label = all_output_sources[out_idx] if out_idx < len(all_output_sources) else "unknown"
+
+                                # Pipeline config → config_json
+                                is_pipeline_config = any(
+                                    k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
+                                )
+                                if is_pipeline_config and 'config_json' in cfg:
+                                    existing = cfg.get('config_json') or ''
+                                    if not existing or len(existing) <= 10:
+                                        cfg['config_json'] = _json.dumps(prev_data)
+                                        injected_count += 1
+                                        logger.info(f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json")
+                                    continue
+
+                                # UCMV output (has 'yaml' key) → ucmv_output
+                                if 'ucmv_output' in cfg and 'yaml' in prev_data:
+                                    has_manual_yaml = bool(
+                                        cfg.get('yaml_specs_json') and
+                                        cfg['yaml_specs_json'] not in ('{}', None, '')
+                                    )
+                                    if not has_manual_yaml and (not cfg.get('ucmv_output') or cfg['ucmv_output'] in (None, 'null', '')):
+                                        cfg['ucmv_output'] = _json.dumps(prev_data)
+                                        injected_count += 1
+                                        logger.info(f"📥 Injected UCMV output from {source_label} ({len(_json.dumps(prev_data)):,} chars) into {tool_name}.ucmv_output")
+                                    continue
+
+                                # Visual mappings (has 'visual_mappings' or 'visual_mappings_json') → visual_mappings_json
+                                if 'visual_mappings_json' in cfg and ('visual_mappings' in prev_data or 'visual_mappings_json' in prev_data):
+                                    if not cfg.get('visual_mappings_json') or cfg['visual_mappings_json'] in (None, 'null', ''):
+                                        raw_mappings = prev_data.get('visual_mappings_json') or _json.dumps(prev_data.get('visual_mappings', []))
+                                        cfg['visual_mappings_json'] = raw_mappings if isinstance(raw_mappings, str) else _json.dumps(raw_mappings)
+                                        injected_count += 1
+                                        logger.info(f"📥 Injected visual_mappings_json from {source_label} into {tool_name}")
+                                    continue
+
+                                # Generic: inject matching keys from immediate predecessor only
+                                if out_idx == 0:
+                                    for key, value in prev_data.items():
+                                        if key in cfg and (not cfg.get(key) or cfg[key] in (None, 'null', '')):
+                                            cfg[key] = value if isinstance(value, str) else _json.dumps(value)
+                                            injected_count += 1
+
+                    if injected_count > 0:
+                        logger.info(f"📥 Total: injected {injected_count} key(s) from flow chain into tool _default_config(s)")
+                except Exception as inject_err:
+                    logger.debug(f"Flow chain injection error (non-fatal): {inject_err}")
 
                 logger.info("⏱️ Calling listener crew.kickoff_async() with 10 minute timeout...")
 

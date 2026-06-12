@@ -2,9 +2,9 @@
 """
 Direct deployment script for Kasal application.
 
-Deploys backend source, frontend source, and docs to Databricks Apps.
-The frontend ships as SOURCE together with the root package.json; Databricks
-Apps runs npm install + npm run build during deployment (remote build).
+Deploys backend source, prebuilt frontend assets, and docs to Databricks Apps.
+The frontend is BUILT LOCALLY on every deploy (npm run build via the root
+package.json lifecycle) and ships as static assets in frontend_static/.
 
 Scopes: by default BOTH frontend and backend are uploaded. Pass --frontend to
 upload only the frontend (and docs), or --backend to upload only the backend.
@@ -51,6 +51,40 @@ def custom_ignore_function(excluded_dirs, excluded_patterns):
                 logger.debug(f"Ignoring pattern match: {item}")
         return ignored
     return _ignore
+
+def build_frontend(root_dir, api_url=None):
+    """Build the frontend locally so every deploy ships fresh static assets.
+
+    Runs the root package.json npm lifecycle (prebuild → build → postbuild):
+    docs are copied into frontend/public/docs, the React app is built with
+    npm install + npm run build, and frontend_static/ is recreated from the
+    build output (including docs). Aborts the deployment if the build fails.
+
+    VITE_API_URL is pinned via the process environment, which in Vite takes
+    precedence over .env/.env.local files — otherwise a developer's local
+    `frontend/.env.local` (e.g. VITE_API_URL=http://localhost:3003/api/v1)
+    would be baked into the deployed bundle and the app UI would silently
+    call localhost instead of the backend.
+    """
+    logger.info("=" * 60)
+    logger.info("🔨 Building frontend (npm run build)...")
+    logger.info("=" * 60)
+    effective_api_url = api_url or "/api/v1"
+    logger.info(f"Pinning VITE_API_URL={effective_api_url} for the production build")
+    build_env = {**os.environ, "VITE_API_URL": effective_api_url}
+    try:
+        subprocess.run(["npm", "run", "build"], cwd=str(root_dir), check=True, env=build_env)
+    except FileNotFoundError:
+        logger.error("npm not found on PATH — install Node.js to build the frontend.")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Frontend build failed with exit code {e.returncode} — aborting deployment")
+        raise
+    frontend_static = root_dir / "frontend_static"
+    if not (frontend_static / "index.html").exists():
+        logger.error("frontend_static/index.html missing after build — aborting deployment")
+        raise FileNotFoundError("frontend_static/index.html not found after npm run build")
+    logger.info("✅ Frontend build completed — frontend_static/ refreshed")
 
 def get_desired_oauth_scopes(exclude_dataplane=True):
     """Return the OAuth user-authorization scopes the app should have.
@@ -226,8 +260,8 @@ def deploy_source_to_databricks(
         logger.warning(f"Could not verify identity (proceeding anyway): {e}")
         logger.info(f"Connecting to Databricks at {client.config.host}")
 
-    # Frontend ships as SOURCE: Databricks Apps detects the root package.json
-    # and runs npm install + npm run build during deployment.
+    # Frontend ships PREBUILT: deploy.py runs the npm build locally on every
+    # deploy (root package.json lifecycle) and uploads frontend_static/.
     ship_frontend = scope in ("all", "frontend")
     ship_backend = scope in ("all", "backend")
     if ship_frontend:
@@ -235,8 +269,9 @@ def deploy_source_to_databricks(
             logger.error("frontend/ directory not found. Cannot deploy frontend.")
             raise FileNotFoundError("frontend/ directory not found")
         if not (root_dir / "package.json").exists():
-            logger.error("package.json not found. Required for the npm build on Databricks Apps.")
+            logger.error("package.json not found. Required to run the local npm build.")
             raise FileNotFoundError("package.json not found")
+        build_frontend(root_dir, api_url=api_url)
 
     # Check that docs directory exists
     docs_dir = root_dir / "docs"
@@ -364,23 +399,18 @@ def deploy_source_to_databricks(
                 logger.info("Copied backend/src (only src/ ships; dev/test/runtime artifacts stay local)")
 
             if ship_frontend:
-                # Frontend source; Databricks Apps runs the npm lifecycle from
-                # the root package.json during deployment.
-                logger.info("Copying frontend source folder...")
-                frontend_excluded_dirs = {'node_modules', 'dist', 'coverage', 'build', '.git', '.benchmarks'}
-                frontend_excluded_patterns = [
-                    '.env.local', '.env.development.local', '.env.test.local', '.env.production.local',
-                    'package-lock.json', '*.tsbuildinfo', '.DS_Store'
-                ]
+                # Prebuilt assets: build_frontend() just refreshed
+                # frontend_static/ via the root package.json lifecycle.
+                logger.info("Copying frontend_static (prebuilt assets)...")
                 shutil.copytree(
-                    root_dir / "frontend",
-                    databricks_dist / "frontend",
-                    ignore=custom_ignore_function(frontend_excluded_dirs, frontend_excluded_patterns)
+                    root_dir / "frontend_static",
+                    databricks_dist / "frontend_static",
+                    ignore=custom_ignore_function({'.git'}, ['.DS_Store'])
                 )
-                logger.info(f"Copied frontend source folder (excluding: {frontend_excluded_dirs})")
+                logger.info("Copied frontend_static folder")
 
-                # Docs ship with the frontend: the npm prebuild copies docs/*.md
-                # into frontend/public/docs, and the app serves them from there.
+                # Docs also ship standalone; the npm postbuild already copied
+                # docs/*.md into frontend_static/docs for the app to serve.
                 docs_src = root_dir / "docs"
                 if docs_src.exists():
                     logger.info("Copying docs folder...")
@@ -394,11 +424,12 @@ def deploy_source_to_databricks(
                     logger.warning("docs/ folder not found, skipping")
 
             # Root files always ship (tiny): the app needs all of them whatever
-            # the scope. package.json triggers the npm build on Databricks Apps;
-            # pyproject.toml + uv.lock at the bundle root make the build run
-            # `uv sync` (we never ship requirements.txt — it would take
-            # precedence and bypass uv).
-            root_files = ["app.yaml", "entrypoint.py", "package.json"]
+            # the scope. package.json deliberately does NOT ship — its presence
+            # at the bundle root would trigger a remote npm build on Databricks
+            # Apps against frontend source we no longer upload. pyproject.toml +
+            # uv.lock at the bundle root make the build run `uv sync` (we never
+            # ship requirements.txt — it would take precedence and bypass uv).
+            root_files = ["app.yaml", "entrypoint.py"]
             for file_name in root_files:
                 src_file = root_dir / file_name
                 if src_file.exists():
@@ -415,11 +446,12 @@ def deploy_source_to_databricks(
             logger.info("Proceeding with upload...")
 
             # Remove stale workspace artifacts: requirements.txt would override
-            # uv; frontend_static/ is a leftover from the old prebuilt-assets
-            # deploy mode (the platform npm build creates its own copy inside
-            # the deployment snapshot, not in the workspace).
+            # uv; frontend/ and package.json are leftovers from the remote-build
+            # deploy mode (their presence would trigger a pointless — and now
+            # failing — npm build on Databricks Apps).
             stale_paths = [(f"{workspace_dir}/requirements.txt", False),
-                           (f"{workspace_dir}/frontend_static", True)]
+                           (f"{workspace_dir}/package.json", False),
+                           (f"{workspace_dir}/frontend", True)]
             for stale_path, recursive in stale_paths:
                 try:
                     client.workspace.delete(stale_path, recursive=recursive)
@@ -451,7 +483,7 @@ def deploy_source_to_databricks(
             if ship_backend:
                 prune_remote_dir(f"{workspace_dir}/backend", databricks_dist / "backend")
             if ship_frontend:
-                prune_remote_dir(f"{workspace_dir}/frontend", databricks_dist / "frontend")
+                prune_remote_dir(f"{workspace_dir}/frontend_static", databricks_dist / "frontend_static")
                 prune_remote_dir(f"{workspace_dir}/docs", databricks_dist / "docs")
 
             # Upload each component with `databricks sync` (parallel transfers).
@@ -473,7 +505,7 @@ def deploy_source_to_databricks(
             if ship_backend:
                 run_sync(databricks_dist / "backend", f"{workspace_dir}/backend")
             if ship_frontend:
-                run_sync(databricks_dist / "frontend", f"{workspace_dir}/frontend")
+                run_sync(databricks_dist / "frontend_static", f"{workspace_dir}/frontend_static")
                 if (databricks_dist / "docs").exists():
                     run_sync(databricks_dist / "docs", f"{workspace_dir}/docs")
 
@@ -496,7 +528,7 @@ def deploy_source_to_databricks(
                     (e.path or "").rsplit("/", 1)[-1] for e in client.workspace.list(workspace_dir)
                 )
                 logger.info(f"Workspace now contains: {remote_top}")
-                for expected in (["frontend", "package.json"] if ship_frontend else []) + (["backend"] if ship_backend else []):
+                for expected in (["frontend_static"] if ship_frontend else []) + (["backend"] if ship_backend else []):
                     if expected not in remote_top:
                         logger.error(
                             f"{expected} is MISSING from the workspace after sync — "
@@ -639,15 +671,16 @@ def main():
         sys.exit(1)
     
     # Resolve deploy scope: default is everything; --frontend / --backend narrow
-    # it. Passing both is the same as the default. The frontend is built ON
-    # Databricks Apps (npm lifecycle from package.json) — no local build.
+    # it. Passing both is the same as the default. The frontend is built
+    # LOCALLY by deploy.py (npm lifecycle from package.json) on every deploy
+    # that includes the frontend, and ships as prebuilt static assets.
     if args.frontend and not args.backend:
         scope = "frontend"
     elif args.backend and not args.frontend:
         scope = "backend"
     else:
         scope = "all"
-    logger.info(f"Deploy scope: {scope} (frontend builds on Databricks Apps during deployment)")
+    logger.info(f"Deploy scope: {scope} (frontend is built locally during deployment)")
 
     try:
         success = deploy_source_to_databricks(

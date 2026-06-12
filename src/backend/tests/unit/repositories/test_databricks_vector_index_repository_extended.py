@@ -96,9 +96,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("PROVISIONING", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert isinstance(result, IndexResponse)
@@ -111,9 +110,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("OFFLINE", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -125,9 +123,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("FAILED", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -139,9 +136,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "READY", ready=True)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -153,9 +149,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "PROVISIONING", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -167,9 +162,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "WEIRD_STATE", ready=True)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -182,9 +176,8 @@ class TestGetIndexStateMappings:
                 "status": {"ready": True}}
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("idx", "ep")
 
         assert result.success is True
@@ -196,9 +189,8 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("BANANA", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -214,9 +206,8 @@ class TestGetIndexStateMappings:
         }
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("idx", "ep")
 
         assert result.success is True
@@ -227,9 +218,8 @@ class TestGetIndexStateMappings:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is False
@@ -248,9 +238,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": "PROVISIONING", "ready": False}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         # list_indexes may return 0 or more depending on internal get calls,
@@ -264,9 +253,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": "OFFLINE", "ready": False}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -278,9 +266,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": "FAILED", "ready": False}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -292,9 +279,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": None, "detailed_state": "READY", "ready": True}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -306,9 +292,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": None, "detailed_state": "WEIRD", "ready": True}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -320,9 +305,8 @@ class TestListIndexesStateMappings:
                                          "status": {"state": "NOPE", "ready": False}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -332,9 +316,8 @@ class TestListIndexesStateMappings:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is False
@@ -346,9 +329,8 @@ class TestListIndexesStateMappings:
                                          "status": {"ready": False}}]}
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -397,9 +379,8 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(200, {"status": "OK"})
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "text": "hello"}])
 
         assert "success" in result
@@ -410,9 +391,8 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(200, {"status": "OK"})
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.upsert("cat.schema.idx", "ep", {"id": 1, "text": "hello"})
 
         assert "success" in result
@@ -424,9 +404,8 @@ class TestUpsertEdgeCases:
         error_text = "INVALID_PARAMETER_VALUE: inputs_json is empty"
         session_cm, _, _ = make_aiohttp_ctx(400, text_data=error_text)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
 
         assert result["success"] is False
@@ -438,9 +417,8 @@ class TestUpsertEdgeCases:
         error_text = "INVALID_PARAMETER_VALUE: wrong column name"
         session_cm, _, _ = make_aiohttp_ctx(400, text_data=error_text)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
 
         assert result["success"] is False
@@ -451,9 +429,8 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
 
         assert result["success"] is False
@@ -500,9 +477,8 @@ class TestCountDocumentsEdgeCases:
         }
         session_cm, _, _ = make_aiohttp_ctx(200, describe_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.aiohttp") as mock_aiohttp, \
+        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
              patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            mock_aiohttp.ClientSession = MagicMock(return_value=session_cm)
             result = await repo.count_documents("cat.schema.idx", "ep")
 
         assert isinstance(result, int)

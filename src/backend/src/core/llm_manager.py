@@ -39,6 +39,11 @@ from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHan
 # Databricks/Bedrock models return (avoids the "1 validation error for
 # MemoryAnalysis" retry spam). Import for its module-level patch side effect.
 import src.core.llm_handlers.crewai_memory_patch  # noqa: F401
+# Make CrewAI's InternalInstructor forward api_key/api_base to litellm on
+# structured-output calls (otherwise they fall back to SDK env auth, which
+# breaks tenant isolation and hard-fails on Databricks Apps with "more than
+# one authorization method configured"). Module-level patch side effect.
+import src.core.llm_handlers.crewai_instructor_patch  # noqa: F401
 
 
 # Get the absolute path to the logs directory
@@ -350,6 +355,14 @@ def _configure_databricks_mlflow():
             # MLflow ONLY supports environment variable authentication
             os.environ["DATABRICKS_HOST"] = auth.workspace_url
             os.environ["DATABRICKS_TOKEN"] = auth.token
+            # On Databricks Apps the platform injects DATABRICKS_CLIENT_ID/
+            # SECRET (oauth). Exporting DATABRICKS_TOKEN alongside them makes
+            # every env-auth SDK consumer (e.g. litellm's WorkspaceClient()
+            # fallback) raise "validate: more than one authorization method
+            # configured: oauth and pat". An explicit auth preference makes
+            # the SDK pick the self-refreshing SPN oauth instead of erroring.
+            if os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"):
+                os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
             logger.info(f"MLflow configured with {auth.auth_method} authentication")
 
             # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
@@ -522,6 +535,23 @@ class MLflowTrackedLLM:
 # Export functions for external use
 __all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksRetryLLM']
 
+
+def _is_http_400(exc: Exception) -> bool:
+    """Check if an exception represents an HTTP 400 error."""
+    # litellm raises BadRequestError (subclass of openai.BadRequestError)
+    exc_name = type(exc).__name__
+    if exc_name in ("BadRequestError",):
+        return True
+    # Also check status_code attribute (litellm exceptions carry it)
+    if getattr(exc, "status_code", None) == 400:
+        return True
+    # Fallback: check string representation
+    exc_str = str(exc)
+    if "400" in exc_str and ("bad request" in exc_str.lower() or "BadRequest" in exc_str):
+        return True
+    return False
+
+
 class LLMManager:
     """Manager for LLM configurations and interactions."""
 
@@ -570,6 +600,7 @@ class LLMManager:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         extra_headers: Optional[Dict[str, str]] = None,
+        fallback_drop_system_on_400: bool = False,
     ) -> str:
         """
         Unified async completion method that routes through CrewAI's LLM class.
@@ -583,6 +614,9 @@ class LLMManager:
                 configure_crewai_llm; a last-resort 4000 cap applies only when
                 neither the caller nor the model config sets a budget.
             extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
+            fallback_drop_system_on_400: If True and the call raises an HTTP 400,
+                retry once with system messages removed (user messages only).
+                Handles models that reject system+user dual-message payloads.
 
         Returns:
             str: The LLM response content string
@@ -612,6 +646,24 @@ class LLMManager:
             return result
         except Exception as e:
             duration = time.time() - start_time
+            # On HTTP 400 with fallback enabled, retry without system messages
+            if fallback_drop_system_on_400 and _is_http_400(e):
+                user_only = [m for m in messages if m.get("role") != "system"]
+                if user_only and len(user_only) < len(messages):
+                    logger.warning(
+                        f"LLM completion got 400, retrying without system message: model={model}"
+                    )
+                    try:
+                        result = await asyncio.to_thread(llm.call, user_only)
+                        fallback_duration = time.time() - start_time
+                        logger.info(
+                            f"LLM completion (user-only fallback): model={model}, "
+                            f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
+                        )
+                        return result
+                    except Exception as retry_err:
+                        logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
+                        raise retry_err
             logger.error(f"LLM completion failed: model={model}, duration={duration:.2f}s, error={e}")
             raise
 

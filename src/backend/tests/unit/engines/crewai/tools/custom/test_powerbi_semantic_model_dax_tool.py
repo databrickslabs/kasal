@@ -5,7 +5,7 @@ Tests the PowerBISemanticModelDaxTool — generates & executes DAX from natural 
 
 Strategy:
   - Instantiate the real tool class
-  - Mock only: httpx.AsyncClient, PowerBISemanticModelCacheService, async_session_factory,
+  - Mock only: httpx.AsyncClient, ToolSessionProvider.cache_service / .conversion_repo,
     powerbi_auth_utils helpers
   - Test: init, placeholder detection, _run validation, _format_output, _extract_measures_from_dax,
     _dax_quote_table, config merging, and integration with mocked pipeline
@@ -21,6 +21,29 @@ from src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool import (
     _dax_quote_table,
     _run_async_in_sync_context,
 )
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+
+
+def _mock_cache_service_ctx(mock_service):
+    """Return an async context manager that yields mock_service."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_service
+
+    return _ctx
+
+
+def _mock_conversion_repo_ctx(mock_repo):
+    """Return an async context manager that yields mock_repo."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_repo
+
+    return _ctx
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -552,23 +575,16 @@ class TestRunIntegrationDax:
         # Should reach the pipeline (JSON parsing is done inside async pipeline)
         assert isinstance(result, str)
 
-    @patch("src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory")
-    @patch("src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService")
-    def test_cache_miss_proceeds_without_context(self, mock_svc_cls, mock_factory):
+    def test_cache_miss_proceeds_without_context(self):
         """With no cache and no model_context_json, pipeline should handle gracefully."""
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=None)
-        mock_svc_cls.return_value = mock_service
 
-        ctx_mgr = MagicMock()
-        ctx_mgr.__aenter__ = AsyncMock(return_value=MagicMock())
-        ctx_mgr.__aexit__ = AsyncMock(return_value=None)
-        mock_factory.return_value = ctx_mgr
-
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="no context result"
-        ):
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
+             patch(
+                "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
+                return_value="no context result"
+             ):
             tool = _make_tool()
             result = tool._run()
         assert isinstance(result, str)
@@ -628,20 +644,10 @@ class TestResolvModelContext:
             "dataset_id": DS_ID,
         }
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._resolve_model_context(config))
         # With no cache and empty context, should return None
         assert result is None
@@ -663,21 +669,11 @@ class TestResolvModelContext:
             "slicers": [],
         }
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            # First call = reduced cache (miss), second call = full cache (hit)
-            mock_service.get_cached_metadata = AsyncMock(side_effect=[None, cached])
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        # First call = reduced cache (miss), second call = full cache (hit)
+        mock_service.get_cached_metadata = AsyncMock(side_effect=[None, cached])
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._resolve_model_context(config))
         assert result is not None
         assert "_source" in result
@@ -1523,26 +1519,17 @@ class TestSaveToConversionHistory:
         results = {"user_question": "test?", "generated_dax": "EVALUATE Sales", "dax_execution": {}, "errors": []}
         config = {}
         mock_repo = MagicMock()
-        mock_repo.create = AsyncMock(return_value=MagicMock())
+        mock_repo.create = AsyncMock(return_value=MagicMock(id=42))
+        mock_repo.session = MagicMock()
+        mock_repo.session.commit = AsyncMock()
 
         mock_schema_mod = MagicMock()
         mock_schema_mod.ConversionHistoryCreate = MagicMock(return_value=MagicMock())
 
-        mock_repo_mod = MagicMock()
-        mock_repo_mod.ConversionHistoryRepository = MagicMock(return_value=mock_repo)
-
         with patch.dict("sys.modules", {
             "src.schemas.conversion": mock_schema_mod,
-            "src.repositories.conversion_repository": mock_repo_mod
         }):
-            with patch(
-                "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-            ) as mock_factory:
-                ctx = MagicMock()
-                ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-                ctx.__aexit__ = AsyncMock(return_value=None)
-                mock_factory.return_value = ctx
-
+            with patch.object(ToolSessionProvider, "conversion_repo", _mock_conversion_repo_ctx(mock_repo)):
                 try:
                     self._run(self.tool._save_to_conversion_history(results, config, []))
                 except Exception:
@@ -1799,18 +1786,9 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
         config = self._make_config()
         previous = [{"attempt": 1, "dax": "bad dax", "success": False, "error": "syntax error"}]
 
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"}}]
-        }
+        mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])")
 
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        with patch("src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue?", model_context, config, previous
@@ -1959,20 +1937,10 @@ class TestResolveModelContextAdditional:
             "default_filters": {},
         }
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=reduced_cached)
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=reduced_cached)
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._resolve_model_context(config))
 
         assert result is not None
@@ -1986,20 +1954,10 @@ class TestResolveModelContextAdditional:
             "dataset_id": DS_ID,
         }
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._resolve_model_context(config))
 
         assert result is None
@@ -2014,10 +1972,17 @@ class TestResolveModelContextAdditional:
         """Cache exception in reduced cache should fall through to full cache."""
         config = {"workspace_id": WS_ID, "dataset_id": DS_ID}
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory",
-            side_effect=Exception("DB error")
-        ):
+        def _raising_ctx():
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def _ctx():
+                raise Exception("DB error")
+                yield  # noqa: unreachable
+
+            return _ctx
+
+        with patch.object(ToolSessionProvider, "cache_service", _raising_ctx()):
             result = self._run(self.tool._resolve_model_context(config))
 
         assert result is None
@@ -2046,20 +2011,10 @@ class TestFetchFullCacheTables:
     def test_cache_miss_returns_none(self):
         config = {"workspace_id": WS_ID, "dataset_id": DS_ID}
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._fetch_full_cache_tables(config, {"Sales"}))
 
         assert result is None
@@ -2077,20 +2032,10 @@ class TestFetchFullCacheTables:
             "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100, 200]}},
         }
 
-        with patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory"
-        ) as mock_factory, patch(
-            "src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.PowerBISemanticModelCacheService"
-        ) as mock_svc_cls:
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=full_cached)
-            mock_svc_cls.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=full_cached)
 
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
-
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
             result = self._run(self.tool._fetch_full_cache_tables(config, {"Sales"}))
 
         assert result is not None
@@ -2635,8 +2580,17 @@ class TestSaveToConversionHistory:
         }
         config = {"workspace_id": WS_ID, "dataset_id": DS_ID, "active_filters": {}}
 
-        with patch("src.engines.crewai.tools.custom.powerbi_semantic_model_dax_tool.async_session_factory") as mock_factory:
-            mock_factory.side_effect = Exception("DB error")
+        def _raising_repo_ctx():
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def _ctx():
+                raise Exception("DB error")
+                yield  # noqa: unreachable
+
+            return _ctx
+
+        with patch.object(ToolSessionProvider, "conversion_repo", _raising_repo_ctx()):
             self._run(self.tool._save_to_conversion_history(results, config, []))
         # Should not raise
 

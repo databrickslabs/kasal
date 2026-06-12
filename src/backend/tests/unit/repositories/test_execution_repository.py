@@ -135,7 +135,9 @@ class TestExecutionRepository:
         
         mock_session.execute.side_effect = [mock_count_result, mock_list_result]
         
-        executions, total_count = await repo.get_execution_history(limit=10, offset=0)
+        executions, total_count = await repo.get_execution_history(
+            limit=10, offset=0, group_ids=["group-1"], include_count=True
+        )
         
         assert len(executions) == 1
         assert executions[0] == mock_execution
@@ -378,7 +380,9 @@ class TestExecutionRepository:
         mock_session.execute.side_effect = [mock_count_result, mock_list_result]
         
         # Test with custom pagination
-        executions, total_count = await repo.get_execution_history(limit=20, offset=40)
+        executions, total_count = await repo.get_execution_history(
+            limit=20, offset=40, group_ids=["group-1"], include_count=True
+        )
         
         assert total_count == 100
         assert len(executions) == 0

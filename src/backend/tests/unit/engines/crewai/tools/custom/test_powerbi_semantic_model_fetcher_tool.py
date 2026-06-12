@@ -5,7 +5,7 @@ Tests the PowerBISemanticModelFetcherTool — extracts & caches semantic model m
 
 Strategy:
   - Instantiate the real tool class
-  - Mock only: httpx, PowerBISemanticModelCacheService, async_session_factory,
+  - Mock only: httpx, ToolSessionProvider.cache_service,
     powerbi_auth_utils helpers
   - Test: init, _is_placeholder_value, _run validation branches, config merging,
     _parse_tmdl_for_measures_and_tables, and integration with mocked pipelines
@@ -21,6 +21,7 @@ from src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool import 
     PowerBISemanticModelFetcherSchema,
     _run_async_in_sync_context,
 )
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -59,16 +60,15 @@ def _make_tool(**kwargs):
     return PowerBISemanticModelFetcherTool(**defaults)
 
 
-def _mock_session_factory(cached_metadata=None):
-    mock_service = MagicMock()
-    mock_service.get_cached_metadata = AsyncMock(return_value=cached_metadata)
-    mock_service.save_metadata = AsyncMock(return_value=None)
-    mock_service.build_metadata_dict = MagicMock(return_value={})
+def _mock_cache_service_ctx(mock_service):
+    """Return an async context manager that yields mock_service (for ToolSessionProvider.cache_service)."""
+    from contextlib import asynccontextmanager
 
-    ctx_mgr = MagicMock()
-    ctx_mgr.__aenter__ = AsyncMock(return_value=MagicMock())
-    ctx_mgr.__aexit__ = AsyncMock(return_value=None)
-    return MagicMock(return_value=ctx_mgr), mock_service
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_service
+
+    return _ctx
 
 
 # ===========================================================================
@@ -353,23 +353,16 @@ class TestFetcherParseTmdl:
 # ===========================================================================
 
 class TestFetcherCacheInteraction:
-    @patch("src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory")
-    @patch("src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService")
-    def test_cache_hit_returns_cached_data(self, mock_svc_cls, mock_factory):
+    def test_cache_hit_returns_cached_data(self):
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=MOCK_CACHED_METADATA)
         mock_service.save_metadata = AsyncMock(return_value=None)
         mock_service.build_metadata_dict = MagicMock(return_value={})
-        mock_svc_cls.return_value = mock_service
-
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_factory.return_value = ctx
 
         tool = _make_tool()
         # Mock the token acquisition too
-        with patch(
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
+             patch(
             "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
             return_value=json.dumps({"measures": [{"name": "Total Revenue"}]})
         ):
@@ -377,13 +370,15 @@ class TestFetcherCacheInteraction:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    @patch(
-        "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory",
-        side_effect=Exception("DB connection failed"),
-    )
-    def test_db_error_returns_error_string(self, _mock_factory):
+    def test_db_error_returns_error_string(self):
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(side_effect=Exception("DB connection failed"))
+        mock_service.save_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+
         tool = _make_tool()
-        result = tool._run()
+        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+            result = tool._run()
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -463,23 +458,13 @@ class TestFetcherPipelineAsync:
             "access_token": ACCESS_TOKEN,
             "output_format": "json",
         }
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=MOCK_CACHED_METADATA)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls:
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=MOCK_CACHED_METADATA)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -503,27 +488,17 @@ class TestFetcherPipelineAsync:
             "payload": _b64.b64encode(tmdl_content.encode()).decode()
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[tmdl_part]), \
              patch.object(self.tool, "_fetch_relationships", return_value=[]), \
              patch.object(self.tool, "_enrich_model_context_with_metadata", return_value={}), \
              patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -536,23 +511,13 @@ class TestFetcherPipelineAsync:
             "access_token": ACCESS_TOKEN,
             "output_format": "json",
         }
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=MOCK_CACHED_METADATA)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls:
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=MOCK_CACHED_METADATA)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2492,28 +2457,18 @@ class TestFetcherPipelineMarkdownOutput:
             "skip_system_tables": True,
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
              patch.object(self.tool, "_fetch_relationships", return_value=[]), \
              patch.object(self.tool, "_enrich_model_context_with_metadata",
                           return_value={"measures": [], "tables": [{"name": "Sales", "columns": ["Amount"]}],
                                         "relationships": [], "columns": [], "sample_data": {}}):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2535,28 +2490,18 @@ class TestFetcherPipelineMarkdownOutput:
             "skip_system_tables": True,
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(side_effect=Exception("DB write error"))
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
              patch.object(self.tool, "_fetch_relationships", return_value=[]), \
              patch.object(self.tool, "_enrich_model_context_with_metadata",
                           return_value={"measures": [], "tables": [{"name": "Sales", "columns": ["Amount"]}],
                                         "relationships": [], "columns": [], "sample_data": {}}):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(side_effect=Exception("DB write error"))
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2709,24 +2654,14 @@ class TestFetcherPipelineCacheHitBranches:
         }
         config = self._base_config()
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=cached)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_sample_column_values", return_value={"Sales[Amount]": {"type": "categorical", "sample_values": [100]}}):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=cached)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2748,25 +2683,15 @@ class TestFetcherPipelineCacheHitBranches:
         }
         config = self._base_config(report_id="rpt-abc")
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=cached)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_extract_report_definition_parts", return_value=[]), \
              patch.object(self.tool, "_extract_slicers_from_report", return_value=[]):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=cached)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2786,23 +2711,13 @@ class TestFetcherPipelineCacheHitBranches:
         }
         config = self._base_config()
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=cached)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls:
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=cached)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2824,23 +2739,13 @@ class TestFetcherPipelineCacheHitBranches:
         }
         config = self._base_config(report_id="rpt-abc")
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=cached)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls:
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=cached)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2884,24 +2789,14 @@ class TestFetcherPipelineSlicerGapRecovery:
             "skip_system_tables": True,
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=cached)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_column_metadata_for_table", return_value=[]):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=cached)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2944,12 +2839,13 @@ class TestFetcherPipelineSPFallback:
             "skip_system_tables": True,
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
              patch.object(self.tool, "_fetch_relationships", return_value=[]), \
              patch.object(self.tool, "_enrich_model_context_with_metadata",
@@ -2959,17 +2855,6 @@ class TestFetcherPipelineSPFallback:
              patch.object(self.tool, "_extract_default_filters", return_value={}), \
              patch.object(self.tool, "_extract_slicers_from_report", return_value=[]), \
              patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_service.build_metadata_dict = MagicMock(return_value={})
-            mock_service.save_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2984,22 +2869,14 @@ class TestFetcherPipelineSPFallback:
             "output_format": "json",
         }
 
+        mock_service = MagicMock()
+        mock_service.get_cached_metadata = AsyncMock(return_value=None)
+        mock_service.build_metadata_dict = MagicMock(return_value={})
+        mock_service.save_metadata = AsyncMock(return_value=None)
+
         with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.async_session_factory"
-             ) as mock_factory, patch(
-                 "src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelCacheService"
-             ) as mock_svc_cls, \
+             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
              patch.object(self.tool, "_extract_model_context", side_effect=Exception("model extraction failed")):
-
-            mock_service = MagicMock()
-            mock_service.get_cached_metadata = AsyncMock(return_value=None)
-            mock_svc_cls.return_value = mock_service
-
-            ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_factory.return_value = ctx
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -3103,47 +2980,40 @@ class TestFetcherEnrichTablesSemantic:
 
     def test_successful_enrichment(self):
         tables = [{"name": "Sales", "columns": ["Amount", "Region"]}]
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"tables": [{"name": "Sales", "grain": "One row per order", "purpose": "Fact table"}]}'}}]
-        }
 
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_tables_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables,
-            )
+        mock_completion = AsyncMock(
+            return_value='{"tables": [{"name": "Sales", "grain": "One row per order", "purpose": "Fact table"}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_tables_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables,
+                )
+            )
 
         assert tables[0].get("grain") == "One row per order"
         assert tables[0].get("purpose") == "Fact table"
 
     def test_llm_exception_skipped(self):
         tables = [{"name": "Sales"}]
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(side_effect=Exception("LLM error"))
+
+        mock_completion = AsyncMock(side_effect=Exception("LLM error"))
 
         # Should not raise
-        self._run(
-            self.tool._enrich_tables_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables,
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_tables_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables,
+                )
             )
-        )
 
     def test_empty_tables_no_error(self):
-        mock_client = MagicMock()
         self._run(
             self.tool._enrich_tables_semantic(
-                mock_client, "https://example.com/invocations", {}, []
+                "databricks-claude-sonnet-4", []
             )
         )
 
@@ -3166,19 +3036,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         tables = [{"name": "Sales", "columns": ["Amount", "Region"]}]  # strings, not dicts
         measures = []
 
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock()
+        mock_completion = AsyncMock(return_value='{"columns": []}')
 
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
             )
-        )
-        # No post call should be made for string columns
-        mock_client.post.assert_not_called()
+        # No LLM call should be made for string columns
+        mock_completion.assert_not_called()
 
     def test_dict_columns_enriched(self):
         tables = [
@@ -3190,23 +3058,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         ]
         measures = []
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"columns": [{"name": "Amount", "description": "Sales amount", "synonyms": ["Revenue"]}]}'}}]
-        }
-
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
-            )
+        mock_completion = AsyncMock(
+            return_value='{"columns": [{"name": "Amount", "description": "Sales amount", "synonyms": ["Revenue"]}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
+            )
 
         col = next((c for c in tables[0]["columns"] if c["name"] == "Amount"), None)
         assert col is not None
@@ -3216,23 +3078,17 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
         tables = []
         measures = [{"name": "Revenue", "expression": "SUM(Sales[Amount])"}]
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"measures": [{"name": "Revenue", "description": "Total sales revenue", "synonyms": ["Total Revenue"]}]}'}}]
-        }
-
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        self._run(
-            self.tool._enrich_columns_and_measures_semantic(
-                mock_client,
-                "https://example.com/invocations",
-                {"Authorization": "Bearer tok"},
-                tables, measures, {},
-            )
+        mock_completion = AsyncMock(
+            return_value='{"measures": [{"name": "Revenue", "description": "Total sales revenue", "synonyms": ["Total Revenue"]}]}'
         )
+
+        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+            self._run(
+                self.tool._enrich_columns_and_measures_semantic(
+                    "databricks-claude-sonnet-4",
+                    tables, measures, {},
+                )
+            )
 
         assert measures[0].get("description") == "Total sales revenue"
         assert "Total Revenue" in measures[0].get("synonyms", [])

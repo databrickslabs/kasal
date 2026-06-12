@@ -15,8 +15,6 @@ import json
 import logging
 from typing import Dict, List, Optional, Any
 
-import httpx
-
 from .models import (
     MQueryExpression,
     ConversionResult,
@@ -47,8 +45,9 @@ class MQueryLLMConverter:
         Initialize the LLM converter.
 
         Args:
-            workspace_url: Databricks workspace URL
-            token: Databricks API token (PAT or OAuth)
+            workspace_url: Deprecated — kept for backward compatibility.
+                Authentication is handled internally by LLMManager.
+            token: Deprecated — kept for backward compatibility.
             model: Model endpoint name
         """
         self.workspace_url = workspace_url
@@ -168,42 +167,21 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         Returns:
             Dict with response content and usage
         """
-        if not self.workspace_url or not self.token:
-            logger.warning("LLM credentials not configured, using rule-based conversion")
-            return {"content": None, "usage": {}, "error": "LLM not configured"}
-
-        base_url = self.workspace_url.rstrip("/")
-        from src.utils.databricks_url_utils import DatabricksURLUtils
-        url, _gw_model = DatabricksURLUtils.construct_chat_completions_url(base_url, self.model)
-
+        from src.core.llm_manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json",
-            **get_user_agent_header(KasalProduct.POWERBI),
-        }
-
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 4000,
-            "temperature": 0.1
-        }
-        if _gw_model:
-            payload["model"] = _gw_model
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-
-                result = response.json()
-                return {
-                    "content": result["choices"][0]["message"]["content"],
-                    "usage": result.get("usage", {})
-                }
+            content = await LLMManager.completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                model=self.model,
+                temperature=0.1,
+                max_tokens=4000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
+            return {"content": content, "usage": {}}
         except Exception as e:
             logger.error(f"LLM API call failed: {e}")
             return {"content": None, "usage": {}, "error": str(e)}
@@ -252,8 +230,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             original_expression=expression.raw_expression,
             error_message=(
                 "LLM conversion required but not available. "
-                "Please configure Databricks LLM credentials (llm_workspace_url and llm_token) "
-                "to convert M-Query expressions to SQL."
+                "The LLM call failed or use_llm was disabled — check the model "
+                "configuration and group context, then retry."
             ),
             source_connection={
                 "server": expression.server,
@@ -292,8 +270,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         """
         logger.info(f"Converting expression for table '{table_name}' ({expression.expression_type.value})")
 
-        # LLM-first approach: Always use LLM if available
-        if use_llm and self.workspace_url and self.token:
+        # LLM-first approach: LLMManager authenticates internally from the
+        # group context — no per-instance credentials needed.
+        if use_llm:
             logger.info(f"[LLM_CONVERTER] Using LLM conversion for '{table_name}'")
 
             # Use LLM for conversion
@@ -505,8 +484,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
 
             logger.info(f"Converting calculated column '{col.name}' in table '{table_name}'")
 
-            # Try LLM conversion first
-            if use_llm and self.workspace_url and self.token:
+            # Try LLM conversion first — LLMManager authenticates internally
+            if use_llm:
                 result = await self._convert_calculated_column_llm(
                     table_name=table_name,
                     column=col

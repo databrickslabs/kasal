@@ -459,8 +459,6 @@ def process_table(
                     base_names=base_names,
                     original_to_snake=original_to_snake,
                     model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
-                    workspace_url=ctx.llm_config.get('llm_workspace_url', ''),
-                    token=ctx.llm_config.get('llm_token', ''),
                 )
             )
             llm_translated = []

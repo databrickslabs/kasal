@@ -23,6 +23,7 @@ from collections import OrderedDict
 from typing import Any, Dict
 
 from src.engines.crewai.guardrails.base_guardrail import BaseGuardrail
+from src.engines.crewai.guardrails.llm_injection_guardrail import _run_completion
 from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().guardrails
@@ -74,11 +75,10 @@ class SelfReflectionGuardrail(BaseGuardrail):
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
-        from crewai import LLM
         model: str = config.get("llm_model", "databricks-claude-sonnet-4-5")
-        if model.startswith("databricks-") and not model.startswith("databricks/"):
-            model = f"databricks/{model}"
-        self._llm = LLM(model=model, temperature=0.0, max_tokens=8)
+        # Strip provider prefix — LLMManager adds it from DB config
+        if model.startswith("databricks/"):
+            model = model[len("databricks/"):]
         self._model_name = model
         self._task_description: str = config.get("task_description") or _DEFAULT_TASK_DESCRIPTION
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
@@ -104,10 +104,13 @@ class SelfReflectionGuardrail(BaseGuardrail):
             return self._cache[cache_key]
 
         try:
-            verdict = self._llm.call([
-                {"role": "system", "content": _REVIEWER_SYSTEM},
-                {"role": "user", "content": prompt},
-            ])
+            verdict = _run_completion(
+                self._model_name,
+                [
+                    {"role": "system", "content": _REVIEWER_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+            )
             if isinstance(verdict, str) and verdict.strip().upper() == "FAIL":
                 logger.warning(
                     "[SECURITY] SelfReflectionGuardrail: FAIL verdict (model=%s)",

@@ -1,0 +1,73 @@
+{
+  "visual_mappings": [
+    {
+      "visual_id": "v1",
+      "page_name": "Production Analytics",
+      "visual_type": "barChart",
+      "chart_title": "Active Shift Hours vs Total Hours by Plant",
+      "ucmv_view": "david_test_metrics.ucmv_kasal.fact_pe002",
+      "dimensions": [
+        "plant"
+      ],
+      "measures": [
+        "active_shift_hours",
+        "total_hours"
+      ],
+      "sql": "SELECT plant, MEASURE(active_shift_hours), MEASURE(total_hours) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant"
+    },
+    {
+      "visual_id": "v2",
+      "page_name": "Production Analytics",
+      "visual_type": "lineChart",
+      "chart_title": "SLE Waterfall Trend - SLE vs CIP by Plant",
+      "ucmv_view": "david_test_metrics.ucmv_kasal.fact_pe002",
+      "dimensions": [
+        "plant"
+      ],
+      "measures": [
+        "sle_waterfall_sle",
+        "sle_waterfall_cip"
+      ],
+      "sql": "SELECT plant, MEASURE(sle_waterfall_sle), MEASURE(sle_waterfall_cip) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant"
+    },
+    {
+      "visual_id": "v3",
+      "page_name": "Production Analytics",
+      "visual_type": "tableEx",
+      "chart_title": "Production Metrics by Plant and Work Center",
+      "ucmv_view": "david_test_metrics.ucmv_kasal.fact_pe002",
+      "dimensions": [
+        "plant",
+        "plant_workcenter_key",
+        "bic_cwc_type"
+      ],
+      "measures": [
+        "production_quantity",
+        "paid_hours",
+        "epl"
+      ],
+      "sql": "SELECT plant, plant_workcenter_key, bic_cwc_type, MEASURE(production_quantity), MEASURE(paid_hours), MEASURE(epl) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant, plant_workcenter_key, bic_cwc_type"
+    },
+    {
+      "visual_id": "v4",
+      "page_name": "Production Analytics",
+      "visual_type": "card",
+      "chart_title": "Total SLE Actual",
+      "ucmv_view": "david_test_metrics.ucmv_kasal.fact_pe002",
+      "dimensions": [],
+      "measures": [
+        "total_sle_actual"
+      ],
+      "sql": "SELECT MEASURE(total_sle_actual) FROM david_test_metrics.ucmv_kasal.fact_pe002"
+    }
+  ],
+  "visual_mappings_json": "[{\"visual_id\": \"v1\", \"page_name\": \"Production Analytics\", \"visual_type\": \"barChart\", \"chart_title\": \"Active Shift Hours vs Total Hours by Plant\", \"ucmv_view\": \"david_test_metrics.ucmv_kasal.fact_pe002\", \"dimensions\": [\"plant\"], \"measures\": [\"active_shift_hours\", \"total_hours\"], \"sql\": \"SELECT plant, MEASURE(active_shift_hours), MEASURE(total_hours) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant\"}, {\"visual_id\": \"v2\", \"page_name\": \"Production Analytics\", \"visual_type\": \"lineChart\", \"chart_title\": \"SLE Waterfall Trend - SLE vs CIP by Plant\", \"ucmv_view\": \"david_test_metrics.ucmv_kasal.fact_pe002\", \"dimensions\": [\"plant\"], \"measures\": [\"sle_waterfall_sle\", \"sle_waterfall_cip\"], \"sql\": \"SELECT plant, MEASURE(sle_waterfall_sle), MEASURE(sle_waterfall_cip) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant\"}, {\"visual_id\": \"v3\", \"page_name\": \"Production Analytics\", \"visual_type\": \"tableEx\", \"chart_title\": \"Production Metrics by Plant and Work Center\", \"ucmv_view\": \"david_test_metrics.ucmv_kasal.fact_pe002\", \"dimensions\": [\"plant\", \"plant_workcenter_key\", \"bic_cwc_type\"], \"measures\": [\"production_quantity\", \"paid_hours\", \"epl\"], \"sql\": \"SELECT plant, plant_workcenter_key, bic_cwc_type, MEASURE(production_quantity), MEASURE(paid_hours), MEASURE(epl) FROM david_test_metrics.ucmv_kasal.fact_pe002 GROUP BY plant, plant_workcenter_key, bic_cwc_type\"}, {\"visual_id\": \"v4\", \"page_name\": \"Production Analytics\", \"visual_type\": \"card\", \"chart_title\": \"Total SLE Actual\", \"ucmv_view\": \"david_test_metrics.ucmv_kasal.fact_pe002\", \"dimensions\": [], \"measures\": [\"total_sle_actual\"], \"sql\": \"SELECT MEASURE(total_sle_actual) FROM david_test_metrics.ucmv_kasal.fact_pe002\"}]",
+  "dashboard_title": "PE002 Production Analytics",
+  "catalog": "david_test_metrics",
+  "schema_name": "ucmv_kasal",
+  "summary": {
+    "total_visuals": 4,
+    "mapped": 4,
+    "unmapped": 0
+  }
+}

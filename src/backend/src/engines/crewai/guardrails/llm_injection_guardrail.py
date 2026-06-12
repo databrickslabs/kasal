@@ -53,6 +53,24 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+def _run_completion(model: str, messages, max_tokens: int = 8):
+    """Run LLMManager.completion() from a sync context (guardrail validate)."""
+    from src.core.llm_manager import LLMManager
+
+    async def _call():
+        return await LLMManager.completion(
+            messages=messages,
+            model=model,
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+
+    # Context-preserving bridge: LLMManager.completion needs the group_id
+    # ContextVar, which a bare ThreadPoolExecutor offload would drop.
+    from src.engines.crewai.tools.async_bridge import run_async_with_context
+    return run_async_with_context(_call(), timeout=30)
+
+
 class LLMInjectionGuardrail(BaseGuardrail):
     """
     Opt-in guardrail that uses an LLM to classify task output for injection signs.
@@ -69,12 +87,10 @@ class LLMInjectionGuardrail(BaseGuardrail):
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
-        from crewai import LLM
         model: str = config.get("llm_model", "databricks-claude-sonnet-4-5")
-        # Normalise Databricks model name to the format CrewAI/litellm expects
-        if model.startswith("databricks-") and not model.startswith("databricks/"):
-            model = f"databricks/{model}"
-        self._llm = LLM(model=model, temperature=0.0, max_tokens=8)
+        # Strip provider prefix — LLMManager adds it from DB config
+        if model.startswith("databricks/"):
+            model = model[len("databricks/"):]
         self._model_name = model
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self._cache_max = int(config.get("cache_size", _DEFAULT_CACHE_SIZE))
@@ -95,10 +111,13 @@ class LLMInjectionGuardrail(BaseGuardrail):
             return self._cache[cache_key]
 
         try:
-            verdict = self._llm.call([
-                {"role": "system", "content": _CLASSIFIER_SYSTEM},
-                {"role": "user", "content": truncated},
-            ])
+            verdict = _run_completion(
+                self._model_name,
+                [
+                    {"role": "system", "content": _CLASSIFIER_SYSTEM},
+                    {"role": "user", "content": truncated},
+                ],
+            )
             if isinstance(verdict, str) and verdict.strip().upper() == "INJECTION":
                 logger.warning(
                     "[SECURITY] LLMInjectionGuardrail: INJECTION verdict for output (model=%s)",

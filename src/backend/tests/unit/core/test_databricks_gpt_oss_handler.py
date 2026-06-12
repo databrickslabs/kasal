@@ -21,7 +21,6 @@ from src.core.llm_handlers.databricks_gpt_oss_handler import (
     _sanitize_tools_for_gemini,
 )
 
-
 class TestDatabricksGPTOSSHandler:
     """Test suite for DatabricksGPTOSSHandler."""
 
@@ -347,13 +346,19 @@ class TestApplyToolCallsFix:
 
     def test_patch_applied_to_sync_method(self):
         """Verify the patch was applied to LLM._handle_non_streaming_response."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         assert callable(LLM._handle_non_streaming_response)  # patched, or skipped if crewai is already correct
 
     def test_patch_applied_to_async_method(self):
         """Verify the patch was applied to LLM._ahandle_non_streaming_response."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         assert callable(LLM._ahandle_non_streaming_response)  # patched, or skipped if crewai is already correct
 
@@ -362,7 +367,10 @@ class TestApplyToolCallsFix:
         self, mock_completion
     ):
         """Core bug fix: when LLM returns both content and tool_calls, return tool_calls."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         tool_call = self._make_tool_call()
         mock_completion.return_value = self._make_mock_response(
@@ -384,7 +392,10 @@ class TestApplyToolCallsFix:
     @patch("litellm.completion")
     def test_returns_text_when_no_tool_calls(self, mock_completion):
         """When LLM returns only text (no tool_calls), return text normally."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         mock_completion.return_value = self._make_mock_response(
             content="Here is the answer.",
@@ -404,7 +415,10 @@ class TestApplyToolCallsFix:
     @patch("litellm.completion")
     def test_returns_tool_calls_when_no_text_content(self, mock_completion):
         """When LLM returns tool_calls without text content, return tool_calls."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         tool_call = self._make_tool_call()
         mock_completion.return_value = self._make_mock_response(
@@ -425,7 +439,10 @@ class TestApplyToolCallsFix:
     @patch("litellm.completion")
     def test_executes_tools_when_available_functions_provided(self, mock_completion):
         """When available_functions is provided, tool execution is handled by LLM internally."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         tool_call = self._make_tool_call()
         mock_completion.return_value = self._make_mock_response(
@@ -449,7 +466,10 @@ class TestApplyToolCallsFix:
     @patch("litellm.completion")
     def test_returns_multiple_tool_calls(self, mock_completion):
         """When LLM returns multiple tool_calls alongside text, all are returned."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         tc1 = self._make_tool_call(name="PerplexityTool")
         tc2 = self._make_tool_call(name="WebSearchTool")
@@ -470,7 +490,10 @@ class TestApplyToolCallsFix:
 
     def test_reapply_is_idempotent(self):
         """Calling apply_tool_calls_fix again doesn't break anything."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         apply_tool_calls_fix()
 
@@ -480,7 +503,10 @@ class TestApplyToolCallsFix:
 
     def test_handles_patch_failure_gracefully(self):
         """If patching fails, existing method is preserved and error is logged."""
-        from crewai import LLM
+        # Import via the handler module — the exact class object the patch was
+        # applied to (a runtime 'from crewai import LLM' can return a fresh,
+        # unpatched class if crewai was evicted from sys.modules mid-suite).
+        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
 
         original_method = LLM._handle_non_streaming_response
 
@@ -1084,6 +1110,18 @@ class TestDatabricksRetryLLMRetryLogic:
         )
         assert mock_retry_llm._is_retryable_error(db_internal) is True
         assert mock_retry_llm._is_retryable_error("502 bad gateway") is True
+
+        # Databricks capacity shedding: litellm.ServiceUnavailableError lowercases
+        # WITHOUT a space and the payload has error_code TEMPORARILY_UNAVAILABLE
+        # with no numeric status (seen on new FMAPI models like claude-fable-5).
+        # Regression: was treated as fatal and failed crew generation instantly.
+        db_capacity = (
+            'litellm.serviceunavailableerror: databricksexception - '
+            '{"error_code":"temporarily_unavailable","message":"databricks is '
+            'unable to satisfy this request due to unexpected capacity '
+            'constraints - we apologize for the inconvenience."}'
+        )
+        assert mock_retry_llm._is_retryable_error(db_capacity) is True
 
     def test_context_length_hint(self, mock_retry_llm):
         """A prompt-too-long / context-window error yields an actionable hint;
