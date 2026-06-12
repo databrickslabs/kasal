@@ -161,15 +161,10 @@ class TestCreateUnifiedStorageLakebase:
 
     @pytest.mark.asyncio
     async def test_lakebase_missing_table_raises(self):
-        """LakebaseMemoryConfig with empty memory_table raises ValueError."""
-        config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.LAKEBASE,
-            lakebase_config=LakebaseMemoryConfig(memory_table=""),
-        )
-        with pytest.raises(ValueError, match="memory_table is required"):
-            await MemoryBackendFactory.create_unified_storage(
-                config=config, crew_id="crew", group_id="grp1"
-            )
+        """Empty memory_table is rejected at schema validation time
+        (identifier validation moved into LakebaseMemoryConfig)."""
+        with pytest.raises(ValueError, match="memory_table"):
+            LakebaseMemoryConfig(memory_table="")
 
     @pytest.mark.asyncio
     async def test_lakebase_returns_backend_instance(self):

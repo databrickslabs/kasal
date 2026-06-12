@@ -166,7 +166,8 @@ class TaskConfig:
                     logger.info(f"Task {task_data.name} has LLM guardrail configuration: {llm_guardrail_config}")
 
                     from crewai.tasks.llm_guardrail import LLMGuardrail
-                    from crewai import LLM
+                    from src.core.llm_manager import LLMManager
+                    from src.utils.user_context import UserContext
 
                     # Extract configuration
                     if isinstance(llm_guardrail_config, dict):
@@ -186,13 +187,14 @@ class TaskConfig:
                         task.description = task.description + validation_augmentation
                         logger.info(f"Augmented task {task_data.name} description with guardrail criteria")
 
-                    # Ensure model has provider prefix for LiteLLM
-                    if llm_model and not llm_model.startswith('databricks/'):
-                        if llm_model.startswith('databricks-'):
-                            llm_model = f"databricks/{llm_model}"
+                    # Strip provider prefix — LLMManager adds it from DB config
+                    if llm_model and llm_model.startswith('databricks/'):
+                        llm_model = llm_model[len('databricks/'):]
 
-                    # Create and apply LLM guardrail
-                    guardrail_llm = LLM(model=llm_model)
+                    # Create guardrail LLM via LLMManager (gets AI Gateway routing + API keys)
+                    gc = UserContext.get_group_context()
+                    group_id = gc.primary_group_id if gc else "default"
+                    guardrail_llm = await LLMManager.configure_crewai_llm(llm_model, group_id)
                     llm_guardrail = LLMGuardrail(description=guardrail_description, llm=guardrail_llm)
                     task.guardrail = llm_guardrail
                     task.retry_on_fail = True

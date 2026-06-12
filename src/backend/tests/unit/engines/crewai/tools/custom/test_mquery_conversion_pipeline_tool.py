@@ -68,23 +68,23 @@ MOCK_SCAN_RESULT = {
 }
 
 
-def _mock_cache_service(cached_data=None):
-    mock = MagicMock()
-    mock.get_scan_data = AsyncMock(return_value=cached_data)
-    mock.save_scan_data = AsyncMock(return_value=None)
-    return mock
+def _mock_cache_service_via_provider(cached_metadata=None):
+    """Create a mock that patches ToolSessionProvider.cache_service().
 
+    The context manager yields a mock PowerBISemanticModelCacheService
+    with ``get_cached_metadata`` and ``save_metadata`` pre-wired.
+    """
+    from contextlib import asynccontextmanager
 
-def _mock_session_factory(cache_svc=None):
-    svc = cache_svc or _mock_cache_service()
-    mock_session = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=None)
+    mock_svc = MagicMock()
+    mock_svc.get_cached_metadata = AsyncMock(return_value=cached_metadata)
+    mock_svc.save_metadata = AsyncMock(return_value=None)
 
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=mock_session)
-    cm.__aexit__ = AsyncMock(return_value=None)
-    return cm, svc
+    @asynccontextmanager
+    async def _fake_cache_service():
+        yield mock_svc
+
+    return _fake_cache_service, mock_svc
 
 
 # ---------------------------------------------------------------------------
@@ -177,26 +177,24 @@ class TestMissingFields:
 # ---------------------------------------------------------------------------
 
 class TestCachedDataPath:
-    @patch("src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory")
-    @patch("src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService")
-    def test_uses_cached_scan_data(self, mock_svc_cls, mock_session_factory):
-        cached = MOCK_SCAN_RESULT
-        mock_svc = _mock_cache_service(cached_data=cached)
-        mock_svc_cls.return_value = mock_svc
-
-        mock_sess = AsyncMock()
-        mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
-        mock_sess.__aexit__ = AsyncMock(return_value=None)
-        mock_session_factory.return_value = mock_sess
-
-        tool = MqueryConversionPipelineTool()
-        result = tool._run(
-            workspace_id=WORKSPACE_ID,
-            dataset_id=DATASET_ID,
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
+    def test_uses_cached_scan_data(self):
+        # _get_mquery_cache returns a cached formatted_output string so _run
+        # short-circuits without touching the connector.
+        fake_cm, mock_svc = _mock_cache_service_via_provider(
+            cached_metadata={"formatted_output": "cached conversion result"}
         )
+        with patch(
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
+        ):
+            tool = MqueryConversionPipelineTool()
+            result = tool._run(
+                workspace_id=WORKSPACE_ID,
+                dataset_id=DATASET_ID,
+                tenant_id=TENANT_ID,
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+            )
         assert result is not None
 
 
@@ -205,25 +203,22 @@ class TestCachedDataPath:
 # ---------------------------------------------------------------------------
 
 class TestOutputStructure:
-    @patch("src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory")
-    @patch("src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService")
-    def test_output_parseable(self, mock_svc_cls, mock_session_factory):
-        mock_svc = _mock_cache_service(cached_data=MOCK_SCAN_RESULT)
-        mock_svc_cls.return_value = mock_svc
-
-        mock_sess = AsyncMock()
-        mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
-        mock_sess.__aexit__ = AsyncMock(return_value=None)
-        mock_session_factory.return_value = mock_sess
-
-        tool = MqueryConversionPipelineTool()
-        result = tool._run(
-            workspace_id=WORKSPACE_ID,
-            dataset_id=DATASET_ID,
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
+    def test_output_parseable(self):
+        fake_cm, mock_svc = _mock_cache_service_via_provider(
+            cached_metadata={"formatted_output": "cached conversion result"}
         )
+        with patch(
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
+        ):
+            tool = MqueryConversionPipelineTool()
+            result = tool._run(
+                workspace_id=WORKSPACE_ID,
+                dataset_id=DATASET_ID,
+                tenant_id=TENANT_ID,
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+            )
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -686,65 +681,47 @@ class TestMqueryCacheComprehensive:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def _setup_cache(self, return_value=None):
-        mock_service = MagicMock()
-        mock_service.get_cached_metadata = AsyncMock(return_value=return_value)
-        mock_service.save_metadata = AsyncMock(return_value=None)
-
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        return mock_service, ctx
-
     def test_cache_hit_returns_formatted_output(self):
-        svc, ctx = self._setup_cache({"formatted_output": "cached data"})
+        fake_cm, mock_svc = _mock_cache_service_via_provider(
+            cached_metadata={"formatted_output": "cached data"}
+        )
         with patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory",
-            return_value=ctx
-        ), patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService",
-            return_value=svc
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
         ):
             result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
         assert result == "cached data"
 
     def test_cache_miss_returns_none(self):
-        svc, ctx = self._setup_cache(None)
+        fake_cm, mock_svc = _mock_cache_service_via_provider(cached_metadata=None)
         with patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory",
-            return_value=ctx
-        ), patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService",
-            return_value=svc
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
         ):
             result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
         assert result is None
 
     def test_cache_with_no_formatted_output_key_returns_none(self):
-        svc, ctx = self._setup_cache({"other_key": "data"})
+        fake_cm, mock_svc = _mock_cache_service_via_provider(
+            cached_metadata={"other_key": "data"}
+        )
         with patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory",
-            return_value=ctx
-        ), patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService",
-            return_value=svc
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
         ):
             result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
         assert result is None
 
     def test_save_mquery_cache_calls_save_metadata(self):
-        svc, ctx = self._setup_cache()
+        fake_cm, mock_svc = _mock_cache_service_via_provider()
         with patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.async_session_factory",
-            return_value=ctx
-        ), patch(
-            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.PowerBISemanticModelCacheService",
-            return_value=svc
+            "src.engines.crewai.tools.custom.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
+            fake_cm,
         ):
             self._run(self.tool._save_mquery_cache(
                 "key", WORKSPACE_ID, {"formatted_output": "result"}
             ))
-        svc.save_metadata.assert_called_once()
+        mock_svc.save_metadata.assert_called_once()
 
     def test_cache_group_constant(self):
         assert self.tool._CACHE_GROUP == "mquery_conversion"

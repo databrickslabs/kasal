@@ -30,8 +30,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
-from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -275,8 +274,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         cache_saved = False  # Tracks whether full metadata is available in cache
 
         try:
-            async with async_session_factory() as session:
-                cache_service = PowerBISemanticModelCacheService(session)
+            async with ToolSessionProvider.cache_service() as cache_service:
                 cached_metadata = await cache_service.get_cached_metadata(
                     group_id=group_id,
                     dataset_id=dataset_id,
@@ -328,8 +326,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         logger.info(f"[CACHE FIX] Fetched {len(sample_values)} sample value sets — persisting to cache")
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with async_session_factory() as session:
-                                cache_service = PowerBISemanticModelCacheService(session)
+                            async with ToolSessionProvider.cache_service() as cache_service:
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
                                     relationships=model_context.get("relationships", []),
@@ -372,8 +369,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                 logger.warning(f"[CACHE FIX] Slicer distinct values failed: {e}")
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with async_session_factory() as session:
-                                cache_service = PowerBISemanticModelCacheService(session)
+                            async with ToolSessionProvider.cache_service() as cache_service:
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
                                     relationships=model_context.get("relationships", []),
@@ -409,8 +405,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         # Re-persist cache with updated sample_data
                         try:
-                            async with async_session_factory() as session:
-                                cache_service = PowerBISemanticModelCacheService(session)
+                            async with ToolSessionProvider.cache_service() as cache_service:
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
                                     relationships=model_context.get("relationships", []),
@@ -451,8 +446,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         # Re-persist with validated filters + marker
                         try:
-                            async with async_session_factory() as session:
-                                cache_service = PowerBISemanticModelCacheService(session)
+                            async with ToolSessionProvider.cache_service() as cache_service:
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
                                     relationships=model_context.get("relationships", []),
@@ -568,8 +562,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
                 # Step 2d: Save to cache
                 try:
-                    async with async_session_factory() as session:
-                        cache_service = PowerBISemanticModelCacheService(session)
+                    async with ToolSessionProvider.cache_service() as cache_service:
                         cache_metadata = cache_service.build_metadata_dict(
                             measures=model_context.get("measures", []),
                             relationships=model_context.get("relationships", []),
@@ -1458,25 +1451,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measure dicts in-place so the enriched fields flow into the daily cache.
 
         Config keys:
-          - llm_workspace_url: Databricks workspace URL (already used by Reducer)
-          - llm_token: Personal access token (already used by Reducer)
           - semantic_enrichment_endpoint: Serving endpoint name
                 (default: databricks-meta-llama-3-3-70b-instruct)
 
-        Fail-open: any batch failure is logged and skipped.
+        Authentication is handled internally by LLMManager from the group
+        context. Fail-open: any batch failure is logged and skipped.
         """
-        workspace_url = (config.get("llm_workspace_url") or "").rstrip("/")
-        token = config.get("llm_token") or ""
         endpoint = config.get(
             "semantic_enrichment_endpoint",
             "databricks-meta-llama-3-3-70b-instruct",
         )
-
-        if not workspace_url or not token:
-            logger.warning(
-                "[SemanticEnrichment] llm_workspace_url or llm_token missing — skipping"
-            )
-            return
 
         _SYSTEM_TABLES = ("LocalDateTable", "DateTableTemplate", "DateTable")
         tables = [
@@ -1486,23 +1470,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         measures = model_context.get("measures", [])
         sample_data = model_context.get("sample_data", {})
 
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
-        from src.utils.databricks_url_utils import DatabricksURLUtils
-        # AI Gateway on  -> /ai-gateway/mlflow/v1/chat/completions (model in body via gw_model)
-        # AI Gateway off -> /serving-endpoints/<endpoint>/invocations (model in path)
-        serving_url, gw_model = DatabricksURLUtils.construct_chat_completions_url(workspace_url, endpoint)
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-
         logger.info(
             f"[SemanticEnrichment] Starting — {len(tables)} tables, "
             f"{len(measures)} measures via endpoint '{endpoint}'"
         )
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            await self._enrich_tables_semantic(client, serving_url, headers, tables, gw_model=gw_model)
-            await self._enrich_columns_and_measures_semantic(
-                client, serving_url, headers, tables, measures, sample_data, gw_model=gw_model
-            )
+        await self._enrich_tables_semantic(endpoint, tables)
+        await self._enrich_columns_and_measures_semantic(
+            endpoint, tables, measures, sample_data
+        )
 
         total_cols = sum(
             len([c for c in t.get("columns", []) if isinstance(c, dict)])
@@ -1515,18 +1491,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _enrich_tables_semantic(
         self,
-        client: "httpx.AsyncClient",
-        serving_url: str,
-        headers: Dict[str, str],
+        endpoint: str,
         tables: List[Dict[str, Any]],
         batch_size: int = 5,
-        gw_model: Optional[str] = None,
     ) -> None:
-        """Batch-enrich tables with grain and purpose via LLM. Mutates in-place.
+        """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        gw_model: when set (AI Gateway mode), injected as the request body's
-        "model" field since the gateway URL carries no model in its path.
-        """
         _SYSTEM = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Analyse each table and output strict JSON only — no markdown, no prose."
@@ -1557,16 +1529,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             )
 
             try:
-                resp = await client.post(
-                    serving_url,
-                    headers=headers,
-                    json={**({"model": gw_model} if gw_model else {}), "messages": [
+                content = await LLMManager.completion(
+                    messages=[
                         {"role": "system", "content": _SYSTEM},
                         {"role": "user", "content": prompt},
-                    ]},
+                    ],
+                    model=endpoint,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    extra_headers=get_user_agent_header(KasalProduct.POWERBI),
                 )
-                resp.raise_for_status()
-                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                result = self._parse_llm_json(content)
                 table_map = {t["name"]: t for t in batch}
                 for item in result.get("tables", []):
                     target = table_map.get(item.get("name"))
@@ -1587,20 +1560,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _enrich_columns_and_measures_semantic(
         self,
-        client: "httpx.AsyncClient",
-        serving_url: str,
-        headers: Dict[str, str],
+        endpoint: str,
         tables: List[Dict[str, Any]],
         measures: List[Dict[str, Any]],
         sample_data: Dict[str, Any],
         batch_size: int = 10,
-        gw_model: Optional[str] = None,
     ) -> None:
-        """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place.
+        """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        gw_model: when set (AI Gateway mode), injected as the request body's
-        "model" field since the gateway URL carries no model in its path.
-        """
         _SYSTEM_COL = (
             "You are a senior data architect specialising in Power BI semantic models. "
             "Understand how business users refer to data fields differently from technical names. "
@@ -1611,6 +1580,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "You can read DAX expressions and explain what they compute in plain business language. "
             "Output strict JSON only — no markdown, no prose."
         )
+
+        pbi_headers = get_user_agent_header(KasalProduct.POWERBI)
 
         # ── Column enrichment (per table, batched) ────────────────────────────
         for table in tables:
@@ -1645,16 +1616,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
 
                 try:
-                    resp = await client.post(
-                        serving_url,
-                        headers=headers,
-                        json={**({"model": gw_model} if gw_model else {}), "messages": [
+                    content = await LLMManager.completion(
+                        messages=[
                             {"role": "system", "content": _SYSTEM_COL},
                             {"role": "user", "content": prompt},
-                        ]},
+                        ],
+                        model=endpoint,
+                        temperature=0.7,
+                        max_tokens=4000,
+                        extra_headers=pbi_headers,
                     )
-                    resp.raise_for_status()
-                    result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                    result = self._parse_llm_json(content)
                     col_map = {c.get("name", ""): c for c in batch}
                     for item in result.get("columns", []):
                         target = col_map.get(item.get("name"))
@@ -1693,16 +1665,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             )
 
             try:
-                resp = await client.post(
-                    serving_url,
-                    headers=headers,
-                    json={**({"model": gw_model} if gw_model else {}), "messages": [
+                content = await LLMManager.completion(
+                    messages=[
                         {"role": "system", "content": _SYSTEM_MEAS},
                         {"role": "user", "content": prompt},
-                    ]},
+                    ],
+                    model=endpoint,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    extra_headers=pbi_headers,
                 )
-                resp.raise_for_status()
-                result = self._parse_llm_json(resp.json()["choices"][0]["message"]["content"])
+                result = self._parse_llm_json(content)
                 measure_map = {m["name"]: m for m in batch}
                 for item in result.get("measures", []):
                     target = measure_map.get(item.get("name"))

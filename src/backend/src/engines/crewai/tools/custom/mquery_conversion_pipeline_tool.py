@@ -13,8 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
-from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
-from src.db.session import async_session_factory
+from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +88,13 @@ def run_sync(coro):
     """
     try:
         # Try to get the current running loop
-        loop = asyncio.get_running_loop()
-        # We're already in an async context, run in executor to avoid nested loop issues
+        asyncio.get_running_loop()
+        # Already in an async context — run in executor with the caller's
+        # ContextVars copied in (LLMManager needs the UserContext group_id).
         logger.debug("Detected running event loop, using ThreadPoolExecutor")
-        future = _EXECUTOR.submit(asyncio.run, coro)
+        import contextvars
+        ctx = contextvars.copy_context()
+        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
         return future.result()
     except RuntimeError:
         # No running loop, create a new one
@@ -712,8 +714,7 @@ class MqueryConversionPipelineTool(BaseTool):
 
     async def _get_mquery_cache(self, dataset_key: str, workspace_id: str) -> Optional[str]:
         """Return today's cached formatted output, or None on miss."""
-        async with async_session_factory() as session:
-            svc = PowerBISemanticModelCacheService(session)
+        async with ToolSessionProvider.cache_service() as svc:
             cached = await svc.get_cached_metadata(
                 group_id=self._CACHE_GROUP,
                 dataset_id=dataset_key,
@@ -726,8 +727,7 @@ class MqueryConversionPipelineTool(BaseTool):
 
     async def _save_mquery_cache(self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]) -> None:
         """Persist the conversion result so same-day reruns are instant."""
-        async with async_session_factory() as session:
-            svc = PowerBISemanticModelCacheService(session)
+        async with ToolSessionProvider.cache_service() as svc:
             await svc.save_metadata(
                 group_id=self._CACHE_GROUP,
                 dataset_id=dataset_key,
@@ -1177,23 +1177,9 @@ class MqueryConversionPipelineTool(BaseTool):
         """Ask LLM to fix SQL given the row-count diff vs DAX."""
         import re as _re
         try:
-            from crewai import LLM
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4")
-            workspace_url = cfg.get("llm_workspace_url") or ""
-            llm_token = cfg.get("llm_token") or ""
-            if not workspace_url or not llm_token:
-                import os
-                workspace_url = workspace_url or os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL", "")
-                llm_token = llm_token or os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY", "")
-            if workspace_url and not workspace_url.startswith("http"):
-                workspace_url = f"https://{workspace_url}"
-            from src.utils.databricks_url_utils import DatabricksURLUtils
-            llm = LLM(
-                model=model,
-                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-                api_key=llm_token or None,
-                max_tokens=2000,
-            )
             prompt = (
                 f"You are a Databricks SQL expert. This SQL was transpiled from a Power BI M-Query "
                 f"but the row count does not match: {diff}\n\n"
@@ -1209,7 +1195,13 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"Return ONLY the corrected SQL SELECT statement that faithfully implements "
                 f"the M-Query transformation. No explanation."
             )
-            response = llm.call([{"role": "user", "content": prompt}])
+            response = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0,
+                max_tokens=2000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
             if isinstance(response, str):
                 m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
                 return m.group(1).strip() if m else response.strip()
@@ -1300,23 +1292,9 @@ class MqueryConversionPipelineTool(BaseTool):
         # LLM generates the CREATE TABLE; we do the INSERT VALUES mechanically
         # but with the correct types from the LLM-generated schema.
         try:
-            from crewai import LLM
+            from src.core.llm_manager import LLMManager
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4")
-            workspace_url = cfg.get("llm_workspace_url") or ""
-            llm_token = cfg.get("llm_token") or ""
-            if not workspace_url or not llm_token:
-                import os as _os
-                workspace_url = workspace_url or _os.environ.get("DATABRICKS_HOST") or _os.environ.get("DATABRICKS_WORKSPACE_URL", "")
-                llm_token = llm_token or _os.environ.get("DATABRICKS_TOKEN") or _os.environ.get("DATABRICKS_API_KEY", "")
-            if workspace_url and not workspace_url.startswith("http"):
-                workspace_url = f"https://{workspace_url}"
-            from src.utils.databricks_url_utils import DatabricksURLUtils
-            llm = LLM(
-                model=model,
-                base_url=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-                api_key=llm_token or None,
-                max_tokens=1500,
-            )
             prompt = (
                 f"You are a Databricks SQL expert. A Power BI table called '{tname}' "
                 f"has been fetched via EVALUATE and needs to be inserted into Delta table `{full_target}`.\n\n"
@@ -1326,7 +1304,13 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"with correct Spark SQL types (STRING, BIGINT, DOUBLE, DATE, TIMESTAMP, BOOLEAN). "
                 f"Infer types from the sample data. Return only the SQL, no explanation."
             )
-            response = llm.call([{"role": "user", "content": prompt}])
+            response = await LLMManager.completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0,
+                max_tokens=1500,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
             if isinstance(response, str):
                 m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
                 llm_sql = m.group(1).strip() if m else response.strip()

@@ -169,38 +169,35 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
     # LLM call
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _call_llm(self, prompt: str, auth, model: str) -> str:
+    def _call_llm(self, prompt: str, model: str) -> str:
         """Call the LLM and return the response text."""
-        import litellm
-        from src.utils.databricks_url_utils import DatabricksURLUtils
+        from src.core.llm_manager import LLMManager
+        from src.engines.crewai.tools.async_bridge import run_async_with_context
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        workspace_url = (auth.workspace_url or '').rstrip('/')
-        headers = auth.get_headers()
-        token = headers.get('Authorization', '').replace('Bearer ', '')
+        async def _run():
+            return await LLMManager.completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a data analytics expert helping configure a Databricks Genie Space. "
+                            "Genie allows business users to ask natural language questions about data. "
+                            "Your job is to generate clear, business-friendly configuration based on "
+                            "UC Metric View definitions."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.3,
+                max_tokens=4000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        if not workspace_url or not token:
-            raise ValueError("No workspace URL or token available for LLM call")
-
-        response = litellm.completion(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a data analytics expert helping configure a Databricks Genie Space. "
-                        "Genie allows business users to ask natural language questions about data. "
-                        "Your job is to generate clear, business-friendly configuration based on "
-                        "UC Metric View definitions."
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ],
-            api_base=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-            api_key=token,
-            max_tokens=4000,
-            temperature=0.3,
-        )
-        return response.choices[0].message.content or ""
+        # ContextVars (UserContext group/token) must survive the sync→async
+        # bridge — LLMManager.completion requires group_id from context.
+        return run_async_with_context(_run(), timeout=300)
 
     def _build_prompt(self, summaries: list, space_title: str) -> str:
         """Build the LLM prompt from metric view summaries."""
@@ -292,7 +289,18 @@ Rules:
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get('ucmv_output')
         if not ucmv_raw:
-            return json.dumps({"error": "No ucmv_output available — auto-generation requires ucmv_output from flow injection"})
+            # DB fallback (same as the UCMV Validator): allows running the
+            # Genie-space flow standalone after a previous UCMV Generator run.
+            try:
+                from src.engines.crewai.tools.custom.metric_view_validator_tool import MetricViewValidatorTool
+                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                if isinstance(latest, dict) and latest.get('yaml'):
+                    logger.info("[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB")
+                    ucmv_raw = json.dumps(latest)
+            except Exception as e:
+                logger.warning(f"[GenieConfigGen] DB fallback for ucmv_output failed: {e}")
+        if not ucmv_raw:
+            return json.dumps({"error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"})
 
         yaml_specs = self._extract_yaml_specs(ucmv_raw)
         if not yaml_specs:
@@ -320,7 +328,7 @@ Rules:
 
             prompt = self._build_prompt(summaries, space_title)
             logger.info(f"[GenieConfigGen] Calling LLM ({llm_model}) for config generation")
-            llm_response = self._call_llm(prompt, auth, llm_model)
+            llm_response = self._call_llm(prompt, llm_model)
             generated = self._parse_llm_response(llm_response)
             logger.info(f"[GenieConfigGen] LLM generation complete — keys: {list(generated.keys())}")
         except Exception as e:

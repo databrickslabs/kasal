@@ -445,6 +445,13 @@ class DatabricksRetryLLM(LLM):
                 "ratelimit",
                 "too many requests",
                 "service unavailable",
+                # litellm.ServiceUnavailableError lowercases WITHOUT a space, and
+                # Databricks capacity shedding reports error_code
+                # TEMPORARILY_UNAVAILABLE with no numeric status in the message
+                # (seen on brand-new FMAPI models like claude-fable-5).
+                "serviceunavailable",
+                "temporarily_unavailable",
+                "capacity constraints",
                 "503",
                 "429",
                 "502",

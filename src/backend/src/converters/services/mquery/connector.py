@@ -137,16 +137,10 @@ class MQueryConnector(BaseInboundConnector):
             config=self.config
         )
 
-        # Initialize LLM converter if credentials provided
-        if self.config.llm_workspace_url and self.config.llm_token:
-            self._llm_converter = MQueryLLMConverter(
-                workspace_url=self.config.llm_workspace_url,
-                token=self.config.llm_token,
-                model=self.config.llm_model
-            )
-        else:
-            logger.info("LLM credentials not provided, will use rule-based conversion only")
-            self._llm_converter = MQueryLLMConverter()  # No LLM, rule-based only
+        # LLM converter authenticates internally via LLMManager — no
+        # per-connector credentials needed (llm_workspace_url/llm_token are
+        # accepted for backward compatibility but unused).
+        self._llm_converter = MQueryLLMConverter(model=self.config.llm_model)
 
         self._connected = True
         logger.info("Successfully connected to Power BI Admin API")
@@ -312,7 +306,7 @@ class MQueryConnector(BaseInboundConnector):
             table=table,
             target_catalog=self.config.target_catalog,
             target_schema=self.config.target_schema,
-            use_llm=use_llm and bool(self.config.llm_workspace_url),
+            use_llm=use_llm,
             include_calculated_columns=include_calculated_columns
         )
 

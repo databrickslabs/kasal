@@ -53,6 +53,10 @@ def chat_history_service(mock_session, mock_repository):
     """Create chat history service with mocked dependencies."""
     service = ChatHistoryService(session=mock_session)
     service.repository = mock_repository
+    # delete_session also consults the named-session repository; mock it so
+    # the message-repository mock alone drives the test outcomes.
+    service.session_repository = AsyncMock()
+    service.session_repository.delete_by_id_and_group = AsyncMock(return_value=False)
     return service
 
 

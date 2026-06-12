@@ -221,38 +221,35 @@ class PBIVisualUCMVMapperTool(BaseTool):
     # LLM call
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _call_llm(self, prompt: str, auth, model: str) -> str:
+    def _call_llm(self, prompt: str, model: str) -> str:
         """Call the LLM and return the response text."""
-        import litellm
-        from src.utils.databricks_url_utils import DatabricksURLUtils
+        from src.core.llm_manager import LLMManager
+        from src.engines.crewai.tools.async_bridge import run_async_with_context
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
 
-        workspace_url = (auth.workspace_url or '').rstrip('/')
-        headers = auth.get_headers()
-        token = headers.get('Authorization', '').replace('Bearer ', '')
+        async def _run():
+            return await LLMManager.completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a data engineering expert who maps Power BI report visuals "
+                            "to Databricks UC Metric Views. You match PBI measure names to UCMV "
+                            "SQL measure names and generate SQL using the MEASURE() syntax. "
+                            "You output only valid JSON arrays."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.1,
+                max_tokens=8000,
+                extra_headers=get_user_agent_header(KasalProduct.POWERBI),
+            )
 
-        if not workspace_url or not token:
-            raise ValueError("No workspace URL or token available for LLM call")
-
-        response = litellm.completion(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a data engineering expert who maps Power BI report visuals "
-                        "to Databricks UC Metric Views. You match PBI measure names to UCMV "
-                        "SQL measure names and generate SQL using the MEASURE() syntax. "
-                        "You output only valid JSON arrays."
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ],
-            api_base=DatabricksURLUtils.construct_llm_base_url(workspace_url),
-            api_key=token,
-            max_tokens=8000,
-            temperature=0.1,
-        )
-        return response.choices[0].message.content or ""
+        # ContextVars (UserContext group/token) must survive the sync→async
+        # bridge — LLMManager.completion requires group_id from context.
+        return run_async_with_context(_run(), timeout=300)
 
     def _build_prompt(
         self,
@@ -455,7 +452,19 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get('ucmv_output')
         if not ucmv_raw:
-            return json.dumps({"error": "No ucmv_output available — required for UCMV mapping"})
+            # DB fallback (same as the UCMV Validator / Genie config generator):
+            # covers standalone runs and flows where multi-hop injection did not
+            # deliver the deployer output across the intermediate crews.
+            try:
+                from src.engines.crewai.tools.custom.metric_view_validator_tool import MetricViewValidatorTool
+                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                if isinstance(latest, dict) and latest.get('yaml'):
+                    logger.info("[PBIVisualMapper] ucmv_output not injected — using latest UCMV Generator output from DB")
+                    ucmv_raw = json.dumps(latest)
+            except Exception as e:
+                logger.warning(f"[PBIVisualMapper] DB fallback for ucmv_output failed: {e}")
+        if not ucmv_raw:
+            return json.dumps({"error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"})
 
         ucmv_data = self._parse_ucmv_output(ucmv_raw)
         ucmv_summaries = self._build_ucmv_summaries(ucmv_data, catalog, schema)
@@ -492,7 +501,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
 
             prompt = self._build_prompt(visuals, ucmv_summaries, measures_data, dashboard_title)
             logger.info(f"[PBIVisualMapper] Calling LLM ({llm_model}) for {len(visuals)} visuals")
-            llm_response = self._call_llm(prompt, auth, llm_model)
+            llm_response = self._call_llm(prompt, llm_model)
             visual_mappings = self._parse_llm_response(llm_response)
             logger.info(f"[PBIVisualMapper] LLM returned {len(visual_mappings)} mappings")
 

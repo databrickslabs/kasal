@@ -929,6 +929,7 @@ class TestCreateTaskGuardrail:
                 task_key="llm-guardrail-task",
                 task_config=task_config,
                 agent=agent,
+                config={"group_id": "test-group"},
             )
         assert task is not None
 
@@ -965,6 +966,7 @@ class TestCreateTaskGuardrail:
                 task_key="llm-prefix-task",
                 task_config=task_config,
                 agent=agent,
+                config={"group_id": "test-group"},
             )
 
         # LLM should be created with databricks/ prefix
@@ -1007,6 +1009,7 @@ class TestCreateTaskGuardrail:
                 task_key="llm-augment-task",
                 task_config=task_config,
                 agent=agent,
+                config={"group_id": "test-group"},
             )
 
         # Description should be augmented with validation criteria

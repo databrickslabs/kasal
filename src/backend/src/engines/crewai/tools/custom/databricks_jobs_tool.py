@@ -58,10 +58,13 @@ def _run_async_in_sync_context(coro):
     """
     try:
         # Try to get the current running loop
-        loop = asyncio.get_running_loop()
-        # We're already in an async context, run in executor to avoid nested loop issues
+        asyncio.get_running_loop()
+        # Already in an async context — run in executor with the caller's
+        # ContextVars copied in (UserContext group/token must propagate).
         logger.debug("Detected running event loop, using ThreadPoolExecutor")
-        future = _EXECUTOR.submit(asyncio.run, coro)
+        import contextvars
+        ctx = contextvars.copy_context()
+        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
         return future.result()
     except RuntimeError:
         # No event loop running, we can safely create one

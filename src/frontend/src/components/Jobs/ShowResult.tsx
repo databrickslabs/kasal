@@ -786,7 +786,22 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               }
             }}
           >
-            {typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
+            {(() => {
+              // Check if string value contains a structured result (UCMV or Validator)
+              if (typeof value === 'string' && value.trim().startsWith('{')) {
+                try {
+                  const innerParsed = JSON.parse(value);
+                  if (isValidatorResult(innerParsed)) {
+                    return <ValidatorResultViewer result={innerParsed as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+                  }
+                  if (isUCMVResult(innerParsed)) {
+                    return <UCMVResultViewer result={innerParsed as Parameters<typeof UCMVResultViewer>[0]['result']} />;
+                  }
+                } catch { /* not JSON, fall through */ }
+              }
+              return null;
+            })() ||
+            (typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
               <SandboxedHTMLRenderer html={value} isFullscreen={isFullscreen} />
             ) : typeof value === 'string' && isMarkdown(value) && !isHTML(value) ? (
               <Box sx={{
@@ -910,7 +925,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                   : formatValue(value)
                 }
               </pre>
-            )}
+            ))}
           </Paper>
           {index < Object.entries(content).length - 1 && (
             <Divider sx={{ my: 3 }} />

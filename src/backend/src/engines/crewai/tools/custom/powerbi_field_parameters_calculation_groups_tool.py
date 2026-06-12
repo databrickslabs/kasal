@@ -381,20 +381,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             return f"Error: {str(e)}"
 
     def _run_sync(self, coro):
-        """Run async coroutine from sync context."""
-        try:
-            loop = asyncio.get_running_loop()
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
+        """Run async coroutine from sync context (ContextVars preserved)."""
+        from src.engines.crewai.tools.async_bridge import run_async_with_context
+        return run_async_with_context(coro)
 
     async def _extract_and_process(
         self,
