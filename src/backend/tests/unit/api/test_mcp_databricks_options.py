@@ -317,6 +317,16 @@ async def test_external_options_only_include_mcp_flagged_http_connections():
             {"name": "plain-http", "connection_type": "HTTP", "options": {"host": "x"}},
             {"name": "warehouse", "connection_type": "SNOWFLAKE", "options": {"is_mcp": "true"}},
             {"name": "", "connection_type": "HTTP", "options": {"is_mcp_connection": "TRUE"}},
+            # System AI-agent connections are AgentBricks-internal and stay
+            # out of the picker — even the MCP-backed ones (slack/atlassian).
+            {"name": "system_ai_agent_slack_mcp", "connection_type": "HTTP",
+             "comment": "System-managed connection for AI agents.",
+             "options": {"is_mcp_connection": "false",
+                         "host": "https://mcp.slack.com", "base_path": "/mcp"}},
+            {"name": "system_ai_agent_gmail", "connection_type": "HTTP",
+             "comment": "System-managed connection for AI agents.",
+             "options": {"is_mcp_connection": "false",
+                         "host": "https://www.googleapis.com", "base_path": "/"}},
         ]
     }
     session_cm, session = _aiohttp_session([(200, payload)])

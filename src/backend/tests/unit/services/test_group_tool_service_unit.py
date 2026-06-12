@@ -455,3 +455,73 @@ class TestRemoveToolFromGroup:
         """Raises ForbiddenError when group context has no primary group ID."""
         with pytest.raises(ForbiddenError, match="Group context required"):
             await service.remove_tool_from_group(1, empty_group_context)
+
+
+class TestPersonalWorkspaceToolGuard:
+    """Gmail (personal-workspace-only) must never be addable in a shared workspace."""
+
+    @pytest.fixture
+    def personal_context(self):
+        # generate_individual_group_id("user@example.com") == "user_user_example_com"
+        return GroupContext(
+            group_ids=["user_user_example_com"],
+            group_email="user@example.com",
+            email_domain="example.com",
+            user_id="user-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_gmail_blocked_in_shared_workspace(
+        self, service, mock_tool_repo, mock_group_tool_repo, group_context
+    ):
+        from src.core.exceptions import ForbiddenError
+
+        gmail = _make_tool(id=96, title="Gmail", enabled=True, group_id=None)
+        mock_tool_repo.get.return_value = gmail
+
+        with pytest.raises(ForbiddenError, match="personal workspace"):
+            await service.add_tool_to_group(96, group_context)
+        mock_group_tool_repo.upsert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_add_gmail_allowed_in_personal_workspace(
+        self, service, mock_tool_repo, mock_group_tool_repo, personal_context
+    ):
+        gmail = _make_tool(id=96, title="Gmail", enabled=True, group_id=None)
+        mock_tool_repo.get.return_value = gmail
+        mock_group_tool_repo.upsert.return_value = _make_group_tool(
+            id=300, tool_id=96, group_id="user_user_example_com", enabled=True
+        )
+
+        result = await service.add_tool_to_group(96, personal_context)
+        assert result.tool_id == 96
+        mock_group_tool_repo.upsert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_available_list_excludes_gmail_in_shared_workspace(
+        self, service, mock_tool_repo, mock_group_tool_repo, group_context
+    ):
+        mock_tool_repo.list.return_value = [
+            _make_tool(id=96, title="Gmail", enabled=True, group_id=None),
+            _make_tool(id=2, title="WebSearch", enabled=True, group_id=None),
+        ]
+        mock_group_tool_repo.list_for_group.return_value = []
+
+        result = await service.list_available_to_add_for_group(group_context)
+        titles = {t.title for t in result.tools}
+        assert "Gmail" not in titles
+        assert "WebSearch" in titles
+
+    @pytest.mark.asyncio
+    async def test_available_list_includes_gmail_in_personal_workspace(
+        self, service, mock_tool_repo, mock_group_tool_repo, personal_context
+    ):
+        mock_tool_repo.list.return_value = [
+            _make_tool(id=96, title="Gmail", enabled=True, group_id=None),
+            _make_tool(id=2, title="WebSearch", enabled=True, group_id=None),
+        ]
+        mock_group_tool_repo.list_for_group.return_value = []
+
+        result = await service.list_available_to_add_for_group(personal_context)
+        titles = {t.title for t in result.tools}
+        assert "Gmail" in titles

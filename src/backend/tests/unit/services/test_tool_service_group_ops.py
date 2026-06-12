@@ -468,3 +468,71 @@ async def test_update_tool_config_group_scoped_creates_new_no_base():
         mock_resp.model_validate.return_value = MagicMock()
         await svc.update_tool_configuration_group_scoped("NewTool", {"new": "val"}, ctx)
     svc.repository.create.assert_called_once()
+
+
+# ─── personal-workspace-only tools (Gmail) ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_gmail_hidden_in_shared_workspace():
+    """Gmail must not appear in get_all_tools_for_group for a shared workspace."""
+    svc = make_service()
+    svc.repository.list = AsyncMock(return_value=[
+        make_tool(id=1, title="Gmail", group_id=None),
+        make_tool(id=2, title="PerplexityTool", group_id=None),
+    ])
+    # Shared workspace: primary_group_id is NOT user_<email>.
+    ctx = make_group_context(
+        group_ids=["bi-specialist"], primary_group_id="bi-specialist",
+        group_email="alice@x.com",
+    )
+    result = await svc.get_all_tools_for_group(ctx)
+    titles = {t.title for t in result.tools}
+    assert "Gmail" not in titles
+    assert "PerplexityTool" in titles
+
+
+@pytest.mark.asyncio
+async def test_gmail_visible_in_personal_workspace():
+    """Gmail appears when the active group IS the caller's personal workspace."""
+    svc = make_service()
+    svc.repository.list = AsyncMock(return_value=[
+        make_tool(id=1, title="Gmail", group_id=None),
+        make_tool(id=2, title="PerplexityTool", group_id=None),
+    ])
+    # generate_individual_group_id("alice@x.com") == "user_alice_x_com"
+    ctx = make_group_context(
+        group_ids=["user_alice_x_com"], primary_group_id="user_alice_x_com",
+        group_email="alice@x.com",
+    )
+    result = await svc.get_all_tools_for_group(ctx)
+    titles = {t.title for t in result.tools}
+    assert "Gmail" in titles
+    assert "PerplexityTool" in titles
+
+
+@pytest.mark.asyncio
+async def test_gmail_hidden_in_enabled_tools_for_shared_workspace():
+    """The same filter applies to the /enabled path used by ChatMode/generation."""
+    from src.core.cache import tool_list_cache
+    await tool_list_cache.clear()
+
+    svc = make_service()
+    svc.repository.find_enabled = AsyncMock(return_value=[
+        make_tool(id=1, title="Gmail", group_id=None),
+        make_tool(id=2, title="PerplexityTool", group_id=None),
+    ])
+    mapping1 = MagicMock(tool_id=1, config={})
+    mapping2 = MagicMock(tool_id=2, config={})
+    with patch("src.services.tool_service.GroupToolRepository") as MockGroupRepo:
+        group_repo = AsyncMock()
+        group_repo.list_enabled_for_group = AsyncMock(return_value=[mapping1, mapping2])
+        MockGroupRepo.return_value = group_repo
+        ctx = make_group_context(
+            group_ids=["bi-specialist"], primary_group_id="bi-specialist",
+            group_email="alice@x.com",
+        )
+        result = await svc._build_enabled_tools_for_group(ctx)
+
+    titles = {t.title for t in result.tools}
+    assert "Gmail" not in titles
+    assert "PerplexityTool" in titles

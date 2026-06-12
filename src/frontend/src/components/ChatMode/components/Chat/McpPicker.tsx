@@ -35,7 +35,8 @@ const isRegisteredInKasal = (
 ): boolean =>
   servers.some(
     (s) =>
-      s.name === databricksMcpServerName(option) ||
+      // Registered names are lowercase, but legacy rows may be mixed-case.
+      s.name.toLowerCase() === databricksMcpServerName(option) ||
       Boolean(s.server_url && s.server_url === option.server_url),
   );
 
@@ -455,6 +456,19 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
             )}
           </div>
 
+          {/* The managed SQL MCP executes arbitrary statements with the
+              caller's warehouse permissions — selecting it deserves an
+              explicit heads-up, not silent power. */}
+          {selected.some((n) => n.toLowerCase() === 'databricks sql') && (
+            <div
+              className="px-3 py-2 text-[11px]"
+              style={{ color: '#d97706', borderTop: '1px solid var(--border-color)' }}
+            >
+              ⚠ Databricks SQL has CRUD rights: agents can modify or delete data
+              with your permissions, not just read it. Review your prompt and the
+              model's actions with care — content the agent reads can steer it.
+            </div>
+          )}
           {error && (
             <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--accent)', borderTop: '1px solid var(--border-color)' }}>
               {error}

@@ -788,7 +788,9 @@ const ChatWorkspace: React.FC = () => {
       // tool (and its space prompt) doesn't double up with the MCP server.
       const genieViaMcp = useExecutionStore
         .getState()
-        .selectedMcpServers.some((name) => name.startsWith('Databricks Genie:'));
+        .selectedMcpServers.some((name) =>
+          name.toLowerCase().startsWith('databricks genie:'),
+        );
       const stripped = genieViaMcp
         ? stripGenieTools(raw, useAppStore.getState().toolNameMap)
         : raw;

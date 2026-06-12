@@ -95,10 +95,11 @@ beforeEach(() => {
   getDatabricksMcpCatalog.mockResolvedValue(CATALOG);
   listGenieMcpSpaces.mockResolvedValue({ options: [GENIE_SPACE], next_page_token: null });
   listAiSearchMcpIndexes.mockResolvedValue([AI_INDEX]);
+  // Mirrors the real databricksMcpServerName contract: lowercase names.
   ensureDatabricksMcpServer.mockImplementation(async (o: { kind: string; name: string }) => {
-    if (o.kind === 'genie') return `Databricks Genie: ${o.name}`;
-    if (o.kind === 'ai-search') return `Databricks AI Search: ${o.name}`;
-    return o.name;
+    if (o.kind === 'genie') return `databricks genie: ${o.name}`.toLowerCase();
+    if (o.kind === 'ai-search') return `databricks ai search: ${o.name}`.toLowerCase();
+    return o.name.toLowerCase();
   });
 });
 
@@ -268,7 +269,7 @@ describe('McpPicker', () => {
 
     fireEvent.click(screen.getByText('Databricks SQL'));
     await waitFor(() =>
-      expect(useExecutionStore.getState().selectedMcpServers).toEqual(['Databricks SQL']),
+      expect(useExecutionStore.getState().selectedMcpServers).toEqual(['databricks sql']),
     );
     expect(ensureDatabricksMcpServer).toHaveBeenCalledWith({
       id: 'sql',
@@ -277,6 +278,27 @@ describe('McpPicker', () => {
       description: null,
       server_url: 'https://ws/api/2.0/mcp/sql',
     });
+  });
+
+  it('warns about CRUD rights while Databricks SQL is selected', async () => {
+    render(<McpPicker />);
+    await openPicker();
+
+    // No warning for other selections.
+    fireEvent.click(screen.getByText('My MCP'));
+    expect(screen.queryByText(/CRUD rights/)).toBeNull();
+
+    fireEvent.click(screen.getByText('Databricks SQL'));
+    await waitFor(() =>
+      expect(useExecutionStore.getState().selectedMcpServers).toContain('databricks sql'),
+    );
+    expect(screen.getByText(/CRUD rights/)).toBeInTheDocument();
+    expect(screen.getByText(/modify or delete data/)).toBeInTheDocument();
+
+    // Deselecting clears the warning.
+    fireEvent.click(screen.getByText('Databricks SQL'));
+    expect(useExecutionStore.getState().selectedMcpServers).not.toContain('databricks sql');
+    expect(screen.queryByText(/CRUD rights/)).toBeNull();
   });
 
   it('tolerates a managed leaf without a server_url', async () => {
@@ -350,7 +372,7 @@ describe('McpPicker', () => {
     fireEvent.click(screen.getByText('Sales Space'));
     await waitFor(() =>
       expect(useExecutionStore.getState().selectedMcpServers).toEqual([
-        'Databricks Genie: Sales Space',
+        'databricks genie: sales space',
       ]),
     );
     expect(ensureDatabricksMcpServer).toHaveBeenCalledWith(GENIE_SPACE);
@@ -421,7 +443,7 @@ describe('McpPicker', () => {
     fireEvent.click(screen.getByText('main.gold.docs_idx'));
     await waitFor(() =>
       expect(useExecutionStore.getState().selectedMcpServers).toEqual([
-        'Databricks AI Search: main.gold.docs_idx',
+        'databricks ai search: main.gold.docs_idx',
       ]),
     );
     expect(ensureDatabricksMcpServer).toHaveBeenCalledWith(AI_INDEX);
