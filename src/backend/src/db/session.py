@@ -221,6 +221,20 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
         }
     return {}
 
+
+def get_sqlite_poolclass():
+    """Pool class for the SQLite engine: NullPool.
+
+    StaticPool shares ONE aiosqlite connection across every thread and event
+    loop (API loop, trace writer, OTel exporter thread, subprocess helpers);
+    whichever context drops the last reference then closes/rolls back the
+    shared connection outside SQLAlchemy's greenlet bridge, raising
+    MissingGreenlet / "Cannot operate on a closed database" at run teardown.
+    NullPool opens a fresh connection per checkout in the caller's own
+    context; WAL mode + busy_timeout (configure_sqlite) keep that safe.
+    """
+    return NullPool
+
 isolation_level = get_isolation_level(str(settings.DATABASE_URI))
 connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 
@@ -228,13 +242,21 @@ connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 # Strategy: Use pooled connections for main app, NullPool for background tasks
 
 if str(settings.DATABASE_URI).startswith('sqlite'):
-    # SQLite: Use StaticPool for both contexts (single connection)
-    logger.info("SQLite detected - using StaticPool for single connection reuse")
+    # SQLite: NullPool — a FRESH aiosqlite connection per checkout, opened and
+    # closed inside the same task/event-loop context that uses it. StaticPool
+    # previously shared ONE connection across every thread and event loop
+    # (API loop, trace writer, OTel exporter thread, subprocess helpers);
+    # whichever context dropped the last reference then closed/rolled back the
+    # shared connection outside SQLAlchemy's greenlet bridge, producing
+    # MissingGreenlet / "Cannot operate on a closed database" on run teardown.
+    # WAL mode + busy_timeout (configure_sqlite, applied per-connection via
+    # the "connect" event) keep concurrent access safe without sharing.
+    logger.info("SQLite detected - using NullPool (fresh connection per session, no cross-loop sharing)")
     engine = create_async_engine(
         str(settings.DATABASE_URI),
         echo=SQL_DEBUG,
         future=True,
-        poolclass=StaticPool,
+        poolclass=get_sqlite_poolclass(),
         connect_args={
             **connect_args,
             "check_same_thread": False,
@@ -288,9 +310,14 @@ else:
         logger.info("USE_NULLPOOL=false - Full pooling mode enabled for maximum performance")
         engine = pooled_engine
 
-# Configure SQLite for better concurrent access
+# Configure SQLite for better concurrent access.
+# With NullPool this hook fires for EVERY new connection (i.e. constantly), so
+# the success line logs at INFO only once and DEBUG afterwards.
+_sqlite_configured_logged = False
+
 def configure_sqlite(dbapi_connection, connection_record):
     """Configure SQLite connection for better performance and concurrency."""
+    global _sqlite_configured_logged
     if str(settings.DATABASE_URI).startswith('sqlite'):
         try:
             # Set busy timeout - CRITICAL for handling locks (20 seconds based on best practices)
@@ -311,7 +338,11 @@ def configure_sqlite(dbapi_connection, connection_record):
             dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
             # Optimize page size for better performance
             dbapi_connection.execute("PRAGMA page_size=4096")
-            logger.info("SQLite configured with WAL mode and optimizations")
+            if not _sqlite_configured_logged:
+                logger.info("SQLite configured with WAL mode and optimizations (per-connection; further lines at DEBUG)")
+                _sqlite_configured_logged = True
+            else:
+                logger.debug("SQLite connection configured (WAL + optimizations)")
         except Exception as e:
             logger.error(f"Failed to configure SQLite connection: {e}")
 

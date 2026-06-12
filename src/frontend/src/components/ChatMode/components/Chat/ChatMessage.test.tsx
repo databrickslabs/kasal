@@ -42,6 +42,20 @@ vi.mock('../Cards/GenieSpaceSelector', () => ({
   ),
 }));
 
+vi.mock('../Cards/CrewActionsBar', () => ({
+  default: ({ messageId }: { messageId: string }) => (
+    <div data-testid="crew-actions-bar">{messageId}</div>
+  ),
+}));
+vi.mock('../Cards/GenieSpacePrompt', () => ({
+  default: () => <div data-testid="genie-space-prompt" />,
+}));
+vi.mock('../Cards/InputVariablesPrompt', () => ({
+  default: ({ onSubmit }: { onSubmit?: (i: Record<string, string>) => void }) => (
+    <button data-testid="input-vars-prompt" onClick={() => onSubmit?.({ topic: 'AI' })}>vars</button>
+  ),
+}));
+
 let toolNameMap: Record<string, string> = {};
 vi.mock('../../store/appStore', () => ({
   useAppStore: (selector: (s: unknown) => unknown) => selector({ toolNameMap }),
@@ -85,6 +99,54 @@ describe('ChatMessage — roles', () => {
 });
 
 describe('ChatMessage — rich content routing', () => {
+  it('crew_actions -> CrewActionsBar with the message id', () => {
+    render(
+      <ChatMessage
+        message={msg({ id: 'm-7', resultType: 'crew_actions', resultData: { agents: [] } })}
+      />,
+    );
+    expect(screen.getByTestId('crew-actions-bar')).toHaveTextContent('m-7');
+  });
+  it('genie_space_prompt -> GenieSpacePrompt', () => {
+    render(
+      <ChatMessage
+        message={msg({ resultType: 'genie_space_prompt', resultData: { agents: [] } })}
+      />,
+    );
+    expect(screen.getByTestId('genie-space-prompt')).toBeInTheDocument();
+  });
+  it('input_variables -> InputVariablesPrompt wiring onSubmitVariables with the message id', () => {
+    const onSubmitVariables = vi.fn();
+    render(
+      <ChatMessage
+        message={msg({
+          id: 'm-9',
+          resultType: 'input_variables',
+          resultData: { variables: [{ name: 'topic', required: true }] },
+        })}
+        onSubmitVariables={onSubmitVariables}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('input-vars-prompt'));
+    expect(onSubmitVariables).toHaveBeenCalledWith('m-9', { topic: 'AI' });
+  });
+  it('input_variables without variables renders nothing', () => {
+    render(
+      <ChatMessage message={msg({ resultType: 'input_variables', resultData: {} })} />,
+    );
+    expect(screen.queryByTestId('input-vars-prompt')).toBeNull();
+  });
+  it('input_variables without an onSubmitVariables handler submits safely', () => {
+    render(
+      <ChatMessage
+        message={msg({
+          resultType: 'input_variables',
+          resultData: { variables: [{ name: 'topic' }] },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('input-vars-prompt'));
+  });
   it('agent -> AgentCard', () => {
     render(<ChatMessage message={msg({ resultType: 'agent', resultData: { role: 'r' } })} />);
     expect(screen.getByTestId('agent-card')).toBeInTheDocument();

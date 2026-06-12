@@ -6,7 +6,7 @@ This module provides endpoints for managing MCP (Model Context Protocol) servers
 import logging
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from src.core.exceptions import BadRequestError, ForbiddenError
 
@@ -68,6 +68,326 @@ async def get_mcp_servers(
         getattr(group_context, "primary_group_id", None) if group_context else None
     )
     return await service.get_all_servers_effective(group_id)
+
+
+async def _list_external_mcp_options(
+    workspace_url: str, user_token: Optional[str]
+) -> List[Dict[str, Any]]:
+    """
+    External MCP servers registered IN DATABRICKS that the caller can use.
+
+    These are Unity Catalog HTTP connections flagged as MCP connections
+    (workspace UI: AI Gateway → MCPs), proxied by the workspace at
+    ``/api/2.0/mcp/external/{connection_name}``. Listing uses the CALLER's
+    credentials (OBO when available), so the result honors their UC
+    permissions — users only see the servers they have access to.
+    """
+    import aiohttp
+
+    from src.utils.databricks_auth import get_auth_context
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+    auth = await get_auth_context(user_token=user_token)
+    if not auth:
+        return []
+    headers = auth.get_headers()
+    headers.update(get_user_agent_header(KasalProduct.MCP))
+
+    url = f"{workspace_url}/api/2.1/unity-catalog/connections"
+    async with aiohttp.ClientSession() as http:
+        async with http.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                logger.warning(
+                    f"Could not list UC connections for external MCPs: HTTP {resp.status}"
+                )
+                return []
+            payload = await resp.json()
+
+    options: List[Dict[str, Any]] = []
+    for conn in payload.get("connections") or []:
+        if str(conn.get("connection_type", "")).upper() != "HTTP":
+            continue
+        # The MCP flag is an option on the HTTP connection ("Is MCP connection"
+        # in the UI). Match any mcp-ish option key so naming variants
+        # (is_mcp / is_mcp_connection) all register.
+        conn_options = conn.get("options") or {}
+        is_mcp = any(
+            "mcp" in str(key).lower() and str(value).strip().lower() in ("true", "1", "yes")
+            for key, value in conn_options.items()
+        )
+        if not is_mcp:
+            continue
+        name = str(conn.get("name", ""))
+        if not name:
+            continue
+        options.append(
+            {
+                "id": f"external:{name}",
+                "kind": "external",
+                "name": name,
+                "description": conn.get("comment"),
+                "server_url": f"{workspace_url}/api/2.0/mcp/external/{name}",
+            }
+        )
+    return options
+
+
+@router.get("/databricks/available")
+async def get_databricks_mcp_options(
+    request: Request, session: SessionDep, group_context: GroupContextDep = None
+) -> Dict[str, Any]:
+    """
+    The Databricks MCP catalog for this workspace, grouped for the chat's
+    two-step picker:
+
+    - ``external``: MCP servers registered IN DATABRICKS as UC HTTP
+      connections (proxied at ``/api/2.0/mcp/external/{name}``), listed with
+      the caller's credentials so only the ones they have permission on appear.
+    - ``managed``: the workspace's managed MCP server TYPES. Leaf types carry
+      a ``server_url`` and are selectable directly:
+        * Databricks SQL  → ``/api/2.0/mcp/sql``
+        * Unity Catalog Functions → ``/api/2.0/mcp/functions/{catalog}/{schema}``
+          using the catalog/schema from the workspace's Databricks
+          configuration (only offered when configured).
+      Expandable types (``expandable: true``) have a second step — Genie
+      spaces can number in the thousands, so they are NOT enumerated here:
+        * Genie     → drill into /mcp/databricks/genie-spaces (search+paging)
+        * AI Search → drill into /mcp/databricks/ai-search-indexes
+
+    Selecting any leaf registers it as a Kasal MCP server with
+    ``auth_type=databricks_spn`` and ``server_type=streamable``.
+    """
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    workspace_url = ""
+    try:
+        auth = await get_auth_context(user_token=user_token)
+        workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    except Exception as e:
+        logger.warning(f"Could not resolve workspace URL for Databricks MCPs: {e}")
+
+    external: List[Dict[str, Any]] = []
+    managed: List[Dict[str, Any]] = []
+    if workspace_url:
+        # External (connection-based) MCP servers, permission-filtered by
+        # listing with the caller's own credentials.
+        try:
+            external = await _list_external_mcp_options(workspace_url, user_token)
+        except Exception as e:
+            logger.warning(f"Could not enumerate external Databricks MCP servers: {e}")
+
+        managed.append(
+            {
+                "id": "sql",
+                "kind": "sql",
+                "name": "Databricks SQL",
+                "description": "Execute SQL against the workspace (managed MCP)",
+                "server_url": f"{workspace_url}/api/2.0/mcp/sql",
+                "expandable": False,
+            }
+        )
+
+        # Unity Catalog Functions — schema-level server built from the
+        # catalog/schema in the workspace's Databricks configuration.
+        try:
+            from src.repositories.databricks_config_repository import (
+                DatabricksConfigRepository,
+            )
+
+            group_id = (
+                getattr(group_context, "primary_group_id", None) if group_context else None
+            )
+            config = await DatabricksConfigRepository(session).get_active_config(
+                group_id=group_id
+            )
+            catalog = getattr(config, "catalog", None) if config else None
+            schema = getattr(config, "schema", None) if config else None
+            if catalog and schema:
+                managed.append(
+                    {
+                        "id": f"functions:{catalog}.{schema}",
+                        "kind": "functions",
+                        "name": f"Unity Catalog Functions ({catalog}.{schema})",
+                        "description": "Run the UC functions in the configured schema",
+                        "server_url": f"{workspace_url}/api/2.0/mcp/functions/{catalog}/{schema}",
+                        "expandable": False,
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Could not derive UC Functions MCP from config: {e}")
+
+        # Built-in system.ai functions (python_exec, etc.) are always offered;
+        # skipped only when the configured schema already IS system.ai.
+        if all(o["id"] != "functions:system.ai" for o in managed):
+            managed.append(
+                {
+                    "id": "functions:system.ai",
+                    "kind": "functions",
+                    "name": "Unity Catalog Functions (system.ai)",
+                    "description": "Built-in functions such as python_exec",
+                    "server_url": f"{workspace_url}/api/2.0/mcp/functions/system/ai",
+                    "expandable": False,
+                }
+            )
+
+        # Two-step types — instances are listed on drill-in.
+        managed.append(
+            {
+                "id": "genie",
+                "kind": "genie",
+                "name": "Genie",
+                "description": "Pick a Genie space",
+                "expandable": True,
+            }
+        )
+        managed.append(
+            {
+                "id": "ai-search",
+                "kind": "ai-search",
+                "name": "AI Search",
+                "description": "Pick an AI Search index",
+                "expandable": True,
+            }
+        )
+
+    return {"workspace_url": workspace_url, "external": external, "managed": managed}
+
+
+@router.get("/databricks/genie-spaces")
+async def list_genie_mcp_spaces(
+    request: Request,
+    search: Optional[str] = None,
+    page_token: Optional[str] = None,
+    group_context: GroupContextDep = None,
+) -> Dict[str, Any]:
+    """
+    Second step of the Genie managed-MCP picker: the caller's Genie spaces as
+    selectable MCP servers (``/api/2.0/mcp/genie/{space_id}``), searchable and
+    paginated — workspaces can have thousands of spaces, so the first step
+    never enumerates them.
+    """
+    from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
+    from src.services.genie_service import GenieService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"options": [], "next_page_token": None}
+
+    genie = GenieService(GenieAuthConfig(use_obo=True, user_token=user_token))
+    spaces = await genie.get_spaces(
+        GenieSpacesRequest(search_query=search, page_token=page_token, page_size=50)
+    )
+    return {
+        "options": [
+            {
+                "id": f"genie:{space.id}",
+                "kind": "genie",
+                "name": space.name,
+                "description": space.description,
+                "server_url": f"{workspace_url}/api/2.0/mcp/genie/{space.id}",
+            }
+            for space in spaces.spaces
+        ],
+        "next_page_token": spaces.next_page_token,
+    }
+
+
+@router.get("/databricks/ai-search-indexes")
+async def list_ai_search_mcp_indexes(
+    request: Request, group_context: GroupContextDep = None
+) -> Dict[str, Any]:
+    """
+    Second step of the AI Search managed-MCP picker: the workspace's vector
+    search indexes as selectable MCP servers
+    (``/api/2.0/mcp/ai-search/{catalog}/{schema}/{index}``), listed with the
+    caller's credentials.
+    """
+    import aiohttp
+
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"options": []}
+
+    headers = auth.get_headers()
+    headers.update(get_user_agent_header(KasalProduct.MCP))
+
+    options: List[Dict[str, Any]] = []
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.get(
+                f"{workspace_url}/api/2.0/vector-search/endpoints", headers=headers
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        f"Could not list vector search endpoints: HTTP {resp.status}"
+                    )
+                    return {"options": []}
+                endpoints = (await resp.json()).get("endpoints") or []
+
+            for endpoint in endpoints:
+                endpoint_name = endpoint.get("name")
+                if not endpoint_name:
+                    continue
+                async with http.get(
+                    f"{workspace_url}/api/2.0/vector-search/indexes",
+                    headers=headers,
+                    params={"endpoint_name": endpoint_name},
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    indexes = (await resp.json()).get("vector_indexes") or []
+                for index in indexes:
+                    full_name = str(index.get("name", ""))
+                    parts = full_name.split(".")
+                    if len(parts) != 3:
+                        continue
+                    catalog, schema, index_name = parts
+                    options.append(
+                        {
+                            "id": f"ai-search:{full_name}",
+                            "kind": "ai-search",
+                            "name": full_name,
+                            "description": f"Endpoint: {endpoint_name}",
+                            "server_url": (
+                                f"{workspace_url}/api/2.0/mcp/ai-search/"
+                                f"{catalog}/{schema}/{index_name}"
+                            ),
+                        }
+                    )
+    except Exception as e:
+        logger.warning(f"Could not enumerate AI Search indexes: {e}")
+
+    return {"options": options}
 
 
 @router.get("/servers/enabled", response_model=MCPServerListResponse)

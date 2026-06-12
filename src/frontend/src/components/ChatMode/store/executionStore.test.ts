@@ -116,6 +116,23 @@ describe('executionStore - basic setters & log', () => {
     expect(useExecutionStore.getState().workspaceMemory).toBe(true);
   });
 
+  it('toggleMcpServer adds and removes MCP selections; setSelectedMcpServers replaces them', () => {
+    useExecutionStore.setState({ selectedMcpServers: [] });
+    useExecutionStore.getState().toggleMcpServer('My MCP');
+    useExecutionStore.getState().toggleMcpServer('Databricks Genie: Sales');
+    expect(useExecutionStore.getState().selectedMcpServers).toEqual([
+      'My MCP',
+      'Databricks Genie: Sales',
+    ]);
+    useExecutionStore.getState().toggleMcpServer('My MCP');
+    expect(useExecutionStore.getState().selectedMcpServers).toEqual([
+      'Databricks Genie: Sales',
+    ]);
+    useExecutionStore.getState().setSelectedMcpServers(['Only This']);
+    expect(useExecutionStore.getState().selectedMcpServers).toEqual(['Only This']);
+    useExecutionStore.getState().setSelectedMcpServers([]);
+  });
+
   it('setMemoryEnabled toggles whether crews run with memory (default enabled)', () => {
     // Defaults to enabled so crews keep memory unless the user picks "No memory".
     expect(useExecutionStore.getState().memoryEnabled).toBe(true);

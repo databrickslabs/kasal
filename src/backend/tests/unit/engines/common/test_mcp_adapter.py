@@ -1475,3 +1475,183 @@ class TestAdapterInitSpnFallbackHeaders:
         params = {'url': '  https://example.com/mcp  '}
         adapter = MCPAdapter(params)
         assert adapter.server_url == 'https://example.com/mcp'
+
+class TestRateLimitRetryAndGate:
+    """429-aware retry + the per-server concurrency gate (the 'Calling tools.'
+    incident: 18 parallel calls hit /api/2.0/mcp/sql, all got 429, none were
+    retried, and the agent's placeholder text leaked out as the answer)."""
+
+    def _params(self):
+        return {
+            'url': f'https://gate-{time.monotonic()}.example.com/mcp',
+            'timeout_seconds': 5,
+            'max_retries': 3,
+            'rate_limit': 60,
+            'headers': {'Authorization': 'Bearer t'},
+        }
+
+    def _http_error(self, status):
+        """An anyio-style ExceptionGroup wrapping an httpx-like status error."""
+        inner = Exception(f"Client error '{status}'")
+        inner.response = Mock(status_code=status)  # type: ignore[attr-defined]
+        try:
+            raise ExceptionGroup('unhandled errors in a TaskGroup', [inner])
+        except ExceptionGroup as eg:
+            return eg
+
+    def test_extract_http_status_walks_exception_groups(self):
+        from src.engines.common.mcp_adapter import _extract_http_status
+
+        assert _extract_http_status(self._http_error(429)) == 429
+        # Nested groups resolve too.
+        nested = ExceptionGroup('outer', [self._http_error(503)])
+        assert _extract_http_status(nested) == 503
+        assert _extract_http_status(Exception('no status')) is None
+
+    def test_server_call_gate_is_shared_per_url(self):
+        from src.engines.common.mcp_adapter import _server_call_gate
+
+        a1 = _server_call_gate('https://one.example.com/mcp')
+        a2 = _server_call_gate('https://one.example.com/mcp')
+        b = _server_call_gate('https://two.example.com/mcp')
+        assert a1 is a2
+        assert a1 is not b
+
+    @pytest.mark.asyncio
+    async def test_429_is_retried_with_backoff_until_success(self):
+        adapter = MCPAdapter(self._params())
+        result = Mock()
+        adapter._get_authentication_headers = AsyncMock(
+            return_value={'Authorization': 'Bearer t'}
+        )
+        adapter._execute_with_transport = AsyncMock(
+            side_effect=[self._http_error(429), result]
+        )
+
+        with patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
+            out = await adapter.execute_tool('execute_sql_read_only', {'q': '1'})
+
+        assert out is result
+        assert adapter._execute_with_transport.await_count == 2
+        # Rate limits back off longer than flaky gateways (4x base).
+        mock_sleep.assert_awaited_once_with(4)
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_http_error_raises_immediately(self):
+        adapter = MCPAdapter(self._params())
+        adapter._get_authentication_headers = AsyncMock(
+            return_value={'Authorization': 'Bearer t'}
+        )
+        adapter._execute_with_transport = AsyncMock(side_effect=self._http_error(401))
+
+        with pytest.raises(ExceptionGroup):
+            await adapter.execute_tool('tool', {})
+        assert adapter._execute_with_transport.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_429_exhausting_retries_raises_the_last_error(self):
+        adapter = MCPAdapter(self._params())
+        adapter._get_authentication_headers = AsyncMock(
+            return_value={'Authorization': 'Bearer t'}
+        )
+        adapter._execute_with_transport = AsyncMock(
+            side_effect=[self._http_error(429)] * 3
+        )
+
+        with patch('asyncio.sleep', new=AsyncMock()):
+            with pytest.raises(ExceptionGroup):
+                await adapter.execute_tool('tool', {})
+        assert adapter._execute_with_transport.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_gate_is_released_after_failure(self):
+        from src.engines.common.mcp_adapter import _server_call_gate
+
+        params = self._params()
+        adapter = MCPAdapter(params)
+        adapter._get_authentication_headers = AsyncMock(
+            return_value={'Authorization': 'Bearer t'}
+        )
+        adapter._execute_with_transport = AsyncMock(side_effect=self._http_error(401))
+
+        with pytest.raises(ExceptionGroup):
+            await adapter.execute_tool('tool', {})
+
+        # All permits are back: acquiring non-blocking succeeds 3 times.
+        gate = _server_call_gate(adapter.server_url)
+        permits = [gate.acquire(blocking=False) for _ in range(3)]
+        try:
+            assert permits == [True, True, True]
+        finally:
+            for _ in permits:
+                gate.release()
+
+
+class TestHardDeadlines:
+    """Discovery and execution attempts run under a hard per-attempt deadline.
+
+    The MCP SDK's ``timeout`` parameter only bounds the HTTP connect: a server
+    that ACCEPTS the connection but never answers initialize/tools-list/call
+    used to hang crew preparation (or a tool call) until the user force-stopped
+    the run. asyncio.wait_for(timeout_seconds) caps every attempt.
+    """
+
+    def _adapter(self) -> MCPAdapter:
+        return MCPAdapter({
+            'url': 'https://test.mcp.server/api/mcp/',
+            'timeout_seconds': 0.05,
+            'max_retries': 1,
+            'rate_limit': 0,
+            'headers': {'Authorization': 'Bearer test-token'},
+        })
+
+    class _HangingConnect:
+        """Async CM that connects fine but whose session never responds."""
+
+        async def __aenter__(self):
+            await asyncio.sleep(30)  # way past the 0.05s deadline
+
+        async def __aexit__(self, *args):
+            return False
+
+    @pytest.mark.asyncio
+    async def test_streamable_discovery_times_out(self):
+        adapter = self._adapter()
+        with patch(
+            'mcp.client.streamable_http.streamablehttp_client',
+            return_value=self._HangingConnect(),
+        ):
+            with pytest.raises(asyncio.TimeoutError):
+                await adapter._discover_via_streamable_http({})
+
+    @pytest.mark.asyncio
+    async def test_sse_discovery_times_out(self):
+        adapter = self._adapter()
+        with patch(
+            'mcp.client.sse.sse_client',
+            return_value=self._HangingConnect(),
+        ):
+            with pytest.raises(asyncio.TimeoutError):
+                await adapter._discover_via_sse({})
+
+    @pytest.mark.asyncio
+    async def test_execution_times_out_and_is_retried_as_transient(self):
+        adapter = self._adapter()
+        adapter.max_retries = 2
+        adapter._get_authentication_headers = AsyncMock(
+            return_value={'Authorization': 'Bearer t'}
+        )
+
+        calls = {'count': 0}
+
+        async def hang(*args, **kwargs):
+            calls['count'] += 1
+            await asyncio.sleep(30)  # way past the 0.05s deadline
+
+        with patch.object(adapter, '_execute_with_transport_unbounded', side_effect=hang):
+            with pytest.raises(asyncio.TimeoutError):
+                await adapter.execute_tool('tool', {})
+
+        # The deadline fired on each attempt: retried once (transient), then
+        # surfaced — instead of hanging the agent until a force stop.
+        assert calls['count'] == 2

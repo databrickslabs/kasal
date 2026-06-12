@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
+import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, postCrewFeedback, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -359,5 +359,36 @@ describe('stripGenieTools', () => {
     expect(out.agents[0]).toEqual({ name: 'A' });
     expect(out.tasks[0].tools).toEqual([]);
     expect((input.tasks[0].tools as string[])).toEqual(['GenieTool']); // input untouched
+  });
+
+  it('tolerates generations without agents or tasks arrays', () => {
+    const out = stripGenieTools({} as never);
+    expect(out.agents).toEqual([]);
+    expect(out.tasks).toEqual([]);
+  });
+});
+
+describe('postCrewFeedback', () => {
+  let post: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    post = vi.fn().mockResolvedValue({
+      data: { id: 'fb-1', crew_id: 'crew-1', rating: 'up', created_at: 'now' },
+    });
+    mockedGetClient.mockReturnValue({ post } as unknown as ReturnType<typeof getClient>);
+  });
+
+  it('posts a thumbs-up without a comment', async () => {
+    const entry = await postCrewFeedback('crew-1', 'up');
+    expect(post).toHaveBeenCalledWith('/crews/crew-1/feedback', { rating: 'up' });
+    expect(entry.id).toBe('fb-1');
+  });
+
+  it('posts a thumbs-down with its comment', async () => {
+    await postCrewFeedback('crew-1', 'down', 'images were broken');
+    expect(post).toHaveBeenCalledWith('/crews/crew-1/feedback', {
+      rating: 'down',
+      comment: 'images were broken',
+    });
   });
 });

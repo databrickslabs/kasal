@@ -7,6 +7,7 @@ MCP client library with Databricks OAuth authentication.
 
 import asyncio
 import logging
+import threading
 import time
 import traceback
 from collections import deque
@@ -14,6 +15,44 @@ from typing import Dict, Optional, Any, List
 
 from src.core.exceptions import MCPConnectionError
 from src.utils.telemetry import KasalProduct, get_user_agent
+
+# Cap concurrent in-flight calls PER SERVER across all tools and threads.
+# CrewAI can emit many parallel tool_calls in one model response, and each MCP
+# execution runs in its own thread + event loop — an unthrottled stampede gets
+# the whole batch 429-rate-limited by managed endpoints (observed: 18 calls in
+# ~3s against /api/2.0/mcp/sql, all rejected). A threading semaphore (not an
+# asyncio one) coordinates across those per-call event loops.
+_MAX_CONCURRENT_CALLS_PER_SERVER = 3
+_SERVER_CALL_GATES: Dict[str, threading.BoundedSemaphore] = {}
+_SERVER_CALL_GATES_LOCK = threading.Lock()
+
+# HTTP statuses worth retrying with backoff: rate limiting + transient
+# upstream failures.
+_RETRYABLE_HTTP_STATUSES = {429, 502, 503, 504}
+
+
+def _server_call_gate(server_url: str) -> threading.BoundedSemaphore:
+    """The shared per-server concurrency gate (created on first use)."""
+    with _SERVER_CALL_GATES_LOCK:
+        gate = _SERVER_CALL_GATES.get(server_url)
+        if gate is None:
+            gate = threading.BoundedSemaphore(_MAX_CONCURRENT_CALLS_PER_SERVER)
+            _SERVER_CALL_GATES[server_url] = gate
+        return gate
+
+
+def _extract_http_status(exc: BaseException) -> Optional[int]:
+    """The HTTP status buried in an exception, walking ExceptionGroup
+    sub-exceptions (anyio TaskGroups wrap httpx.HTTPStatusError)."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    for sub in getattr(exc, "exceptions", None) or []:
+        found = _extract_http_status(sub)
+        if found is not None:
+            return found
+    return None
 
 logger = logging.getLogger(__name__)
 
@@ -225,17 +264,28 @@ class MCPAdapter:
         """Discover tools using streamable HTTP transport."""
         from mcp.client.streamable_http import streamablehttp_client as connect
 
-        async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
-            logger.info("Connected to MCP streamable HTTP endpoint for tool discovery")
-            return await self._list_tools_from_session(read_stream, write_stream)
+        async def _attempt() -> List[Dict[str, Any]]:
+            async with connect(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream, _):
+                logger.info("Connected to MCP streamable HTTP endpoint for tool discovery")
+                return await self._list_tools_from_session(read_stream, write_stream)
+
+        # Hard deadline for the WHOLE attempt. The SDK's ``timeout`` only
+        # bounds the HTTP connect — a server that accepts the connection but
+        # never answers initialize/tools-list would otherwise hang crew
+        # preparation indefinitely (until the user force-stops the run).
+        return await asyncio.wait_for(_attempt(), timeout=self.timeout_seconds)
 
     async def _discover_via_sse(self, clean_headers: Dict[str, str]) -> List[Dict[str, Any]]:
         """Discover tools using SSE transport (fallback)."""
         from mcp.client.sse import sse_client
 
-        async with sse_client(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream):
-            logger.info("Connected to MCP SSE endpoint for tool discovery")
-            return await self._list_tools_from_session(read_stream, write_stream)
+        async def _attempt() -> List[Dict[str, Any]]:
+            async with sse_client(self.server_url, headers=clean_headers, timeout=self.timeout_seconds) as (read_stream, write_stream):
+                logger.info("Connected to MCP SSE endpoint for tool discovery")
+                return await self._list_tools_from_session(read_stream, write_stream)
+
+        # Same hard deadline as the streamable attempt (see above).
+        return await asyncio.wait_for(_attempt(), timeout=self.timeout_seconds)
 
     async def _list_tools_from_session(self, read_stream, write_stream) -> List[Dict[str, Any]]:
         """List tools from an established MCP session."""
@@ -411,39 +461,81 @@ class MCPAdapter:
             "User-Agent": get_user_agent(KasalProduct.MCP)
         }
 
-        last_error: Optional[Exception] = None
-        for attempt in range(self.max_retries):
-            try:
-                result = await self._execute_with_transport(
-                    tool_name, converted_params, clean_headers
-                )
-                self._call_timestamps.append(time.monotonic())
-                return result
-
-            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    backoff = 2 ** attempt
-                    logger.warning(
-                        f"Transient error executing MCP tool {tool_name} "
-                        f"(attempt {attempt + 1}/{self.max_retries}), "
-                        f"retrying in {backoff}s: {e}"
+        # Per-server concurrency gate: parallel tool_calls queue here instead
+        # of stampeding the endpoint into rate limiting. Acquired via
+        # to_thread so a busy gate never blocks this thread's event loop.
+        gate = _server_call_gate(self.server_url)
+        await asyncio.to_thread(gate.acquire)
+        try:
+            last_error: Optional[Exception] = None
+            for attempt in range(self.max_retries):
+                try:
+                    result = await self._execute_with_transport(
+                        tool_name, converted_params, clean_headers
                     )
-                    await asyncio.sleep(backoff)
-                else:
-                    logger.error(
-                        f"MCP tool {tool_name} failed after {self.max_retries} attempts: {e}"
-                    )
-            except Exception as e:
-                _log_exception_group(e, f"Error executing MCP tool {tool_name}")
-                raise
+                    self._call_timestamps.append(time.monotonic())
+                    return result
 
-        raise last_error  # type: ignore[misc]
+                except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                    last_error = e
+                    if attempt < self.max_retries - 1:
+                        backoff = 2 ** attempt
+                        logger.warning(
+                            f"Transient error executing MCP tool {tool_name} "
+                            f"(attempt {attempt + 1}/{self.max_retries}), "
+                            f"retrying in {backoff}s: {e}"
+                        )
+                        await asyncio.sleep(backoff)
+                    else:
+                        logger.error(
+                            f"MCP tool {tool_name} failed after {self.max_retries} attempts: {e}"
+                        )
+                except Exception as e:
+                    # Rate limiting (429) and transient upstream errors arrive
+                    # as httpx.HTTPStatusError wrapped in anyio ExceptionGroups
+                    # — without this they bypassed retry entirely and the agent
+                    # saw every call fail.
+                    status = _extract_http_status(e)
+                    if (
+                        status in _RETRYABLE_HTTP_STATUSES
+                        and attempt < self.max_retries - 1
+                    ):
+                        last_error = e
+                        # Rate limits need a longer pause than flaky gateways.
+                        backoff = (2 ** attempt) * (4 if status == 429 else 1)
+                        logger.warning(
+                            f"MCP tool {tool_name} got HTTP {status} "
+                            f"(attempt {attempt + 1}/{self.max_retries}), "
+                            f"retrying in {backoff}s"
+                        )
+                        await asyncio.sleep(backoff)
+                    else:
+                        _log_exception_group(e, f"Error executing MCP tool {tool_name}")
+                        raise
+
+            raise last_error  # type: ignore[misc]
+        finally:
+            gate.release()
 
     async def _execute_with_transport(
         self, tool_name: str, params: Dict[str, Any], clean_headers: Dict[str, str]
     ) -> Any:
-        """Execute a tool using the transport that succeeded during discovery."""
+        """Execute a tool using the transport that succeeded during discovery.
+
+        The whole attempt runs under a hard deadline (``timeout_seconds``,
+        per-server, default 30s): the SDK's connect timeout doesn't cover
+        initialize/call_tool, so a hung server would otherwise block the agent
+        forever. The resulting asyncio.TimeoutError is retried by execute_tool
+        like any other transient error, then surfaced.
+        """
+        return await asyncio.wait_for(
+            self._execute_with_transport_unbounded(tool_name, params, clean_headers),
+            timeout=self.timeout_seconds,
+        )
+
+    async def _execute_with_transport_unbounded(
+        self, tool_name: str, params: Dict[str, Any], clean_headers: Dict[str, str]
+    ) -> Any:
         from mcp import ClientSession
 
         if self._transport == "sse":

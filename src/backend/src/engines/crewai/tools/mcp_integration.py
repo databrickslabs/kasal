@@ -58,9 +58,34 @@ class MCPIntegration:
 
     @classmethod
     def add_warning(cls, warning: str) -> None:
-        """Add a warning message."""
+        """Add a warning message and surface it in the execution trace."""
         cls._warnings.append(warning)
         logger.warning(f"[MCP WARNING] {warning}")
+        cls._emit_warning_span(warning)
+
+    @staticmethod
+    def _emit_warning_span(warning: str) -> None:
+        """Emit the warning as an OTel span so it lands in execution_trace and
+        the run activity. Without this, a failed MCP connection (e.g. HTTP 403
+        on an external server) leaves the run silently tool-less — the error
+        only exists in backend logs and the user sees agents "working" with
+        no hint that their selected MCP never attached.
+        """
+        try:
+            from opentelemetry import trace as otel_trace
+            from opentelemetry.trace import StatusCode
+
+            tracer = otel_trace.get_tracer("kasal.mcp")
+            with tracer.start_as_current_span("kasal.mcp.error") as span:
+                if not span.is_recording():
+                    return  # OTel disabled — the log line above still has it
+                span.set_attribute("kasal.event_type", "tool_error")
+                span.set_attribute("kasal.agent_name", "MCP")
+                span.set_attribute("kasal.tool_name", "MCP")
+                span.set_attribute("kasal.output_content", warning)
+                span.set_status(StatusCode.ERROR, warning[:500])
+        except Exception as e:  # never let trace plumbing break tool creation
+            logger.debug(f"Could not emit MCP warning span: {e}")
     
     @staticmethod
     async def resolve_effective_mcp_servers(

@@ -94,3 +94,76 @@ class TestCallRaisesRecognizableOverflow:
             "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
         ), pytest.raises(RuntimeError):
             handler.call(messages=[{"role": "user", "content": "hi"}])
+
+
+class TestPlaceholderResponseRetry:
+    """A bare "Calling tools." answer is the sanitization placeholder echoed
+    back by the model (history mimicry after many tool turns) — never a real
+    answer. It must be treated as empty and retried with a corrective nudge."""
+
+    def _make_handler(self) -> DatabricksRetryLLM:
+        with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
+            handler = DatabricksRetryLLM(model="databricks/test-model")
+        # No real backoff waits in tests.
+        handler._get_backoff_time = lambda *a, **k: 0
+        return handler
+
+    def test_is_placeholder_response_detection(self):
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _is_placeholder_response,
+        )
+
+        assert _is_placeholder_response("Calling tools.") is True
+        assert _is_placeholder_response("  calling tools  ") is True
+        assert _is_placeholder_response("Calling tools") is True
+        assert _is_placeholder_response("Calling tools to fetch data…") is False
+        assert _is_placeholder_response("A real answer.") is False
+        assert _is_placeholder_response("") is False
+        assert _is_placeholder_response(None) is False
+        assert _is_placeholder_response(42) is False
+
+    def test_append_placeholder_nudge_is_idempotent_and_safe(self):
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _PLACEHOLDER_NUDGE,
+            _append_placeholder_nudge,
+        )
+
+        messages = [{"role": "user", "content": "hi"}]
+        _append_placeholder_nudge(messages)
+        _append_placeholder_nudge(messages)
+        assert len(messages) == 2
+        assert messages[-1] == {"role": "user", "content": _PLACEHOLDER_NUDGE}
+        _append_placeholder_nudge("not-a-list")  # no crash
+
+    def test_call_retries_placeholder_and_returns_the_real_answer(self):
+        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            _PLACEHOLDER_NUDGE,
+        )
+
+        handler = self._make_handler()
+        messages = [{"role": "user", "content": "list the tables"}]
+
+        with patch(
+            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call",
+            side_effect=["Calling tools.", "Here are the 12 tables…"],
+        ) as mock_call, patch("time.sleep"):
+            result = handler.call(messages=messages)
+
+        assert result == "Here are the 12 tables…"
+        assert mock_call.call_count == 2
+        # The retry carried the corrective nudge so the model breaks the loop.
+        retry_messages = mock_call.call_args_list[1].args[0]
+        assert retry_messages[-1]["content"] == _PLACEHOLDER_NUDGE
+
+    def test_call_gives_up_after_max_retries_of_placeholder(self):
+        handler = self._make_handler()
+
+        with patch(
+            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call",
+            side_effect=["Calling tools."] * 10,
+        ), patch("time.sleep"):
+            result = handler.call(messages=[{"role": "user", "content": "hi"}])
+
+        # Terminal behavior matches the empty-response path (empty string),
+        # not a placeholder masquerading as an answer.
+        assert result == ""

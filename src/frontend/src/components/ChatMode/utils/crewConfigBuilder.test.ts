@@ -437,6 +437,101 @@ describe('crewConfigBuilder', () => {
       expect(agent).not.toHaveProperty('allow_delegation');
     });
 
+    it('injects the chat-selected MCP servers into EVERY agent AND task (tool_configs.MCP_SERVERS)', () => {
+      const config = buildCrewConfigFromGenerated(
+        [
+          { id: 'a1', role: 'R1', tools: ['GenieTool'] },
+          { id: 'a2', role: 'R2' }, // no tools / no other tool_configs
+        ],
+        [
+          // A task WITH its own tools: in CrewAI those replace the agent's
+          // tools, so the MCP selection must ride on the task too or the run
+          // never sees the MCP tools.
+          { id: 't1', tools: ['31'], agent_id: 'a1' },
+          { id: 't2', agent_id: 'a2' }, // and one without tools
+        ],
+        undefined,
+        { GenieTool: { spaceId: 's' } },
+        undefined,
+        {},
+        null,
+        true,
+        true,
+        ['Databricks Genie: Sales', 'My MCP'],
+      );
+
+      expect(config.agents_yaml.agent_a1.tool_configs).toEqual({
+        GenieTool: { spaceId: 's' },
+        MCP_SERVERS: { servers: ['Databricks Genie: Sales', 'My MCP'] },
+      });
+      // Agents without other overrides still get the MCP selection.
+      expect(config.agents_yaml.agent_a2.tool_configs).toEqual({
+        MCP_SERVERS: { servers: ['Databricks Genie: Sales', 'My MCP'] },
+      });
+      // Tasks get it too — with and without their own tools.
+      expect(config.tasks_yaml.task_t1.tool_configs).toEqual({
+        MCP_SERVERS: { servers: ['Databricks Genie: Sales', 'My MCP'] },
+      });
+      expect(config.tasks_yaml.task_t2.tool_configs).toEqual({
+        MCP_SERVERS: { servers: ['Databricks Genie: Sales', 'My MCP'] },
+      });
+    });
+
+    it('appends the originating user request to every task description', () => {
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1' }],
+        [
+          { id: 't1', description: 'Generic mission', agent_id: 'a1' },
+          { id: 't2', agent_id: 'a1' }, // no description
+        ],
+        undefined,
+        undefined,
+        undefined,
+        {},
+        null,
+        true,
+        true,
+        [],
+        'what are my top customers?',
+      );
+      expect(config.tasks_yaml.task_t1.description).toBe(
+        'Generic mission\n\nUSER REQUEST — this run exists to answer it:\nwhat are my top customers?',
+      );
+      expect(config.tasks_yaml.task_t2.description).toBe(
+        '\n\nUSER REQUEST — this run exists to answer it:\nwhat are my top customers?',
+      );
+    });
+
+    it('names the attached MCP data sources in the task grounding', () => {
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1' }],
+        [{ id: 't1', description: 'Generic mission', agent_id: 'a1' }],
+        undefined,
+        undefined,
+        undefined,
+        {},
+        null,
+        true,
+        true,
+        ['Databricks Genie: Sales'],
+        'top customers?',
+      );
+      expect(config.tasks_yaml.task_t1.description).toBe(
+        'Generic mission\n\n' +
+        'USER REQUEST — this run exists to answer it:\ntop customers?\n\n' +
+        'MCP data sources attached — query them for data questions: Databricks Genie: Sales',
+      );
+    });
+
+    it('adds no MCP_SERVERS when nothing is selected (default)', () => {
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1', role: 'R1' }],
+        [{ id: 't1', agent_id: 'a1' }],
+      );
+      expect(config.agents_yaml.agent_a1).not.toHaveProperty('tool_configs');
+      expect(config.tasks_yaml.task_t1).not.toHaveProperty('tool_configs');
+    });
+
     it('resolves a tool referenced by id to its name when attaching tool_configs', () => {
       // The generated crew lists GenieTool by id ('5'); toolConfigs is keyed by
       // the canonical name. The toolNameMap resolves id → name so the override

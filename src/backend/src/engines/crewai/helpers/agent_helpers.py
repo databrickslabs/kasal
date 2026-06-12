@@ -4,6 +4,7 @@ Utilities for Agent configuration, validation, and setup.
 This module provides helper functions for working with CrewAI agents.
 """
 import os
+import re
 from typing import Dict, Any, Optional, Tuple, List
 
 from crewai import Agent
@@ -47,6 +48,15 @@ def _build_security_preamble() -> str:
     AI Security team to guard against indirect prompt injection attacks.
     """
     return _SECURITY_PREAMBLE
+
+
+def redact_llm_repr(llm: Any) -> str:
+    """LLM repr safe for user-downloadable execution logs.
+
+    CrewAI's LLM repr prints ``api_key='dapi…'`` in cleartext; execution logs
+    are downloadable from the UI, so the credential must never land in them.
+    """
+    return re.sub(r"api_key='[^']*'", "api_key='***REDACTED***'", repr(llm))
 
 
 async def create_agent(
@@ -164,8 +174,9 @@ async def create_agent(
         llm = agent_config.get('llm', "gpt-4o")
         logger.warning(f"Using string model name as fallback for agent {agent_key}: {llm}")
     
-    # Log detailed LLM info for debugging
-    logger.info(f"Final LLM configuration for agent {agent_key}: {llm}")
+    # Log detailed LLM info for debugging. The LLM repr includes api_key, and
+    # execution logs are user-downloadable — redact the credential.
+    logger.info(f"Final LLM configuration for agent {agent_key}: {redact_llm_repr(llm)}")
     
     # Handle tool resolution if tool_service is provided and agent has tool_ids
     agent_tools = tools if tools else []

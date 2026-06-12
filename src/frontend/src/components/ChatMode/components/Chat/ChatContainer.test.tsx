@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ChatContainer from './ChatContainer';
+import ChatContainer, { liveStepLine } from './ChatContainer';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // Stub the heavy children so we can isolate ChatContainer logic. The run/
@@ -120,6 +120,37 @@ describe('ChatContainer', () => {
   it('disables the input while loading', () => {
     render(<ChatContainer {...baseProps} messages={[]} isLoading />);
     expect(screen.getByTestId('chat-input')).toBeDisabled();
+  });
+});
+
+describe('liveStepLine — the live header one-liner', () => {
+  const step = (over: Record<string, unknown>) =>
+    ({ label: 'Tool', kind: 'tool_call', ...over } as never);
+
+  it('Memory steps surface the retrieved context, falling back to the sublabel', () => {
+    expect(liveStepLine(step({ label: 'Memory', detail: 'ctx line\nmore' }))).toEqual({
+      name: 'Memory',
+      line: 'ctx line',
+    });
+    expect(liveStepLine(step({ label: 'Memory', sublabel: 'context retrieved' }))).toEqual({
+      name: 'Memory',
+      line: 'context retrieved',
+    });
+  });
+
+  it('other steps prefer the sublabel and fall back to the detail', () => {
+    expect(liveStepLine(step({ sublabel: 'query', detail: 'full' })).line).toBe('query');
+    expect(liveStepLine(step({ detail: 'full output' })).line).toBe('full output');
+  });
+
+  it('returns an empty line when the step has no text at all (or only blanks)', () => {
+    expect(liveStepLine(step({})).line).toBe('');
+    expect(liveStepLine(step({ sublabel: '\n  \n' })).line).toBe('');
+  });
+
+  it('truncates the line to 100 characters', () => {
+    const { line } = liveStepLine(step({ sublabel: 'y'.repeat(140) }));
+    expect(line).toBe(`${'y'.repeat(100)}…`);
   });
 });
 

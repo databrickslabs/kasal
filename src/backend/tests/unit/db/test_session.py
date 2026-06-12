@@ -301,6 +301,22 @@ class TestModuleLevelConfiguration:
         from src.db.session import engine
         assert engine is not None
 
+    def test_sqlite_engine_uses_nullpool(self):
+        """SQLite must use NullPool, not StaticPool: a StaticPool's single
+        shared aiosqlite connection gets closed/rolled back from whichever
+        thread or event loop drops it last (trace writer, OTel exporter,
+        subprocess helpers), raising MissingGreenlet / "Cannot operate on a
+        closed database" at run teardown."""
+        from sqlalchemy.pool import NullPool
+        from src.config.settings import settings
+        from src.db.session import engine, get_sqlite_poolclass
+
+        assert get_sqlite_poolclass() is NullPool
+        # When this test environment actually runs on SQLite, the live engine
+        # must be using it too.
+        if str(settings.DATABASE_URI).startswith('sqlite'):
+            assert isinstance(engine.pool, NullPool)
+
     def test_sync_session_factory_exists(self):
         """Test that sync_session_factory is defined."""
         from src.db.session import sync_session_factory

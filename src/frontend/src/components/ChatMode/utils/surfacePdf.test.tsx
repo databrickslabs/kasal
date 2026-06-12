@@ -145,6 +145,27 @@ describe('downloadSurfacePdf — other deliverables', () => {
     save.mockClear();
     await downloadSurfacePdf(docSurface(), '');
     expect(save).toHaveBeenCalledWith('kasal-app.pdf');
+
+    // A title that sanitizes down to nothing also falls back.
+    save.mockClear();
+    await downloadSurfacePdf(docSurface(), '???');
+    expect(save).toHaveBeenCalledWith('kasal-app.pdf');
+  });
+
+  it('treats a Slides root with malformed children (or a missing root) as a plain document', async () => {
+    const malformed: UiSurface = {
+      rootId: 'root',
+      components: { root: { id: 'root', component: 'Slides', children: 'nope' as never } },
+      data: {},
+    };
+    await downloadSurfacePdf(malformed, 'X');
+    expect(addPage).not.toHaveBeenCalled(); // single-page document path
+
+    vi.clearAllMocks();
+    html2canvasMock.mockResolvedValue(fakeCanvas(2200, 1000));
+    const missingRoot: UiSurface = { rootId: 'ghost', components: {}, data: {} };
+    await downloadSurfacePdf(missingRoot, 'Y');
+    expect(addPage).not.toHaveBeenCalled();
   });
 
   it('cleans the offscreen container up even when rasterization fails', async () => {

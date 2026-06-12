@@ -72,6 +72,13 @@ interface ExecutionState {
    * store for the same persistence reason as ``workspaceMemory``.
    */
   memoryEnabled: boolean;
+  /**
+   * MCP servers (Kasal server NAMES) selected via the chat input's "+" picker.
+   * At execution time these are injected into every generated agent's
+   * tool_configs.MCP_SERVERS so the crew gets the servers' tools. Lives in the
+   * store for the same persistence reason as ``workspaceMemory``.
+   */
+  selectedMcpServers: string[];
 }
 
 interface ExecutionActions {
@@ -83,6 +90,8 @@ interface ExecutionActions {
   toggleChatCollapsed: () => void;
   setWorkspaceMemory: (value: boolean) => void;
   setMemoryEnabled: (value: boolean) => void;
+  toggleMcpServer: (name: string) => void;
+  setSelectedMcpServers: (names: string[]) => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -129,6 +138,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   executionLog: [],
   workspaceMemory: true,
   memoryEnabled: true,
+  selectedMcpServers: [],
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -173,6 +183,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
   setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
   setMemoryEnabled: (value) => set({ memoryEnabled: value }),
+  toggleMcpServer: (name) =>
+    set((s) => ({
+      selectedMcpServers: s.selectedMcpServers.includes(name)
+        ? s.selectedMcpServers.filter((n) => n !== name)
+        : [...s.selectedMcpServers, name],
+    })),
+  setSelectedMcpServers: (names) => set({ selectedMcpServers: names }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });

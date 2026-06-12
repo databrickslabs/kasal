@@ -65,6 +65,23 @@ describe('InputVariablesPrompt', () => {
     expect(field).toHaveAttribute('type', 'text');
   });
 
+  it('drops whitespace-only optional values from the submitted inputs', () => {
+    const onSubmit = vi.fn();
+    render(<InputVariablesPrompt variables={VARS} messageId="m6" onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByPlaceholderText('Enter topic'), { target: { value: 'AI' } });
+    fireEvent.change(screen.getByPlaceholderText('Enter api key'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: /Run crew/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ topic: 'AI' });
+  });
+
+  it('runs safely without an onSubmit handler', () => {
+    render(<InputVariablesPrompt variables={VARS} messageId="m7" />);
+    fireEvent.change(screen.getByPlaceholderText('Enter topic'), { target: { value: 'AI' } });
+    fireEvent.click(screen.getByRole('button', { name: /Run crew/i }));
+    expect(screen.getByRole('button', { name: /Running/i })).toBeDisabled();
+  });
+
   it('isSensitive flags secret-like names only', () => {
     expect(isSensitive('api_key')).toBe(true);
     expect(isSensitive('PASSWORD')).toBe(true);

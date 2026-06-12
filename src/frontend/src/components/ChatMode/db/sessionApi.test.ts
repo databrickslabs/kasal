@@ -30,6 +30,35 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+describe('sessionApi - adapter contract', () => {
+  it('initDb kicks off the background migration and swallows its failures', async () => {
+    (localDb.listSessions as Mock).mockRejectedValueOnce(new Error('idb broken'));
+    await api.initDb();
+    await new Promise((r) => setTimeout(r, 0)); // let the background catch run
+    expect(localDb.initDb).toHaveBeenCalled();
+  });
+
+  it('assignUngroupedSessions is a server-side no-op', async () => {
+    await expect(api.assignUngroupedSessions('g1')).resolves.toBeUndefined();
+  });
+
+  it('clearSessionMessages deletes and recreates the session row', async () => {
+    mockDelete.mockResolvedValue({ data: {} });
+    mockPost.mockResolvedValue({ data: {} });
+
+    await api.clearSessionMessages('s1');
+
+    expect(mockDelete).toHaveBeenCalledWith('/chat-history/sessions/s1');
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/sessions', { id: 's1', title: 'New Chat' });
+  });
+
+  it('clearSessionMessages tolerates delete and recreate failures', async () => {
+    mockDelete.mockRejectedValue(new Error('gone'));
+    mockPost.mockRejectedValue(new Error('conflict'));
+    await expect(api.clearSessionMessages('s1')).resolves.toBeUndefined();
+  });
+});
+
 describe('sessionApi - sessions', () => {
   it('creates a session via the API and maps timestamps as UTC', async () => {
     mockPost.mockResolvedValue({
@@ -61,6 +90,11 @@ describe('sessionApi - sessions', () => {
     expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/named');
     expect(sessions).toHaveLength(1);
     expect(sessions[0].title).toBe('A');
+  });
+
+  it('tolerates a session-list response without data', async () => {
+    mockGet.mockResolvedValue({ data: null });
+    expect(await api.listSessions()).toEqual([]);
   });
 
   it('renames and deletes via the API', async () => {
@@ -103,6 +137,26 @@ describe('sessionApi - messages', () => {
     expect(messages[1].role).toBe('assistant');
   });
 
+  it('maps user and system wire types to their roles', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [
+          { id: 'm1', session_id: 's1', message_type: 'user', content: 'hi', timestamp: '2026-06-11T07:00:00' },
+          { id: 'm2', session_id: 's1', message_type: 'system', content: 'note', timestamp: '2026-06-11T07:00:00' },
+        ],
+      },
+    });
+
+    const [userMsg, systemMsg] = await api.getSessionMessages('s1');
+    expect(userMsg.role).toBe('user');
+    expect(systemMsg.role).toBe('system');
+  });
+
+  it('tolerates a messages response without messages', async () => {
+    mockGet.mockResolvedValue({ data: {} });
+    expect(await api.getSessionMessages('s1')).toEqual([]);
+  });
+
   it('persists a message with client id and packed extras', async () => {
     mockPost.mockResolvedValue({ data: {} });
 
@@ -134,6 +188,21 @@ describe('sessionApi - messages', () => {
     mockPut.mockClear();
     await api.updateMessageInSession('s1', 'm1', { isStreaming: false });
     expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it('updates intent and packed extras via PUT', async () => {
+    mockPut.mockResolvedValue({ data: {} });
+
+    await api.updateMessageInSession('s1', 'm1', {
+      intent: 'generate_crew',
+      resultType: 'trace',
+      resultData: { a: 1 },
+    });
+
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/messages/m1', {
+      intent: 'generate_crew',
+      generation_result: { __chatmode: { resultType: 'trace', resultData: { a: 1 } } },
+    });
   });
 });
 
@@ -170,6 +239,49 @@ describe('sessionApi - migration', () => {
 
     expect(await api.migrateLocalSessionsToServer()).toBe(0);
     expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('returns 0 when there are no local sessions to migrate', async () => {
+    (localDb.listSessions as Mock).mockResolvedValue([]);
+    expect(await api.migrateLocalSessionsToServer()).toBe(0);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('migrates only the current workspace sessions (plus untagged), defaulting empty titles', async () => {
+    localStorage.setItem('selectedGroupId', 'g1');
+    // A corrupt migrated-ids flag falls back to an empty set instead of throwing.
+    localStorage.setItem('kasal-chat-sessions-migrated-ids', 'not-json');
+    (localDb.listSessions as Mock).mockResolvedValue([
+      { id: 'mine', title: '', groupId: 'g1', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'other', title: 'X', groupId: 'g2', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'untagged', title: 'U', createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    (localDb.getSessionMessages as Mock).mockResolvedValue([]);
+    mockGet.mockResolvedValue({ data: [] });
+    mockPost.mockResolvedValue({ data: {} });
+
+    const migrated = await api.migrateLocalSessionsToServer();
+
+    expect(migrated).toBe(2);
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/sessions', { id: 'mine', title: 'New Chat' });
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/sessions', { id: 'untagged', title: 'U' });
+    expect(mockPost).not.toHaveBeenCalledWith(
+      '/chat-history/sessions',
+      expect.objectContaining({ id: 'other' }),
+    );
+  });
+
+  it('keeps another workspace tag when no workspace is selected, and stops on a post failure', async () => {
+    (localDb.listSessions as Mock).mockResolvedValue([
+      { id: 'l1', title: 'A', groupId: 'g9', createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGet.mockResolvedValue({ data: [] });
+    mockPost.mockRejectedValue(new Error('conflict'));
+
+    // No selectedGroupId → tagged sessions still migrate… but the post fails,
+    // so the loop breaks and the session is retried on the next run.
+    expect(await api.migrateLocalSessionsToServer()).toBe(0);
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/sessions', { id: 'l1', title: 'A' });
   });
 });
 

@@ -184,6 +184,32 @@ class TestConfigureSqlite:
 
         mock_conn.execute.assert_not_called()
 
+    def test_configure_sqlite_logs_success_at_info_only_once(self):
+        """With NullPool the hook fires per connection — the success line must
+        log INFO once, then DEBUG, or the log fills with one line per second."""
+        import src.db.session as session_module
+        from src.db.session import configure_sqlite
+
+        mock_record = MagicMock()
+        with patch("src.db.session.settings") as mock_settings, \
+             patch.object(session_module, "logger") as mock_logger, \
+             patch.object(session_module, "_sqlite_configured_logged", False):
+            mock_settings.DATABASE_URI = "sqlite:///test.db"
+            configure_sqlite(MagicMock(), mock_record)
+            configure_sqlite(MagicMock(), mock_record)
+            configure_sqlite(MagicMock(), mock_record)
+
+        info_lines = [
+            c for c in mock_logger.info.call_args_list
+            if "WAL mode" in str(c)
+        ]
+        debug_lines = [
+            c for c in mock_logger.debug.call_args_list
+            if "WAL" in str(c)
+        ]
+        assert len(info_lines) == 1
+        assert len(debug_lines) == 2
+
 
 # ---------------------------------------------------------------------------
 # init_db
