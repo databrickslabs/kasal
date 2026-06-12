@@ -15,6 +15,7 @@ import { detectVariablesFromNodes, detectVariablesFromGenerated } from './utils/
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
+import { parseUiDocument } from './utils/uiDocument';
 import { saveSessionPreview, getSessionPreview } from './db/sessionDb';
 import { useThemeStore } from '../../store/theme';
 import './chat.css';
@@ -229,8 +230,49 @@ export function summarizeTaskOutput(
 }
 
 /**
+ * Strip an embedded A2UI document (createSurface/updateComponents payload)
+ * from a final-answer text. The surface is rendered in the preview pane —
+ * dumping its raw JSON into the chat hard-confuses business users. Keeps the
+ * surrounding prose; falls back to a friendly line when nothing else remains.
+ */
+export function stripEmbeddedUiDocument(text: string): string {
+  if (!text || (!text.includes('createSurface') && !text.includes('updateComponents'))) {
+    return text;
+  }
+  let cleaned = text;
+  // 1. Remove fenced ```json blocks that parse as a UI document.
+  cleaned = cleaned.replace(/```(?:json)?\s*([\s\S]*?)```/g, (match, inner) =>
+    parseUiDocument(inner.trim()) ? '' : match,
+  );
+  // 2. Remove a bare (unfenced) JSON document — from the first '{' that opens
+  //    a parseable UI document through its matching closing brace.
+  if (cleaned.includes('createSurface') || cleaned.includes('updateComponents')) {
+    const start = cleaned.indexOf('{');
+    if (start >= 0) {
+      let depth = 0;
+      for (let i = start; i < cleaned.length; i++) {
+        if (cleaned[i] === '{') depth++;
+        else if (cleaned[i] === '}') {
+          depth--;
+          if (depth === 0) {
+            const candidate = cleaned.slice(start, i + 1);
+            if (parseUiDocument(candidate)) {
+              cleaned = cleaned.slice(0, start) + cleaned.slice(i + 1);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+  // Drop a now-orphaned "json" fence label and tidy whitespace.
+  cleaned = cleaned.replace(/(^|\n)\s*json\s*(\n|$)/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+  return cleaned || 'Generated an app. View it in the preview pane.';
+}
+
+/**
  * Extract the final answer text from the various result shapes the backend
- * returns ("text", {result}, {result:{result}}, {content}, {output}, …).
+ * returns ("text", {result}, {result:{result}}, {content}, {output}, {value}…).
  * Shared by the live SSE completion path AND the REST polling fallback so both
  * render the answer identically.
  */
@@ -244,6 +286,7 @@ export function extractResultText(data: Record<string, unknown>): string {
         if (parsed && typeof parsed === 'object') {
           resultText = (typeof parsed.result === 'string' ? parsed.result : '')
             || (typeof parsed.content === 'string' ? parsed.content : '')
+            || (typeof parsed.value === 'string' ? parsed.value : '')
             || rawResult;
         } else {
           resultText = rawResult;
@@ -253,7 +296,7 @@ export function extractResultText(data: Record<string, unknown>): string {
       }
     } else if (rawResult && typeof rawResult === 'object') {
       const nested = rawResult as Record<string, unknown>;
-      const inner = nested.result ?? nested.content ?? nested.raw;
+      const inner = nested.result ?? nested.content ?? nested.raw ?? nested.value;
       if (typeof inner === 'string') {
         resultText = inner;
       } else if (inner && typeof inner === 'object') {
@@ -277,7 +320,8 @@ export function extractResultText(data: Record<string, unknown>): string {
   } catch {
     resultText = '';
   }
-  return resultText;
+  // The preview pane renders A2UI surfaces — never show their raw JSON in chat.
+  return stripEmbeddedUiDocument(resultText);
 }
 
 const ChatWorkspace: React.FC = () => {
