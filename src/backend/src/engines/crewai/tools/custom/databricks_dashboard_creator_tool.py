@@ -445,8 +445,11 @@ class DatabricksDashboardCreatorTool(BaseTool):
         }
 
         if existing_id:
+            # Lakeview update is PATCH (PUT returns 404 ENDPOINT_NOT_FOUND);
+            # parent_path is create-only — sending it on update is rejected.
             update_url = f"{workspace_url}/api/2.0/lakeview/dashboards/{existing_id}"
-            status_code, body = self._api_request('PUT', update_url, headers, payload)
+            update_payload = {k: v for k, v in payload.items() if k != 'parent_path'}
+            status_code, body = self._api_request('PATCH', update_url, headers, update_payload)
             op = 'updated'
         else:
             status_code, body = self._api_request('POST', list_url, headers, payload)
@@ -479,7 +482,8 @@ class DatabricksDashboardCreatorTool(BaseTool):
             "warehouse_id": warehouse_id,
             "embed_credentials": True,
         }
-        status_code, _ = self._api_request('PUT', pub_url, headers, payload)
+        # Lakeview publish is POST (PUT returns 404 ENDPOINT_NOT_FOUND)
+        status_code, _ = self._api_request('POST', pub_url, headers, payload)
         return status_code in (200, 201)
 
     # ──────────────────────────────────────────────────────────────────────────
