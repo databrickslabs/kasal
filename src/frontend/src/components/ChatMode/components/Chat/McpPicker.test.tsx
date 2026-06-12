@@ -280,25 +280,27 @@ describe('McpPicker', () => {
     });
   });
 
-  it('warns about CRUD rights while Databricks SQL is selected', async () => {
+  it('warns in plain language about data changes while Databricks SQL is selected', async () => {
     render(<McpPicker />);
     await openPicker();
 
     // No warning for other selections.
     fireEvent.click(screen.getByText('My MCP'));
-    expect(screen.queryByText(/CRUD rights/)).toBeNull();
+    expect(screen.queryByText(/change your data/)).toBeNull();
 
     fireEvent.click(screen.getByText('Databricks SQL'));
     await waitFor(() =>
       expect(useExecutionStore.getState().selectedMcpServers).toContain('databricks sql'),
     );
-    expect(screen.getByText(/CRUD rights/)).toBeInTheDocument();
-    expect(screen.getByText(/modify or delete data/)).toBeInTheDocument();
+    // Plain-language wording (no jargon like "CRUD").
+    expect(screen.getByText(/change your data/)).toBeInTheDocument();
+    expect(screen.getByText(/add, update or permanently delete/)).toBeInTheDocument();
+    expect(screen.queryByText(/CRUD/)).toBeNull();
 
     // Deselecting clears the warning.
     fireEvent.click(screen.getByText('Databricks SQL'));
     expect(useExecutionStore.getState().selectedMcpServers).not.toContain('databricks sql');
-    expect(screen.queryByText(/CRUD rights/)).toBeNull();
+    expect(screen.queryByText(/change your data/)).toBeNull();
   });
 
   it('tolerates a managed leaf without a server_url', async () => {

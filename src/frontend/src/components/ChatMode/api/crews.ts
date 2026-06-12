@@ -175,13 +175,30 @@ export function deriveCrewName(
 export async function saveGeneratedCrew(
   data: GenerationCompleteData | Record<string, unknown>,
   name?: string,
-  opts?: { overwrite?: boolean; memoryEnabled?: boolean; spaceId?: string },
+  opts?: {
+    overwrite?: boolean;
+    memoryEnabled?: boolean;
+    spaceId?: string;
+    mcpServers?: string[];
+  },
 ): Promise<SavedCrew> {
   // When a Genie space was picked in chat, persist it as a GenieTool override on
   // any agent/task that uses GenieTool so the saved crew runs against that space.
   const genieToolConfig = opts?.spaceId ? { GenieTool: { spaceId: opts.spaceId } } : undefined;
   const usesGenie = (tools: unknown): boolean =>
     Array.isArray(tools) && tools.some((t) => isGenieToolRef(t));
+
+  // Persist the MCP servers selected for the run onto EVERY agent and task
+  // (mirrors execution's buildCrewConfigFromGenerated injection), so the saved
+  // crew reloads with the same MCP tools instead of losing them.
+  const mcpServers = opts?.mcpServers ?? [];
+  const toolConfigsFor = (tools: unknown): Record<string, unknown> | undefined => {
+    const cfg: Record<string, unknown> = {};
+    if (genieToolConfig && usesGenie(tools)) Object.assign(cfg, genieToolConfig);
+    if (mcpServers.length > 0) cfg.MCP_SERVERS = { servers: mcpServers };
+    return Object.keys(cfg).length > 0 ? cfg : undefined;
+  };
+
   const { agents, tasks } = normalizeGeneration(data);
   const agent_ids = agents.map((a) => a.id).filter((id): id is string => Boolean(id));
   const task_ids = tasks.map((t) => t.id).filter((id): id is string => Boolean(id));
@@ -212,8 +229,8 @@ export async function saveGeneratedCrew(
         tools: Array.isArray(a.tools) ? a.tools : [],
         // Honour the chat's memory choice when provided, else keep the agent's own.
         ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
-        // Persist the picked Genie space on Genie-using agents.
-        ...(genieToolConfig && usesGenie(a.tools) ? { tool_configs: genieToolConfig } : {}),
+        // Persist the Genie space and/or selected MCP servers.
+        ...(toolConfigsFor(a.tools) ? { tool_configs: toolConfigsFor(a.tools) } : {}),
       },
     });
   });
@@ -229,8 +246,8 @@ export async function saveGeneratedCrew(
         description: t.description || '',
         expected_output: t.expected_output || '',
         tools: Array.isArray(t.tools) ? t.tools : [],
-        // Persist the picked Genie space on Genie-using tasks.
-        ...(genieToolConfig && usesGenie(t.tools) ? { tool_configs: genieToolConfig } : {}),
+        // Persist the Genie space and/or selected MCP servers.
+        ...(toolConfigsFor(t.tools) ? { tool_configs: toolConfigsFor(t.tools) } : {}),
       },
     });
 
