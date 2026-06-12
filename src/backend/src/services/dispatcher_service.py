@@ -544,6 +544,12 @@ class DispatcherService:
                             if not workspace_url.startswith("http"):
                                 workspace_url = f"https://{workspace_url}"
                             os.environ["DATABRICKS_HOST"] = workspace_url
+                            # Main process keeps SPN vars (below), so the env
+                            # now holds oauth AND a token — any env-auth SDK
+                            # consumer would raise "more than one authorization
+                            # method configured". Pin the SDK preference to the
+                            # self-refreshing SPN oauth to disambiguate.
+                            os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
                             auth_method = "service_principal"
                             logger.info(
                                 "[Dispatcher] SPN credential set (len=%d)",

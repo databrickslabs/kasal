@@ -1111,6 +1111,18 @@ class TestDatabricksRetryLLMRetryLogic:
         assert mock_retry_llm._is_retryable_error(db_internal) is True
         assert mock_retry_llm._is_retryable_error("502 bad gateway") is True
 
+        # Databricks capacity shedding: litellm.ServiceUnavailableError lowercases
+        # WITHOUT a space and the payload has error_code TEMPORARILY_UNAVAILABLE
+        # with no numeric status (seen on new FMAPI models like claude-fable-5).
+        # Regression: was treated as fatal and failed crew generation instantly.
+        db_capacity = (
+            'litellm.serviceunavailableerror: databricksexception - '
+            '{"error_code":"temporarily_unavailable","message":"databricks is '
+            'unable to satisfy this request due to unexpected capacity '
+            'constraints - we apologize for the inconvenience."}'
+        )
+        assert mock_retry_llm._is_retryable_error(db_capacity) is True
+
     def test_context_length_hint(self, mock_retry_llm):
         """A prompt-too-long / context-window error yields an actionable hint;
         anything else returns None (so normal errors aren't masked)."""

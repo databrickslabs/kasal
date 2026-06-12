@@ -39,6 +39,11 @@ from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHan
 # Databricks/Bedrock models return (avoids the "1 validation error for
 # MemoryAnalysis" retry spam). Import for its module-level patch side effect.
 import src.core.llm_handlers.crewai_memory_patch  # noqa: F401
+# Make CrewAI's InternalInstructor forward api_key/api_base to litellm on
+# structured-output calls (otherwise they fall back to SDK env auth, which
+# breaks tenant isolation and hard-fails on Databricks Apps with "more than
+# one authorization method configured"). Module-level patch side effect.
+import src.core.llm_handlers.crewai_instructor_patch  # noqa: F401
 
 
 # Get the absolute path to the logs directory
@@ -350,6 +355,14 @@ def _configure_databricks_mlflow():
             # MLflow ONLY supports environment variable authentication
             os.environ["DATABRICKS_HOST"] = auth.workspace_url
             os.environ["DATABRICKS_TOKEN"] = auth.token
+            # On Databricks Apps the platform injects DATABRICKS_CLIENT_ID/
+            # SECRET (oauth). Exporting DATABRICKS_TOKEN alongside them makes
+            # every env-auth SDK consumer (e.g. litellm's WorkspaceClient()
+            # fallback) raise "validate: more than one authorization method
+            # configured: oauth and pat". An explicit auth preference makes
+            # the SDK pick the self-refreshing SPN oauth instead of erroring.
+            if os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"):
+                os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
             logger.info(f"MLflow configured with {auth.auth_method} authentication")
 
             # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
