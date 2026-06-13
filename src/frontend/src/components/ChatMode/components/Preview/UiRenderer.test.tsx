@@ -1078,28 +1078,67 @@ describe('UiRenderer — Mindmap rendering: lines behind nodes + no overlap', ()
     expect(child.style.background).toContain('--ui-surface-solid');
   });
 
-  it('caps node width and ellipsizes long labels so nodes cannot overlap neighbours', () => {
+  it('gives nodes a fixed width and wraps long labels to two lines by word', () => {
     const { container } = render(<UiRenderer surface={mindmap()} />);
     const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
-    expect(child.style.maxWidth).toBe('200px'); // MM_NODE_MAX_W
+    expect(child.style.width).toBe('220px'); // MM_NODE_W — fixed width < MM_COL avoids overlap
     const root = container.querySelector('[data-mm-node="r"]') as HTMLElement;
-    expect(root.style.maxWidth).toBe('240px'); // root a touch wider
-    // The long label is ellipsized and its full text stays available on hover.
+    expect(root.style.width).toBe('240px'); // root a touch wider
+    // The long label wraps by word (whiteSpace normal, overflowWrap break-word —
+    // NOT 'anywhere', which broke mid-word) and is clamped to two lines.
     const labelSpan = Array.from(child.querySelectorAll('span')).find(
-      (s) => s.getAttribute('title')?.startsWith('A very long branch'),
+      (s) => s.textContent?.startsWith('A very long branch'),
     ) as HTMLElement;
     expect(labelSpan).toBeTruthy();
-    expect(labelSpan.style.textOverflow).toBe('ellipsis');
+    expect(labelSpan.style.whiteSpace).toBe('normal');
+    expect(labelSpan.style.overflowWrap).toBe('break-word');
     expect(labelSpan.style.overflow).toBe('hidden');
+    expect(labelSpan.style.webkitLineClamp).toBe('2');
   });
 
-  it('spaces depth columns wider than the node cap so a max-width node clears the next column', () => {
+  it('reveals a clamped label in full via a hover tooltip; short nodes get none', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const longNode = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
+    expect(container.querySelector('[data-mm-tooltip]')).toBeNull(); // nothing until hover
+    fireEvent.mouseEnter(longNode);
+    const tip = container.querySelector('[data-mm-tooltip]') as HTMLElement;
+    expect(tip).toBeTruthy();
+    expect(tip.textContent).toContain('A very long branch label that would otherwise overflow its column');
+    fireEvent.mouseLeave(longNode);
+    expect(container.querySelector('[data-mm-tooltip]')).toBeNull();
+    // 'B' is short with no detail → nothing extra to show, so no tooltip.
+    const shortNode = container.querySelector('[data-mm-node="r.1"]') as HTMLElement;
+    fireEvent.mouseEnter(shortNode);
+    expect(container.querySelector('[data-mm-tooltip]')).toBeNull();
+  });
+
+  it('shows a node’s description (label heading + detail body) in the hover tooltip', () => {
+    const withDetail = surface({
+      root: {
+        id: 'root',
+        component: 'Mindmap',
+        root: {
+          label: 'Topic',
+          children: [{ label: 'Revenue', description: 'Total booked revenue across all regions for FY24, net of refunds.' }],
+        },
+      },
+    });
+    const { container } = render(<UiRenderer surface={withDetail} />);
+    const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
+    fireEvent.mouseEnter(child);
+    const tip = container.querySelector('[data-mm-tooltip]') as HTMLElement;
+    expect(tip).toBeTruthy();
+    expect(tip.textContent).toContain('Revenue'); // short label as the heading
+    expect(tip.textContent).toContain('Total booked revenue'); // the detail body
+  });
+
+  it('spaces depth columns wider than the node width so a fixed-width node clears the next column', () => {
     const { container } = render(<UiRenderer surface={mindmap()} />);
     const px = (v: string) => parseFloat(v || '0');
     const root = container.querySelector('[data-mm-node="r"]') as HTMLElement;
     const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
-    // Adjacent depths are MM_COL (260) apart > MM_NODE_MAX_W (200), so the
-    // node footprints (centered, ≤200 wide) never overlap horizontally.
+    // Adjacent depths are MM_COL (260) apart > the widest node (root 240), so the
+    // node footprints (centered, ≤240 wide) never overlap horizontally.
     expect(Math.abs(px(child.style.left) - px(root.style.left))).toBe(260);
   });
 });

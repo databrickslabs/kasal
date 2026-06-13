@@ -475,10 +475,16 @@ const QuizNode: React.FC<{ title?: string; questions: QuizQuestion[] }> = ({ tit
   );
 };
 
-/** A node in a Mindmap tree: a label plus optional nested children. */
+/** A node in a Mindmap tree: a short label, optional longer detail/description
+ *  (surfaced in the hover tooltip), and optional nested children. */
 interface MindmapData {
   label?: unknown;
   text?: unknown;
+  /** Longer explanatory content for the node, shown in the hover tooltip. The
+   *  agent may name it any of these; the first present wins. */
+  description?: unknown;
+  detail?: unknown;
+  note?: unknown;
   children?: MindmapData[];
 }
 
@@ -490,9 +496,13 @@ function mindmapChildren(node: MindmapData): MindmapData[] {
 }
 
 // Auto-layout spacing: horizontal distance per depth level, vertical per leaf row.
-// MM_COL must exceed MM_NODE_MAX_W so a wide node never reaches into the next
-// depth column; MM_ROW exceeds a node's height for the same reason vertically.
-const MM_NODE_MAX_W = 200;
+// MM_COL must exceed the widest node (root = MM_NODE_W + 20) so a node never
+// reaches into the next depth column; MM_ROW exceeds a (two-line) node's height
+// for the same reason vertically.
+// Nodes render at this FIXED width (root a touch wider) so a multi-word label
+// wraps by WORD onto up to two lines at a stable, readable size — instead of the
+// flex box collapsing to a sliver and breaking the text mid-word.
+const MM_NODE_W = 220;
 const MM_COL = 260;
 const MM_ROW = 76;
 const MM_MIN_ZOOM = 0.3;
@@ -501,6 +511,8 @@ const MM_MAX_ZOOM = 2.5;
 interface MMNode {
   id: string;
   label: string;
+  /** Longer content shown in the hover tooltip; '' when the node has none. */
+  detail: string;
   depth: number;
   parentId: string | null;
   childIds: string[];
@@ -517,7 +529,14 @@ function buildMindmap(root: MindmapData): { nodes: Record<string, MMNode>; rootI
   const walk = (node: MindmapData, id: string, depth: number, parentId: string | null, color: string) => {
     const kids = mindmapChildren(node);
     const childIds = kids.map((_, i) => `${id}.${i}`);
-    nodes[id] = { id, label: String(node.label ?? node.text ?? ''), depth, parentId, childIds, color };
+    const label = String(node.label ?? node.text ?? '');
+    // Detail = an explicit description/detail/note, else a `text` that's distinct
+    // from the label (when the agent puts the short name in `label` and the long
+    // form in `text`). The tooltip shows this; '' means "nothing extra to show".
+    const explicit = node.description ?? node.detail ?? node.note;
+    const textVal = node.text != null ? String(node.text) : '';
+    const detail = explicit != null ? String(explicit) : (textVal && textVal !== label ? textVal : '');
+    nodes[id] = { id, label, detail, depth, parentId, childIds, color };
     kids.forEach((k, i) => {
       const childColor = depth === 0 ? CHART_PALETTE[i % CHART_PALETTE.length] : color;
       walk(k, childIds[i], depth + 1, id, childColor);
@@ -640,6 +659,10 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
   // reports its size (see centerView), so the map opens centered.
   const [view, setView] = useState({ scale: 1, x: 48, y: 32 });
   const [grabbing, setGrabbing] = useState(false);
+  // The node the pointer is currently over → drives the detail tooltip. Tracked
+  // with mouse enter/leave (not the pointer-drag handlers), so hovering and
+  // dragging stay independent.
+  const [hovered, setHovered] = useState<string | null>(null);
 
   // Latest positions behind a ref so centerView stays identity-stable (it is a
   // dependency of the canvas ref callback — a new identity would re-attach the
@@ -829,6 +852,8 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
               key={id}
               data-mm-node={id}
               onPointerDown={startNodeDrag(id)}
+              onMouseEnter={() => setHovered(id)}
+              onMouseLeave={() => setHovered((h) => (h === id ? null : h))}
               style={{
                 position: 'absolute',
                 left: p.x,
@@ -856,11 +881,13 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 padding: isRoot ? '11px 17px' : '8px 13px',
                 fontWeight: isRoot ? 800 : 600,
                 fontSize: isRoot ? '1.02rem' : '0.9rem',
-                whiteSpace: 'nowrap',
-                // Cap the node footprint so a long label can't overflow into the
-                // neighbouring depth column / sibling and overlap it. The label
-                // ellipsizes; the full text stays available on hover (title).
-                maxWidth: isRoot ? MM_NODE_MAX_W + 40 : MM_NODE_MAX_W,
+                // FIXED width (not a cap) so the label has a stable box to wrap
+                // its WORDS into; a flexible cap let the box collapse to a sliver
+                // and break the text after ~2 characters. The width stays < MM_COL
+                // so the node never overlaps the neighbouring depth column, and the
+                // label wraps to at most TWO lines (see the label span) — a longer
+                // description is clamped there and revealed in full on hover (title).
+                width: isRoot ? MM_NODE_W + 20 : MM_NODE_W,
                 boxShadow: isRoot ? '0 8px 26px rgba(0,0,0,0.30)' : '0 2px 10px rgba(0,0,0,0.16)',
               }}
             >
@@ -868,8 +895,23 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 99, background: node.color, flexShrink: 0 }} />
               )}
               <span
-                title={node.label}
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}
+                style={{
+                  // Fill the node's fixed width and wrap the label by WORD onto at
+                  // most two lines, then clamp with an ellipsis: short / important
+                  // labels read in full inline, while an over-long label is
+                  // truncated here and stays available on hover via the detail
+                  // tooltip below. `break-word` only splits a single word that is
+                  // itself wider than the box — normal text breaks at spaces.
+                  flex: 1,
+                  minWidth: 0,
+                  display: '-webkit-box',
+                  WebkitBoxOrient: 'vertical',
+                  WebkitLineClamp: 2,
+                  overflow: 'hidden',
+                  whiteSpace: 'normal',
+                  overflowWrap: 'break-word',
+                  lineHeight: 1.25,
+                }}
               >
                 {node.label}
               </span>
@@ -898,6 +940,56 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
           );
         })}
       </div>
+      {/* Detail tooltip — shows the hovered node's full content (a separate
+          description, else the full label when it was clamped to two lines).
+          Rendered OUTSIDE the world transform so it stays unscaled and readable,
+          positioned at the node's screen coordinates. Hidden while panning/dragging. */}
+      {(() => {
+        if (!hovered || grabbing) return null;
+        const n = nodes[hovered];
+        const p = positions[hovered];
+        if (!n || !p) return null;
+        // Only worth a tooltip when there is MORE than the inline label already
+        // shows: a real detail, or a label long enough to have been clamped.
+        if (!n.detail && n.label.length <= 44) return null;
+        const sx = p.x * view.scale + view.x;
+        const sy = p.y * view.scale + view.y;
+        const lift = 34 * view.scale + 10; // clear the node's edge
+        const below = sy < 150; // flip under the node when too near the top to fit above
+        return (
+          <div
+            data-mm-tooltip=""
+            style={{
+              position: 'absolute',
+              left: sx,
+              top: below ? sy + lift : sy - lift,
+              transform: below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+              maxWidth: 300,
+              padding: '8px 11px',
+              borderRadius: 10,
+              background: `linear-gradient(${GLASS_STRONG}, ${GLASS_STRONG}), var(--ui-surface-solid, #141b35)`,
+              border: `1px solid ${GLASS_BORDER}`,
+              color: TEXT,
+              fontSize: '0.8rem',
+              lineHeight: 1.4,
+              whiteSpace: 'normal',
+              overflowWrap: 'break-word',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+              pointerEvents: 'none',
+              zIndex: 3,
+            }}
+          >
+            {n.detail ? (
+              <>
+                <div style={{ fontWeight: 700, marginBottom: 3 }}>{n.label}</div>
+                <div style={{ color: MUTED }}>{n.detail}</div>
+              </>
+            ) : (
+              n.label
+            )}
+          </div>
+        );
+      })()}
       {/* Zoom controls (don't start a pan when pressed). */}
       <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 2 }}>
         {[
