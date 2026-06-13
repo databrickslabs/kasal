@@ -16,7 +16,7 @@ import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import { parseUiDocument } from './utils/uiDocument';
-import { saveSessionPreview, getSessionPreview } from './db/sessionDb';
+import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
 import './chat.css';
 
@@ -347,6 +347,9 @@ const ChatWorkspace: React.FC = () => {
   const sessions = useSessionStore((s) => s.sessions);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const messages = useSessionStore((s) => s.messages);
+  // True until init() finishes restoring a persisted session — holds the empty
+  // "new chat" greeting so a refresh doesn't flash it before the chat loads.
+  const hydrating = useSessionStore((s) => s.hydrating);
   const addMessage = useSessionStore((s) => s.addMessage);
   const addMessageToTargetSession = useSessionStore((s) => s.addMessageToTargetSession);
   const updateMessage = useSessionStore((s) => s.updateMessage);
@@ -1725,6 +1728,7 @@ const ChatWorkspace: React.FC = () => {
           <div className="flex-1 overflow-hidden">
             <ChatContainer
               messages={messages}
+              hydrating={hydrating}
               onSend={handleSend}
               onCommand={handleSend}
               onExecuteCrew={handleExecuteCrew}

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
-import { saveSessionPreview, getSessionPreview } from '../db/sessionDb';
+import { saveSessionPreview, getSessionPreview } from '../db/sessionApi';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
 
 // --- Mocks for sibling modules ---
@@ -18,7 +18,7 @@ vi.mock('./sessionStore', () => {
   };
 });
 
-vi.mock('../db/sessionDb', () => ({
+vi.mock('../db/sessionApi', () => ({
   saveSessionPreview: vi.fn(),
   getSessionPreview: vi.fn(() => Promise.resolve(undefined)),
   setSessionRunningJob: vi.fn(() => Promise.resolve()),

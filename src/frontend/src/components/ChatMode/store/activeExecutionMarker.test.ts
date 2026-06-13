@@ -4,7 +4,7 @@ const setSessionRunningJob = vi.fn();
 const getSessionRunningJob = vi.fn();
 const clearSessionRunningJob = vi.fn();
 
-vi.mock('../db/sessionDb', () => ({
+vi.mock('../db/sessionApi', () => ({
   setSessionRunningJob: (...a: unknown[]) => setSessionRunningJob(...a),
   getSessionRunningJob: (...a: unknown[]) => getSessionRunningJob(...a),
   clearSessionRunningJob: (...a: unknown[]) => clearSessionRunningJob(...a),

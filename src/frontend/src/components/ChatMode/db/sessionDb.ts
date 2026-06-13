@@ -67,32 +67,39 @@ export function initDb(): Promise<IDBPDatabase> {
 }
 
 // --- In-flight crew run marker (for refresh reconnect) ---------------------
-// Stored on the session record itself (no extra object store / version bump).
+// Stored as a SEPARATE record in the `sessions` store under a reserved id prefix
+// (no extra object store / version bump). It must NOT live on the session record
+// itself: during a run that record is rewritten constantly (touchSession on every
+// persisted message/trace, plus the auto-title rename), and those non-atomic
+// read-modify-writes don't carry the marker — so a concurrent write clobbered it
+// (a lost-update race) and a refresh then found no job to reconnect to. A
+// dedicated record shares no fields with those writers, so it can't be clobbered.
+const RUNNING_JOB_PREFIX = 'running-job:';
 
-/** Record the in-flight crew job for a session. */
+/** Record the in-flight crew job for a session (in its own marker record). */
 export async function setSessionRunningJob(sessionId: string, jobId: string): Promise<void> {
   const db = await initDb();
-  const session = await db.get('sessions', sessionId);
-  if (session) {
-    await db.put('sessions', { ...session, runningJobId: jobId });
-  }
+  // Write the marker UNCONDITIONALLY — it must NOT depend on a session record
+  // existing in this IndexedDB store. Sessions are persisted server-side
+  // (db/sessionApi), so the local 'sessions' store is empty; a previous guard
+  // (`if (!session) return`) therefore dropped EVERY marker write, which silently
+  // disabled refresh-reconnect entirely. The marker is a standalone record
+  // (RUNNING_JOB_PREFIX), so IndexedDB stores and returns it regardless of where
+  // the sessions themselves live.
+  await db.put('sessions', { id: `${RUNNING_JOB_PREFIX}${sessionId}`, runningJobId: jobId });
 }
 
 /** Read the in-flight crew job for a session, or null if none. */
 export async function getSessionRunningJob(sessionId: string): Promise<string | null> {
   const db = await initDb();
-  const session = await db.get('sessions', sessionId);
-  return session?.runningJobId ?? null;
+  const marker = await db.get('sessions', `${RUNNING_JOB_PREFIX}${sessionId}`);
+  return (marker?.runningJobId as string) ?? null;
 }
 
 /** Clear the in-flight crew job marker for a session (run finished/stopped). */
 export async function clearSessionRunningJob(sessionId: string): Promise<void> {
   const db = await initDb();
-  const session = await db.get('sessions', sessionId);
-  if (session && 'runningJobId' in session) {
-    delete session.runningJobId;
-    await db.put('sessions', session);
-  }
+  await db.delete('sessions', `${RUNNING_JOB_PREFIX}${sessionId}`);
 }
 
 /**
@@ -104,7 +111,10 @@ export async function assignUngroupedSessions(groupId: string): Promise<void> {
   if (!groupId) return;
   const db = await initDb();
   const all = await db.getAll('sessions');
-  const ungrouped = all.filter((s) => !s.groupId);
+  // Skip running-job marker records (not real sessions; see RUNNING_JOB_PREFIX).
+  const ungrouped = all.filter(
+    (s) => !s.groupId && !(typeof s.id === 'string' && s.id.startsWith(RUNNING_JOB_PREFIX)),
+  );
   if (ungrouped.length === 0) return;
   const tx = db.transaction('sessions', 'readwrite');
   for (const s of ungrouped) {
@@ -138,6 +148,9 @@ export async function listSessions(groupId?: string): Promise<ChatSession[]> {
   const db = await initDb();
   const all = await db.getAll('sessions');
   return all
+    // Exclude running-job marker records (reserved id prefix) — they aren't
+    // real sessions and would otherwise show as phantom rows in the history rail.
+    .filter((s) => !(typeof s.id === 'string' && s.id.startsWith(RUNNING_JOB_PREFIX)))
     .filter((s) => !groupId || s.groupId === groupId)
     .map((s) => ({
       ...s,
@@ -150,6 +163,8 @@ export async function listSessions(groupId?: string): Promise<ChatSession[]> {
 export async function deleteSession(id: string): Promise<void> {
   const db = await initDb();
   await db.delete('sessions', id);
+  // Drop the running-job marker record too (if any).
+  await db.delete('sessions', `${RUNNING_JOB_PREFIX}${id}`);
   // Delete preview for this session
   await db.delete('previews', id);
   // Delete all messages for this session

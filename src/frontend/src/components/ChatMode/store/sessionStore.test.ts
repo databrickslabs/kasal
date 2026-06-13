@@ -54,6 +54,7 @@ const resetState = () => {
     currentSessionId: null,
     messages: [],
     isDbReady: false,
+    hydrating: false,
   });
 };
 
@@ -79,18 +80,38 @@ afterEach(() => {
 });
 
 describe('init', () => {
-  it('lands on a fresh chat even when a last-active session is persisted', async () => {
-    // Landing must NOT auto-restore the previous session — history stays in
-    // the rail; a new session is created lazily on the first message.
+  it('restores the last-active session on a full reload (refresh)', async () => {
+    // A refresh must keep the user in the conversation they left — the session
+    // recorded in ACTIVE_SESSION_KEY is reloaded with its messages.
     const sessions = [makeSession('s1'), makeSession('s2')];
     (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue(sessions);
+    const msgs = [{ id: 'm1', role: 'user', content: 'hi' }];
+    (db.getSessionMessages as ReturnType<typeof vi.fn>).mockResolvedValue(msgs);
     localStorage.setItem(ACTIVE_SESSION_KEY, 's2');
+    useSessionStore.setState({ hydrating: true }); // seeded from the persisted id
 
     await useSessionStore.getState().init();
 
     const state = useSessionStore.getState();
     expect(state.isDbReady).toBe(true);
     expect(state.sessions).toEqual(sessions);
+    expect(state.currentSessionId).toBe('s2');
+    expect(state.messages).toEqual(msgs);
+    expect(db.getSessionMessages).toHaveBeenCalledWith('s2');
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('s2');
+    // The greeting hold is released once restore completes.
+    expect(state.hydrating).toBe(false);
+  });
+
+  it('lands on a fresh chat when the active session no longer belongs to the workspace', async () => {
+    // Stale id (deleted, or from another group) → do not restore; clear it.
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue(sessions);
+    localStorage.setItem(ACTIVE_SESSION_KEY, 'gone');
+
+    await useSessionStore.getState().init();
+
+    const state = useSessionStore.getState();
     expect(state.currentSessionId).toBeNull();
     expect(state.messages).toEqual([]);
     expect(db.getSessionMessages).not.toHaveBeenCalled();
@@ -120,6 +141,25 @@ describe('init', () => {
     expect(state.currentSessionId).toBeNull();
     expect(state.messages).toEqual([]);
     expect(db.getSessionMessages).not.toHaveBeenCalled();
+  });
+});
+
+describe('reloadForGroup (workspace switch)', () => {
+  it('lands on a fresh chat and clears the active session even if one is persisted', async () => {
+    // Switching workspace must NOT carry over the other group's session — the
+    // default (no restore) drops it; history stays in the rail.
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue(sessions);
+    localStorage.setItem(ACTIVE_SESSION_KEY, 's2');
+
+    await useSessionStore.getState().reloadForGroup();
+
+    const state = useSessionStore.getState();
+    expect(state.currentSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(state.sessions).toEqual(sessions);
+    expect(db.getSessionMessages).not.toHaveBeenCalled();
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
   });
 });
 

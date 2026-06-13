@@ -15,7 +15,11 @@ from src.schemas.chat_history import (
     GetSessionRequest,
     GetUserSessionsRequest,
     NamedChatSessionResponse,
+    RunningJobResponse,
     SaveMessageRequest,
+    SavePreviewRequest,
+    SessionPreviewResponse,
+    SetRunningJobRequest,
     UpdateMessageRequest,
 )
 from src.services.chat_history_service import ChatHistoryService
@@ -244,13 +248,19 @@ async def create_new_chat_session(
 
     return {"session_id": session_id}
 
+
 # ---------------------------------------------------------------------------
 # Named chat sessions (chat-mode workspace). Server-side replacement for the
 # browser IndexedDB session store: sessions live in SQLite locally and in
 # Lakebase when a Lakebase backend is active (smart-routed session).
 # ---------------------------------------------------------------------------
 
-@router.post("/sessions", response_model=NamedChatSessionResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/sessions",
+    response_model=NamedChatSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_named_session(
     request: ChatSessionCreateRequest,
     service: ChatHistoryServiceDep,
@@ -307,6 +317,109 @@ async def rename_named_session(
     return NamedChatSessionResponse.model_validate(record)
 
 
+# ---------------------------------------------------------------------------
+# Per-session preview + in-flight job marker. Server-side replacement for the
+# browser IndexedDB stores, so previews and refresh-reconnect survive reload
+# and follow the user across browsers/devices.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions/{session_id}/preview", response_model=SessionPreviewResponse)
+async def get_session_preview(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Return the session's rendered preview, or all-null when it has none."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    preview = await service.get_preview(session_id, group_context=group_context)
+    if not preview:
+        return SessionPreviewResponse()
+    return SessionPreviewResponse(**preview)
+
+
+@router.put("/sessions/{session_id}/preview", status_code=status.HTTP_204_NO_CONTENT)
+async def save_session_preview(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    request: SavePreviewRequest,
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Save (replace) the session's rendered preview (group-checked)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    ok = await service.set_preview(
+        session_id,
+        request.type,
+        request.data,
+        request.title,
+        group_context=group_context,
+    )
+    if not ok:
+        raise NotFoundError("Chat session not found")
+
+
+@router.delete("/sessions/{session_id}/preview", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session_preview(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Clear the session's rendered preview (group-checked)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    # Missing session → treat as already-clear (idempotent).
+    await service.set_preview(session_id, None, None, None, group_context=group_context)
+
+
+@router.get("/sessions/{session_id}/running-job", response_model=RunningJobResponse)
+async def get_session_running_job(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Return the session's in-flight crew job id (for refresh reconnect), or null."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    job_id = await service.get_running_job(session_id, group_context=group_context)
+    return RunningJobResponse(job_id=job_id)
+
+
+@router.put(
+    "/sessions/{session_id}/running-job", status_code=status.HTTP_204_NO_CONTENT
+)
+async def set_session_running_job(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    request: SetRunningJobRequest,
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Record the in-flight crew job for a session (group-checked)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    ok = await service.set_running_job(
+        session_id, request.job_id, group_context=group_context
+    )
+    if not ok:
+        raise NotFoundError("Chat session not found")
+
+
+@router.delete(
+    "/sessions/{session_id}/running-job", status_code=status.HTTP_204_NO_CONTENT
+)
+async def clear_session_running_job(
+    session_id: Annotated[str, Path(..., description="Chat session identifier")],
+    service: ChatHistoryServiceDep,
+    group_context: GroupContextDep,
+):
+    """Clear the session's in-flight crew job marker (run finished/stopped)."""
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+    # Idempotent: missing session → nothing to clear.
+    await service.set_running_job(session_id, None, group_context=group_context)
+
+
 @router.put("/messages/{message_id}", response_model=ChatHistoryResponse)
 async def update_chat_message(
     message_id: Annotated[str, Path(..., description="Message identifier")],
@@ -328,4 +441,3 @@ async def update_chat_message(
     if not updated:
         raise NotFoundError("Chat message not found")
     return updated
-

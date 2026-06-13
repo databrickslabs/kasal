@@ -7,8 +7,10 @@
  * so they land in SQLite during local dev and in Lakebase when a Lakebase
  * backend is active — and survive browser/profile changes.
  *
- * Device-local concerns (previews, running-job markers) intentionally stay in
- * sessionDb's IndexedDB store.
+ * Previews and the running-job (refresh-reconnect) marker also live server-side
+ * now (on the chat_sessions row). They used to sit in browser IndexedDB, which
+ * meant they didn't follow the user across browsers AND silently broke once
+ * sessions themselves moved to the server.
  */
 
 import { ChatMessage, ChatSession } from '../types/chat';
@@ -183,6 +185,98 @@ export async function clearSessionMessages(sessionId: string): Promise<void> {
   await client
     .post(`${BASE}/sessions`, { id: sessionId, title: 'New Chat' })
     .catch(() => undefined);
+}
+
+// ---------------------------------------------------------------------------
+// Per-session preview (rendered A2UI deliverable). Server-side replacement for
+// the IndexedDB 'previews' store. Reads are resilient (return undefined on any
+// error) so a transient failure never blocks the chat; writes are best-effort.
+// ---------------------------------------------------------------------------
+
+export interface StoredPreview {
+  sessionId: string;
+  type: string;
+  data: string;
+  title?: string;
+}
+
+interface PreviewWire {
+  type: string | null;
+  data: string | null;
+  title: string | null;
+}
+
+export async function saveSessionPreview(
+  sessionId: string,
+  preview: { type: string; data: string; title?: string },
+): Promise<void> {
+  try {
+    await getClient().put(`${BASE}/sessions/${sessionId}/preview`, {
+      type: preview.type,
+      data: preview.data,
+      title: preview.title ?? null,
+    });
+  } catch {
+    /* best-effort persistence — never break the chat on a failed write */
+  }
+}
+
+export async function getSessionPreview(
+  sessionId: string,
+): Promise<StoredPreview | undefined> {
+  try {
+    const res = await getClient().get<PreviewWire>(`${BASE}/sessions/${sessionId}/preview`);
+    const w = res.data;
+    if (!w || !w.data) return undefined; // no preview stored
+    return {
+      sessionId,
+      type: w.type || 'ui',
+      data: w.data,
+      ...(w.title ? { title: w.title } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function deleteSessionPreview(sessionId: string): Promise<void> {
+  try {
+    await getClient().delete(`${BASE}/sessions/${sessionId}/preview`);
+  } catch {
+    /* best-effort */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-session in-flight crew job marker (refresh reconnect). Server-side
+// replacement for the IndexedDB marker.
+// ---------------------------------------------------------------------------
+
+export async function setSessionRunningJob(sessionId: string, jobId: string): Promise<void> {
+  try {
+    await getClient().put(`${BASE}/sessions/${sessionId}/running-job`, { job_id: jobId });
+  } catch {
+    /* best-effort — reconnect just won't happen if this write is lost */
+  }
+}
+
+export async function getSessionRunningJob(sessionId: string): Promise<string | null> {
+  try {
+    const res = await getClient().get<{ job_id: string | null }>(
+      `${BASE}/sessions/${sessionId}/running-job`,
+    );
+    return res.data?.job_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearSessionRunningJob(sessionId: string): Promise<void> {
+  try {
+    await getClient().delete(`${BASE}/sessions/${sessionId}/running-job`);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ---------------------------------------------------------------------------

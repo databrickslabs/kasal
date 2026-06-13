@@ -4,6 +4,7 @@ Unit tests for ChatSessionRepository (named chat-mode sessions).
 Covers group-scoped CRUD, ordering, the empty-group short-circuits, and the
 model's table shape (server-side replacement for browser IndexedDB storage).
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,15 +36,35 @@ class TestModelShape:
     def test_table_and_columns(self):
         assert ChatSession.__tablename__ == "chat_sessions"
         cols = {c.name for c in ChatSession.__table__.columns}
-        assert {"id", "title", "user_id", "created_at", "updated_at", "group_id", "group_email"} <= cols
+        assert {
+            "id",
+            "title",
+            "user_id",
+            "created_at",
+            "updated_at",
+            "group_id",
+            "group_email",
+        } <= cols
+        # Server-side replacements for the old browser IndexedDB stores.
+        assert {
+            "running_job_id",
+            "preview_type",
+            "preview_data",
+            "preview_title",
+        } <= cols
 
 
 class TestCreate:
     @pytest.mark.asyncio
     async def test_create_adds_and_flushes(self, repo, mock_session):
-        record = await repo.create({
-            "id": "s1", "title": "T", "user_id": "u@x.com", "group_id": "g1",
-        })
+        record = await repo.create(
+            {
+                "id": "s1",
+                "title": "T",
+                "user_id": "u@x.com",
+                "group_id": "g1",
+            }
+        )
         assert record.id == "s1"
         mock_session.add.assert_called_once()
         mock_session.flush.assert_awaited_once()
@@ -120,3 +141,59 @@ class TestTouchAndDelete:
     async def test_delete_empty_groups_short_circuits(self, repo, mock_session):
         assert await repo.delete_by_id_and_group("s1", []) is False
         mock_session.execute.assert_not_awaited()
+
+
+class TestRunningJobMarker:
+    @pytest.mark.asyncio
+    async def test_set_running_job(self, repo, mock_session):
+        row = ChatSession(id="s1", title="T", user_id="u", group_id="g1")
+        mock_session.execute = AsyncMock(return_value=_scalars_result([row]))
+        result = await repo.set_running_job("s1", ["g1"], "job-1")
+        assert result is row
+        assert row.running_job_id == "job-1"
+        mock_session.flush.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_clear_running_job_with_none(self, repo, mock_session):
+        row = ChatSession(id="s1", running_job_id="job-1", group_id="g1")
+        mock_session.execute = AsyncMock(return_value=_scalars_result([row]))
+        await repo.set_running_job("s1", ["g1"], None)
+        assert row.running_job_id is None
+
+    @pytest.mark.asyncio
+    async def test_set_running_job_not_found(self, repo, mock_session):
+        mock_session.execute = AsyncMock(return_value=_scalars_result([]))
+        assert await repo.set_running_job("missing", ["g1"], "j") is None
+
+
+class TestPreview:
+    @pytest.mark.asyncio
+    async def test_set_preview(self, repo, mock_session):
+        row = ChatSession(id="s1", title="T", user_id="u", group_id="g1")
+        mock_session.execute = AsyncMock(return_value=_scalars_result([row]))
+        result = await repo.set_preview("s1", ["g1"], "ui", '{"messages":[]}', "Deck")
+        assert result is row
+        assert row.preview_type == "ui"
+        assert row.preview_data == '{"messages":[]}'
+        assert row.preview_title == "Deck"
+        mock_session.flush.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_clear_preview_with_none(self, repo, mock_session):
+        row = ChatSession(
+            id="s1",
+            preview_type="ui",
+            preview_data="x",
+            preview_title="T",
+            group_id="g1",
+        )
+        mock_session.execute = AsyncMock(return_value=_scalars_result([row]))
+        await repo.set_preview("s1", ["g1"], None, None, None)
+        assert row.preview_type is None
+        assert row.preview_data is None
+        assert row.preview_title is None
+
+    @pytest.mark.asyncio
+    async def test_set_preview_not_found(self, repo, mock_session):
+        mock_session.execute = AsyncMock(return_value=_scalars_result([]))
+        assert await repo.set_preview("missing", ["g1"], "ui", "x", None) is None

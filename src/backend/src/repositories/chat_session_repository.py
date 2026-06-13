@@ -81,6 +81,35 @@ class ChatSessionRepository:
         )
         await self.session.execute(stmt)
 
+    async def set_running_job(
+        self, session_id: str, group_ids: List[str], job_id: Optional[str]
+    ) -> Optional[ChatSession]:
+        """Set (or clear, when job_id is None) the in-flight job marker."""
+        record = await self.get_by_id_and_group(session_id, group_ids)
+        if not record:
+            return None
+        record.running_job_id = job_id
+        await self.session.flush()
+        return record
+
+    async def set_preview(
+        self,
+        session_id: str,
+        group_ids: List[str],
+        preview_type: Optional[str],
+        preview_data: Optional[str],
+        preview_title: Optional[str],
+    ) -> Optional[ChatSession]:
+        """Save (or clear, when all None) the session's rendered preview."""
+        record = await self.get_by_id_and_group(session_id, group_ids)
+        if not record:
+            return None
+        record.preview_type = preview_type
+        record.preview_data = preview_data
+        record.preview_title = preview_title
+        await self.session.flush()
+        return record
+
     async def delete_by_id_and_group(
         self, session_id: str, group_ids: List[str]
     ) -> bool:

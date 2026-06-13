@@ -24,7 +24,7 @@ from src.db.base import Base
 from src.core.logger import LoggerManager
 
 # SQL identifier validation to prevent injection in dynamic SQL
-_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_identifier(name: str, kind: str = "identifier") -> str:
@@ -49,9 +49,9 @@ logger = logging.getLogger(__name__)
 
 # Check if SQL debugging is enabled via environment variable or debug all
 SQL_DEBUG = (
-    os.environ.get("SQL_DEBUG", "false").lower() == "true" or
-    os.environ.get("KASAL_DEBUG_ALL", "false").lower() == "true" or
-    os.environ.get("KASAL_LOG_DATABASE", "").upper() == "DEBUG"
+    os.environ.get("SQL_DEBUG", "false").lower() == "true"
+    or os.environ.get("KASAL_DEBUG_ALL", "false").lower() == "true"
+    or os.environ.get("KASAL_LOG_DATABASE", "").upper() == "DEBUG"
 )
 if SQL_DEBUG:
     logger.warning("=" * 80)
@@ -60,9 +60,11 @@ if SQL_DEBUG:
     logger.warning("To disable: unset SQL_DEBUG or export SQL_DEBUG=false")
     logger.warning("=" * 80)
 
+
 # Database retry decorator for handling SQLite locks
 def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float = 2.0):
     """Decorator to retry database operations when SQLite is locked."""
+
     def decorator(func):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -72,9 +74,14 @@ def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float 
                     return await func(*args, **kwargs)
                 except OperationalError as e:
                     last_exception = e
-                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                        wait_time = delay * (backoff ** attempt)
-                        logger.warning(f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                    if (
+                        "database is locked" in str(e).lower()
+                        and attempt < max_retries - 1
+                    ):
+                        wait_time = delay * (backoff**attempt)
+                        logger.warning(
+                            f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
+                        )
                         await asyncio.sleep(wait_time)
                         continue
                     raise
@@ -91,9 +98,14 @@ def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float 
                     return func(*args, **kwargs)
                 except OperationalError as e:
                     last_exception = e
-                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                        wait_time = delay * (backoff ** attempt)
-                        logger.warning(f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                    if (
+                        "database is locked" in str(e).lower()
+                        and attempt < max_retries - 1
+                    ):
+                        wait_time = delay * (backoff**attempt)
+                        logger.warning(
+                            f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
+                        )
                         time.sleep(wait_time)
                         continue
                     raise
@@ -107,12 +119,16 @@ def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float 
             return async_wrapper
         else:
             return sync_wrapper
+
     return decorator
+
 
 # Create a SQLAlchemy logger using the LoggerManager
 class SQLAlchemyLogger:
     def __init__(self):
-        self.formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        self.formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
         self.log_dir = logger_manager._log_dir
         self.setup_logger()
 
@@ -121,7 +137,7 @@ class SQLAlchemyLogger:
         sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
 
         # Get the sqlalchemy engine logger
-        engine_logger = logging.getLogger('sqlalchemy.engine')
+        engine_logger = logging.getLogger("sqlalchemy.engine")
 
         # When SQL_DEBUG is enabled, we want both console and file output
         if SQL_DEBUG:
@@ -132,15 +148,15 @@ class SQLAlchemyLogger:
 
             # Add console handler for immediate visibility
             console_handler = logging.StreamHandler()
-            console_handler.setFormatter(logging.Formatter('[SQL] %(message)s'))
+            console_handler.setFormatter(logging.Formatter("[SQL] %(message)s"))
             engine_logger.addHandler(console_handler)
 
             # Also add file handler for persistent logging
             file_handler = logging.handlers.RotatingFileHandler(
                 sqlalchemy_log_file,
-                maxBytes=10*1024*1024,  # 10MB
+                maxBytes=10 * 1024 * 1024,  # 10MB
                 backupCount=5,
-                encoding='utf-8'
+                encoding="utf-8",
             )
             file_handler.setFormatter(self.formatter)
             engine_logger.addHandler(file_handler)
@@ -154,9 +170,9 @@ class SQLAlchemyLogger:
             # Create file handler if not already configured elsewhere
             file_handler = logging.handlers.RotatingFileHandler(
                 sqlalchemy_log_file,
-                maxBytes=10*1024*1024,  # 10MB
+                maxBytes=10 * 1024 * 1024,  # 10MB
                 backupCount=5,
-                encoding='utf-8'
+                encoding="utf-8",
             )
             file_handler.setFormatter(self.formatter)
             engine_logger.addHandler(file_handler)
@@ -165,6 +181,7 @@ class SQLAlchemyLogger:
         logger.info(f"SQLAlchemy logs will be written to {sqlalchemy_log_file}")
         if SQL_DEBUG:
             logger.info("SQL_DEBUG enabled: SQL queries will also be shown in console")
+
 
 # Initialize SQLAlchemy logging
 sql_logger = SQLAlchemyLogger()
@@ -180,6 +197,7 @@ use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
 # Track the main event loop for intelligent engine selection
 main_event_loop = None
 
+
 def set_main_event_loop():
     """
     Capture the main event loop when the FastAPI app starts.
@@ -192,6 +210,7 @@ def set_main_event_loop():
     except RuntimeError:
         logger.warning("Failed to capture main event loop")
 
+
 # Try to detect early if we're in an async context
 try:
     main_event_loop = asyncio.get_running_loop()
@@ -200,10 +219,11 @@ except RuntimeError:
     # No event loop running yet - will be set later by set_main_event_loop()
     logger.info("No event loop during module import - will capture during app startup")
 
+
 # Determine isolation level based on database type
 def get_isolation_level(database_uri: str) -> str:
     """Get appropriate isolation level based on database type."""
-    if database_uri.startswith('sqlite'):
+    if database_uri.startswith("sqlite"):
         # SQLite with SQLAlchemy: Use None for autocommit behavior with async
         # This allows SQLite to handle transactions automatically
         return None
@@ -211,9 +231,10 @@ def get_isolation_level(database_uri: str) -> str:
         # PostgreSQL supports: READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ, SERIALIZABLE
         return "READ COMMITTED"
 
+
 def get_sqlite_connect_args(database_uri: str) -> dict:
     """Get SQLite-specific connection arguments for better concurrent access."""
-    if database_uri.startswith('sqlite'):
+    if database_uri.startswith("sqlite"):
         return {
             "check_same_thread": False,  # Allow SQLite to be used across threads
             "timeout": 60,  # Increase to 60 seconds for heavy operations
@@ -235,13 +256,14 @@ def get_sqlite_poolclass():
     """
     return NullPool
 
+
 isolation_level = get_isolation_level(str(settings.DATABASE_URI))
 connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 
 # Create intelligent dual-engine setup for optimal performance
 # Strategy: Use pooled connections for main app, NullPool for background tasks
 
-if str(settings.DATABASE_URI).startswith('sqlite'):
+if str(settings.DATABASE_URI).startswith("sqlite"):
     # SQLite: NullPool — a FRESH aiosqlite connection per checkout, opened and
     # closed inside the same task/event-loop context that uses it. StaticPool
     # previously shared ONE connection across every thread and event loop
@@ -251,7 +273,9 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
     # MissingGreenlet / "Cannot operate on a closed database" on run teardown.
     # WAL mode + busy_timeout (configure_sqlite, applied per-connection via
     # the "connect" event) keep concurrent access safe without sharing.
-    logger.info("SQLite detected - using NullPool (fresh connection per session, no cross-loop sharing)")
+    logger.info(
+        "SQLite detected - using NullPool (fresh connection per session, no cross-loop sharing)"
+    )
     engine = create_async_engine(
         str(settings.DATABASE_URI),
         echo=SQL_DEBUG,
@@ -269,8 +293,12 @@ if str(settings.DATABASE_URI).startswith('sqlite'):
 else:
     # PostgreSQL: Create TWO engines for different contexts
     logger.info("=" * 80)
-    logger.info("PostgreSQL detected - creating dual-engine setup for optimal performance")
-    logger.info("Main app will use pooled connections, background tasks will use NullPool")
+    logger.info(
+        "PostgreSQL detected - creating dual-engine setup for optimal performance"
+    )
+    logger.info(
+        "Main app will use pooled connections, background tasks will use NullPool"
+    )
     logger.info("=" * 80)
 
     # 1. Create POOLED engine for main FastAPI application (best performance)
@@ -284,9 +312,11 @@ else:
         "pool_recycle": 3600,  # Recycle after 1 hour
         "echo_pool": SQL_DEBUG,
         "connect_args": connect_args,
-        "isolation_level": isolation_level
+        "isolation_level": isolation_level,
     }
-    pooled_engine = create_async_engine(str(settings.DATABASE_URI), **pooled_engine_opts)
+    pooled_engine = create_async_engine(
+        str(settings.DATABASE_URI), **pooled_engine_opts
+    )
     logger.info("Created pooled engine for main FastAPI app (20x better performance)")
 
     # 2. Create NULLPOOL engine for background tasks/CrewAI (event loop isolation)
@@ -295,19 +325,25 @@ else:
         "future": True,
         "poolclass": NullPool,  # No pooling - new connection per query
         "connect_args": connect_args,
-        "isolation_level": isolation_level
+        "isolation_level": isolation_level,
     }
-    nullpool_engine = create_async_engine(str(settings.DATABASE_URI), **nullpool_engine_opts)
+    nullpool_engine = create_async_engine(
+        str(settings.DATABASE_URI), **nullpool_engine_opts
+    )
     logger.info("Created NullPool engine for background tasks (CrewAI compatibility)")
 
     # Default engine selection
     # When USE_NULLPOOL=true, default to NullPool to avoid cross-loop issues under reload
     # get_db() still routes to pooled sessions where safe (main app loop) when USE_NULLPOOL=false
     if use_nullpool:
-        logger.info("USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)")
+        logger.info(
+            "USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)"
+        )
         engine = nullpool_engine
     else:
-        logger.info("USE_NULLPOOL=false - Full pooling mode enabled for maximum performance")
+        logger.info(
+            "USE_NULLPOOL=false - Full pooling mode enabled for maximum performance"
+        )
         engine = pooled_engine
 
 # Configure SQLite for better concurrent access.
@@ -315,10 +351,11 @@ else:
 # the success line logs at INFO only once and DEBUG afterwards.
 _sqlite_configured_logged = False
 
+
 def configure_sqlite(dbapi_connection, connection_record):
     """Configure SQLite connection for better performance and concurrency."""
     global _sqlite_configured_logged
-    if str(settings.DATABASE_URI).startswith('sqlite'):
+    if str(settings.DATABASE_URI).startswith("sqlite"):
         try:
             # Set busy timeout - CRITICAL for handling locks (20 seconds based on best practices)
             dbapi_connection.execute("PRAGMA busy_timeout=20000")
@@ -339,24 +376,27 @@ def configure_sqlite(dbapi_connection, connection_record):
             # Optimize page size for better performance
             dbapi_connection.execute("PRAGMA page_size=4096")
             if not _sqlite_configured_logged:
-                logger.info("SQLite configured with WAL mode and optimizations (per-connection; further lines at DEBUG)")
+                logger.info(
+                    "SQLite configured with WAL mode and optimizations (per-connection; further lines at DEBUG)"
+                )
                 _sqlite_configured_logged = True
             else:
                 logger.debug("SQLite connection configured (WAL + optimizations)")
         except Exception as e:
             logger.error(f"Failed to configure SQLite connection: {e}")
 
+
 # Apply SQLite configuration to all engines
-if str(settings.DATABASE_URI).startswith('sqlite'):
+if str(settings.DATABASE_URI).startswith("sqlite"):
     # For async engine, we need to listen to the sync_engine property
     event.listen(engine.sync_engine, "connect", configure_sqlite)
     logger.info("Applied SQLite configuration event listener to main engine")
 
     # Also apply to pooled and nullpool engines if they exist (PostgreSQL only)
-    if 'pooled_engine' in locals():
+    if "pooled_engine" in locals():
         event.listen(pooled_engine.sync_engine, "connect", configure_sqlite)
         logger.info("Applied SQLite configuration to pooled engine")
-    if 'nullpool_engine' in locals():
+    if "nullpool_engine" in locals():
         event.listen(nullpool_engine.sync_engine, "connect", configure_sqlite)
         logger.info("Applied SQLite configuration to nullpool engine")
 
@@ -416,7 +456,7 @@ async_session_factory = _SwappableSessionFactory(_local_session_factory)
 
 # ContextVar holding the current request-scoped session (set by DI providers)
 _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
-    '_request_session', default=None
+    "_request_session", default=None
 )
 
 
@@ -443,7 +483,7 @@ async def request_scoped_session():
 pooled_session_factory = None
 nullpool_session_factory = None
 
-if not str(settings.DATABASE_URI).startswith('sqlite'):
+if not str(settings.DATABASE_URI).startswith("sqlite"):
     # For PostgreSQL, create session factories for both engines
     pooled_session_factory = async_sessionmaker(
         pooled_engine,
@@ -458,6 +498,7 @@ if not str(settings.DATABASE_URI).startswith('sqlite'):
         autoflush=False,
         autocommit=False,
     )
+
 
 @asynccontextmanager
 async def safe_async_session():
@@ -483,12 +524,14 @@ async def safe_async_session():
 # Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
 # Uses the sync_engine underlying the async engine.
 from sqlalchemy.orm import sessionmaker as sync_sessionmaker
+
 sync_session_factory = sync_sessionmaker(
     engine.sync_engine,
     expire_on_commit=False,
     autoflush=False,
     autocommit=False,
 )
+
 
 # Database initialization
 async def _ensure_documentation_embeddings_columns(conn) -> None:
@@ -499,10 +542,12 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     built-in doc seeding, and group-scoped search (all reference the columns).
     Safe to run on every startup; the embedding column is unchanged here.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith('sqlite')
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
     try:
         if is_sqlite:
-            res = await conn.exec_driver_sql("PRAGMA table_info(documentation_embeddings)")
+            res = await conn.exec_driver_sql(
+                "PRAGMA table_info(documentation_embeddings)"
+            )
             cols = {row[1] for row in res.fetchall()}
             if not cols:
                 return  # table not created yet
@@ -550,7 +595,9 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
                 await conn.exec_driver_sql(
                     "ALTER TABLE knowledge_embeddings ADD COLUMN created_by VARCHAR(255)"
                 )
-                logger.info("Added knowledge_embeddings.created_by column (SQLite self-heal)")
+                logger.info(
+                    "Added knowledge_embeddings.created_by column (SQLite self-heal)"
+                )
         else:
             await conn.exec_driver_sql(
                 "ALTER TABLE knowledge_embeddings ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"
@@ -578,6 +625,45 @@ async def _ensure_chat_sessions_table(conn) -> None:
         logger.warning(f"Could not ensure chat_sessions table: {e}")
 
 
+async def _ensure_chat_sessions_columns(conn) -> None:
+    """Idempotently add the running_job_id + preview_* columns to chat_sessions.
+
+    These back the refresh-reconnect marker and the per-session preview, which
+    moved off browser IndexedDB onto the server. create_all never ALTERs an
+    existing table, so DBs created before these columns existed (e.g. customer
+    instances we can't migrate manually) are missing them — which would break
+    saving/reading previews and the running-job marker. Safe to run every
+    startup; all columns are nullable with no default.
+    """
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    columns = [
+        ("running_job_id", "VARCHAR"),
+        ("preview_type", "VARCHAR(50)"),
+        ("preview_data", "TEXT"),
+        ("preview_title", "VARCHAR(512)"),
+    ]
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(chat_sessions)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (handled by _ensure_chat_sessions_table)
+            for name, ddl_type in columns:
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE chat_sessions ADD COLUMN {name} {ddl_type}"
+                    )
+                    logger.info(f"Added chat_sessions.{name} column (SQLite self-heal)")
+        else:
+            for name, ddl_type in columns:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS {name} {ddl_type}"
+                )
+            logger.info("Ensured chat_sessions preview/running_job_id columns")
+    except Exception as e:
+        logger.warning(f"Could not ensure chat_sessions columns: {e}")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -602,7 +688,7 @@ async def _ensure_databricks_config_columns(conn) -> None:
     the Databricks configuration. Safe to run on every startup; defaults to
     false (serving-endpoints routing) to preserve existing behavior.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith('sqlite')
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(databricksconfig)")
@@ -613,14 +699,18 @@ async def _ensure_databricks_config_columns(conn) -> None:
                 await conn.exec_driver_sql(
                     "ALTER TABLE databricksconfig ADD COLUMN ai_gateway_enabled BOOLEAN DEFAULT 0"
                 )
-                logger.info("Added databricksconfig.ai_gateway_enabled column (SQLite self-heal)")
+                logger.info(
+                    "Added databricksconfig.ai_gateway_enabled column (SQLite self-heal)"
+                )
         else:
             await conn.exec_driver_sql(
                 "ALTER TABLE databricksconfig ADD COLUMN IF NOT EXISTS ai_gateway_enabled BOOLEAN DEFAULT false"
             )
             logger.info("Ensured databricksconfig.ai_gateway_enabled column")
     except Exception as e:
-        logger.warning(f"Could not ensure databricksconfig.ai_gateway_enabled column: {e}")
+        logger.warning(
+            f"Could not ensure databricksconfig.ai_gateway_enabled column: {e}"
+        )
 
 
 async def init_db() -> None:
@@ -629,11 +719,12 @@ async def init_db() -> None:
         # Import all models to ensure they're registered
         import importlib
         import src.db.all_models
+
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
         from src.db.all_models import Base
 
         # For PostgreSQL, check if database exists and create if not
-        if str(settings.DATABASE_URI).startswith('postgresql'):
+        if str(settings.DATABASE_URI).startswith("postgresql"):
             import asyncpg
 
             # Extract connection parameters
@@ -650,11 +741,7 @@ async def init_db() -> None:
             try:
                 # First, try to connect to the specified database
                 test_conn = await asyncpg.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=db_name
+                    host=host, port=port, user=user, password=password, database=db_name
                 )
                 await test_conn.close()
                 logger.info(f"Database '{db_name}' exists and is accessible")
@@ -668,7 +755,7 @@ async def init_db() -> None:
                     port=port,
                     user=user,
                     password=password,
-                    database='postgres'  # Connect to default postgres database
+                    database="postgres",  # Connect to default postgres database
                 )
 
                 try:
@@ -683,10 +770,8 @@ async def init_db() -> None:
                 finally:
                     await admin_conn.close()
 
-
-
         # For SQLite, ensure database file exists
-        if str(settings.DATABASE_URI).startswith('sqlite'):
+        if str(settings.DATABASE_URI).startswith("sqlite"):
             db_path = settings.SQLITE_DB_PATH
 
             # Get absolute path if relative
@@ -706,11 +791,12 @@ async def init_db() -> None:
             if not os.path.exists(db_path):
                 logger.info(f"Creating new SQLite database file: {db_path}")
                 # Create the file and initialize it
-                with open(db_path, 'w') as f:
+                with open(db_path, "w") as f:
                     pass  # Create empty file
 
                 # Initialize it as a sqlite database
                 import sqlite3
+
                 conn = sqlite3.connect(db_path)
                 conn.close()
                 logger.info(f"Empty database file created at {db_path}")
@@ -720,9 +806,10 @@ async def init_db() -> None:
 
         # For SQLite, we can verify if tables already exist first
         tables_exist = False
-        if str(settings.DATABASE_URI).startswith('sqlite'):
+        if str(settings.DATABASE_URI).startswith("sqlite"):
             try:
                 import sqlite3
+
                 conn = sqlite3.connect(os.path.abspath(settings.SQLITE_DB_PATH))
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -730,7 +817,9 @@ async def init_db() -> None:
                 conn.close()
 
                 if len(tables) > 1:  # SQLite has a sqlite_master table by default
-                    logger.info(f"Tables already exist: {', '.join([t[0] for t in tables])}")
+                    logger.info(
+                        f"Tables already exist: {', '.join([t[0] for t in tables])}"
+                    )
                     tables_exist = True
             except Exception as e:
                 logger.error(f"Error checking existing tables: {e}")
@@ -744,14 +833,17 @@ async def init_db() -> None:
             }
 
             # For SQLite, don't set isolation_level to avoid errors
-            if not str(settings.DATABASE_URI).startswith('sqlite'):
-                init_engine_opts['isolation_level'] = 'AUTOCOMMIT'  # Use AUTOCOMMIT for table creation
-                init_engine_opts['poolclass'] = NullPool  # Avoid pooling during init to isolate loop
+            if not str(settings.DATABASE_URI).startswith("sqlite"):
+                init_engine_opts["isolation_level"] = (
+                    "AUTOCOMMIT"  # Use AUTOCOMMIT for table creation
+                )
+                init_engine_opts["poolclass"] = (
+                    NullPool  # Avoid pooling during init to isolate loop
+                )
 
             # Create a dedicated engine just for initialization
             engine_for_init = create_async_engine(
-                str(settings.DATABASE_URI),
-                **init_engine_opts
+                str(settings.DATABASE_URI), **init_engine_opts
             )
 
             # First ensure connection works
@@ -759,22 +851,28 @@ async def init_db() -> None:
                 logger.info("Database connection established")
 
             # Ensure pgvector extension (PostgreSQL) before table creation
-            if not str(settings.DATABASE_URI).startswith('sqlite'):
+            if not str(settings.DATABASE_URI).startswith("sqlite"):
                 try:
                     logger.info("Checking pgvector extension...")
                     async with engine_for_init.connect() as conn:
-                        result = await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
+                        result = await conn.execute(
+                            text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+                        )
                         extension_exists = result.fetchone() is not None
                         if not extension_exists:
                             logger.info("Installing pgvector extension...")
-                            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                            await conn.execute(
+                                text("CREATE EXTENSION IF NOT EXISTS vector")
+                            )
                             await conn.commit()
                             logger.info("pgvector extension installed successfully")
                         else:
                             logger.info("pgvector extension already installed")
                 except Exception as e:
                     logger.warning(f"Could not install pgvector extension: {e}")
-                    logger.warning("The database will work but documentation embeddings table will not be created")
+                    logger.warning(
+                        "The database will work but documentation embeddings table will not be created"
+                    )
 
             # Then create tables
             try:
@@ -784,6 +882,7 @@ async def init_db() -> None:
             except Exception as table_error:
                 logger.error(f"Error creating tables: {table_error}")
                 import traceback
+
                 logger.error(traceback.format_exc())
                 raise
 
@@ -797,12 +896,15 @@ async def init_db() -> None:
         # then). DBs created before these columns were added would otherwise be
         # missing them, breaking built-in doc seeding + group-scoped search.
         try:
-            ensure_engine = create_async_engine(str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG)
+            ensure_engine = create_async_engine(
+                str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG
+            )
             try:
                 async with ensure_engine.begin() as conn:
                     await _ensure_documentation_embeddings_columns(conn)
                     await _ensure_databricks_config_columns(conn)
                     await _ensure_chat_sessions_table(conn)
+                    await _ensure_chat_sessions_columns(conn)
                     await _ensure_crew_feedback_table(conn)
             finally:
                 await ensure_engine.dispose()
@@ -810,14 +912,18 @@ async def init_db() -> None:
             logger.warning(f"column ensure skipped: {ensure_err}")
 
         # Verify tables were created for SQLite
-        if str(settings.DATABASE_URI).startswith('sqlite'):
+        if str(settings.DATABASE_URI).startswith("sqlite"):
 
             import sqlite3
+
             try:
                 db_path_to_check = os.path.abspath(settings.SQLITE_DB_PATH)
                 logger.info(f"Verifying tables in: {db_path_to_check}")
 
-                if os.path.exists(db_path_to_check) and os.path.getsize(db_path_to_check) > 0:
+                if (
+                    os.path.exists(db_path_to_check)
+                    and os.path.getsize(db_path_to_check) > 0
+                ):
                     conn = sqlite3.connect(db_path_to_check)
                     cursor = conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -825,21 +931,28 @@ async def init_db() -> None:
                     conn.close()
 
                     table_count = len(tables)
-                    logger.info(f"Verified {table_count} tables in database: {', '.join([t[0] for t in tables])}")
+                    logger.info(
+                        f"Verified {table_count} tables in database: {', '.join([t[0] for t in tables])}"
+                    )
                     if table_count == 0:
                         logger.error("No tables were created in the database!")
                 else:
-                    logger.error(f"Database file not found or empty after initialization: {db_path_to_check}")
+                    logger.error(
+                        f"Database file not found or empty after initialization: {db_path_to_check}"
+                    )
             except Exception as e:
                 logger.error(f"Error verifying tables: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         # Print full traceback for debugging
         import traceback
+
         logger.error(traceback.format_exc())
         raise
+
 
 def get_smart_engine():
     """
@@ -850,7 +963,7 @@ def get_smart_engine():
         - NullPool engine for background tasks/CrewAI (event loop isolation)
     """
     # If SQLite, always return the same engine
-    if str(settings.DATABASE_URI).startswith('sqlite'):
+    if str(settings.DATABASE_URI).startswith("sqlite"):
         return engine
 
     # For PostgreSQL, check if we can detect the context
@@ -859,11 +972,15 @@ def get_smart_engine():
 
         # Check if we're in a background task (different event loop)
         if main_event_loop and current_loop != main_event_loop:
-            logger.debug(f"Background task detected (loop {id(current_loop)} != main {id(main_event_loop)}) - using NullPool")
+            logger.debug(
+                f"Background task detected (loop {id(current_loop)} != main {id(main_event_loop)}) - using NullPool"
+            )
             return nullpool_engine
         else:
             # We're in the main event loop - use pooled engine for performance
-            logger.debug(f"Main app context detected (loop {id(current_loop)}) - using pooled engine")
+            logger.debug(
+                f"Main app context detected (loop {id(current_loop)}) - using pooled engine"
+            )
             return pooled_engine
     except RuntimeError:
         # No event loop running - probably sync context
@@ -890,7 +1007,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
     # In normal runtime (not under pytest), select appropriate factory by context
     if not os.environ.get("PYTEST_CURRENT_TEST"):
-        if str(settings.DATABASE_URI).startswith('sqlite'):
+        if str(settings.DATABASE_URI).startswith("sqlite"):
             # SQLite always uses the same session factory
             smart_session_factory = async_session_factory
         else:
@@ -900,11 +1017,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
                 # Check if we're in a background task (different event loop)
                 if main_event_loop and current_loop != main_event_loop:
-                    logger.debug(f"Background context (loop {id(current_loop)}) - using NullPool session")
+                    logger.debug(
+                        f"Background context (loop {id(current_loop)}) - using NullPool session"
+                    )
                     smart_session_factory = nullpool_session_factory
                 else:
                     # We're in the main event loop - ALWAYS use pooled sessions for performance!
-                    logger.debug(f"Main app context (loop {id(current_loop)}) - using POOLED session")
+                    logger.debug(
+                        f"Main app context (loop {id(current_loop)}) - using POOLED session"
+                    )
                     # CRITICAL: Always use pooled_session_factory for main app, not async_session_factory
                     smart_session_factory = pooled_session_factory
             except RuntimeError:
@@ -912,7 +1033,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 logger.debug("No event loop - using NullPool session")
                 smart_session_factory = nullpool_session_factory
             except Exception as e:
-                logger.warning(f"Error detecting context: {e} - using NullPool for safety")
+                logger.warning(
+                    f"Error detecting context: {e} - using NullPool for safety"
+                )
                 # Fallback to NullPool for safety (not the default factory which might be wrong)
                 smart_session_factory = nullpool_session_factory
 
@@ -932,9 +1055,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 except OperationalError as e:
                     # Rollback on any exception
                     await session.rollback()
-                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                        wait_time = 0.1 * (2.0 ** attempt)
-                        logger.warning(f"Database locked in session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                    if (
+                        "database is locked" in str(e).lower()
+                        and attempt < max_retries - 1
+                    ):
+                        wait_time = 0.1 * (2.0**attempt)
+                        logger.warning(
+                            f"Database locked in session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
+                        )
                         await asyncio.sleep(wait_time)
                         continue
                     raise
@@ -953,11 +1081,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     await session.close()
         except OperationalError as e:
             if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                wait_time = 0.1 * (2.0 ** attempt)
-                logger.warning(f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                wait_time = 0.1 * (2.0**attempt)
+                logger.warning(
+                    f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
+                )
                 await asyncio.sleep(wait_time)
                 continue
             raise
+
 
 async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a session connected to the LOCAL database (SQLite/PG),
@@ -982,6 +1113,7 @@ async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
 # get_sync_db removed - use get_db() instead
 # All database operations must be async
 
+
 # Graceful engine disposal to avoid event-loop mismatch on shutdown
 async def dispose_engines() -> None:
     """
@@ -999,12 +1131,12 @@ async def dispose_engines() -> None:
         except Exception:
             pass
         try:
-            if 'pooled_engine' in globals():
+            if "pooled_engine" in globals():
                 engines.append(pooled_engine)
         except Exception:
             pass
         try:
-            if 'nullpool_engine' in globals():
+            if "nullpool_engine" in globals():
                 engines.append(nullpool_engine)
         except Exception:
             pass
@@ -1028,6 +1160,7 @@ async def dispose_engines() -> None:
         # on the next request after a backend switch
         try:
             from src.db.lakebase_session import dispose_lakebase_factory
+
             await dispose_lakebase_factory()
         except Exception as e:
             logger.warning(f"Error disposing Lakebase factory: {e}")

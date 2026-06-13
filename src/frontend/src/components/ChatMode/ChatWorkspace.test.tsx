@@ -186,7 +186,7 @@ vi.mock('./api/crews', () => ({
     })),
   }),
 }));
-vi.mock('./db/sessionDb', () => ({
+vi.mock('./db/sessionApi', () => ({
   saveSessionPreview: (...a: unknown[]) => h.saveSessionPreview(...a),
   getSessionPreview: (...a: unknown[]) => h.getSessionPreview(...a),
   setSessionRunningJob: (...a: unknown[]) => h.setSessionRunningJob(...a),

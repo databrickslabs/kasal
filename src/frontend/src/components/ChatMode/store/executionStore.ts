@@ -6,7 +6,7 @@ import { useSessionStore } from './sessionStore';
 import {
   saveSessionPreview,
   getSessionPreview,
-} from '../db/sessionDb';
+} from '../db/sessionApi';
 import {
   persistActiveExecution,
   clearActiveExecution,
