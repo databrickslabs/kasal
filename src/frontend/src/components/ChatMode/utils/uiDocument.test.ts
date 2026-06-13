@@ -421,6 +421,48 @@ describe('setSurfaceTheme — deterministic restyle', () => {
     expect(out?.theme).toEqual({ accent: '#FF0000', background: '#000000', font: 'serif', muted: '#999999', _pinned: true });
   });
 
+  it('restyles a document wrapped in a non-fenced prose preamble (regression: instant Look no-op)', () => {
+    // Agents commonly prefix the UI document with a sentence ("Here is your
+    // dashboard: …"). The renderer tolerates that (coerceJson peels the prose),
+    // so the preview shows fine — but the instant "Look" used a strict JSON.parse
+    // that threw on the prose and returned the doc UNCHANGED, so restyling
+    // silently did nothing. (It looked dashboard-specific because that agent
+    // happened to add a preamble while the deck/mindmap output was pure JSON.)
+    const inner = JSON.stringify({
+      messages: [
+        { createSurface: { surfaceId: 's1', catalogId: 'basic' } },
+        {
+          updateComponents: {
+            components: [
+              { id: 'root', component: 'Column', children: ['d'] },
+              { id: 'd', component: 'Dashboard', children: ['k'] },
+              { id: 'k', component: 'Stat', label: 'Revenue', value: '$1M' },
+            ],
+          },
+        },
+      ],
+    });
+    const prosey = 'Here is your dashboard:\n' + inner;
+    const out = setSurfaceTheme(prosey, theme);
+    expect(out).not.toBe(prosey); // no longer the silent no-op
+    const surface = parseUiDocument(out)!;
+    expect(surface.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+    expect(surface.components.k.label).toBe('Revenue'); // components preserved
+    // the decorative wrapper is dropped — the persisted doc is canonical JSON
+    expect(() => JSON.parse(out)).not.toThrow();
+  });
+
+  it('restyles fenced and double-encoded documents (same tolerant coercion as the renderer)', () => {
+    const inner = JSON.stringify({
+      messages: [{ updateComponents: { components: [{ id: 'root', component: 'Dashboard' }] } }],
+    });
+    const fenced = '```json\n' + inner + '\n```';
+    expect(parseUiDocument(setSurfaceTheme(fenced, theme))?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+    // a doubly JSON-encoded document (e.g. a stringified execution result) too
+    const doubleEncoded = JSON.stringify(inner);
+    expect(parseUiDocument(setSurfaceTheme(doubleEncoded, theme))?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+  });
+
   it('a restyled document survives applyConfiguredTheme (pinned) end-to-end', () => {
     const doc = JSON.stringify({
       messages: [

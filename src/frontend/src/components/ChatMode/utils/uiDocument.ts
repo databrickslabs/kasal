@@ -307,10 +307,18 @@ export const DELIVERABLE_LABELS: Record<string, string> = {
  * `rawDoc` unchanged if it can't be parsed as JSON (caller falls back gracefully).
  */
 export function setSurfaceTheme(rawDoc: string, theme: UiTheme): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawDoc);
-  } catch {
+  // Extract the document with the SAME tolerant coercion the renderer uses
+  // (coerceJson) rather than a strict JSON.parse. A task output frequently
+  // arrives wrapped — a prose preamble ("Here is your dashboard: { … }"), a
+  // ```json fence, or a double-encoded string — and parseUiDocument renders
+  // those fine, so the in-preview "Customize" panel must restyle them too. A
+  // strict parse threw on any such wrapper and silently returned the doc
+  // unchanged, so the instant "Look" did NOTHING for any deliverable an agent
+  // prefaced with prose (while pure-JSON deliverables restyled normally — the
+  // mismatch looked deliverable-specific). Re-serializing the coerced object
+  // also canonicalizes the stored doc (the decorative wrapper is dropped).
+  const parsed: unknown = coerceJson(rawDoc);
+  if (!parsed) {
     return rawDoc;
   }
 
