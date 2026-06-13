@@ -210,6 +210,39 @@ describe('PreviewPanel component', () => {
     expect(onRefine).not.toHaveBeenCalled();
   });
 
+  it('restyles a dashboard even when the document has a non-fenced prose preamble (regression)', () => {
+    // An agent prefaced the dashboard JSON with a sentence. The renderer tolerates
+    // it (so the preview shows fine), but the instant "Look" used to JSON.parse the
+    // whole string, throw on the prose, and silently keep the doc unchanged — so
+    // restyling appeared broken for that deliverable. It must now restyle the
+    // embedded document.
+    const dashDoc = JSON.stringify({
+      messages: [
+        { createSurface: { surfaceId: 's1', catalogId: 'basic' } },
+        {
+          updateComponents: {
+            components: [
+              { id: 'root', component: 'Column', children: ['d'] },
+              { id: 'd', component: 'Dashboard', children: ['k'] },
+              { id: 'k', component: 'Stat', label: 'Revenue', value: '$1M' },
+            ],
+          },
+        },
+      ],
+    });
+    const prosey = 'Here is your dashboard:\n' + dashDoc;
+    const onStyleChange = vi.fn();
+    render(<PreviewPanel content={{ type: 'ui', data: prosey }} {...baseProps} onRefine={vi.fn()} onStyleChange={onStyleChange} />);
+    fireEvent.click(screen.getByText('Customize'));
+    expect(screen.getByText('Dashboard')).toBeInTheDocument(); // detected as a dashboard
+    fireEvent.click(screen.getByTitle('Apply the Dark style'));
+    expect(onStyleChange).toHaveBeenCalledTimes(1);
+    const updated = onStyleChange.mock.calls[0][0] as string;
+    expect(updated).not.toBe(prosey); // no longer the silent no-op
+    expect(updated).toContain('"_pinned":true');
+    expect(updated).toContain('#38BDF8'); // dark preset accent applied
+  });
+
   it('a preset click is a safe no-op when onStyleChange is not provided', () => {
     const onRefine = vi.fn();
     render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />); // no onStyleChange
