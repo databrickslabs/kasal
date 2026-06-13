@@ -229,6 +229,57 @@ describe('executionStore - preview history', () => {
     expect(useExecutionStore.getState().previewContent).toEqual(a);
   });
 
+  it('updatePreviewData replaces the current version in place (no new history entry) and persists', () => {
+    setCurrentSessionId('sess-A');
+    const store = useExecutionStore.getState();
+    store.setPreviewContent(a as any);
+    store.setPreviewContent(b as any); // history: [a, b], index 1
+    mockedSave.mockClear();
+    useExecutionStore.getState().updatePreviewData('<p>B restyled</p>');
+    const s = useExecutionStore.getState();
+    // history length unchanged; the viewed entry's data swapped in place
+    expect(s.previewHistory).toHaveLength(2);
+    expect(s.previewIndex).toBe(1);
+    expect(s.previewContent?.data).toBe('<p>B restyled</p>');
+    expect(s.previewContent?.title).toBe('B'); // other fields preserved
+    expect(s.previewHistory[1].data).toBe('<p>B restyled</p>');
+    expect(s.previewHistory[0]).toEqual(a); // earlier version untouched
+    // persisted to the owning session
+    expect(mockedSave).toHaveBeenCalledWith('sess-A', { type: 'ui', data: '<p>B restyled</p>', title: 'B' });
+  });
+
+  it('updatePreviewData is a no-op when there is no current preview', () => {
+    const store = useExecutionStore.getState();
+    store.updatePreviewData('anything');
+    expect(useExecutionStore.getState().previewContent).toBeNull();
+    expect(mockedSave).not.toHaveBeenCalled();
+  });
+
+  it('updatePreviewData swaps content but skips history when the index has no slot', () => {
+    useExecutionStore.setState({
+      previewContent: a as any,
+      previewOwnerSessionId: 'sess-A',
+      previewHistory: [a as any],
+      previewIndex: 5, // out of range — no slot to replace
+    });
+    mockedSave.mockClear();
+    useExecutionStore.getState().updatePreviewData('NEW');
+    const s = useExecutionStore.getState();
+    expect(s.previewContent?.data).toBe('NEW');
+    expect(s.previewHistory[0]).toEqual(a); // history untouched
+    expect(mockedSave).toHaveBeenCalledWith('sess-A', expect.objectContaining({ data: 'NEW' }));
+  });
+
+  it('updatePreviewData does not persist when no session owns the preview', () => {
+    setCurrentSessionId(null);
+    const store = useExecutionStore.getState();
+    store.setPreviewContent(a as any); // owner resolves to null
+    mockedSave.mockClear();
+    store.updatePreviewData('X');
+    expect(useExecutionStore.getState().previewContent?.data).toBe('X');
+    expect(mockedSave).not.toHaveBeenCalled();
+  });
+
   it('completeExecution appends the final preview to history when viewing owner', () => {
     setCurrentSessionId('sess-O');
     mockedParse.mockReturnValue(b);

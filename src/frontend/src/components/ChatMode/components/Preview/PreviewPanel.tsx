@@ -1,8 +1,16 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { parseUiDocument, applyConfiguredTheme } from '../../utils/uiDocument';
+import {
+  parseUiDocument,
+  applyConfiguredTheme,
+  inferSurfaceDeliverable,
+  setSurfaceTheme,
+  DELIVERABLE_LABELS,
+} from '../../utils/uiDocument';
+import type { Theme } from '../../../Configuration/uiConfigShared';
 import { useWorkspaceThemes } from '../../hooks/useWorkspaceThemes';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
 import UiRenderer from './UiRenderer';
+import RefinePanel from './RefinePanel';
 
 // The preview pane renders structured A2UI documents ONLY — the UI document is
 // the single source of truth for generated deliverables. Raw HTML, JSON,
@@ -21,8 +29,10 @@ interface PreviewPanelProps {
   onClose: () => void;
   chatCollapsed: boolean;
   onToggleChat: () => void;
-  /** Refine the current artifact with a natural-language instruction. */
+  /** Refine the current artifact with a natural-language instruction (AI). */
   onRefine?: (instruction: string) => void;
+  /** Replace the current artifact's document in place (deterministic restyle, no AI). */
+  onStyleChange?: (updatedData: string) => void;
   /** All previewable task outputs of the run, oldest → newest. */
   history?: PreviewContent[];
   /** Index into `history` currently shown. */
@@ -80,9 +90,8 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   return null;
 }
 
-const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, history, index, onNavigate }) => {
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate }) => {
   const [refineOpen, setRefineOpen] = useState(false);
-  const [refineValue, setRefineValue] = useState('');
   const asideRef = useRef<HTMLElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -104,15 +113,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     void asideRef.current!.requestFullscreen().catch(() => {});
   };
 
-  const submitRefine = () => {
-    const trimmed = refineValue.trim();
-    if (!trimmed) return;
-    // Only reachable from the refine bar, which renders only when onRefine is set.
-    onRefine!(trimmed);
-    setRefineValue('');
-    setRefineOpen(false);
-  };
-
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
 
@@ -124,6 +124,20 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     const parsed = parseUiDocument(displayData);
     return parsed ? applyConfiguredTheme(parsed, workspaceThemes) : null;
   }, [displayData, workspaceThemes]);
+
+  // What this deliverable is (presentation, dashboard, …) drives the "Customize"
+  // panel: a friendly title + the matching per-type content controls.
+  // inferSurfaceDeliverable only ever returns keys present in DELIVERABLE_LABELS.
+  const deliverable = useMemo(() => (uiSurface ? inferSurfaceDeliverable(uiSurface) : 'default'), [uiSurface]);
+  const deliverableLabel = DELIVERABLE_LABELS[deliverable];
+  const currentTheme = uiSurface?.theme;
+
+  // Apply a deterministic Look change: rewrite the doc's theme and hand it back
+  // to the owner to swap in place + persist. No AI, no crew run.
+  const applyStyle = (theme: Theme) => {
+    if (!onStyleChange) return;
+    onStyleChange(setSurfaceTheme(displayData, theme));
+  };
 
   // Download the rendered surface as a PDF file (no print dialog): decks land
   // one slide per landscape page; other deliverables as one content-sized page.
@@ -253,12 +267,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
                 color: refineOpen ? 'var(--accent)' : 'var(--text-secondary)',
                 backgroundColor: 'var(--bg-secondary)',
               }}
-              title="Refine this result with an instruction"
+              title="Customize the look and content of this result"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
               </svg>
-              Refine
+              Customize
             </button>
           )}
           <button
@@ -314,37 +328,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
       </div>
       )}
 
-      {/* Refine instruction bar */}
-      {onRefine && refineOpen && (
-        <div
-          className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}
-        >
-          <input
-            autoFocus
-            value={refineValue}
-            onChange={(e) => setRefineValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitRefine();
-              if (e.key === 'Escape') { setRefineOpen(false); setRefineValue(''); }
-            }}
-            placeholder="Describe how to improve this result…"
-            className="flex-1 rounded-lg px-3 py-1.5 text-sm outline-none"
-            style={{
-              backgroundColor: 'var(--bg-input)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-color)',
-            }}
-          />
-          <button
-            onClick={submitRefine}
-            disabled={!refineValue.trim()}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
-          >
-            Refine
-          </button>
-        </div>
+      {/* Customize panel — instant "Look" (deterministic) + AI "Content" refine */}
+      {onRefine && refineOpen && !fullscreen && (
+        <RefinePanel
+          deliverable={deliverable}
+          deliverableLabel={deliverableLabel}
+          currentTheme={currentTheme}
+          onApplyStyle={applyStyle}
+          onRefine={onRefine}
+          onClose={() => setRefineOpen(false)}
+        />
       )}
 
       {/* Content — A2UI only; non-UI documents are never previewable. */}

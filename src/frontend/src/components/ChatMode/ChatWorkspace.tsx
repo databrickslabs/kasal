@@ -1767,6 +1767,7 @@ const ChatWorkspace: React.FC = () => {
           chatCollapsed={chatCollapsed}
           onToggleChat={() => useExecutionStore.getState().toggleChatCollapsed()}
           onRefine={handleRefine}
+          onStyleChange={(data) => useExecutionStore.getState().updatePreviewData(data)}
           history={previewHistory}
           index={previewIndex}
           onNavigate={navigatePreview}
