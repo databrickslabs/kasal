@@ -43,6 +43,12 @@ const MUTED = 'var(--ui-muted, #aab3d4)';
 const GLASS = 'var(--ui-surface, rgba(255,255,255,0.06))';
 const GLASS_STRONG = 'var(--ui-surface-strong, rgba(255,255,255,0.10))';
 const GLASS_BORDER = 'var(--ui-border, rgba(255,255,255,0.16))';
+// OPAQUE node fill for the mindmap: the connector curves run into each node's
+// center, and a translucent glass fill lets those lines show THROUGH the node
+// (looking like the lines are drawn on top). Compositing the glass tint over an
+// opaque base occludes the line so it reads as being BEHIND the node, while
+// keeping the glass hue. Themes can override the solid base via --ui-surface-solid.
+const NODE_FILL = `linear-gradient(${GLASS}, ${GLASS}), var(--ui-surface-solid, #141b35)`;
 const STAGE_BG =
   'var(--ui-stage,' +
   'radial-gradient(1100px 560px at 12% -10%, rgba(90,162,255,0.20), transparent 60%),' +
@@ -484,7 +490,10 @@ function mindmapChildren(node: MindmapData): MindmapData[] {
 }
 
 // Auto-layout spacing: horizontal distance per depth level, vertical per leaf row.
-const MM_COL = 220;
+// MM_COL must exceed MM_NODE_MAX_W so a wide node never reaches into the next
+// depth column; MM_ROW exceeds a node's height for the same reason vertically.
+const MM_NODE_MAX_W = 200;
+const MM_COL = 260;
 const MM_ROW = 76;
 const MM_MIN_ZOOM = 0.3;
 const MM_MAX_ZOOM = 2.5;
@@ -785,7 +794,7 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
         <svg
           width={maxX}
           height={maxY}
-          style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none' }}
+          style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none', zIndex: 0 }}
         >
           {visibleIds
             .filter((id) => nodes[id].parentId !== null)
@@ -824,6 +833,9 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 position: 'absolute',
                 left: p.x,
                 top: p.y,
+                // Above the connector SVG (zIndex 0) so the lines read as
+                // being BEHIND every node.
+                zIndex: 1,
                 transform: 'translate(-50%, -50%)',
                 display: 'inline-flex',
                 flexDirection: onLeft ? 'row-reverse' : 'row',
@@ -832,7 +844,7 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 cursor: 'grab',
                 userSelect: 'none',
                 touchAction: 'none',
-                background: isRoot ? ACCENT : GLASS,
+                background: isRoot ? ACCENT : NODE_FILL,
                 color: isRoot ? ON_ACCENT : TEXT,
                 border: `1px solid ${isRoot ? ACCENT : GLASS_BORDER}`,
                 ...(isRoot
@@ -845,13 +857,22 @@ const MindmapCanvas: React.FC<{ root: MindmapData }> = ({ root }) => {
                 fontWeight: isRoot ? 800 : 600,
                 fontSize: isRoot ? '1.02rem' : '0.9rem',
                 whiteSpace: 'nowrap',
+                // Cap the node footprint so a long label can't overflow into the
+                // neighbouring depth column / sibling and overlap it. The label
+                // ellipsizes; the full text stays available on hover (title).
+                maxWidth: isRoot ? MM_NODE_MAX_W + 40 : MM_NODE_MAX_W,
                 boxShadow: isRoot ? '0 8px 26px rgba(0,0,0,0.30)' : '0 2px 10px rgba(0,0,0,0.16)',
               }}
             >
               {!isRoot && (
                 <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 99, background: node.color, flexShrink: 0 }} />
               )}
-              <span>{node.label}</span>
+              <span
+                title={node.label}
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}
+              >
+                {node.label}
+              </span>
               {hasKids && (
                 <button
                   type="button"

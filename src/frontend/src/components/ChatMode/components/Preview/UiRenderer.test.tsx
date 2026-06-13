@@ -1052,6 +1052,58 @@ describe('UiRenderer — remaining visual branches', () => {
   });
 });
 
+describe('UiRenderer — Mindmap rendering: lines behind nodes + no overlap', () => {
+  const tree = {
+    label: 'Root',
+    children: [
+      { label: 'A very long branch label that would otherwise overflow its column', children: [{ label: 'A1' }] },
+      { label: 'B' },
+    ],
+  };
+  const mindmap = () => surface({ root: { id: 'root', component: 'Mindmap', root: tree } });
+
+  it('paints the connector svg BEHIND the nodes (svg zIndex 0, nodes zIndex 1)', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const svg = container.querySelector('[data-mm-world] svg') as SVGElement;
+    expect(svg.style.zIndex).toBe('0');
+    container.querySelectorAll('[data-mm-node]').forEach((n) => {
+      expect((n as HTMLElement).style.zIndex).toBe('1');
+    });
+  });
+
+  it('gives non-root nodes an OPAQUE fill so connector lines do not show through', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
+    // Composited glass-over-solid: an opaque solid base occludes the line.
+    expect(child.style.background).toContain('--ui-surface-solid');
+  });
+
+  it('caps node width and ellipsizes long labels so nodes cannot overlap neighbours', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
+    expect(child.style.maxWidth).toBe('200px'); // MM_NODE_MAX_W
+    const root = container.querySelector('[data-mm-node="r"]') as HTMLElement;
+    expect(root.style.maxWidth).toBe('240px'); // root a touch wider
+    // The long label is ellipsized and its full text stays available on hover.
+    const labelSpan = Array.from(child.querySelectorAll('span')).find(
+      (s) => s.getAttribute('title')?.startsWith('A very long branch'),
+    ) as HTMLElement;
+    expect(labelSpan).toBeTruthy();
+    expect(labelSpan.style.textOverflow).toBe('ellipsis');
+    expect(labelSpan.style.overflow).toBe('hidden');
+  });
+
+  it('spaces depth columns wider than the node cap so a max-width node clears the next column', () => {
+    const { container } = render(<UiRenderer surface={mindmap()} />);
+    const px = (v: string) => parseFloat(v || '0');
+    const root = container.querySelector('[data-mm-node="r"]') as HTMLElement;
+    const child = container.querySelector('[data-mm-node="r.0"]') as HTMLElement;
+    // Adjacent depths are MM_COL (260) apart > MM_NODE_MAX_W (200), so the
+    // node footprints (centered, ≤200 wide) never overlap horizontally.
+    expect(Math.abs(px(child.style.left) - px(root.style.left))).toBe(260);
+  });
+});
+
 describe('UiRenderer — URL sanitization (security)', () => {
   it('sanitizes javascript: URLs in Album anchors and keeps safe http(s) links', () => {
     const { container } = render(<UiRenderer surface={surface({
