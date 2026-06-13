@@ -144,6 +144,60 @@ class CrewPreparation:
 
         return False
 
+    def _append_genie_mcp_formatting(self, task_config: Dict[str, Any]) -> None:
+        """
+        Append formatting instructions for Genie MCP output to match Genie Tool format.
+        When Genie MCP is used, format the output similar to GenieTool with:
+        - Natural language summary
+        - Query description
+        - Generated SQL
+        - Structured results table
+        - Suggested follow-up questions
+        - Link to open in Genie
+
+        Args:
+            task_config: Task configuration dictionary
+        """
+        try:
+            # Check if task uses Genie MCP (via MCP_SERVERS in tool_configs)
+            tool_configs = task_config.get('tool_configs', {})
+            mcp_servers = tool_configs.get('MCP_SERVERS', {}).get('servers', [])
+
+            # Check if any MCP server is a genie space
+            has_genie_mcp = any(
+                isinstance(server, str) and 'databricks genie:' in server.lower()
+                for server in mcp_servers
+            )
+
+            if not has_genie_mcp:
+                return
+
+            # Get or create expected_output
+            expected_output = task_config.get('expected_output', '')
+
+            # Append formatting instructions for Genie MCP output
+            genie_mcp_format_instructions = (
+                "\n\nIMPORTANT: Format your response to match the Genie Tool output structure:\n"
+                "1. **Natural Language Summary**: Start with a clear, concise summary of what the query results show.\n"
+                "2. **Query Description**: Explain in plain English what the query does.\n"
+                "3. **SQL Query**: Include the generated SQL query (if available).\n"
+                "4. **Query Results**: Format any returned data as a structured table with column headers and rows.\n"
+                "5. **Suggested Follow-up Questions**: List 3-5 relevant follow-up questions the user might ask.\n"
+                "6. **Link**: Include a link to open the results in Genie if available.\n"
+                "\nThis ensures Genie MCP output is consistently formatted like the Genie Tool."
+            )
+
+            # Append to existing expected_output or create new one
+            if expected_output and genie_mcp_format_instructions.strip() not in expected_output:
+                task_config['expected_output'] = expected_output + genie_mcp_format_instructions
+            elif not expected_output:
+                task_config['expected_output'] = genie_mcp_format_instructions.strip()
+
+            logger.info(f"[CrewPreparation] Appended Genie MCP formatting instructions to task")
+
+        except Exception as e:
+            logger.warning(f"[CrewPreparation] Failed to append Genie MCP formatting: {e}")
+
     def _should_disable_memory_for_agent(self, agent_config: Dict[str, Any]) -> bool:
         """
         Check if memory is explicitly disabled for an agent.
@@ -591,6 +645,9 @@ class CrewPreparation:
                         logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
 
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
+
+                # Add formatting instructions for genie MCP output to match genie tool format
+                self._append_genie_mcp_formatting(task_config)
 
                 # Create the task
                 # Get execution_name from config (can be run_name or execution_id)
