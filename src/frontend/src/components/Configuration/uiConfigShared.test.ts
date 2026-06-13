@@ -43,7 +43,7 @@ describe('buildDirective — phrases every spec with defaults (workspace config)
 
 describe('shared specs sanity', () => {
   it('every option default round-trips through optionVal', () => {
-    for (const type of ['presentation', 'dashboard', 'album', 'quiz', 'report', 'genie', 'mindmap']) {
+    for (const type of ['presentation', 'dashboard', 'album', 'quiz', 'flashcards', 'report', 'genie', 'mindmap']) {
       for (const s of optionSpecs(type)) {
         expect(optionVal(undefined, s)).toBe(s.default);
       }

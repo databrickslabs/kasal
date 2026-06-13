@@ -43,7 +43,8 @@ export type UiComponentType =
   | 'Slides'
   | 'Slide'
   | 'Album'
-  | 'Mindmap';
+  | 'Mindmap'
+  | 'Flashcards';
 
 /** The component names available in each catalog (for the configurator UI). */
 export const CATALOG_COMPONENTS: Record<string, UiComponentType[]> = {
@@ -51,7 +52,7 @@ export const CATALOG_COMPONENTS: Record<string, UiComponentType[]> = {
   basic: [
     'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
     'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
-    'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap',
+    'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap', 'Flashcards',
   ],
 };
 
@@ -104,7 +105,7 @@ export interface UiSurface {
 const VALID_TYPES: ReadonlySet<string> = new Set<UiComponentType>([
   'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
   'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
-  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap',
+  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap', 'Flashcards',
 ]);
 
 /** Scan from the first `open` char to its balanced `close` (string-aware) and
@@ -265,6 +266,7 @@ export type WorkspaceThemes = Record<string, UiTheme>;
 const DELIVERABLE_BY_COMPONENT: [UiComponentType, string][] = [
   ['Slides', 'presentation'],
   ['Quiz', 'quiz'],
+  ['Flashcards', 'flashcards'],
   ['Album', 'album'],
   ['Mindmap', 'mindmap'],
   ['Dashboard', 'dashboard'],
@@ -290,6 +292,7 @@ export const DELIVERABLE_LABELS: Record<string, string> = {
   mindmap: 'Mind map',
   album: 'Photo album',
   quiz: 'Quiz',
+  flashcards: 'Flashcard deck',
   report: 'Report',
   default: 'Document',
 };

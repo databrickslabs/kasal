@@ -443,7 +443,7 @@ const UIConfigurator: React.FC = () => {
           {!isCustomized && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
               {activeType === 'presentation'
-                ? 'Presentations render with the built-in Databricks deck theme (deep-teal stage, orange accent, animated slides). Turn on the switch above to set custom branding instead.'
+                ? 'Presentations render with the built-in Studio deck theme (deep-teal stage, orange accent, animated slides). Turn on the switch above to set custom branding instead.'
                 : `Inherits the Default palette. Turn on the switch above to give ${activeLabel} its own branding.`}
             </Typography>
           )}

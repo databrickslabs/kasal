@@ -1143,6 +1143,47 @@ describe('UiRenderer — Mindmap rendering: lines behind nodes + no overlap', ()
   });
 });
 
+describe('UiRenderer — Flashcards (Anki flip cards)', () => {
+  const deck = (cards: unknown[], title?: string) =>
+    surface({ root: { id: 'root', component: 'Flashcards', title, cards } });
+
+  it('renders a card grid and flips a card front↔back on click', () => {
+    const { container } = render(
+      <UiRenderer surface={deck(
+        [
+          { front: 'What is Spark?', back: 'A distributed compute engine' },
+          { question: 'RDD?', answer: 'Resilient Distributed Dataset' }, // alt key synonyms
+        ],
+        'Study',
+      )} />,
+    );
+    expect(screen.getByText('Study')).toBeInTheDocument(); // title
+    expect(screen.getByText('What is Spark?')).toBeInTheDocument(); // front face
+    // alt keys (question/answer) are parsed into front/back too
+    expect(screen.getByText('Resilient Distributed Dataset')).toBeInTheDocument();
+
+    const inners = container.querySelectorAll('[data-fc-inner]');
+    expect(inners).toHaveLength(2);
+    const firstBtn = inners[0].closest('button') as HTMLElement;
+    // Starts on the question side (not flipped).
+    expect(firstBtn.getAttribute('aria-pressed')).toBe('false');
+    expect((inners[0] as HTMLElement).style.transform).toBe('none');
+    // Click flips to the answer; the second card is unaffected.
+    fireEvent.click(firstBtn);
+    expect(firstBtn.getAttribute('aria-pressed')).toBe('true');
+    expect((inners[0] as HTMLElement).style.transform).toBe('rotateY(180deg)');
+    expect(inners[1].closest('button')!.getAttribute('aria-pressed')).toBe('false');
+    // Click again flips back.
+    fireEvent.click(firstBtn);
+    expect(firstBtn.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('renders nothing when there are no usable cards', () => {
+    const { container } = render(<UiRenderer surface={deck([{}, 'junk', null])} />);
+    expect(container.querySelector('[data-fc-inner]')).toBeNull();
+  });
+});
+
 describe('UiRenderer — URL sanitization (security)', () => {
   it('sanitizes javascript: URLs in Album anchors and keeps safe http(s) links', () => {
     const { container } = render(<UiRenderer surface={surface({

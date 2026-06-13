@@ -1101,6 +1101,203 @@ const AlbumCarousel: React.FC<{ title?: string; items: AlbumImage[] }> = ({ titl
   );
 };
 
+type Flashcard = { front: string; back: string };
+
+/**
+ * An Anki-style flashcard deck: grid or carousel of cards, each showing its
+ * QUESTION (front) and FLIPPING (a real 3D rotateY) to reveal the ANSWER (back)
+ * on click. Self-graded — no scoring — so it complements the multiple-choice
+ * Quiz. Both faces always exist in the DOM (backface-hidden); flipping just
+ * rotates the card. All colors come from the themed tokens.
+ */
+const FlashcardsNode: React.FC<{ title?: string; cards: Flashcard[]; layout?: 'grid' | 'carousel' }> = ({ title, cards, layout = 'grid' }) => {
+  const [flipped, setFlipped] = useState<Set<number>>(new Set());
+  const [idx, setIdx] = useState(0);
+  if (cards.length === 0) return null;
+
+  const toggle = (i: number) =>
+    setFlipped((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  // Keyboard navigation for carousel
+  React.useEffect(() => {
+    if (layout !== 'carousel') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') setIdx((i) => Math.min(cards.length - 1, i + 1));
+      else if (e.key === 'ArrowLeft') setIdx((i) => Math.max(0, i - 1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [layout, cards.length]);
+
+  // Shared face style: fills the card, centers content, hides its back side so
+  // only the up-facing side shows during/after the flip.
+  const face: React.CSSProperties = {
+    ...CARD_STYLE,
+    background: GLASS_STRONG,
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 18,
+    textAlign: 'center',
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+  };
+  const kicker: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+  };
+
+  // Render card component
+  const renderCard = (c: Flashcard, i: number, isSelected: boolean) => {
+    const isBack = flipped.has(i);
+    return (
+      <button
+        key={i}
+        type="button"
+        onClick={() => toggle(i)}
+        aria-pressed={isBack}
+        aria-label={isBack ? `Answer: ${c.back}` : `Question: ${c.front}. Click to reveal the answer.`}
+        style={{ perspective: 1000, background: 'none', border: 'none', padding: 0, height: 180, cursor: 'pointer', outline: 'none', boxShadow: 'none' }}
+      >
+        <div
+          data-fc-inner=""
+          style={{
+            position: 'relative', width: '100%', height: '100%',
+            transformStyle: 'preserve-3d', transition: 'transform 0.5s',
+            transform: isBack ? 'rotateY(180deg)' : 'none',
+          }}
+        >
+          {/* Front = question / term */}
+          <div style={face}>
+            <span style={{ ...kicker, color: MUTED }}>Question</span>
+            <span style={{ color: TEXT, fontSize: '1.05rem', fontWeight: 600 }}>{c.front}</span>
+            <span style={{ fontSize: 11, color: MUTED }}>Click to flip</span>
+          </div>
+          {/* Back = answer (pre-rotated so it faces out once flipped) */}
+          <div style={{ ...face, transform: 'rotateY(180deg)' }}>
+            <span style={{ ...kicker, color: ACCENT }}>Answer</span>
+            <span style={{ color: TEXT, fontSize: '1rem' }}>{c.back}</span>
+            <span style={{ fontSize: 11, color: MUTED }}>Click to flip back</span>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  if (layout === 'carousel') {
+    const current = Math.min(idx, cards.length - 1);
+    const atStart = current === 0;
+    const atEnd = current === cards.length - 1;
+    const navBtn: React.CSSProperties = {
+      position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+      width: 48, height: 48, borderRadius: 999, border: `1px solid ${GLASS_BORDER}`,
+      background: GLASS_STRONG, color: TEXT, fontSize: 28, lineHeight: 1,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', zIndex: 10,
+    };
+
+    // Carousel card with larger dimensions
+    const carouselCardStyle: React.CSSProperties = {
+      perspective: 1000, background: 'none', border: 'none', padding: 0,
+      height: 500, width: '100%', maxWidth: '65vw', cursor: 'pointer',
+      outline: 'none', boxShadow: 'none',
+    };
+
+    const carouselFace: React.CSSProperties = {
+      ...CARD_STYLE,
+      background: GLASS_STRONG,
+      position: 'absolute',
+      inset: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 16,
+      padding: 32,
+      textAlign: 'center',
+      backfaceVisibility: 'hidden',
+      WebkitBackfaceVisibility: 'hidden',
+    };
+
+    const carouselKicker: React.CSSProperties = {
+      fontSize: 13, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: MUTED,
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, height: '100%', justifyContent: 'center' }}>
+        {title && <div style={{ color: TEXT, fontWeight: 700, fontSize: '1.3rem', textAlign: 'center', marginBottom: -10 }}>{title}</div>}
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, minHeight: 450 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', position: 'relative', width: '100%', maxWidth: '70vw' }}>
+            <button
+              type="button"
+              onClick={() => toggle(current)}
+              aria-pressed={flipped.has(current)}
+              aria-label={flipped.has(current) ? `Answer: ${cards[current].back}` : `Question: ${cards[current].front}. Click to reveal the answer.`}
+              style={carouselCardStyle}
+            >
+              <div
+                data-fc-inner=""
+                style={{
+                  position: 'relative', width: '100%', height: '100%',
+                  transformStyle: 'preserve-3d', transition: 'transform 0.5s',
+                  transform: flipped.has(current) ? 'rotateY(180deg)' : 'none',
+                }}
+              >
+                {/* Front */}
+                <div style={carouselFace}>
+                  <span style={carouselKicker}>Question</span>
+                  <span style={{ color: TEXT, fontSize: '1.4rem', fontWeight: 600, lineHeight: 1.4 }}>{cards[current].front}</span>
+                  <span style={{ fontSize: 13, color: MUTED, marginTop: 12 }}>Tap to reveal answer</span>
+                </div>
+                {/* Back */}
+                <div style={{ ...carouselFace, transform: 'rotateY(180deg)' }}>
+                  <span style={{ ...carouselKicker, color: ACCENT }}>Answer</span>
+                  <span style={{ color: TEXT, fontSize: '1.2rem', lineHeight: 1.5 }}>{cards[current].back}</span>
+                  <span style={{ fontSize: 13, color: MUTED, marginTop: 12 }}>Tap to flip back</span>
+                </div>
+              </div>
+            </button>
+            {cards.length > 1 && (
+              <div style={{ position: 'absolute', top: 16, right: 16, background: GLASS_STRONG, color: TEXT, fontSize: 14, fontWeight: 700, padding: '6px 12px', borderRadius: 999, border: `1px solid ${GLASS_BORDER}` }}>
+                {current + 1} / {cards.length}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {cards.length > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 8 }}>
+            {cards.map((_, i) => (
+              <button
+                key={i} type="button" aria-label={`Go to flashcard ${i + 1}`} onClick={() => setIdx(i)}
+                style={{ width: i === current ? 24 : 10, height: 10, borderRadius: 999, background: i === current ? ACCENT : GLASS_BORDER, border: 'none', padding: 0, cursor: 'pointer', transition: 'all 0.2s' }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Grid layout (default)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {title && <div style={{ color: TEXT, fontWeight: 700, fontSize: '1.05rem' }}>{title}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+        {cards.map((c, i) => renderCard(c, i, false))}
+      </div>
+    </div>
+  );
+};
+
 /**
  * A whitelisted, appearance-only subset of an agent-provided `style` object.
  * The renderer imposes its own premium theme by default, but a node may
@@ -1440,6 +1637,25 @@ const Node: React.FC<{
         };
       }).filter((q) => q.question && q.options.length > 0);
       return <QuizNode title={node.title != null ? String(node.title) : undefined} questions={questions} />;
+    }
+    case 'Flashcards': {
+      // Anki-style flip cards. Accept `cards` (or `items`) and tolerate the
+      // common key synonyms agents use for the two faces. Supports `layout` property
+      // for grid (default) or carousel (one per screen) display.
+      const rawCards = (resolveValue(node.cards, data) as unknown) ?? node.cards ?? node.items;
+      const cards = (Array.isArray(rawCards) ? rawCards : []).map((c) => {
+        const o = (c || {}) as Record<string, unknown>;
+        return {
+          front: String(o.front ?? o.question ?? o.term ?? o.q ?? ''),
+          back: String(o.back ?? o.answer ?? o.definition ?? o.a ?? ''),
+        };
+      }).filter((c) => c.front || c.back);
+      const layout = typeof node.layout === 'string' ? (node.layout as 'grid' | 'carousel') : 'grid';
+      return (
+        <div style={{ ...nodeStyle }}>
+          <FlashcardsNode title={node.title != null ? String(node.title) : undefined} cards={cards} layout={layout} />
+        </div>
+      );
     }
     case 'Mindmap': {
       // The tree lives in `root` (or `data`/`tree`): a nested
