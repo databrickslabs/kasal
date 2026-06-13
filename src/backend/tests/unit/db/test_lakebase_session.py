@@ -34,6 +34,11 @@ def _isolate_lakebase_env(monkeypatch):
     _orig = _mod._lakebase_factory
     _mod._lakebase_factory = None
 
+    # Reset the SPN creds cache so a populated entry from one test can't make
+    # another take the SPN path (the cache is the race-safe fallback).
+    _orig_cache = dict(_mod._SPN_CREDS_CACHE)
+    _mod._SPN_CREDS_CACHE.clear()
+
     # Remove env vars that change code paths inside lakebase_session
     for _var in (
         "USE_NULLPOOL",
@@ -49,6 +54,8 @@ def _isolate_lakebase_env(monkeypatch):
     yield
 
     _mod._lakebase_factory = _orig
+    _mod._SPN_CREDS_CACHE.clear()
+    _mod._SPN_CREDS_CACHE.update(_orig_cache)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +202,41 @@ class TestGetWorkspaceClient:
                 client_id="test-client-id",
                 client_secret="test-secret",
             )
+
+    @pytest.mark.asyncio
+    async def test_spn_survives_concurrent_env_strip_via_cache(self):
+        """The deployed bug: another crew thread's _clean_environment() pops
+        DATABRICKS_CLIENT_ID/SECRET/HOST from os.environ while the knowledge
+        search creates its Lakebase client. With the env STRIPPED, the cached
+        SPN creds (captured on a prior present read) must still drive the SPN
+        path — not fall through to the failing PAT branch."""
+        import src.db.lakebase_session as _mod
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        # 1) A prior call with creds present populates the cache.
+        present = {
+            "DATABRICKS_CLIENT_ID": "cid",
+            "DATABRICKS_CLIENT_SECRET": "secret",
+            "DATABRICKS_HOST": "https://ws.example.com",
+        }
+        with patch.dict(os.environ, present, clear=False):
+            _mod._resolve_spn_creds()
+        assert _mod._SPN_CREDS_CACHE.get("client_id") == "cid"
+
+        # 2) Now the env is stripped (concurrent _clean_environment window).
+        for v in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET", "DATABRICKS_HOST"):
+            os.environ.pop(v, None)
+
+        factory = LakebaseSessionFactory()
+        mock_ws = MagicMock()
+        with patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+            result = await factory._get_workspace_client()
+
+        # SPN path still taken using the CACHED creds — no PAT fallback, no ValueError.
+        assert result is mock_ws
+        mock_cls.assert_called_once_with(
+            host="https://ws.example.com", client_id="cid", client_secret="secret"
+        )
 
     @pytest.mark.asyncio
     async def test_spn_oauth_is_cached(self):

@@ -20,6 +20,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+def emit_knowledge_span(event_type: str, attrs: dict) -> None:
+    """Emit a one-shot OTel span recording a knowledge store/search decision.
+
+    The crew SUBPROCESS's ``logger.info`` lines do NOT reach the OTel logs
+    table, but tool spans DO reach otel_spans — so the only way to observe how
+    the subprocess search resolves its store (Lakebase vs app DB) is a span.
+    Best-effort: never let diagnostics break the search/ingest path.
+    """
+    try:
+        from opentelemetry import trace as _otel_trace
+
+        tracer = _otel_trace.get_tracer("kasal.knowledge")
+        with tracer.start_as_current_span("kasal.knowledge.store") as span:
+            if not span.is_recording():
+                return
+            span.set_attribute("kasal.event_type", event_type)
+            for key, value in attrs.items():
+                if value is None:
+                    continue
+                span.set_attribute(f"kasal.knowledge.{key}", value)
+    except Exception as e:  # pragma: no cover - diagnostics must not raise
+        logger.debug(f"[KNOWLEDGE] Could not emit knowledge span: {e}")
+
+
 # The dedicated knowledge_embeddings table for uploaded knowledge, created
 # complete (incl. the pgvector embedding column) so the creating connection owns
 # it. pgvector ('vector' type + vector_cosine_ops) lives in public, which is on
@@ -117,16 +141,41 @@ async def resolve_lakebase_instance(
         from src.schemas.memory_backend import MemoryBackendType
 
         config = await MemoryConfigService(app_session).get_active_config(group_id)
+        backend_type = getattr(config, "backend_type", None) if config else None
         if config and config.backend_type == MemoryBackendType.LAKEBASE:
             instance = None
             lakebase_config = getattr(config, "lakebase_config", None)
             if lakebase_config is not None:
                 instance = getattr(lakebase_config, "instance_name", None)
-            return instance or os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            resolved = instance or os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            logger.info(
+                f"[KNOWLEDGE] resolve_lakebase_instance: group={group_id} "
+                f"backend=LAKEBASE -> instance={resolved}"
+            )
+            return resolved
+        # Not Lakebase — record WHY so a deployed run shows whether the
+        # subprocess saw 'no active config' vs a non-Lakebase backend.
+        logger.info(
+            f"[KNOWLEDGE] resolve_lakebase_instance: group={group_id} "
+            f"backend={backend_type if config else 'NO_ACTIVE_CONFIG'} -> using app DB"
+        )
+        emit_knowledge_span(
+            "knowledge_store_resolve",
+            {
+                "group_id": group_id,
+                "lakebase": False,
+                "backend": str(backend_type) if config else "no_active_config",
+            },
+        )
         return None
     except Exception as e:
         logger.warning(
-            f"Could not resolve active memory backend ({e}); using app DB for embeddings"
+            f"[KNOWLEDGE] resolve_lakebase_instance FAILED for group={group_id} "
+            f"({type(e).__name__}: {e}); using app DB for embeddings"
+        )
+        emit_knowledge_span(
+            "knowledge_store_resolve",
+            {"group_id": group_id, "lakebase": False, "error": f"{type(e).__name__}: {e}"[:300]},
         )
         return None
 
@@ -182,10 +231,26 @@ async def knowledge_embedding_session(
         from src.db.lakebase_session import get_lakebase_session
 
         logger.info(f"[KNOWLEDGE] Using Lakebase instance '{instance}' for document embeddings")
+        emit_knowledge_span(
+            "knowledge_store_session",
+            {"group_id": group_id, "lakebase": True, "instance": instance},
+        )
         async with get_lakebase_session(
             instance_name=instance, group_id=group_id, user_token=user_token
         ) as lb_session:
             await _assume_knowledge_role(lb_session)
             yield lb_session, True
     else:
+        # App-DB fallback. Previously SILENT — the single biggest blind spot:
+        # on deployed Databricks Apps the crew SUBPROCESS landing here (while
+        # ingest used Lakebase in the API process) is exactly how a search
+        # reads the wrong/empty store and returns "No relevant information".
+        logger.info(
+            f"[KNOWLEDGE] Using APP DB (not Lakebase) for document embeddings "
+            f"(group={group_id}) — ingest and search MUST agree on this store"
+        )
+        emit_knowledge_span(
+            "knowledge_store_session",
+            {"group_id": group_id, "lakebase": False, "instance": "app_db"},
+        )
         yield app_session, False

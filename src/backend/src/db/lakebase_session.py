@@ -35,6 +35,47 @@ logger = logging.getLogger(__name__)
 # Token refresh interval: 50 minutes (tokens expire at 60 min, 10 min safety margin)
 TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
 
+# Cached SPN credentials, captured the first time all three env vars are present.
+# CRITICAL (deployed Databricks Apps): the crew subprocess is multi-threaded and
+# src.utils.databricks_auth._clean_environment() temporarily POPS
+# DATABRICKS_CLIENT_ID/SECRET/HOST from the PROCESS-GLOBAL os.environ during
+# every workspace-client creation. The knowledge search runs in a CrewAI tool
+# worker thread; if it reads os.getenv() during another thread's strip window it
+# sees None, skips SPN, and the run fails to reach Lakebase ("Failed to create
+# workspace client"). Caching the creds once makes Lakebase auth immune to that
+# transient race.
+_SPN_CREDS_CACHE: dict = {}
+
+
+def _resolve_spn_creds() -> tuple:
+    """Return (client_id, client_secret, host), preferring live env but falling
+    back to the cached snapshot when a concurrent strip window blanked them."""
+    client_id = os.getenv("DATABRICKS_CLIENT_ID")
+    client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+    host = os.getenv("DATABRICKS_HOST")
+    if client_id and client_secret and host:
+        # Fully present — refresh the cache for future racy reads.
+        _SPN_CREDS_CACHE.update(
+            client_id=client_id, client_secret=client_secret, host=host
+        )
+        return client_id, client_secret, host
+    # One or more were stripped by a concurrent _clean_environment(); use cache.
+    cached = _SPN_CREDS_CACHE
+    if cached.get("client_id") and cached.get("client_secret") and cached.get("host"):
+        logger.info(
+            "[LAKEBASE SESSION] SPN env vars transiently absent (concurrent "
+            "_clean_environment strip); using cached SPN credentials"
+        )
+        return cached["client_id"], cached["client_secret"], cached["host"]
+    return client_id, client_secret, host
+
+
+# Eager snapshot at import: the crew subprocess inherits the app's SPN env from
+# its parent, so the creds are present here BEFORE any crew thread starts
+# running _clean_environment() — capturing them now guarantees the cache is
+# populated even if the very first Lakebase auth races with a strip window.
+_resolve_spn_creds()
+
 
 class LakebaseSessionFactory:
     """Factory for creating Lakebase database sessions with do_connect token injection."""
@@ -76,10 +117,11 @@ class LakebaseSessionFactory:
             return self._workspace_client
 
         try:
-            # Priority 1: SPN OAuth — required when deployed as a Databricks App
-            client_id = os.getenv("DATABRICKS_CLIENT_ID")
-            client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
-            host = os.getenv("DATABRICKS_HOST")
+            # Priority 1: SPN OAuth — required when deployed as a Databricks App.
+            # Resolved race-safe (see _resolve_spn_creds): a concurrent
+            # _clean_environment() strip in another crew thread must not make us
+            # fall through to PAT and fail.
+            client_id, client_secret, host = _resolve_spn_creds()
 
             if client_id and client_secret and host:
                 logger.info("[LAKEBASE SESSION] Using SPN OAuth (client credentials)")

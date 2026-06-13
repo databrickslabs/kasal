@@ -363,6 +363,12 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             query = query.where(self._model.group_id == group_id)
             if file_paths:
                 query = query.where(self._model.file_path.in_(file_paths))
-        query = query.order_by(text("embedding <=> :embedding")).limit(limit)
+        # The bound parameter MUST be cast to ``vector`` — pgvector's ``<=>``
+        # operator is ``vector <=> vector``, and asyncpg sends a bare string as
+        # text, so without ``::vector`` Postgres raises
+        # "operator does not exist: vector <=> text" and the search silently
+        # returns nothing (the SQLite path ranks in Python and is unaffected,
+        # which is why this only bites on Lakebase/Postgres deployments).
+        query = query.order_by(text("embedding <=> (:embedding)::vector")).limit(limit)
         result = await self.db.execute(query, {"embedding": embedding_str})
         return result.scalars().all()

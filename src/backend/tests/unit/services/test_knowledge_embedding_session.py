@@ -12,8 +12,33 @@ from src.services.knowledge_embedding_session import (
     resolve_lakebase_instance,
     knowledge_embedding_session,
     ensure_lakebase_doc_table,
+    emit_knowledge_span,
 )
 from src.schemas.memory_backend import MemoryBackendType
+
+
+def _capture_spans():
+    """Patch the OTel tracer used by emit_knowledge_span and capture the
+    attributes set on each emitted span."""
+    captured = []
+
+    class _Span:
+        def is_recording(self):
+            return True
+
+        def set_attribute(self, k, v):
+            captured.append((k, v))
+
+    class _CM:
+        def __enter__(self):
+            return _Span()
+
+        def __exit__(self, *a):
+            return False
+
+    tracer = MagicMock()
+    tracer.start_as_current_span.return_value = _CM()
+    return captured, patch("opentelemetry.trace.get_tracer", return_value=tracer)
 
 
 def _cfg(backend_type, instance_name="my-lb", has_lakebase=True):
@@ -153,3 +178,77 @@ class TestKnowledgeEmbeddingSession:
         # SET ROLE was attempted on the Lakebase session.
         executed = " ".join(str(c.args[0]) for c in lb.execute.call_args_list)
         assert "SET ROLE" in executed
+
+
+class TestKnowledgeRoutingObservability:
+    """The deployed crew SUBPROCESS doesn't export logger.info to otel_logs, so
+    the store-routing decision is emitted as an OTel span (which DOES reach
+    otel_spans). These tests pin that the span fires on every branch."""
+
+    @pytest.mark.asyncio
+    async def test_app_db_fallback_emits_span(self):
+        captured, span_patch = _capture_spans()
+        app = MagicMock()
+        with patch(
+            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            new=AsyncMock(return_value=None),
+        ), span_patch:
+            async with knowledge_embedding_session(app, "g1") as (sess, is_lakebase):
+                assert sess is app and is_lakebase is False
+        attrs = dict(captured)
+        assert attrs["kasal.event_type"] == "knowledge_store_session"
+        assert attrs["kasal.knowledge.lakebase"] is False
+        assert attrs["kasal.knowledge.instance"] == "app_db"
+
+    @pytest.mark.asyncio
+    async def test_lakebase_branch_emits_span(self):
+        captured, span_patch = _capture_spans()
+        app = MagicMock()
+        lb = MagicMock()
+        lb.execute = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_get_lakebase_session(**kwargs):
+            yield lb
+
+        with patch(
+            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            new=AsyncMock(return_value="my-lb"),
+        ), patch(
+            "src.db.lakebase_session.get_lakebase_session", new=fake_get_lakebase_session
+        ), span_patch:
+            async with knowledge_embedding_session(app, "g1", "tok") as (sess, is_lakebase):
+                assert is_lakebase is True
+        attrs = dict(captured)
+        assert attrs["kasal.knowledge.lakebase"] is True
+        assert attrs["kasal.knowledge.instance"] == "my-lb"
+
+    @pytest.mark.asyncio
+    async def test_resolve_logs_and_spans_non_lakebase_backend(self):
+        captured, span_patch = _capture_spans()
+        with _patch_config(_cfg(MemoryBackendType.DEFAULT)), span_patch:
+            inst = await resolve_lakebase_instance(MagicMock(), "g1")
+        assert inst is None
+        attrs = dict(captured)
+        # Records WHY it's not Lakebase so a deployed run is unambiguous.
+        assert attrs["kasal.event_type"] == "knowledge_store_resolve"
+        assert attrs["kasal.knowledge.lakebase"] is False
+        assert "backend" in attrs["kasal.knowledge.backend"].lower() or attrs["kasal.knowledge.backend"]
+
+    @pytest.mark.asyncio
+    async def test_resolve_error_spans_with_reason(self):
+        captured, span_patch = _capture_spans()
+        svc = MagicMock()
+        svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch(
+            "src.services.memory_config_service.MemoryConfigService", return_value=svc
+        ), span_patch:
+            inst = await resolve_lakebase_instance(MagicMock(), "g1")
+        assert inst is None
+        attrs = dict(captured)
+        assert "RuntimeError" in attrs["kasal.knowledge.error"]
+
+    def test_emit_span_never_raises_without_otel(self):
+        # Best-effort: a tracer failure must not break ingest/search.
+        with patch("opentelemetry.trace.get_tracer", side_effect=RuntimeError("no otel")):
+            emit_knowledge_span("knowledge_search", {"group_id": "g1", "lakebase": True})
