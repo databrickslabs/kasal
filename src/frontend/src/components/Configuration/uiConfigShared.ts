@@ -38,6 +38,7 @@ export const DELIVERABLE_TYPES = [
   { key: 'mindmap', label: 'Mindmap' },
   { key: 'album', label: 'Album' },
   { key: 'quiz', label: 'Quiz' },
+  { key: 'flashcards', label: 'Flashcards' },
   { key: 'report', label: 'Report' },
 ] as const;
 export type DeliverableKey = (typeof DELIVERABLE_TYPES)[number]['key'];
@@ -64,10 +65,10 @@ export const THEME_PRESETS: { key: string; label: string; theme: Theme }[] = [
   { key: 'vibrant', label: 'Vibrant', theme: { accent: '#7C3AED', background: '#FFFFFF', surface: '#F5F3FF', text: '#1E1B4B', heading: '#6D28D9', muted: '#6B7280', font: 'rounded', density: 'comfortable' } },
   { key: 'minimal', label: 'Minimal', theme: { accent: '#111827', background: '#FFFFFF', surface: '#FFFFFF', text: '#111827', heading: '#000000', muted: '#9CA3AF', font: 'sans', density: 'compact' } },
   { key: 'corporate', label: 'Corporate', theme: { accent: '#1E3A5F', background: '#FFFFFF', surface: '#F1F5F9', text: '#1E293B', heading: '#0F2540', muted: '#64748B', font: 'serif', density: 'comfortable' } },
-  { key: 'playful', label: 'Playful', theme: { accent: '#F97316', background: '#FFFBEB', surface: '#FEF3C7', text: '#7C2D12', heading: '#C2410C', muted: '#B45309', font: 'rounded', density: 'comfortable' } },
+  { key: 'amber', label: 'Amber', theme: { accent: '#F97316', background: '#FFFBEB', surface: '#FEF3C7', text: '#7C2D12', heading: '#C2410C', muted: '#B45309', font: 'rounded', density: 'comfortable' } },
   // Mirrors the renderer's built-in presentation deck identity (UiRenderer
   // DECK_THEME_VARS) so users can pin it as an explicit palette and tweak it.
-  { key: 'databricks-deck', label: 'Databricks Deck', theme: { accent: '#FF3621', background: '#0E1B21', surface: '#16272F', text: '#E8EEF2', heading: '#FFFFFF', muted: '#8FA3AD', font: 'sans', density: 'comfortable' } },
+  { key: 'studio', label: 'Studio', theme: { accent: '#FF3621', background: '#0E1B21', surface: '#16272F', text: '#E8EEF2', heading: '#FFFFFF', muted: '#8FA3AD', font: 'sans', density: 'comfortable' } },
 ];
 
 export const DEFAULT_THEME: Theme = THEME_PRESETS[0].theme;
@@ -117,6 +118,12 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
     { kind: 'number', key: 'questions', label: 'Number of questions', min: 3, max: 20, default: 5, phrase: (v) => `write exactly ${v} questions` },
     { kind: 'select', key: 'difficulty', label: 'Difficulty', default: 'mixed', choices: [{ value: 'easy', label: 'Easy' }, { value: 'medium', label: 'Medium' }, { value: 'hard', label: 'Hard' }, { value: 'mixed', label: 'Mixed' }], phrase: (v) => (v === 'mixed' ? 'mix easy, medium and hard questions' : `pitch questions at a ${v} difficulty`) },
     { kind: 'number', key: 'choices', label: 'Options per question', min: 2, max: 5, default: 4, phrase: (v) => `give each question ${v} answer options` },
+  ],
+  flashcards: [
+    { kind: 'select', key: 'layout', label: 'Layout', default: 'carousel', choices: [{ value: 'carousel', label: 'One per screen (carousel)' }, { value: 'grid', label: 'Grid' }], phrase: (v) => (v === 'carousel' ? 'show one flashcard per screen that scrolls left→right — set the Flashcards component\'s "layout" to "carousel"' : 'lay the flashcards out as a responsive grid (Flashcards "layout":"grid")') },
+    { kind: 'number', key: 'count', label: 'Number of cards', min: 4, max: 40, step: 2, default: 12, phrase: (v) => `make about ${v} flashcards` },
+    { kind: 'select', key: 'style', label: 'Card style', default: 'qa', choices: [{ value: 'qa', label: 'Question → Answer' }, { value: 'term', label: 'Term → Definition' }, { value: 'cloze', label: 'Fill in the blank' }], phrase: (v) => (v === 'term' ? 'use term → definition cards' : v === 'cloze' ? 'use fill-in-the-blank (cloze) cards' : 'use question → answer cards') },
+    { kind: 'switch', key: 'examples', label: 'Add a short example to each answer', default: false, phrase: (v) => (v ? 'add a brief example to each answer' : 'keep answers concise without examples') },
   ],
   report: [
     { kind: 'select', key: 'length', label: 'Length', default: 'standard', choices: [{ value: 'brief', label: 'Brief' }, { value: 'standard', label: 'Standard' }, { value: 'detailed', label: 'Detailed' }], phrase: (v) => `keep the report ${v} in length` },

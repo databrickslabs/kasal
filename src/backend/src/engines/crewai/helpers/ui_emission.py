@@ -28,6 +28,7 @@ _THEME_LABELS = {
     "mindmap": "Mindmap / concept map",
     "album": "Album / image gallery",
     "quiz": "Quiz / assessment",
+    "flashcards": "Flashcards / Anki / spaced repetition",
     "report": "Report / summary / briefing",
 }
 _THEME_ORDER = [
@@ -38,6 +39,7 @@ _THEME_ORDER = [
     "mindmap",
     "album",
     "quiz",
+    "flashcards",
     "report",
 ]
 _THEME_KEYS = (
@@ -127,6 +129,141 @@ def _build_directives_block(
     ]
 
 
+# Always-on core: the output contract, the document skeleton, and the UNIVERSAL
+# building blocks every deliverable shares. Everything deliverable-specific lives
+# in _DELIVERABLE_GUIDANCE below and is added per-run for ONLY the inferred
+# deliverable — so the prompt stays ~constant as new artifact types are added (a
+# new type costs tokens only on ITS OWN runs, not on every other deliverable's).
+_CORE: List[str] = [
+    'OUTPUT FORMAT (STRICT): Return your result ONLY as a single JSON "UI document".',
+    "Do NOT write HTML, CSS or JavaScript, and no prose or markdown code fences — only",
+    "the JSON below. It is rendered by a design-system renderer into a polished app.",
+    "",
+    'Shape (note: each component\'s type goes in the "component" field, NOT "type"):',
+    '{ "messages": [',
+    '  { "createSurface": { "surfaceId": "s1", "catalogId": "basic" } },',
+    '  { "updateComponents": { "surfaceId": "s1", "components": [',
+    '    { "id": "root", "component": "Column", "children": ["title", "body"] },',
+    '    { "id": "title", "component": "Text", "variant": "h1", "text": "Heading" },',
+    '    { "id": "body", "component": "Text", "variant": "body", "text": "..." }',
+    "  ] } }",
+    "] }",
+    "",
+    'Every component object MUST use the key "component" (e.g. "component":"Card"), not',
+    '"type". components is a FLAT list; build the tree by referencing child ids. The',
+    'root component MUST have id "root". Use these universal building blocks PLUS the',
+    "deliverable-specific components listed below — do NOT invent other component types:",
+    "- Text (text, variant: h1..h5/body/caption), Row/Column (children, justify, align)",
+    "- Card (title?, children), List (children), Divider, Image (url, alt?), Icon (name)",
+    "- Badge (text, tone: good/warn/bad/neutral), Button (child), TextField (label, value)",
+    "- CheckBox (label, value), Slider (label, min, max, value)",
+]
+
+# Per-deliverable guidance: the build intent + the components / shapes / rules
+# UNIQUE to that deliverable. Sent for ONLY the inferred deliverable (or, when none
+# is inferred, all of them behind the chooser header). Add a new artifact type by
+# adding ONE entry here (+ a renderer component + a keyword) — it does not touch any
+# other deliverable's prompt.
+_DELIVERABLE_GUIDANCE: Dict[str, List[str]] = {
+    "presentation": [
+        "BUILD A PRESENTATION / slides / deck:",
+        "- Slides (children) — a navigable deck; Slide (title?, children).",
+        "- Inside slides use: Chart (chartType: bar/line/pie, title?, data:[{label,value}]),",
+        "  Stat (label, value, delta?, tone), Dashboard (children), Table (columns, rows).",
+        "SLIDE DESIGN RULES (important):",
+        "- Each slide MUST fit ONE screen with no scrolling. One focal element per slide:",
+        "  a short bullet list, OR a Dashboard of stats, OR 1-2 charts — NOT all at once.",
+        "- Do NOT stack a Stat Dashboard AND multiple Charts on one slide; split them across",
+        "  slides. A Dashboard should be the slide's full-width main element.",
+        "- A short title + at most 3-4 brief points (≤1 sentence each). Aim for 6-9 slides.",
+        "- Prefer Charts, Stat tiles, Badges and Icons over paragraphs. Never put dense",
+        "  multi-paragraph text on a slide, and never wrap long text in a Card.",
+        "- BALANCE two-column Rows: columns must carry similar visual weight; a Row has 2-3",
+        "  columns max with a Chart or Stat in at least one. Do NOT pair a big text block",
+        "  with a small chart — that leaves empty space and looks broken.",
+    ],
+    "dashboard": [
+        "BUILD A DASHBOARD / metrics / KPIs:",
+        "- Dashboard (children) — a responsive KPI/card grid; Stat (label, value, delta?,",
+        "  tone: good/warn/bad/neutral) for headline numbers.",
+        "- Chart (chartType: bar/line/pie, title?, data:[{label,value}]) for trends/breakdowns.",
+        "- Table (columns:[str], rows:[[cell,…]]) for tabular detail.",
+        "Lead with Stat tiles, add Charts for trends; keep it a clean grid (do NOT use Slides).",
+    ],
+    "genie": [
+        "BUILD A DATA ANSWER / Genie / query result:",
+        "- A short answer Text, then a Table (columns:[str], rows:[[cell,…]]) of the returned",
+        "  rows, plus a Chart (chartType: bar/line/pie, data:[{label,value}]) when it helps.",
+        "  Do NOT use Slides for data answers.",
+    ],
+    "report": [
+        "BUILD A REPORT / summary / briefing:",
+        "- Cards with Text, List and Badges; lead with a short executive-summary Card. Use",
+        "  Badges for status/labels and a Chart or Table where it aids understanding.",
+    ],
+    "quiz": [
+        "BUILD A QUIZ / assessment:",
+        "- ONE Quiz component: Quiz (title?, questions:[{ question, options:[str],",
+        "  answer: <0-based index of the correct option> }]). The renderer handles",
+        "  selection, scoring and navigation — supply ONLY the data. Do NOT hand-build a",
+        "  quiz from Cards/HTML and do NOT use Slides.",
+    ],
+    "flashcards": [
+        "BUILD FLASHCARDS / an Anki deck (spaced-repetition study cards):",
+        "- ONE Flashcards component: Flashcards (title?, layout?: grid|carousel, cards:[{ front, back }]).",
+        "  Each card shows its \"front\" (question/term) and FLIPS to reveal \"back\" (the answer) when",
+        '  clicked. layout:"carousel" shows ONE flashcard per screen; default is a grid.',
+        "  Supply ONLY the data — do NOT hand-build flip cards from Cards/Buttons,",
+        "  and do NOT use a Quiz (flashcards are self-graded, not multiple-choice).",
+    ],
+    "mindmap": [
+        "BUILD A MINDMAP / concept map / idea tree:",
+        "- ONE Mindmap: Mindmap (title?, root:{label, children:[{label, children:[…]}]}).",
+        '  Nest children to any depth. A node may add "description" — a longer note shown in',
+        "  the node's hover tooltip (use it for detail that won't fit the short label).",
+    ],
+    "album": [
+        "BUILD AN ALBUM / image gallery:",
+        "- ONE Album: Album (title?, layout?: grid|carousel, images:[{url, alt?, caption?}]).",
+        "  Put EXISTING image links into images[].url (prefer DIRECT links ending in",
+        '  .jpg/.png/.webp). layout:"carousel" shows ONE image per screen; default is a grid.',
+        "  ALWAYS emit the Album with the URLs you have — never refuse, never fall back to a",
+        "  markdown/text list, never invent images.",
+    ],
+}
+
+# Order the deliverables are listed in when none is inferred (the chooser menu).
+_GUIDANCE_ORDER = [
+    "presentation",
+    "dashboard",
+    "genie",
+    "report",
+    "quiz",
+    "flashcards",
+    "mindmap",
+    "album",
+]
+
+_CHOOSER_HEADER = [
+    "MATCH THE REQUESTED DELIVERABLE — infer the single most fitting one from the",
+    "request and build just that (do NOT default to slides). Your options:",
+]
+
+# Default directives for each deliverable type. Applied when a deliverable is
+# inferred but the workspace config has no customizations yet. These mirror the
+# frontend defaults from uiConfigShared.ts optionSpecs.
+_DEFAULT_DIRECTIVES = {
+    "flashcards": 'show one flashcard per screen that scrolls left→right — set the Flashcards component\'s "layout" to "carousel"; make about 12 flashcards; use question → answer cards; keep answers concise without examples.',
+    "album": 'show one image per screen that scrolls left→right — set the Album component\'s "layout" to "carousel"; give every image a short caption; include at most 12 images.',
+    "presentation": "aim for about 8 slides; at most 4 bullet points per slide; open with a dedicated title slide; end with a summary / takeaways slide.",
+    "dashboard": "lay out KPI Stat tiles 3 per row; pick the chart type that best fits each metric; show a delta/trend on each Stat tile.",
+    "quiz": "write exactly 5 questions; mix easy, medium and hard questions; give each question 4 answer options.",
+    "mindmap": "nest the tree up to 3 levels deep; give the central topic about 5 main branches; keep node labels plain text.",
+    "report": "keep the report standard in length; write in a neutral tone; lead with an executive summary card; list sources / citations at the end.",
+    "genie": "pick the chart type that best fits each metric; show at most 20 rows in the Table; do not surface the SQL query.",
+}
+
+
 def build_ui_instruction(
     accent: Optional[str] = None,
     themes: Optional[Dict[str, Any]] = None,
@@ -147,84 +284,20 @@ def build_ui_instruction(
         if accent and not themes
         else ""
     )
-    base = "\n".join(
-        [
-            'OUTPUT FORMAT (STRICT): Return your result ONLY as a single JSON "UI document".',
-            "Do NOT write HTML, CSS or JavaScript, and no prose or markdown code fences — only",
-            "the JSON below. It is rendered by a design-system renderer into a polished app.",
-            "",
-            "MATCH THE REQUESTED DELIVERABLE — do not default to slides. Build what the",
-            "task/user asked for:",
-            "- QUIZ / assessment / 'interactive quiz' → ONE Quiz component with a questions",
-            "  array (the renderer handles selection, scoring, navigation). Do NOT hand-build a",
-            "  quiz from Cards/HTML and do NOT use Slides.",
-            "- PRESENTATION / deck / 'slides' → Slides with Slide children.",
-            "- ALBUM / gallery / photos / image collection → ONE Album with an images",
-            "  array of EXISTING image links: images:[{url, caption?}]. Put the image",
-            "  URLs you were given or found directly into images[].url (prefer DIRECT",
-            "  image links ending in .jpg/.png/.webp). ALWAYS emit the Album UI",
-            "  document with the URLs you have — never refuse and never fall back to a",
-            "  markdown/text list of links. Never invent images.",
-            "- MINDMAP / concept map / hierarchy / idea tree → ONE Mindmap with a nested",
-            "  root: root:{label, children:[{label, children:[…]}]}. Use it for",
-            "  brainstorms, topic breakdowns and concept trees.",
-            "- DASHBOARD / metrics / KPIs → Dashboard of Stat tiles + Chart(s).",
-            "- REPORT / summary / briefing → Cards with Text, List and Badges.",
-            "- DATA ANSWER / Genie / query result → a short answer Text, then a Table of the",
-            "  returned rows, plus a Chart when it helps; do NOT use Slides for data answers.",
-            "If the request is ambiguous, infer the most fitting one (don't always pick Slides).",
-            "",
-            'Shape (note: each component\'s type goes in the "component" field, NOT "type"):',
-            '{ "messages": [',
-            '  { "createSurface": { "surfaceId": "s1", "catalogId": "basic" } },',
-            '  { "updateComponents": { "surfaceId": "s1", "components": [',
-            '    { "id": "root", "component": "Column", "children": ["title", "body"] },',
-            '    { "id": "title", "component": "Text", "variant": "h1", "text": "Heading" },',
-            '    { "id": "body", "component": "Text", "variant": "body", "text": "..." }',
-            "  ] } }",
-            "] }",
-            "",
-            'Every component object MUST use the key "component" (e.g. "component":"Card"),',
-            'not "type". components is a FLAT list; build the tree by referencing child',
-            'ids. The root component MUST have id "root". Allowed components ONLY:',
-            "- Text (text, variant: h1..h5/body/caption), Row/Column (children, justify, align)",
-            "- Card (title?, children), List (children), Divider, Image (url, alt?), Icon (name)",
-            "- Badge (text, tone: good/warn/bad/neutral), Button (child), TextField (label, value)",
-            "- CheckBox (label, value), Slider (label, min, max, value)",
-            "- ChoicePicker (label, options:[{label,value}], value) — single choice for quizzes/forms",
-            "- Dashboard (children) — responsive KPI/card grid; Stat (label, value, delta?, tone)",
-            "- Chart (chartType: bar/line/pie, title?, data:[{label,value}])",
-            "- Table (columns:[str], rows:[[cell,…],…]) — for data / Genie query results",
-            "- Quiz (title?, questions:[{ question, options:[str], answer: <0-based index of the",
-            "  correct option> }]) — a complete interactive scored quiz; supply ONLY the data",
-            "- Slides (children) — navigable deck; Slide (title?, children)",
-            "- Album (title?, layout?: grid|carousel, images:[{url, alt?, caption?}]) —",
-            "  a gallery of EXISTING image links (supply real image URLs; do not",
-            '  fabricate). layout:"carousel" shows ONE image per screen with horizontal',
-            "  scroll; default is a responsive grid.",
-            "- Mindmap (title?, root:{label, children:[{label, children:[…]}]}) — a node",
-            "  tree / concept map; nest children to any depth",
-            "",
-            "Pick the components that fit the deliverable: Dashboard+Stat+Chart for metrics,",
-            "Slides+Slide for presentations, Album for image galleries, Mindmap for concept",
-            "trees, ChoicePicker for quizzes. Do not invent other types.",
-            "",
-            "SLIDE DESIGN RULES (important):",
-            "- Each slide MUST fit ONE screen with no scrolling. One focal element per slide:",
-            "  either a short bullet list, OR a Dashboard of stats, OR 1-2 charts — NOT all at once.",
-            "- Do NOT stack a Stat Dashboard AND multiple Charts on the same slide; split them",
-            "  across separate slides. A Dashboard should be the slide's full-width main element.",
-            "- A short title + at most 3-4 brief points (≤1 sentence each). Aim for 6-9 slides total.",
-            "- Prefer Charts, Stat tiles, Badges and Icons over paragraphs. Never put dense",
-            "  multi-paragraph text on a slide, and never wrap long text in a Card.",
-            "- BALANCE two-column Rows: each column must carry similar visual weight (e.g. a few",
-            "  short points on one side, a Chart or Stat group on the other). Do NOT pair a large",
-            "  text block with a small chart — that leaves empty space and looks broken.",
-            "- A Row should have 2-3 columns max; put a Chart or Stat in at least one of them.",
-            "- Use Stat tiles for numbers, Chart for trends/breakdowns, Badge for status/labels."
-            + accent_line,
-        ]
-    )
+    # Always-on core + ONLY the inferred deliverable's component guidance. When the
+    # deliverable can't be inferred, fall back to the full chooser menu (all slices)
+    # so the agent can still pick — that ambiguous case is the exception, not the norm.
+    lines: List[str] = list(_CORE)
+    if deliverable and deliverable in _DELIVERABLE_GUIDANCE:
+        lines.append("")
+        lines.extend(_DELIVERABLE_GUIDANCE[deliverable])
+    else:
+        lines.append("")
+        lines.extend(_CHOOSER_HEADER)
+        for key in _GUIDANCE_ORDER:
+            lines.append("")
+            lines.extend(_DELIVERABLE_GUIDANCE[key])
+    base = "\n".join(lines) + accent_line
     theme_block = _build_theme_block(themes, deliverable) if themes else []
     if theme_block:
         base = base + "\n" + "\n".join(theme_block)
@@ -240,6 +313,10 @@ def build_ui_instruction(
 # infer which single deliverable a task builds so the UI instruction can carry
 # only that deliverable's theme/directive guidance instead of all eight.
 _DELIVERABLE_KEYWORDS = [
+    ("flashcard", "flashcards"),
+    ("flash card", "flashcards"),
+    ("anki", "flashcards"),
+    ("spaced repetition", "flashcards"),
     ("quiz", "quiz"),
     ("mindmap", "mindmap"),
     ("mind map", "mindmap"),
@@ -323,6 +400,15 @@ async def apply_ui_emission(
         deliverable = _infer_deliverable(
             f"{original}\n{last_task.get('expected_output', '') or ''}"
         )
+
+        # Apply default directives for the inferred deliverable if not already customized.
+        # This ensures users get sensible defaults (e.g., carousel layout for flashcards)
+        # even if they haven't visited the workspace configurator yet.
+        if deliverable and deliverable in _DEFAULT_DIRECTIVES:
+            if not directives:
+                directives = {}
+            if deliverable not in directives or not directives[deliverable]:
+                directives[deliverable] = _DEFAULT_DIRECTIVES[deliverable]
 
         instruction = build_ui_instruction(accent, themes, directives, deliverable)
         last_task["description"] = f"{original}\n\n{instruction}"

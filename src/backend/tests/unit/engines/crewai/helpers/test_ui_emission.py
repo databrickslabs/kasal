@@ -249,11 +249,28 @@ async def test_apply_ui_emission_swallows_errors():
 
 _ALL_THEMES = {
     k: {"accent": "#111", "background": "#fff", "font": "sans"}
-    for k in ["default", "dashboard", "presentation", "genie", "mindmap", "album", "quiz", "report"]
+    for k in [
+        "default",
+        "dashboard",
+        "presentation",
+        "genie",
+        "mindmap",
+        "album",
+        "quiz",
+        "report",
+    ]
 }
 _ALL_DIRECTIVES = {
     k: f"settings for {k}"
-    for k in ["dashboard", "presentation", "genie", "mindmap", "album", "quiz", "report"]
+    for k in [
+        "dashboard",
+        "presentation",
+        "genie",
+        "mindmap",
+        "album",
+        "quiz",
+        "report",
+    ]
 }
 
 
@@ -283,7 +300,9 @@ def test_theme_block_lists_deliverable_palette_before_default():
     assert "Default" in palette_lines[1]
     # deliverable == "default" emits just the one palette, not a duplicate
     only_default = [
-        ln for ln in _build_theme_block(_ALL_THEMES, deliverable="default") if ln.startswith("- ")
+        ln
+        for ln in _build_theme_block(_ALL_THEMES, deliverable="default")
+        if ln.startswith("- ")
     ]
     assert len(only_default) == 1
     assert "Default" in only_default[0]
@@ -300,16 +319,24 @@ def test_theme_block_example_does_not_anchor_a_concrete_palette():
 
 
 def test_directives_block_narrows_to_single_deliverable():
-    all_lines = [ln for ln in _build_directives_block(_ALL_DIRECTIVES) if ln.startswith("- ")]
+    all_lines = [
+        ln for ln in _build_directives_block(_ALL_DIRECTIVES) if ln.startswith("- ")
+    ]
     assert len(all_lines) == 7
-    one = [ln for ln in _build_directives_block(_ALL_DIRECTIVES, deliverable="quiz") if ln.startswith("- ")]
+    one = [
+        ln
+        for ln in _build_directives_block(_ALL_DIRECTIVES, deliverable="quiz")
+        if ln.startswith("- ")
+    ]
     assert len(one) == 1
     assert "Quiz" in one[0]
 
 
 def test_build_ui_instruction_deliverable_is_smaller():
     full = build_ui_instruction(themes=_ALL_THEMES, directives=_ALL_DIRECTIVES)
-    narrowed = build_ui_instruction(themes=_ALL_THEMES, directives=_ALL_DIRECTIVES, deliverable="dashboard")
+    narrowed = build_ui_instruction(
+        themes=_ALL_THEMES, directives=_ALL_DIRECTIVES, deliverable="dashboard"
+    )
     assert len(narrowed) < len(full)
 
 
@@ -360,15 +387,108 @@ class TestInferDeliverableMultiKeyword:
     def test_narrowed_instruction_is_materially_smaller(self):
         from src.engines.crewai.helpers.ui_emission import build_ui_instruction
 
-        themes = {k: {"accent": "#2563eb", "background": "#fff"} for k in
-                  ("default", "presentation", "dashboard", "quiz", "report",
-                   "album", "mindmap", "genie")}
-        directives = {k: f"Detailed {k} behavior settings. " * 8 for k in
-                      ("presentation", "dashboard", "quiz", "report",
-                       "album", "mindmap", "genie")}
+        themes = {
+            k: {"accent": "#2563eb", "background": "#fff"}
+            for k in (
+                "default",
+                "presentation",
+                "dashboard",
+                "quiz",
+                "report",
+                "album",
+                "mindmap",
+                "genie",
+            )
+        }
+        directives = {
+            k: f"Detailed {k} behavior settings. " * 8
+            for k in (
+                "presentation",
+                "dashboard",
+                "quiz",
+                "report",
+                "album",
+                "mindmap",
+                "genie",
+            )
+        }
 
-        full = build_ui_instruction(themes=themes, directives=directives, deliverable=None)
-        narrowed = build_ui_instruction(themes=themes, directives=directives,
-                                        deliverable="presentation")
+        full = build_ui_instruction(
+            themes=themes, directives=directives, deliverable=None
+        )
+        narrowed = build_ui_instruction(
+            themes=themes, directives=directives, deliverable="presentation"
+        )
 
         assert len(narrowed) < len(full) - 1000  # at least ~250 tokens saved
+
+
+# --- catalog slicing per deliverable (the sustainability fix) -------------
+
+
+class TestCatalogSlicing:
+    """The component catalog (shapes + rules) is sliced per deliverable just like
+    the theme/directive blocks, so the prompt stays ~constant as new artifact
+    types are added — a new type costs tokens only on its OWN runs."""
+
+    def test_core_is_always_present(self):
+        # The output contract + universal primitives appear regardless of type.
+        for d in (None, "presentation", "dashboard", "quiz", "flashcards"):
+            s = build_ui_instruction(deliverable=d)
+            assert "OUTPUT FORMAT" in s
+            assert 'MUST use the key "component"' in s
+            assert "Text (text, variant" in s  # a universal primitive line
+
+    def test_known_deliverable_emits_only_its_own_slice(self):
+        # A quiz instruction carries the Quiz shape but NOT presentation/mindmap/
+        # album/flashcards guidance — those slices are dropped to save tokens.
+        s = build_ui_instruction(deliverable="quiz")
+        assert "BUILD A QUIZ" in s
+        assert "ONE Quiz component" in s
+        assert "SLIDE DESIGN RULES" not in s  # presentation-only
+        assert "BUILD A MINDMAP" not in s
+        assert "Flashcards (title?, cards" not in s
+
+    def test_presentation_slice_carries_slide_rules(self):
+        s = build_ui_instruction(deliverable="presentation")
+        assert "BUILD A PRESENTATION" in s
+        assert "SLIDE DESIGN RULES" in s
+        assert "BUILD A DASHBOARD" not in s
+
+    def test_flashcards_slice_describes_flip_card(self):
+        s = build_ui_instruction(deliverable="flashcards")
+        assert "BUILD FLASHCARDS" in s
+        assert "Flashcards (title?, cards:[{ front, back }])" in s
+        assert "FLIPS to reveal" in s
+        # not conflated with the quiz slice
+        assert "ONE Quiz component" not in s
+
+    def test_unknown_deliverable_offers_the_full_menu(self):
+        # When nothing is inferred, every deliverable's slice is included behind
+        # the chooser header so the agent can still pick the right one.
+        s = build_ui_instruction(deliverable=None)
+        assert "MATCH THE REQUESTED DELIVERABLE" in s
+        assert "BUILD A PRESENTATION" in s
+        assert "BUILD A DASHBOARD" in s
+        assert "BUILD FLASHCARDS" in s
+        assert "BUILD A MINDMAP" in s
+
+    def test_known_slice_is_smaller_than_the_full_menu(self):
+        full = build_ui_instruction(deliverable=None)
+        one = build_ui_instruction(deliverable="flashcards")
+        assert len(one) < len(full)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("make an anki deck about spark", "flashcards"),
+        ("create flashcards for the exam", "flashcards"),
+        ("a flash card set on history", "flashcards"),
+        ("study with spaced repetition cards", "flashcards"),
+        # flashcards is more specific than a co-mentioned quiz
+        ("anki flashcards, not a quiz", "flashcards"),
+    ],
+)
+def test_infer_deliverable_flashcards(text, expected):
+    assert _infer_deliverable(text) == expected
