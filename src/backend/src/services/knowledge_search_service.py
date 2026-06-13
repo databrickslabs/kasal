@@ -145,6 +145,22 @@ class KnowledgeSearchService:
                         f"group={self.group_id} requested={file_paths} "
                         f"group_rows={total_group_rows} -> {len(rows)} rows"
                     )
+                    # Also emit as a span: the subprocess's logger.info above
+                    # does NOT reach the OTel logs table, but spans DO reach
+                    # otel_spans — so this is what makes a deployed run's search
+                    # routing + row counts observable (lakebase store vs empty
+                    # app-DB fallback, group_rows before per-user/TTL filters).
+                    from src.services.knowledge_embedding_session import emit_knowledge_span
+                    emit_knowledge_span(
+                        "knowledge_search",
+                        {
+                            "group_id": self.group_id,
+                            "lakebase": bool(_is_lakebase),
+                            "group_rows": total_group_rows,
+                            "returned_rows": len(rows),
+                            "created_by": created_by,
+                        },
+                    )
                     # Map rows to dicts INSIDE the session context: a Lakebase
                     # session commits/expires on exit, so attributes must be read
                     # before the context closes (else DetachedInstanceError).
@@ -169,7 +185,20 @@ class KnowledgeSearchService:
                             logger.error(f"Error formatting result: {fmt_err}")
                             continue
             except Exception as search_error:
-                logger.error(f"Search failed: {search_error}")
+                logger.error(f"Search failed: {search_error}", exc_info=True)
+                # Surface the real error as a span: this runs in the crew
+                # subprocess whose logger.error does NOT reach the OTel logs
+                # table, so a swallowed pgvector/permission error (e.g. the
+                # "vector <=> text" cast bug) is otherwise invisible. Spans DO
+                # reach otel_spans.
+                from src.services.knowledge_embedding_session import emit_knowledge_span
+                emit_knowledge_span(
+                    "knowledge_search_error",
+                    {
+                        "group_id": self.group_id,
+                        "error": f"{type(search_error).__name__}: {search_error}"[:400],
+                    },
+                )
                 return []
 
             logger.info(f"Found {len(formatted_results)} results")

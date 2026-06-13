@@ -283,6 +283,27 @@ async def test_search_similar_postgres():
     assert result == items
 
 
+@pytest.mark.asyncio
+async def test_search_similar_postgres_casts_bound_vector():
+    """The order-by MUST cast the bound param to ``vector`` — without
+    ``(:embedding)::vector`` pgvector raises 'operator does not exist:
+    vector <=> text' and the search silently returns nothing on Lakebase."""
+    async_session = make_async_session()
+    async_session.execute.return_value = make_result_mock([])
+    repo = DocumentationEmbeddingRepository(db=async_session)
+
+    await repo._search_similar_postgres([0.1, 0.2], limit=5, group_id="g1")
+
+    # Inspect the compiled ORDER BY of the statement passed to execute.
+    stmt = async_session.execute.call_args.args[0]
+    compiled = str(stmt)
+    assert "(:embedding)::vector" in compiled
+    assert "embedding <=> (:embedding)::vector" in compiled
+    # And the embedding is passed as a pgvector literal string.
+    params = async_session.execute.call_args.args[1]
+    assert params["embedding"].startswith("[") and params["embedding"].endswith("]")
+
+
 # ---- Tests for update ----
 
 @pytest.mark.asyncio
