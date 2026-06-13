@@ -85,6 +85,11 @@ interface ExecutionActions {
   setIsLoading: (loading: boolean) => void;
   setExecutionContext: (ctx: ExecutionContext | null) => void;
   setPreviewContent: (content: PreviewContent | null) => void;
+  /** Replace the CURRENT preview's data in place (no new history entry) and
+   *  persist it. Used by the in-preview "Customize" panel for deterministic
+   *  restyles, which edit the artifact you're viewing rather than appending a
+   *  new version. */
+  updatePreviewData: (data: string) => void;
   navigatePreview: (index: number) => void;
   setChatCollapsed: (collapsed: boolean) => void;
   toggleChatCollapsed: () => void;
@@ -193,6 +198,25 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         previewHistory,
         previewIndex: previewHistory.length - 1,
       };
+    }),
+  // Deterministically restyle the current artifact: swap its data in place,
+  // both in the live slot and in the history entry it occupies, and persist to
+  // the owning session so the restyle survives a reload. No new history entry —
+  // a Look change edits the version you're viewing, it isn't a new revision.
+  updatePreviewData: (data) =>
+    set((s) => {
+      if (!s.previewContent) return {};
+      const updated: PreviewContent = { ...s.previewContent, data };
+      const previewHistory = s.previewHistory.slice();
+      // Replace the entry the user is viewing, if it's a real history slot.
+      if (previewHistory[s.previewIndex]) {
+        previewHistory[s.previewIndex] = updated;
+      }
+      const owner = s.previewOwnerSessionId;
+      if (owner) {
+        void saveSessionPreview(owner, { type: updated.type, data: updated.data, title: updated.title });
+      }
+      return { previewContent: updated, previewHistory };
     }),
   // Page back/forward through the captured task-output previews.
   navigatePreview: (index) =>

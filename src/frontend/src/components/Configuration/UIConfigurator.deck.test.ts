@@ -10,6 +10,8 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const configuratorSrc = readFileSync(resolve(__dirname, 'UIConfigurator.tsx'), 'utf-8');
+// THEME_PRESETS (incl. the Databricks Deck preset) live in the shared specs module.
+const sharedSrc = readFileSync(resolve(__dirname, 'uiConfigShared.ts'), 'utf-8');
 const rendererSrc = readFileSync(
   resolve(__dirname, '../ChatMode/components/Preview/UiRenderer.tsx'),
   'utf-8',
@@ -23,8 +25,8 @@ describe('presentation deck identity', () => {
   });
 
   it('configurator offers the matching Databricks Deck preset', () => {
-    expect(configuratorSrc).toContain("label: 'Databricks Deck'");
-    expect(configuratorSrc).toContain("accent: '#FF3621'");
+    expect(sharedSrc).toContain("label: 'Databricks Deck'");
+    expect(sharedSrc).toContain("accent: '#FF3621'");
   });
 
   it('the Presentation tab explains the built-in deck default', () => {

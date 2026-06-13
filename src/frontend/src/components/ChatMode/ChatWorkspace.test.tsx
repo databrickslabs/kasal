@@ -43,6 +43,7 @@ const h = vi.hoisted(() => {
       previewHistory: [] as unknown[],
       previewIndex: 0,
       navigatePreview: vi.fn(),
+      updatePreviewData: vi.fn(),
       chatCollapsed: false,
       executionOwnerSessionId: 's1',
       activeExecution: null as unknown,
@@ -193,11 +194,12 @@ vi.mock('./db/sessionDb', () => ({
   clearSessionRunningJob: (...a: unknown[]) => h.clearSessionRunningJob(...a),
 }));
 vi.mock('./components/Preview/PreviewPanel', () => ({
-  default: (props: { onClose: () => void; onToggleChat: () => void; onRefine?: (i: string) => void }) => (
+  default: (props: { onClose: () => void; onToggleChat: () => void; onRefine?: (i: string) => void; onStyleChange?: (d: string) => void }) => (
     <div data-testid="preview-panel">
       <button data-testid="preview-close" onClick={props.onClose}>x</button>
       <button data-testid="preview-toggle" onClick={props.onToggleChat}>t</button>
       <button data-testid="preview-refine" onClick={() => props.onRefine?.((globalThis as { __refineMsg?: string }).__refineMsg ?? 'make it pop')}>r</button>
+      <button data-testid="preview-restyle" onClick={() => props.onStyleChange?.('{"restyled":true}')}>s</button>
     </div>
   ),
   parsePreviewContent: (...a: unknown[]) => h.parsePreview(...a),
@@ -924,6 +926,14 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
     expect(h.createExecution).toHaveBeenCalled();
+  });
+
+  it('applies a deterministic restyle via the preview pane onStyleChange handler', async () => {
+    h.exec.previewContent = { type: 'ui', data: '{"messages":[]}' };
+    h.exec.previewOwnerSessionId = 's1';
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('preview-restyle')); });
+    expect(h.exec.updatePreviewData).toHaveBeenCalledWith('{"restyled":true}');
   });
 
   // --- save crew to catalog ---

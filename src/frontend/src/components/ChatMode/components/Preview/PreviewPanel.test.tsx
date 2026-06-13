@@ -162,31 +162,30 @@ describe('PreviewPanel component', () => {
     ).toMatch(/^M11\.25/);
   });
 
-  it('does not render the Refine button when onRefine is not provided', () => {
+  it('does not render the Customize button when onRefine is not provided', () => {
     renderPanel(uiContent);
-    expect(screen.queryByText('Refine')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customize')).not.toBeInTheDocument();
   });
 
-  it('opens the refine bar and submits an instruction via the button', () => {
+  it('opens the Customize panel and submits a free-text instruction via Send', () => {
     const onRefine = vi.fn();
     render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
     // toggle open
-    fireEvent.click(screen.getByText('Refine'));
-    const input = screen.getByPlaceholderText('Describe how to improve this result…');
+    fireEvent.click(screen.getByText('Customize'));
+    expect(screen.getByTestId('refine-panel')).toBeInTheDocument();
+    const input = screen.getByPlaceholderText(/add a chart/i);
     fireEvent.change(input, { target: { value: 'make it blue' } });
-    // the submit button is the second "Refine" (in the bar)
-    const buttons = screen.getAllByText('Refine');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(screen.getByText('Send'));
     expect(onRefine).toHaveBeenCalledWith('make it blue');
-    // bar closes after submit
-    expect(screen.queryByPlaceholderText('Describe how to improve this result…')).not.toBeInTheDocument();
+    // panel closes after submit
+    expect(screen.queryByTestId('refine-panel')).not.toBeInTheDocument();
   });
 
-  it('submits the refine instruction on Enter and ignores empty submits', () => {
+  it('submits the free-text instruction on Enter and ignores empty submits', () => {
     const onRefine = vi.fn();
     render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
-    fireEvent.click(screen.getByText('Refine'));
-    const input = screen.getByPlaceholderText('Describe how to improve this result…');
+    fireEvent.click(screen.getByText('Customize'));
+    const input = screen.getByPlaceholderText(/add a chart/i);
     // empty Enter -> no-op
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onRefine).not.toHaveBeenCalled();
@@ -196,15 +195,47 @@ describe('PreviewPanel component', () => {
     expect(onRefine).toHaveBeenCalledWith('add a chart');
   });
 
-  it('closes the refine bar on Escape without submitting', () => {
+  it('applies a deterministic style preset via onStyleChange (no AI)', () => {
+    const onRefine = vi.fn();
+    const onStyleChange = vi.fn();
+    render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} onStyleChange={onStyleChange} />);
+    fireEvent.click(screen.getByText('Customize'));
+    // Click a one-click Look preset — restyles instantly, no crew run.
+    fireEvent.click(screen.getByTitle('Apply the Dark style'));
+    expect(onStyleChange).toHaveBeenCalledTimes(1);
+    // The rewritten document carries the pinned dark accent.
+    const updated = onStyleChange.mock.calls[0][0] as string;
+    expect(updated).toContain('"_pinned":true');
+    expect(updated).toContain('#38BDF8');
+    expect(onRefine).not.toHaveBeenCalled();
+  });
+
+  it('a preset click is a safe no-op when onStyleChange is not provided', () => {
+    const onRefine = vi.fn();
+    render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />); // no onStyleChange
+    fireEvent.click(screen.getByText('Customize'));
+    // Should not throw and must not trigger an AI refine.
+    fireEvent.click(screen.getByTitle('Apply the Dark style'));
+    expect(onRefine).not.toHaveBeenCalled();
+  });
+
+  it('detects the deliverable and shows its content controls (deck → Presentation)', () => {
+    render(<PreviewPanel content={{ type: 'ui', data: deckDoc }} {...baseProps} onRefine={vi.fn()} />);
+    fireEvent.click(screen.getByText('Customize'));
+    // Friendly title noun + the presentation-specific content control.
+    expect(screen.getByText('Presentation')).toBeInTheDocument();
+    expect(screen.getByLabelText('Target slide count')).toBeInTheDocument();
+  });
+
+  it('closes the Customize panel on Escape in the free-text box without submitting', () => {
     const onRefine = vi.fn();
     render(<PreviewPanel content={uiContent} {...baseProps} onRefine={onRefine} />);
-    fireEvent.click(screen.getByText('Refine'));
-    const input = screen.getByPlaceholderText('Describe how to improve this result…');
+    fireEvent.click(screen.getByText('Customize'));
+    const input = screen.getByPlaceholderText(/add a chart/i);
     fireEvent.change(input, { target: { value: 'discard me' } });
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onRefine).not.toHaveBeenCalled();
-    expect(screen.queryByPlaceholderText('Describe how to improve this result…')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('refine-panel')).not.toBeInTheDocument();
   });
 
   it('does not render the history nav when history has one or zero entries', () => {
@@ -378,10 +409,10 @@ describe('PreviewPanel — full screen', () => {
 
   it('hides the ENTIRE header bar in full screen; the browser (Esc) restores it', () => {
     renderPanel(content, { onRefine: vi.fn() });
-    // header visible: title, type chip, Refine, full-screen toggle, close
+    // header visible: title, type chip, Customize, full-screen toggle, close
     expect(screen.getByText('App')).toBeInTheDocument();
     expect(screen.getByText('UI')).toBeInTheDocument();
-    expect(screen.getByText('Refine')).toBeInTheDocument();
+    expect(screen.getByText('Customize')).toBeInTheDocument();
     expect(screen.getByTitle('Close preview')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Full screen'));
@@ -389,7 +420,7 @@ describe('PreviewPanel — full screen', () => {
     // the whole bar is gone — no header controls at all
     expect(screen.queryByText('App')).toBeNull();
     expect(screen.queryByText('UI')).toBeNull();
-    expect(screen.queryByText('Refine')).toBeNull();
+    expect(screen.queryByText('Customize')).toBeNull();
     expect(screen.queryByTitle('Close preview')).toBeNull();
     expect(screen.queryByLabelText('Full screen')).toBeNull();
     // ...but the content keeps rendering

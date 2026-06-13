@@ -4,6 +4,8 @@ import {
   resolveValue,
   applyConfiguredTheme,
   inferSurfaceDeliverable,
+  setSurfaceTheme,
+  DELIVERABLE_LABELS,
   UiSurface,
   WorkspaceThemes,
 } from './uiDocument';
@@ -343,5 +345,99 @@ describe('applyConfiguredTheme — workspace palettes are the source of truth', 
   it('re-resolves when the embedded theme is an empty object', () => {
     const deck = surfaceOf({ root: 'Slides' }, {});
     expect(applyConfiguredTheme(deck, themes).theme).toEqual(themes.presentation);
+  });
+
+  it('keeps a user-pinned theme verbatim, never re-resolving from the palettes', () => {
+    // A deterministic restyle from the in-preview "Customize" panel stamps
+    // _pinned: true; even on a deck (which would normally re-resolve to the
+    // Presentation palette) the pinned choice must survive unchanged.
+    const pinned = { accent: '#123456', background: '#000000', _pinned: true };
+    const deck = surfaceOf({ root: 'Slides', s1: 'Slide' }, pinned);
+    expect(applyConfiguredTheme(deck, themes).theme).toEqual(pinned);
+  });
+});
+
+describe('setSurfaceTheme — deterministic restyle', () => {
+  const theme = { accent: '#FF0000', background: '#000000', font: 'serif' as const };
+
+  it('merges the theme into an existing createSurface and stamps _pinned', () => {
+    const doc = JSON.stringify({
+      messages: [
+        { createSurface: { surfaceId: 's1', theme: { accent: '#111111', muted: '#999999' } } },
+        { updateComponents: { components: [{ id: 'root', component: 'Slides' }] } },
+      ],
+    });
+    const out = parseUiDocument(setSurfaceTheme(doc, theme));
+    expect(out?.theme).toEqual({ accent: '#FF0000', muted: '#999999', background: '#000000', font: 'serif', _pinned: true });
+    // components are untouched
+    expect(out?.components.root.component).toBe('Slides');
+  });
+
+  it('prepends a bare theme message when there is no createSurface', () => {
+    const doc = JSON.stringify({
+      messages: [{ updateComponents: { components: [{ id: 'root', component: 'Text', text: 'hi' }] } }],
+    });
+    const out = parseUiDocument(setSurfaceTheme(doc, theme));
+    expect(out?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+    expect(out?.components.root.text).toBe('hi');
+  });
+
+  it('handles a bare-array document and a single-message document', () => {
+    const arrDoc = JSON.stringify([
+      { createSurface: { surfaceId: 's1' } },
+      { updateComponents: { components: [{ id: 'root', component: 'Dashboard' }] } },
+    ]);
+    expect(parseUiDocument(setSurfaceTheme(arrDoc, theme))?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+
+    const single = JSON.stringify({ createSurface: { surfaceId: 's1' }, updateComponents: { components: [{ id: 'root', component: 'Album' }] } });
+    expect(parseUiDocument(setSurfaceTheme(single, theme))?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+  });
+
+  it('prepends a theme onto a single bare message that has no createSurface', () => {
+    // A lone updateComponents message (not wrapped in {messages}) → the writer
+    // must promote it to a {messages:[…]} document with a theme message in front.
+    const single = JSON.stringify({ updateComponents: { components: [{ id: 'root', component: 'Text', text: 'hi' }] } });
+    const out = parseUiDocument(setSurfaceTheme(single, theme));
+    expect(out?.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+    expect(out?.components.root.text).toBe('hi');
+  });
+
+  it('returns the input unchanged when it is not valid JSON', () => {
+    expect(setSurfaceTheme('not json', theme)).toBe('not json');
+  });
+
+  it('returns the input unchanged when the JSON is a primitive (no messages)', () => {
+    expect(setSurfaceTheme('123', theme)).toBe('123');
+  });
+
+  it('merges into an existing bare theme message when there is no createSurface', () => {
+    const doc = JSON.stringify({
+      messages: [
+        { theme: { muted: '#999999' } },
+        { updateComponents: { components: [{ id: 'root', component: 'Mindmap' }] } },
+      ],
+    });
+    const out = parseUiDocument(setSurfaceTheme(doc, theme));
+    expect(out?.theme).toEqual({ accent: '#FF0000', background: '#000000', font: 'serif', muted: '#999999', _pinned: true });
+  });
+
+  it('a restyled document survives applyConfiguredTheme (pinned) end-to-end', () => {
+    const doc = JSON.stringify({
+      messages: [
+        { createSurface: { surfaceId: 's1' } },
+        { updateComponents: { components: [{ id: 'root', component: 'Slides' }] } },
+      ],
+    });
+    const surface = parseUiDocument(setSurfaceTheme(doc, theme))!;
+    const resolved = applyConfiguredTheme(surface, { presentation: { accent: '#FF3621' } });
+    expect(resolved.theme).toMatchObject({ accent: '#FF0000', _pinned: true });
+  });
+});
+
+describe('DELIVERABLE_LABELS', () => {
+  it('maps internal keys to friendly business nouns', () => {
+    expect(DELIVERABLE_LABELS.album).toBe('Photo album');
+    expect(DELIVERABLE_LABELS.genie).toBe('Data view');
+    expect(DELIVERABLE_LABELS.default).toBe('Document');
   });
 });

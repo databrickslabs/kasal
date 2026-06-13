@@ -84,6 +84,11 @@ export interface UiTheme {
   muted?: string;
   font?: 'sans' | 'serif' | 'rounded' | 'mono';
   density?: 'comfortable' | 'compact';
+  /** Set when a user has deterministically restyled the surface from the in-preview
+   *  "Customize" panel. Marks the theme as an intentional, user-pinned choice so
+   *  applyConfiguredTheme never re-resolves it away from the workspace palettes.
+   *  Inert at render/PDF (the renderer only reads color/font/density tokens). */
+  _pinned?: boolean;
 }
 
 export interface UiSurface {
@@ -275,6 +280,86 @@ export function inferSurfaceDeliverable(surface: UiSurface): string {
   return 'default';
 }
 
+/** Friendly, non-technical nouns for each deliverable — used as the "Customize
+ *  this {label}" title in the preview's refine panel so a business user reads
+ *  "Photo album" / "Data view" instead of internal keys like 'album' / 'genie'. */
+export const DELIVERABLE_LABELS: Record<string, string> = {
+  presentation: 'Presentation',
+  dashboard: 'Dashboard',
+  genie: 'Data view',
+  mindmap: 'Mind map',
+  album: 'Photo album',
+  quiz: 'Quiz',
+  report: 'Report',
+  default: 'Document',
+};
+
+/**
+ * Deterministically restyle a stored A2UI document: merge `theme` into the
+ * surface's branding and return the re-serialized document. This is how the
+ * in-preview "Customize" panel applies a Look change WITHOUT an AI/crew run —
+ * the renderer reads `surface.theme` at render time, so the preview restyles
+ * instantly, and persisting the rewritten doc makes it survive reload + PDF.
+ *
+ * The theme is stamped `_pinned: true` so applyConfiguredTheme keeps it verbatim
+ * (see there). Merges onto any existing theme so partial edits (one color) work.
+ * The original message wrapper is preserved; only the theme is touched. Returns
+ * `rawDoc` unchanged if it can't be parsed as JSON (caller falls back gracefully).
+ */
+export function setSurfaceTheme(rawDoc: string, theme: UiTheme): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawDoc);
+  } catch {
+    return rawDoc;
+  }
+
+  // Normalize to a mutable message array, remembering how to put it back so the
+  // document's original shape ({messages}, bare array, or single message) survives.
+  let messages: Record<string, unknown>[];
+  let rewrap: (msgs: Record<string, unknown>[]) => unknown;
+  if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { messages?: unknown }).messages)) {
+    messages = (parsed as { messages: Record<string, unknown>[] }).messages;
+    rewrap = (msgs) => ({ ...(parsed as object), messages: msgs });
+  } else if (Array.isArray(parsed)) {
+    messages = parsed as Record<string, unknown>[];
+    rewrap = (msgs) => msgs;
+  } else if (parsed && typeof parsed === 'object') {
+    messages = [parsed as Record<string, unknown>];
+    // A single message stays a single message — unless we had to prepend a
+    // theme message, in which case it becomes a {messages:[…]} document.
+    rewrap = (msgs) => (msgs.length === 1 ? msgs[0] : { messages: msgs });
+  } else {
+    return rawDoc;
+  }
+
+  const pinned: UiTheme = { ...theme, _pinned: true };
+  const merge = (existing: unknown): UiTheme => ({
+    ...(existing && typeof existing === 'object' ? (existing as UiTheme) : {}),
+    ...pinned,
+  });
+
+  // Prefer the surface declaration's theme (where the agent stamps branding);
+  // else a bare { theme } message; else prepend one (parseUiDocument reads both).
+  const surfMsg = messages.find(
+    (m) => m && typeof m === 'object' && (m as { createSurface?: unknown }).createSurface,
+  );
+  if (surfMsg) {
+    // surfMsg was found by having a truthy createSurface, so it's safe to read.
+    const cs = surfMsg.createSurface as Record<string, unknown>;
+    surfMsg.createSurface = { ...cs, theme: merge(cs.theme) };
+  } else {
+    const themeMsg = messages.find((m) => m && typeof m === 'object' && (m as { theme?: unknown }).theme);
+    if (themeMsg) {
+      themeMsg.theme = merge(themeMsg.theme);
+    } else {
+      messages = [{ theme: pinned }, ...messages];
+    }
+  }
+
+  return JSON.stringify(rewrap(messages));
+}
+
 /** True when every token the embedded theme defines equals that palette's —
  *  i.e. the theme is a (possibly partial) copy of the palette rather than a
  *  deliberate deviation. Color tokens compare case-insensitively. */
@@ -316,6 +401,9 @@ export function applyConfiguredTheme(
 ): UiSurface {
   if (!themes) return surface;
   const embedded = surface.theme;
+  // A user-pinned theme (set via the in-preview "Customize" panel) is an explicit
+  // choice — keep it verbatim, never re-resolve from the workspace palettes.
+  if (embedded?._pinned) return surface;
   if (
     embedded &&
     Object.keys(embedded).length > 0 &&
