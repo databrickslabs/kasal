@@ -100,18 +100,32 @@ interface ExecutionActions {
   // Execution lifecycle
   startExecution: (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => void;
   updateExecutionStatus: (status: ExecutionStatus) => void;
-  completeExecution: (resultText: string) => void;
-  failExecution: (error: string) => void;
+  // jobId routes the completion to the session that OWNS that job, so a run
+  // finishing in a backgrounded session (parallel sessions) lands in the right
+  // place instead of the single global slot. Omitting it keeps the legacy
+  // single-run behavior (route by the current live owner).
+  completeExecution: (resultText: string, jobId?: string) => void;
+  failExecution: (error: string, jobId?: string) => void;
+  /** The session that started a still-tracked job (parallel-session routing). */
+  jobOwnerOf: (jobId: string) => string | null;
+  /** Drop a job's owner mapping (e.g. when a reconnect finalizes it directly). */
+  clearJobOwner: (jobId: string) => void;
 
   // Generation lifecycle
   startGeneration: (sessionId?: string) => void;
-  completeGeneration: () => void;
-  failGeneration: (error: string) => void;
+  completeGeneration: (ownerSessionId?: string) => void;
+  failGeneration: (error: string, ownerSessionId?: string) => void;
 
   // Session-aware state management
   saveSessionState: (sessionId: string) => void;
   restoreSessionState: (sessionId: string) => void;
   hasActiveExecution: (sessionId: string) => boolean;
+  /**
+   * Park a preview into a BACKGROUNDED session's snapshot (and its history)
+   * without touching the live slot. Task outputs of a run whose session isn't
+   * on screen reach the UI this way, so the preview is there on switch-back.
+   */
+  stashSessionPreview: (sessionId: string, preview: PreviewContent) => void;
 
   // Reset
   resetForSession: () => void;
@@ -121,6 +135,13 @@ type ExecutionStore = ExecutionState & ExecutionActions;
 
 // Per-session snapshots stored outside Zustand to avoid re-renders
 const sessionSnapshots = new Map<string, SessionExecSnapshot>();
+
+// jobId -> owning sessionId, for PARALLEL-SESSION completion routing. The store
+// holds a single live "view" slot; this map lets a job that finishes while its
+// session is backgrounded resolve its real owner (and land its result/preview
+// in that session's snapshot) instead of being dropped or misrouted. Lives
+// outside Zustand (pure routing data, no re-render needed), like sessionSnapshots.
+const jobOwners = new Map<string, string>();
 
 export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   // --- State ---
@@ -226,6 +247,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   // --- Execution lifecycle ---
   startExecution: (jobId, sessionId, opts) => {
     const owner = sessionId || useSessionStore.getState().currentSessionId;
+    // Remember which session owns this job so its completion routes correctly
+    // even if the user switches away and another session's run takes the slot.
+    if (owner) jobOwners.set(jobId, owner);
     // A refine continues the same artifact lineage, so it keeps the existing
     // preview + history and just appends the revised output. A fresh run clears
     // the previous preview so an unrelated prompt doesn't inherit stale output.
@@ -254,9 +278,17 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     }));
   },
 
-  completeExecution: (resultText: string) => {
+  completeExecution: (resultText: string, jobId?: string) => {
     const state = get();
-    const ownerSession = state.executionOwnerSessionId;
+    // Route to the job's OWNER (parallel sessions), falling back to the single
+    // live owner for the legacy no-jobId path.
+    const ownerSession = (jobId ? jobOwners.get(jobId) : undefined) ?? state.executionOwnerSessionId;
+    // Idempotency: a tracked job finalizes exactly once. A duplicate event
+    // (SSE + poller, or a late re-poll) is a no-op so it can't double-post.
+    if (jobId) {
+      if (!jobOwners.has(jobId)) return;
+      jobOwners.delete(jobId);
+    }
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -325,25 +357,45 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {
-      // Save preview to snapshot for when user switches back. The background
-      // session keeps a single-item history seeded from the final preview.
+      // Finalize the backgrounded session's snapshot for switch-back. Preserve
+      // any preview already parked by this run's task outputs (those reached
+      // only the snapshot, never the live slot, while the session was off
+      // screen) — the final result often carries NO preview, so overwriting
+      // here is exactly what dropped the run's app on switch-back.
+      const prevSnap = sessionSnapshots.get(ownerSession);
+      const prevHistory = prevSnap?.previewHistory ?? [];
+      let nextHistory = prevHistory;
+      if (preview) {
+        const last = prevHistory[prevHistory.length - 1];
+        nextHistory = last && last.type === preview.type && last.data === preview.data
+          ? prevHistory
+          : [...prevHistory, preview];
+      }
+      const nextPreview = preview ?? prevSnap?.previewContent ?? null;
       sessionSnapshots.set(ownerSession, {
         activeExecution: null,
         isExecuting: false,
         isGenerating: false,
         isLoading: false,
         executionContext: null,
-        previewContent: preview,
-        previewHistory: preview ? [preview] : [],
-        previewIndex: 0,
+        previewContent: nextPreview,
+        previewHistory: nextHistory,
+        previewIndex: Math.max(0, nextHistory.length - 1),
       });
-      set({ executionOwnerSessionId: null });
+      // Only clear the live slot's owner if the job that finished is the one
+      // it holds — a DIFFERENT (backgrounded) session finishing must not blank
+      // the currently-viewed session's running banner.
+      set((s) => (s.executionOwnerSessionId === ownerSession ? { executionOwnerSessionId: null } : {}));
     }
   },
 
-  failExecution: (error: string) => {
+  failExecution: (error: string, jobId?: string) => {
     const state = get();
-    const ownerSession = state.executionOwnerSessionId;
+    const ownerSession = (jobId ? jobOwners.get(jobId) : undefined) ?? state.executionOwnerSessionId;
+    if (jobId) {
+      if (!jobOwners.has(jobId)) return; // already finalized — no-op
+      jobOwners.delete(jobId);
+    }
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -373,15 +425,23 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {
+      // Keep any preview the run produced before failing so switch-back still
+      // shows partial output rather than a blank pane. Leave history/index
+      // undefined when there was no prior snapshot — restore fills the defaults.
+      const prevSnap = sessionSnapshots.get(ownerSession);
       sessionSnapshots.set(ownerSession, {
         activeExecution: null,
         isExecuting: false,
         isGenerating: false,
         isLoading: false,
         executionContext: null,
-        previewContent: null,
+        previewContent: prevSnap?.previewContent ?? null,
+        previewHistory: prevSnap?.previewHistory,
+        previewIndex: prevSnap?.previewIndex,
       });
-      set({ executionOwnerSessionId: null });
+      // Only clear the live slot's owner if it belongs to the job that failed —
+      // a backgrounded session failing must not blank the viewed session.
+      set((s) => (s.executionOwnerSessionId === ownerSession ? { executionOwnerSessionId: null } : {}));
     }
   },
 
@@ -395,9 +455,12 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     });
   },
 
-  completeGeneration: () => {
+  completeGeneration: (ownerSessionId?: string) => {
     const state = get();
-    const ownerSession = state.executionOwnerSessionId;
+    // Route to the session that STARTED this generation (passed in), falling
+    // back to the live owner. Reading the global owner alone is wrong once a
+    // parallel session has taken the slot — it would blank the wrong session.
+    const ownerSession = ownerSessionId ?? state.executionOwnerSessionId;
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
 
@@ -417,13 +480,15 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         executionContext: null,
         previewContent: null,
       });
-      set({ executionOwnerSessionId: null });
+      // Only release the live slot if THIS generation owns it — a background
+      // generation finishing must not clear a foreground run's owner.
+      set((s) => (s.executionOwnerSessionId === ownerSession ? { executionOwnerSessionId: null } : {}));
     }
   },
 
-  failGeneration: (error: string) => {
+  failGeneration: (error: string, ownerSessionId?: string) => {
     const state = get();
-    const ownerSession = state.executionOwnerSessionId;
+    const ownerSession = ownerSessionId ?? state.executionOwnerSessionId;
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -454,11 +519,42 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         executionContext: null,
         previewContent: null,
       });
-      set({ executionOwnerSessionId: null });
+      set((s) => (s.executionOwnerSessionId === ownerSession ? { executionOwnerSessionId: null } : {}));
     }
   },
 
   // --- Session-aware state management ---
+  // Which session a job belongs to, or null once it has finalized / was never
+  // tracked. Used by ChatWorkspace to route poller completion events to the
+  // right session even when the global slot holds a different (foreground) run.
+  jobOwnerOf: (jobId: string) => jobOwners.get(jobId) ?? null,
+  clearJobOwner: (jobId: string) => {
+    jobOwners.delete(jobId);
+  },
+
+  stashSessionPreview: (sessionId: string, preview: PreviewContent) => {
+    const prev = sessionSnapshots.get(sessionId);
+    const history = prev?.previewHistory ?? [];
+    const last = history[history.length - 1];
+    // Append unless it repeats the latest entry (a task often re-emits its
+    // output, and the final result usually duplicates the last task output).
+    const nextHistory = last && last.type === preview.type && last.data === preview.data
+      ? history
+      : [...history, preview];
+    sessionSnapshots.set(sessionId, {
+      // Preserve any in-flight run flags so the snapshot still restores the
+      // running banner on switch-back; default to an idle shell if none yet.
+      activeExecution: prev?.activeExecution ?? null,
+      isExecuting: prev?.isExecuting ?? false,
+      isGenerating: prev?.isGenerating ?? false,
+      isLoading: prev?.isLoading ?? false,
+      executionContext: prev?.executionContext ?? null,
+      previewContent: preview,
+      previewHistory: nextHistory,
+      previewIndex: Math.max(0, nextHistory.length - 1),
+    });
+  },
+
   saveSessionState: (sessionId: string) => {
     const state = get();
     // Only snapshot state that BELONGS to this session. The store has a single
@@ -489,18 +585,22 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   },
 
   restoreSessionState: (sessionId: string) => {
-    // While ANY run is live (owner set), the single global execution slot holds
-    // that run — don't clobber it on a session switch. Display is already gated
-    // by owner (banner) and previewOwnerSessionId (preview), so a run owned by
-    // another session simply stays hidden here, and returning to the owner keeps
-    // the live "Running crew…" banner. We only restore/reset per-session state
-    // once no run is active.
-    if (get().executionOwnerSessionId) {
-      return;
-    }
+    // The single global execution/preview slot holds whatever session is in
+    // view. On a switch the caller first parks the OUTGOING session via
+    // saveSessionState, so by the time we get here a still-running incumbent is
+    // safely in its own snapshot and we can load THIS session's snapshot into
+    // the slot — that's what lets a backgrounded run's tracker/preview come back
+    // when you switch to it, while its completion still routes by jobId.
+    const liveOwner = get().executionOwnerSessionId;
+    // Already viewing the live slot's owner — its state is shown; nothing to do.
+    if (liveOwner === sessionId) return;
+    // A run owns the slot but was never parked (no snapshot). Don't clobber a
+    // live run that hasn't been safely stashed.
+    if (liveOwner && !sessionSnapshots.has(liveOwner)) return;
     const snap = sessionSnapshots.get(sessionId);
     if (snap) {
       const previewHistory = snap.previewHistory ?? [];
+      const restoringRun = snap.isExecuting || snap.isGenerating;
       set({
         activeExecution: snap.activeExecution,
         isExecuting: snap.isExecuting,
@@ -512,6 +612,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         previewOwnerSessionId: snap.previewContent ? sessionId : null,
         previewHistory,
         previewIndex: snap.previewIndex ?? Math.max(0, previewHistory.length - 1),
+        // Restoring a still-running snapshot makes THIS session the live slot
+        // owner again, so its banner/tracker reappear and its trace ticks match.
+        // A completed-preview snapshot leaves the slot ownerless (no live run).
+        ...(restoringRun ? { executionOwnerSessionId: sessionId } : {}),
       });
     } else {
       // No in-memory snapshot — try to load persisted preview from IndexedDB
