@@ -57,6 +57,14 @@ const h = vi.hoisted(() => {
       failExecution: vi.fn(),
       completeGeneration: vi.fn(),
       failGeneration: vi.fn(),
+      // Mirrors the real store: a job is "owned"/tracked while it matches the
+      // active execution; returns null otherwise (and after it finalizes).
+      jobOwnerOf: vi.fn((jobId: string) => {
+        const ae = h.exec.activeExecution as { jobId?: string } | null;
+        return ae && ae.jobId === jobId ? 'owner-session' : null;
+      }),
+      clearJobOwner: vi.fn(),
+      stashSessionPreview: vi.fn(),
       updateExecutionStatus: vi.fn(),
       saveSessionState: vi.fn(),
       restoreSessionState: vi.fn(),
@@ -594,7 +602,8 @@ describe('ChatWorkspace component', () => {
       h.streamOpts.onError('boom');
     });
     expect(h.exec.completeExecution).toHaveBeenCalled();
-    expect(h.exec.failExecution).toHaveBeenCalledWith('boom');
+    // No run was started in this test, so the SSE path stamps an undefined jobId.
+    expect(h.exec.failExecution).toHaveBeenCalledWith('boom', undefined);
   });
 
   it('onTaskOutput persists a preview and summarizes output', () => {
@@ -618,7 +627,23 @@ describe('ChatWorkspace component', () => {
   it('generation onFailed marks the generation failed', () => {
     render(<ChatWorkspace />);
     act(() => h.genOpts.onFailed('gen error'));
-    expect(h.exec.failGeneration).toHaveBeenCalledWith('gen error');
+    // Routed to the generation's origin session (falls back to the live owner).
+    expect(h.exec.failGeneration).toHaveBeenCalledWith('gen error', 's1');
+  });
+
+  it('generation onFailed routes to the generation origin captured at stream start', () => {
+    render(<ChatWorkspace />);
+    // Starting the generation stream records its origin session (genOwnerRef).
+    act(() => { h.dispatcherOpts.onStartGenerationStream('gen-x', 's5'); });
+    act(() => h.genOpts.onFailed('boom'));
+    expect(h.exec.failGeneration).toHaveBeenCalledWith('boom', 's5');
+  });
+
+  it('generation onFailed passes undefined when there is no owner at all', () => {
+    h.exec.executionOwnerSessionId = null;
+    render(<ChatWorkspace />);
+    act(() => h.genOpts.onFailed('boom'));
+    expect(h.exec.failGeneration).toHaveBeenCalledWith('boom', undefined);
   });
 
   // --- execution handlers ---
@@ -1188,7 +1213,7 @@ describe('ChatWorkspace component', () => {
       h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'some intermediate output' });
       h.streamOpts.onComplete({ result: 'real final' });
     });
-    expect(h.exec.completeExecution).toHaveBeenCalledWith('real final');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('real final', undefined);
   });
 
   it('a real onError fails the execution and never completes it', () => {
@@ -1198,7 +1223,7 @@ describe('ChatWorkspace component', () => {
       h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Task' }, output: 'some intermediate output' });
       h.streamOpts.onError('stream failed');
     });
-    expect(h.exec.failExecution).toHaveBeenCalledWith('stream failed');
+    expect(h.exec.failExecution).toHaveBeenCalledWith('stream failed', undefined);
     expect(h.exec.completeExecution).not.toHaveBeenCalled();
   });
 
@@ -1343,7 +1368,7 @@ describe('ChatWorkspace component', () => {
   it('onComplete handles a string result that JSON-parses to a non-object', () => {
     render(<ChatWorkspace />);
     act(() => { h.streamOpts.onComplete({ result: '123' }); });
-    expect(h.exec.completeExecution).toHaveBeenCalledWith('123');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('123', undefined);
   });
 
   it('onComplete swallows extraction errors and completes with empty text', () => {
@@ -1351,7 +1376,7 @@ describe('ChatWorkspace component', () => {
     act(() => {
       h.streamOpts.onComplete({ get result() { throw new Error('boom'); } } as unknown as Record<string, unknown>);
     });
-    expect(h.exec.completeExecution).toHaveBeenCalledWith('');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('', undefined);
   });
 
   it('submitting the inline variables prompt runs a parked generated crew', async () => {
@@ -1458,7 +1483,7 @@ describe('ChatWorkspace component', () => {
   it('onComplete falls back to the raw string when parsed JSON has neither result nor content', () => {
     render(<ChatWorkspace />);
     act(() => { h.streamOpts.onComplete({ result: '{"foo":"bar"}' }); });
-    expect(h.exec.completeExecution).toHaveBeenCalledWith('{"foo":"bar"}');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('{"foo":"bar"}', undefined);
   });
 
   it('wires the generation no-op callbacks (onPlanReady/onAgentDetail/onTaskDetail)', () => {
@@ -1746,7 +1771,7 @@ describe('ChatWorkspace component', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('jobCompleted', { detail: { jobId: 'job-done', result: 'final answer' } }));
     });
-    expect(h.exec.completeExecution).toHaveBeenCalledWith('final answer');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('final answer', 'job-done');
   });
 
   it('ignores jobCompleted when it is not the active job', () => {
@@ -1777,7 +1802,7 @@ describe('ChatWorkspace component', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad', error: 'kaboom' } }));
     });
-    expect(h.exec.failExecution).toHaveBeenCalledWith('kaboom');
+    expect(h.exec.failExecution).toHaveBeenCalledWith('kaboom', 'job-bad');
   });
 
   it('jobFailed with no error message falls back to a default', () => {
@@ -1787,15 +1812,17 @@ describe('ChatWorkspace component', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad2' } }));
     });
-    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution failed');
+    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution failed', 'job-bad2');
   });
 
-  it('ignores jobFailed when not executing', () => {
-    h.exec.isExecuting = false;
+  it('ignores jobFailed for an untracked job (not owned)', () => {
+    // The gate is now ownership, not the foreground isExecuting flag: a job that
+    // isn't tracked (jobOwnerOf -> null) is ignored even mid-run.
+    h.exec.isExecuting = true;
     h.exec.activeExecution = { jobId: 'job-bad3', status: 'running' };
     render(<ChatWorkspace />);
     act(() => {
-      window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-bad3', error: 'x' } }));
+      window.dispatchEvent(new CustomEvent('jobFailed', { detail: { jobId: 'job-other', error: 'x' } }));
     });
     expect(h.exec.failExecution).not.toHaveBeenCalled();
   });
@@ -1807,7 +1834,7 @@ describe('ChatWorkspace component', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('jobStopped', { detail: { jobId: 'job-stop', status: 'stopped' } }));
     });
-    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution stopped');
+    expect(h.exec.failExecution).toHaveBeenCalledWith('Execution stopped', 'job-stop');
   });
 
   it('ignores jobStopped when it is not the active job', () => {

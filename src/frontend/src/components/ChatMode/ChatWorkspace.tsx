@@ -515,6 +515,16 @@ const ChatWorkspace: React.FC = () => {
   // the user switched away — instead of trusting the single global "current
   // owner" slot, which mis-routes one session's output into another.
   const jobOwnerRef = useRef<Map<string, string>>(new Map());
+  // The job currently bound to the single live SSE stream (startStream replaces,
+  // so only the latest foreground run streams here). The SSE onComplete/onError
+  // carry no job id, so we stamp completion with this; backgrounded runs finalize
+  // via the REST poller's window events, which DO carry an explicit job id.
+  const sseJobIdRef = useRef<string | undefined>(undefined);
+  // The session that started the in-flight generation (single generation stream).
+  // Generation completion routes by this, not the global owner — otherwise a
+  // generation finishing after you switch to another running session clears the
+  // wrong session's run.
+  const genOwnerRef = useRef<string | undefined>(undefined);
   // The most recent generated crew in this session — the target for `/save`.
   // (The bookmark on each crew card saves its own specific crew directly.)
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
@@ -548,8 +558,14 @@ const ChatWorkspace: React.FC = () => {
     if (preview) {
       if (currentSession === ownerSession) {
         execState.setPreviewContent(preview);
+      } else if (ownerSession) {
+        // This run's session is off screen — park the preview into ITS snapshot
+        // (not the live slot, which belongs to whatever's on screen now) so it's
+        // there on switch-back. Without this the preview reached only IndexedDB
+        // and a later null-preview completion snapshot hid it.
+        execState.stashSessionPreview(ownerSession, preview);
       }
-      // Always persist to IndexedDB so it's available when switching back
+      // Always persist to IndexedDB so it's available after a page refresh too.
       if (ownerSession) {
         saveSessionPreview(ownerSession, preview);
       }
@@ -652,8 +668,11 @@ const ChatWorkspace: React.FC = () => {
   // job id; a no-op when there is no active job, so the callbacks still fire in
   // isolation.
   const finishedJobsRef = useRef<Set<string>>(new Set());
-  const finishOnce = useCallback((run: () => void) => {
-    const jobId = useExecutionStore.getState().activeExecution?.jobId;
+  const finishOnce = useCallback((jobId: string | undefined, run: () => void) => {
+    // Key by the COMPLETING job's id (passed in), not the global slot's active
+    // job — with parallel sessions the slot may hold a different (foreground)
+    // run, and keying off it would let a backgrounded job slip the de-dupe or
+    // block the wrong one.
     if (jobId) {
       if (finishedJobsRef.current.has(jobId)) return;
       finishedJobsRef.current.add(jobId);
@@ -674,15 +693,15 @@ const ChatWorkspace: React.FC = () => {
     else sessionStore.addMessage('assistant', '', extra);
   }, []);
 
-  const completeExecutionOnce = useCallback((resultText: string) => {
-    finishOnce(() => {
-      useExecutionStore.getState().completeExecution(resultText);
+  const completeExecutionOnce = useCallback((jobId: string | undefined, resultText: string) => {
+    finishOnce(jobId, () => {
+      useExecutionStore.getState().completeExecution(resultText, jobId);
       // Result is in — now surface the bookmark/feedback row beneath it.
       postPendingActionsRow();
     });
   }, [finishOnce, postPendingActionsRow]);
-  const failExecutionOnce = useCallback((error: string) => {
-    finishOnce(() => useExecutionStore.getState().failExecution(error));
+  const failExecutionOnce = useCallback((jobId: string | undefined, error: string) => {
+    finishOnce(jobId, () => useExecutionStore.getState().failExecution(error, jobId));
   }, [finishOnce]);
 
   // --- Execution Stream ---
@@ -692,10 +711,10 @@ const ChatWorkspace: React.FC = () => {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);
     },
     onComplete: (data) => {
-      completeExecutionOnce(extractResultText(data));
+      completeExecutionOnce(sseJobIdRef.current, extractResultText(data));
     },
     onError: (error) => {
-      failExecutionOnce(error);
+      failExecutionOnce(sseJobIdRef.current, error);
     },
   });
 
@@ -716,23 +735,24 @@ const ChatWorkspace: React.FC = () => {
         JSON.stringify(trace);
       processTrace(msg, trace as Record<string, unknown>);
     };
+    // Route by the job's OWNER, not the single live slot: a backgrounded
+    // session's run must still finalize (and land in ITS session) even though
+    // the slot currently holds a different, foreground run. jobOwnerOf returns
+    // null once a job has finalized, so this also drops late duplicates.
     const onJobCompleted = (e: Event) => {
       const { jobId, result } = (e as CustomEvent).detail || {};
-      const st = useExecutionStore.getState();
-      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
-      completeExecutionOnce(extractResultText({ result }));
+      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
+      completeExecutionOnce(jobId, extractResultText({ result }));
     };
     const onJobFailed = (e: Event) => {
       const { jobId, error } = (e as CustomEvent).detail || {};
-      const st = useExecutionStore.getState();
-      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
-      failExecutionOnce((error as string) || 'Execution failed');
+      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
+      failExecutionOnce(jobId, (error as string) || 'Execution failed');
     };
     const onJobStopped = (e: Event) => {
       const { jobId } = (e as CustomEvent).detail || {};
-      const st = useExecutionStore.getState();
-      if (!st.isExecuting || st.activeExecution?.jobId !== jobId) return;
-      failExecutionOnce('Execution stopped');
+      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
+      failExecutionOnce(jobId, 'Execution stopped');
     };
     window.addEventListener('traceUpdate', onTraceUpdate as EventListener);
     window.addEventListener('jobCompleted', onJobCompleted as EventListener);
@@ -781,7 +801,10 @@ const ChatWorkspace: React.FC = () => {
       addGenerationTrace('Task ready', String(task?.name || ''));
     },
     onComplete: (raw: GenerationCompleteData) => {
-      const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
+      // The session that STARTED this generation (single generation stream) —
+      // not the global owner, which a parallel session may have taken over.
+      const ownerSession = genOwnerRef.current
+        ?? useExecutionStore.getState().executionOwnerSessionId;
       const sessionStore = useSessionStore.getState();
       // When a Genie MCP server is selected for this run, the crew reaches
       // Genie through MCP — drop the auto-detected GenieTool so the legacy
@@ -819,7 +842,7 @@ const ChatWorkspace: React.FC = () => {
       // Remember it as the /save target.
       lastGeneratedRef.current = data;
 
-      useExecutionStore.getState().completeGeneration();
+      useExecutionStore.getState().completeGeneration(ownerSession ?? undefined);
 
       // Auto-run the generated crew so the user doesn't have to click "Run crew".
       // handleExecuteGenerated handles variable detection and will open the
@@ -832,7 +855,12 @@ const ChatWorkspace: React.FC = () => {
       }
     },
     onFailed: (error) => {
-      useExecutionStore.getState().failGeneration(error);
+      useExecutionStore.getState().failGeneration(
+        error,
+        genOwnerRef.current
+          ?? useExecutionStore.getState().executionOwnerSessionId
+          ?? undefined,
+      );
     },
   });
 
@@ -840,6 +868,7 @@ const ChatWorkspace: React.FC = () => {
   const handleStartGenerationStream = useCallback(
     (generationId: string, sessionId: string) => {
       const origin = sessionId || useSessionStore.getState().currentSessionId;
+      genOwnerRef.current = origin || undefined;
       useExecutionStore.getState().startGeneration(origin || undefined);
       generationStream.startStream(generationId);
     },
@@ -855,7 +884,8 @@ const ChatWorkspace: React.FC = () => {
       useExecutionStore.getState().startExecution(jobId, origin || undefined, opts);
       traceMessageIdsRef.current.clear();
       seenTraceIdsRef.current.clear();
-      finishedJobsRef.current.clear();
+      // This job now owns the single live SSE stream.
+      sseJobIdRef.current = jobId;
       executionStream.startStream(jobId);
       // Announce the job so the globally-mounted useTracePolling
       // (SSEConnectionManager) starts its REST polling fallback for it. When the
@@ -921,6 +951,9 @@ const ChatWorkspace: React.FC = () => {
             executionOwnerSessionId: null,
           });
           clearActiveExecution(sid);
+          // We finalized this job directly (it was already done) — drop its
+          // owner mapping so a late poller event can't re-post a completion.
+          useExecutionStore.getState().clearJobOwner(jobId);
         }
       } catch {
         // Status check failed (offline / transient) — keep the optimistic
@@ -1463,7 +1496,7 @@ const ChatWorkspace: React.FC = () => {
       await stopExecution(activeExec.jobId);
       executionStream.stopStream();
       addMessage('assistant', 'Execution stopped.');
-      execStore.failExecution('Stopped by user');
+      execStore.failExecution('Stopped by user', activeExec.jobId);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : 'Failed to stop execution';
       addMessage('assistant', `Failed to stop: ${errMsg}`);
