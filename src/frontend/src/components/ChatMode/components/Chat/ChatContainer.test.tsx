@@ -66,6 +66,14 @@ describe('ChatContainer', () => {
     expect(screen.getByTestId('chat-input')).toBeInTheDocument();
   });
 
+  it('holds the greeting while hydrating (restoring a session on refresh)', () => {
+    // With no messages YET but a session being restored, the empty greeting must
+    // not flash — the input still renders, but not the "new chat" greeting.
+    render(<ChatContainer {...baseProps} messages={[]} hydrating />);
+    expect(screen.queryByText('What can I help you with?')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+  });
+
   it('renders the conversation list when messages exist', () => {
     render(<ChatContainer {...baseProps} messages={[msg('a'), msg('b')]} />);
     expect(screen.getByTestId('msg-a')).toBeInTheDocument();

@@ -157,6 +157,30 @@ describe('streamExecution', () => {
     cleanup();
   });
 
+  it('ignores a dataless transport error (no false "Execution failed")', () => {
+    // EventSource fires the 'error' listener for native TRANSPORT errors too —
+    // a bare Event with no `.data`. Forwarding it as an application error made a
+    // transient SSE blip post "Execution failed: Unknown error" while the job
+    // kept running. It must be dropped (reconnection is handled by onerror).
+    const onEvent = vi.fn();
+    const cleanup = streamExecution('job-1', onEvent);
+    const es = FakeEventSource.instances[0];
+    es.listeners['error']?.(new Event('error')); // no .data
+    expect(onEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'error' }),
+    );
+    cleanup();
+  });
+
+  it('still forwards a genuine server-sent error frame (carries data)', () => {
+    const onEvent = vi.fn();
+    const cleanup = streamExecution('job-1', onEvent);
+    const es = FakeEventSource.instances[0];
+    es.emit('error', JSON.stringify({ message: 'boom' }));
+    expect(onEvent).toHaveBeenCalledWith({ event: 'error', data: { message: 'boom' } });
+    cleanup();
+  });
+
   it('resets reconnectAttempts on open (onopen handler)', () => {
     const onEvent = vi.fn();
     const cleanup = streamExecution('job-1', onEvent);

@@ -36,12 +36,19 @@ interface SessionState {
   currentSessionId: string | null;
   messages: ChatMessage[];
   isDbReady: boolean;
+  /** True from mount until init() finishes WHEN a session is about to be
+   *  restored (an active-session id is persisted). Lets the UI hold the
+   *  "new chat" greeting so a refresh doesn't flash it before the restored
+   *  conversation loads. False on a genuine fresh start (no session to wait for). */
+  hydrating: boolean;
 }
 
 interface SessionActions {
   init: () => Promise<void>;
-  /** Re-list sessions for the now-current workspace and pick its active session. */
-  reloadForGroup: () => Promise<void>;
+  /** Re-list sessions for the now-current workspace. On a full page reload
+   *  (`restoreActiveSession`) the session the user left is restored; on a
+   *  workspace switch we land on a fresh chat. */
+  reloadForGroup: (restoreActiveSession?: boolean) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   createNewSession: () => Promise<string>;
   deleteSession: (id: string) => Promise<void>;
@@ -78,29 +85,53 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   currentSessionId: null,
   messages: [],
   isDbReady: false,
+  // Seeded synchronously (before the first paint) from the persisted active
+  // session: if one exists, init() is about to restore it, so hold the greeting.
+  hydrating: typeof localStorage !== 'undefined' && !!localStorage.getItem(ACTIVE_SESSION_KEY),
 
   // --- Actions ---
   init: async () => {
-    await initDb();
-    set({ isDbReady: true });
-    // One-time: adopt any pre-workspace-scoping (untagged) sessions into the
-    // current workspace so strict filtering doesn't hide them. No-op once done.
-    const gid = currentGroupId();
-    if (gid) {
-      try {
-        await dbAssignUngroupedSessions(gid);
-      } catch {
-        /* non-fatal */
+    try {
+      await initDb();
+      set({ isDbReady: true });
+      // One-time: adopt any pre-workspace-scoping (untagged) sessions into the
+      // current workspace so strict filtering doesn't hide them. No-op once done.
+      const gid = currentGroupId();
+      if (gid) {
+        try {
+          await dbAssignUngroupedSessions(gid);
+        } catch {
+          /* non-fatal */
+        }
       }
+      // A full page load restores the session the user left (see reloadForGroup).
+      await get().reloadForGroup(true);
+    } finally {
+      // Restore is done (or failed) — release the greeting hold either way.
+      set({ hydrating: false });
     }
-    await get().reloadForGroup();
   },
 
-  reloadForGroup: async () => {
-    // Land on a FRESH chat: list this workspace's sessions for the history
-    // rail but do NOT auto-restore the last one. A session is created lazily
-    // when the first message is sent; previous chats stay one click away.
+  reloadForGroup: async (restoreActiveSession = false) => {
+    // Always re-list this workspace's sessions for the history rail.
     const allSessions = await dbListSessions(currentGroupId());
+    const activeId = localStorage.getItem(ACTIVE_SESSION_KEY);
+    // On a full page reload (refresh), RESTORE the session the user left — so a
+    // refresh keeps you in your conversation instead of bouncing to a new chat.
+    // Only restore when that session still belongs to THIS workspace (a stale id
+    // from another group / a deleted session falls through to a fresh chat).
+    if (
+      restoreActiveSession &&
+      activeId &&
+      allSessions.some((s) => s.id === activeId)
+    ) {
+      const msgs = await getSessionMessages(activeId);
+      set({ sessions: allSessions, currentSessionId: activeId, messages: msgs });
+      return;
+    }
+    // Otherwise (workspace switch, or no/invalid active session) land on a FRESH
+    // chat: a session is created lazily on the first message; previous chats stay
+    // one click away in the rail.
     localStorage.removeItem(ACTIVE_SESSION_KEY);
     set({ sessions: allSessions, currentSessionId: null, messages: [] });
   },

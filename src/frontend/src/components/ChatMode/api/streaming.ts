@@ -62,7 +62,6 @@ export function streamExecution(
       'execution_update',
       'trace',
       'hitl_request',
-      'error',
       'connected',
     ];
 
@@ -78,6 +77,25 @@ export function streamExecution(
         }
       });
     }
+
+    // 'error' is special and NOT in the loop above: EventSource fires the
+    // 'error' listener for BOTH a server-sent `event: error` frame AND a native
+    // TRANSPORT error (a connection drop), the latter a bare Event with no
+    // `.data`. Forwarding that dataless transport error as an application error
+    // made a transient SSE blip surface "Execution failed: Unknown error" while
+    // the backend job kept running — especially right after a refresh, where
+    // reconnecting re-opens the stream. Reconnection is owned by onerror below,
+    // so here we forward ONLY a genuine server-sent error frame (one with data).
+    eventSource.addEventListener('error', (e: Event) => {
+      const me = e as MessageEvent;
+      if (me.data == null) return; // transport error — let onerror reconnect
+      console.log('[SSE] Event received: "error", raw data:', me.data?.slice?.(0, 300) || me.data);
+      try {
+        onEvent({ event: 'error', data: JSON.parse(me.data) });
+      } catch {
+        onEvent({ event: 'error', data: { message: me.data } });
+      }
+    });
 
     eventSource.onopen = () => {
       console.log('[SSE] Connection established for', jobId);

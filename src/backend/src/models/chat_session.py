@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Index, String
+from sqlalchemy import Column, DateTime, Index, String, Text
 
 from src.db.base import Base
 
@@ -30,6 +30,17 @@ class ChatSession(Base):
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+    # In-flight crew job for refresh reconnect (replaces the browser IndexedDB
+    # marker). NULL when no run is active for this session.
+    running_job_id = Column(String, nullable=True)
+
+    # The session's rendered preview (A2UI deliverable), so it survives reload
+    # and follows the user across browsers/devices (replaces the IndexedDB
+    # 'previews' store). All NULL when the session has no preview yet.
+    preview_type = Column(String(50), nullable=True)
+    preview_data = Column(Text, nullable=True)
+    preview_title = Column(String(512), nullable=True)
 
     # Multi-group fields (REQUIRED for all models)
     group_id = Column(String(100), index=True, nullable=True)

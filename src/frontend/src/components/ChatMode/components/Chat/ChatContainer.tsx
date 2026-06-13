@@ -298,6 +298,10 @@ export interface ExecutionContext {
 
 interface ChatContainerProps {
   messages: ChatMessageType[];
+  /** True while a persisted session is still being restored on load — suppresses
+   *  the empty "new chat" greeting so a refresh doesn't flash it before the
+   *  conversation appears. */
+  hydrating?: boolean;
   onSend: (
     message: string,
     meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[] },
@@ -330,6 +334,7 @@ interface ChatContainerProps {
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
   messages,
+  hydrating,
   onSend,
   onCommand,
   onExecuteCrew,
@@ -370,7 +375,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     }
   };
 
-  const isEmpty = messages.length === 0;
+  // While a persisted session is being restored on load, don't treat the
+  // (momentarily) empty message list as a new chat — otherwise the greeting
+  // flashes for a frame before the restored conversation arrives.
+  const isEmpty = messages.length === 0 && !hydrating;
 
   // Empty state: everything centered vertically — greeting + input
   if (isEmpty && !isExecuting) {

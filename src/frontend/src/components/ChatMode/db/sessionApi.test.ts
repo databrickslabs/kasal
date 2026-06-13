@@ -334,3 +334,80 @@ describe('sessionApi - card message persistence', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 });
+
+describe('sessionApi - preview (server-backed, replaces IndexedDB)', () => {
+  it('saves a preview via PUT', async () => {
+    mockPut.mockResolvedValue({ data: {} });
+    await api.saveSessionPreview('s1', { type: 'ui', data: '{"messages":[]}', title: 'Deck' });
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/sessions/s1/preview', {
+      type: 'ui', data: '{"messages":[]}', title: 'Deck',
+    });
+  });
+
+  it('sends a null title when absent', async () => {
+    mockPut.mockResolvedValue({ data: {} });
+    await api.saveSessionPreview('s1', { type: 'ui', data: 'x' });
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/sessions/s1/preview', {
+      type: 'ui', data: 'x', title: null,
+    });
+  });
+
+  it('reads a stored preview (maps wire -> StoredPreview)', async () => {
+    mockGet.mockResolvedValue({ data: { type: 'ui', data: '{"a":1}', title: 'T' } });
+    const p = await api.getSessionPreview('s1');
+    expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/s1/preview');
+    expect(p).toEqual({ sessionId: 's1', type: 'ui', data: '{"a":1}', title: 'T' });
+  });
+
+  it('returns undefined when there is no preview (null data)', async () => {
+    mockGet.mockResolvedValue({ data: { type: null, data: null, title: null } });
+    expect(await api.getSessionPreview('s1')).toBeUndefined();
+  });
+
+  it('reads are resilient — undefined on error', async () => {
+    mockGet.mockRejectedValue(new Error('boom'));
+    expect(await api.getSessionPreview('s1')).toBeUndefined();
+  });
+
+  it('writes are best-effort — never throw', async () => {
+    mockPut.mockRejectedValue(new Error('down'));
+    await expect(api.saveSessionPreview('s1', { type: 'ui', data: 'x' })).resolves.toBeUndefined();
+    mockDelete.mockRejectedValue(new Error('down'));
+    await expect(api.deleteSessionPreview('s1')).resolves.toBeUndefined();
+  });
+
+  it('deletes the preview via DELETE', async () => {
+    mockDelete.mockResolvedValue({ data: {} });
+    await api.deleteSessionPreview('s1');
+    expect(mockDelete).toHaveBeenCalledWith('/chat-history/sessions/s1/preview');
+  });
+});
+
+describe('sessionApi - running-job marker (server-backed, replaces IndexedDB)', () => {
+  it('sets the marker via PUT', async () => {
+    mockPut.mockResolvedValue({ data: {} });
+    await api.setSessionRunningJob('s1', 'job-1');
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/sessions/s1/running-job', { job_id: 'job-1' });
+  });
+
+  it('reads the marker', async () => {
+    mockGet.mockResolvedValue({ data: { job_id: 'job-9' } });
+    expect(await api.getSessionRunningJob('s1')).toBe('job-9');
+    expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/s1/running-job');
+  });
+
+  it('returns null when no job, and on error', async () => {
+    mockGet.mockResolvedValue({ data: { job_id: null } });
+    expect(await api.getSessionRunningJob('s1')).toBeNull();
+    mockGet.mockRejectedValue(new Error('boom'));
+    expect(await api.getSessionRunningJob('s2')).toBeNull();
+  });
+
+  it('clears via DELETE; writes never throw', async () => {
+    mockDelete.mockResolvedValue({ data: {} });
+    await api.clearSessionRunningJob('s1');
+    expect(mockDelete).toHaveBeenCalledWith('/chat-history/sessions/s1/running-job');
+    mockPut.mockRejectedValue(new Error('down'));
+    await expect(api.setSessionRunningJob('s1', 'j')).resolves.toBeUndefined();
+  });
+});

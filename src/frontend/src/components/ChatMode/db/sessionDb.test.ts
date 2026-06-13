@@ -586,30 +586,63 @@ describe('assignUngroupedSessions', () => {
 });
 
 describe('session running-job marker', () => {
-  it('sets, reads and clears the in-flight job on the session record', async () => {
+  it('sets, reads and clears the in-flight job in a SEPARATE marker record', async () => {
     await sessionDb.initDb();
     const store = mockStores.get('sessions')!;
     store.records.set('s1', { id: 's1', title: 't' });
 
     expect(await sessionDb.getSessionRunningJob('s1')).toBeNull(); // none yet
     await sessionDb.setSessionRunningJob('s1', 'job-1');
-    expect(store.records.get('s1')!.runningJobId).toBe('job-1');
+    // The marker lives in its OWN record, NOT on the session record — so the
+    // frequent session-record rewrites (touchSession/rename) can't clobber it.
+    expect(store.records.get('s1')).not.toHaveProperty('runningJobId');
+    expect(store.records.get('running-job:s1')!.runningJobId).toBe('job-1');
     expect(await sessionDb.getSessionRunningJob('s1')).toBe('job-1');
 
     await sessionDb.clearSessionRunningJob('s1');
-    expect('runningJobId' in store.records.get('s1')!).toBe(false);
+    expect(store.records.has('running-job:s1')).toBe(false);
+    expect(await sessionDb.getSessionRunningJob('s1')).toBeNull();
   });
 
-  it('set/clear are no-ops when the session is missing or has no marker', async () => {
+  it('survives a concurrent touchSession — no lost update (regression: refresh saw the run as done)', async () => {
     await sessionDb.initDb();
     const store = mockStores.get('sessions')!;
-    await sessionDb.setSessionRunningJob('missing', 'j'); // session missing → no write
-    expect(store.records.has('missing')).toBe(false);
-    expect(await sessionDb.getSessionRunningJob('missing')).toBeNull(); // undefined session → null
+    store.records.set('s1', { id: 's1', title: 't' });
 
-    store.records.set('s2', { id: 's2', title: 't' }); // present, no runningJobId
-    await sessionDb.clearSessionRunningJob('s2'); // 'runningJobId' not in session → no-op
-    expect(store.records.get('s2')).toMatchObject({ id: 's2' });
-    await sessionDb.clearSessionRunningJob('gone'); // missing session → no-op
+    // Reproduce the real race: the marker write and a session-record write
+    // (touchSession fires on every persisted trace) run concurrently. With the
+    // marker on the session record this dropped it; in its own record it can't.
+    await Promise.all([
+      sessionDb.setSessionRunningJob('s1', 'job-1'),
+      sessionDb.touchSession('s1'),
+    ]);
+
+    expect(await sessionDb.getSessionRunningJob('s1')).toBe('job-1'); // marker survived
+    expect(store.records.get('s1')).toHaveProperty('updatedAt'); // touch still applied
+  });
+
+  it('writes the marker even with NO local session record (sessions live server-side)', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    // No session record exists in this IndexedDB store (sessions are persisted via
+    // db/sessionApi). The marker MUST still be written, or refresh-reconnect breaks
+    // — this is the bug that silently disabled reconnect (a guard required the
+    // local session record, which no longer exists).
+    await sessionDb.setSessionRunningJob('s-remote', 'job-9');
+    expect(store.records.get('running-job:s-remote')!.runningJobId).toBe('job-9');
+    expect(await sessionDb.getSessionRunningJob('s-remote')).toBe('job-9');
+
+    await sessionDb.clearSessionRunningJob('s-remote');
+    expect(await sessionDb.getSessionRunningJob('s-remote')).toBeNull();
+    await sessionDb.clearSessionRunningJob('gone'); // missing marker → no-op, no throw
+  });
+
+  it('marker records are excluded from the session list', async () => {
+    await sessionDb.initDb();
+    const store = mockStores.get('sessions')!;
+    store.records.set('s1', { id: 's1', title: 't', groupId: 'g1', createdAt: new Date(), updatedAt: new Date() });
+    await sessionDb.setSessionRunningJob('s1', 'job-1'); // adds a running-job: record
+    const sessions = await sessionDb.listSessions('g1');
+    expect(sessions.map((s) => s.id)).toEqual(['s1']); // no phantom marker row
   });
 });
