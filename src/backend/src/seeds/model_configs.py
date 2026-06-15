@@ -265,13 +265,6 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000
     },
-    "databricks-claude-fable-5": {
-        "name": "databricks-claude-fable-5",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1000000,
-        "max_output_tokens": 64000
-    },
     "databricks-claude-sonnet-4": {
         "name": "databricks-claude-sonnet-4",
         "temperature": 0.7,
@@ -473,6 +466,11 @@ REMOVED_MODEL_KEYS = [
     # ENDPOINT_NOT_FOUND. Never in DEFAULT_MODELS; prune it from any DB it was
     # manually added to. Use databricks-gemini-3-flash / 2-5-flash instead.
     "databricks-gemini-3-1-flash-lite",
+    # Anthropic suspended Claude Fable 5 on 2026-06-12 (US export-control
+    # directive); the endpoint returns TEMPORARILY_UNAVAILABLE for all callers.
+    # Prune it from any DB it was seeded/added to so it leaves the model picker.
+    # Re-add to DEFAULT_MODELS (and drop from here) if the suspension is lifted.
+    "databricks-claude-fable-5",
 ]
 
 async def seed_async():
