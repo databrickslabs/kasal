@@ -251,6 +251,44 @@ export function parseUiDocument(raw: string | Record<string, unknown>): UiSurfac
   return { rootId, components, data, theme };
 }
 
+/**
+ * Recursively locate an A2UI document anywhere inside an arbitrary value and
+ * return the first renderable surface, or null.
+ *
+ * `parseUiDocument` only inspects the value it is handed: it parses a string
+ * (incl. prose/fence/double-encoded) and reads a top-level message object/array.
+ * But a stored execution result wraps the document in wildly varying shapes —
+ * `{messages:[…]}`, `{result:"<json>"}`, `{someKey:{messages:[…]}}`, a multi-key
+ * envelope `{output:"…", meta:"<json>"}`, a prose-prefixed string value, a
+ * flow's per-crew aggregate, … — so a top-level-only check renders the surface
+ * only "sometimes". This walks objects (values), arrays (elements) and
+ * JSON/prose string values, applying `parseUiDocument` (the SAME strict
+ * predicate — it returns null unless ≥1 recognized component exists) at every
+ * node, so non-A2UI content can never false-positive.
+ *
+ * Outermost-first (pre-order): the node itself is tried before its children, so
+ * a clean top-level document wins and surface selection is unchanged for results
+ * that already worked. When only nested surfaces exist (e.g. a multi-crew flow),
+ * the first one in traversal order is returned. Depth-capped against pathological
+ * nesting; string parsing delegates to the depth-capped `coerceJson`.
+ */
+export function findUiSurface(raw: unknown, depth = 0): UiSurface | null {
+  if (raw == null || depth > 6) return null;
+  // Strings reuse parseUiDocument -> coerceJson (prose/fence/double-encode).
+  if (typeof raw === 'string') return parseUiDocument(raw);
+  if (typeof raw !== 'object') return null;
+  // Try this node as-is first so the OUTERMOST valid document wins.
+  const direct = parseUiDocument(raw as Record<string, unknown>);
+  if (direct) return direct;
+  // Otherwise descend: array elements in order, then object values in order.
+  const children = Array.isArray(raw) ? raw : Object.values(raw as Record<string, unknown>);
+  for (const child of children) {
+    const found = findUiSurface(child, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 /* NOTE: the crew "emit a UI document" instruction is built BACKEND-side
  * (src/backend/src/engines/crewai/helpers/ui_emission.py) so every execution
  * channel behaves the same. This module only parses + renders UI documents. */

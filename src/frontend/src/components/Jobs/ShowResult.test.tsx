@@ -128,6 +128,37 @@ describe('ShowResult A2UI rendering toggle', () => {
     expect(screen.queryByTestId('ui-surface-view')).toBeNull();
   });
 
+  it('does not false-positive on a nested non-A2UI object', () => {
+    render(
+      <ShowResult open={true} onClose={vi.fn()} result={{ wrapper: { status: 'ok' } } as never} run={baseRun} />
+    );
+    expect(screen.queryByTestId('ui-surface-view')).toBeNull();
+  });
+
+  // The run result wraps the A2UI document in varying shapes; ALL of these must
+  // render the surface (previously only a top-level doc did, so it rendered only
+  // "sometimes"). The doc lives nested below the top level in each case.
+  it('renders an A2UI doc nested under a single key as a parsed object', () => {
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ result: JSON.parse(a2uiDoc) }} run={baseRun} />);
+    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByLabelText('rendered view')).toBeInTheDocument();
+  });
+
+  it('renders an A2UI doc in a multi-key envelope with a JSON-string value', () => {
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ output: 'ok', meta: a2uiDoc } as never} run={baseRun} />);
+    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+  });
+
+  it('renders an A2UI doc inside a prose-prefixed string value', () => {
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ task: `Here is your dashboard: ${a2uiDoc}` } as never} run={baseRun} />);
+    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+  });
+
+  it('renders a deeply nested A2UI doc', () => {
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ a: { b: JSON.parse(a2uiDoc) } } as never} run={baseRun} />);
+    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+  });
+
   it('keeps the Code/HTML toggle for HTML results', () => {
     const result = { Value: '<!DOCTYPE html><html><body>Hello</body></html>' };
     render(<ShowResult open={true} onClose={vi.fn()} result={result} run={baseRun} />);
