@@ -730,8 +730,14 @@ const ChatWorkspace: React.FC = () => {
   useEffect(() => {
     const onTraceUpdate = (e: Event) => {
       const { jobId, trace } = (e as CustomEvent).detail || {};
-      const active = useExecutionStore.getState().activeExecution;
-      if (!active || active.jobId !== jobId || !trace) return;
+      // Route by the job's OWNER, not the single live slot — like the job
+      // completion events below. A backgrounded session's task output (which
+      // carries the rendered deliverable) arrives here when SSE is dead
+      // (Databricks Apps) or after its stream was closed by a newer run; gating
+      // on the live `activeExecution` dropped it, so the preview was never
+      // stashed into its snapshot and vanished on switch-back. jobOwnerOf returns
+      // null once a job finalizes, so a late re-poll is still dropped.
+      if (!jobId || !trace || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
       const msg =
         (trace.message as string) ||
         (trace.trace as string) ||
