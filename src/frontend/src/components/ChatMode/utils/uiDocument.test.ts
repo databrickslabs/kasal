@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseUiDocument,
+  findUiSurface,
   resolveValue,
   applyConfiguredTheme,
   inferSurfaceDeliverable,
@@ -482,5 +483,71 @@ describe('DELIVERABLE_LABELS', () => {
     expect(DELIVERABLE_LABELS.album).toBe('Photo album');
     expect(DELIVERABLE_LABELS.genie).toBe('Data view');
     expect(DELIVERABLE_LABELS.default).toBe('Document');
+  });
+});
+
+describe('findUiSurface — A2UI nested anywhere in a result tree', () => {
+  const json = JSON.stringify(doc);
+
+  it('finds a clean top-level document (parity with parseUiDocument)', () => {
+    expect(findUiSurface(doc)!.rootId).toBe('root');
+    expect(findUiSurface(json)!.rootId).toBe('root');
+  });
+
+  // The shapes that defeated the old top-level-only detection. For each, assert
+  // parseUiDocument on the SAME wrapped value is null (the gap) but findUiSurface
+  // recovers the surface (the fix).
+  it('finds a document wrapped under a single key as a PARSED object', () => {
+    const wrapped = { result: doc };
+    expect(parseUiDocument(wrapped as never)).toBeNull();
+    expect(findUiSurface(wrapped)!.rootId).toBe('root');
+  });
+
+  it('finds a document in a MULTI-key envelope whose value is a JSON string', () => {
+    const wrapped = { output: 'done', meta: json };
+    expect(parseUiDocument(wrapped as never)).toBeNull();
+    expect(findUiSurface(wrapped)!.rootId).toBe('root');
+  });
+
+  it('finds a document in a MULTI-key envelope whose value is a parsed object', () => {
+    const wrapped = { success: true, crew_a: doc };
+    expect(findUiSurface(wrapped)!.rootId).toBe('root');
+  });
+
+  it('finds a document inside a PROSE-prefixed string value', () => {
+    const wrapped = { task: `Here is your dashboard: ${json}` };
+    expect(parseUiDocument(wrapped as never)).toBeNull();
+    expect(findUiSurface(wrapped)!.rootId).toBe('root');
+  });
+
+  it('finds a deeply nested document and respects the depth cap', () => {
+    expect(findUiSurface({ a: { b: { c: doc } } })!.rootId).toBe('root');
+    // Nested deeper than the cap (>6) is not found.
+    const tooDeep = { a: { b: { c: { d: { e: { f: { g: doc } } } } } } };
+    expect(findUiSurface(tooDeep)).toBeNull();
+  });
+
+  it('finds a document among array elements', () => {
+    expect(findUiSurface([{ junk: 1 }, doc])!.rootId).toBe('root');
+  });
+
+  it('returns the OUTERMOST/first surface when several exist', () => {
+    const secondDoc = {
+      messages: [{ updateComponents: { components: [{ id: 'root', component: 'Dashboard' }] } }],
+    };
+    // crew_a comes first in value order, so its Column-rooted surface wins.
+    const surface = findUiSurface({ crew_a: doc, crew_b: secondDoc })!;
+    expect(surface.components.title?.text).toBe('Hello');
+  });
+
+  it('never false-positives on non-A2UI content', () => {
+    expect(findUiSurface({ messages: [] })).toBeNull(); // no components
+    expect(findUiSurface({ foo: 'bar', n: 42 })).toBeNull();
+    expect(findUiSurface('just some plain text')).toBeNull();
+    expect(findUiSurface({ wrapper: { status: 'ok' } })).toBeNull();
+    // A surface declaration with no components is not renderable.
+    expect(findUiSurface({ a: { messages: [{ createSurface: { surfaceId: 's' } }] } })).toBeNull();
+    expect(findUiSurface(null)).toBeNull();
+    expect(findUiSurface(42)).toBeNull();
   });
 });

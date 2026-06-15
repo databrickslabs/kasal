@@ -35,7 +35,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { sanitizeUrl } from '../Chat/components/MessageRenderer';
 import { UiSurfaceView } from '../Chat/components/UiSurfaceResult';
-import { parseUiDocument } from '../ChatMode/utils/uiDocument';
+import { findUiSurface } from '../ChatMode/utils/uiDocument';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { DatabricksService } from '../../api/DatabricksService';
@@ -302,12 +302,14 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
     return result;
   }, [result]);
 
-  // A2UI document detection: when the result is (or contains) a parseable A2UI
-  // surface, the dialog can render it as the designed UI and toggle to raw JSON.
-  const uiSurface = useMemo(
-    () => parseUiDocument(memoizedResult as string | Record<string, unknown>),
-    [memoizedResult],
-  );
+  // A2UI document detection: when the result IS or CONTAINS a parseable A2UI
+  // surface anywhere in its tree, the dialog renders it as the designed UI and
+  // toggles to raw JSON. We walk the ORIGINAL `result` (not memoizedResult,
+  // whose single-key/top-level unwrap strips the string layer where the parser's
+  // prose/fence robustness lives) so a wrapped/nested document renders too —
+  // previously detection only fired for a top-level doc, so it rendered only
+  // "sometimes" depending on how the run result happened to be wrapped.
+  const uiSurface = useMemo(() => findUiSurface(result), [result]);
 
   // Update the hasOpened ref when dialog opens and set view mode based on content
   useEffect(() => {
