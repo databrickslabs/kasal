@@ -547,6 +547,12 @@ describe('ChatWorkspace component', () => {
     h.exec.activeExecution = null;
     h.exec.selectedMcpServers = [];
     h.exec.hasActiveExecution = vi.fn(() => false);
+    // Restore the default ownership mock each test (tracked iff it's the live
+    // execution) so a test that overrides jobOwnerOf can't leak into later ones.
+    h.exec.jobOwnerOf = vi.fn((jobId: string) => {
+      const ae = h.exec.activeExecution as { jobId?: string } | null;
+      return ae && ae.jobId === jobId ? 'owner-session' : null;
+    });
     h.app.selectedModel = 'm1';
     h.theme.isDarkMode = false;
     (globalThis as { __ccMsg?: string }).__ccMsg = 'hello world';
@@ -1752,26 +1758,61 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
   });
 
-  it('ignores a traceUpdate whose jobId is not the active execution', () => {
+  it('ignores a polled traceUpdate for an untracked job (no owner)', () => {
+    // The gate is OWNERSHIP, not the live slot: a job that isn't tracked
+    // (jobOwnerOf -> null, e.g. never started or already finalized) is dropped.
     h.exec.activeExecution = { jobId: 'job-poll', status: 'running' };
     render(<ChatWorkspace />);
     act(() => {
       window.dispatchEvent(new CustomEvent('traceUpdate', {
-        detail: { jobId: 'other-job', trace: { id: 2, event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{}' } } } },
+        detail: { jobId: 'other-job', trace: { id: 2, job_id: 'other-job', event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{}' } } } },
       }));
     });
     expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
   });
 
-  it('ignores a traceUpdate when there is no active execution', () => {
+  it('processes a polled traceUpdate for an OWNED job that is not the live slot', () => {
+    // Backgrounded run: its job owns no live slot (activeExecution is null or
+    // holds another session's job), but jobOwnerOf still resolves its owner — so
+    // its traces must be processed and routed to ITS session, not dropped.
     h.exec.activeExecution = null;
+    h.exec.executionOwnerSessionId = 's2';
+    h.session.currentSessionId = 's1';
+    h.exec.jobOwnerOf = vi.fn((id: string) => (id === 'job-bg' ? 's2' : null));
     render(<ChatWorkspace />);
     act(() => {
       window.dispatchEvent(new CustomEvent('traceUpdate', {
-        detail: { jobId: 'x', trace: { id: 3, event_type: 'tool_usage', output: {} } },
+        detail: { jobId: 'job-bg', trace: { id: 7, job_id: 'job-bg', event_type: 'tool_usage', output: { extra_data: { tool_name: 'S', tool_args: '{"q":"a"}' } } } },
       }));
     });
-    expect(h.session.addMessageToTargetSession).not.toHaveBeenCalled();
+    expect(h.session.addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  it('stashes a backgrounded session\'s polled task_completed preview into its snapshot (deployed / poller-only repro)', () => {
+    // The exact "lose the preview on switch-back" repro: in a deployed Databricks
+    // App SSE is dead, so a backgrounded run's deliverable (a task_completed
+    // trace) arrives ONLY via the poller. The buggy live-slot gate dropped it, so
+    // the preview was never parked into the owner's snapshot nor persisted, and
+    // the pane was blank on switch-back. The ownership gate must let it through.
+    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>deliverable</p>' });
+    h.session.currentSessionId = 's1';        // on screen
+    h.exec.executionOwnerSessionId = 's2';    // backgrounded run owns this job
+    h.exec.activeExecution = null;            // s2's job is NOT the live slot
+    h.exec.jobOwnerOf = vi.fn((id: string) => (id === 'job-bg' ? 's2' : null));
+    render(<ChatWorkspace />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('traceUpdate', {
+        detail: {
+          jobId: 'job-bg',
+          trace: { id: 99, job_id: 'job-bg', event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>deliverable</p>' },
+        },
+      }));
+    });
+    // Parked into s2's snapshot (for switch-back) and persisted server-side; the
+    // owner is off screen, so the live preview slot is deliberately untouched.
+    expect(h.exec.stashSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    expect(h.saveSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
   });
 
   it('completes the run from the polling-fallback jobCompleted event', () => {
