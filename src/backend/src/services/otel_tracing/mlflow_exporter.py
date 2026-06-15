@@ -685,6 +685,32 @@ class KasalMLflowSpanExporter(SpanExporter):
                     "tasks": len(task_spans),
                 },
             )
+
+            # CRITICAL: flush the async trace-logging queue NOW.
+            #
+            # mlflow.config.enable_async_logging() (set in mlflow_setup) makes
+            # end_trace write the trace *info* synchronously but upload the
+            # span-data artifact (traces.json) on a background thread. This
+            # exporter runs late, inside its own ThreadPoolExecutor, in a crew
+            # execution subprocess that tears down immediately afterwards —
+            # shutdown(wait=True) only joins THIS exporter's threads, not
+            # MLflow's async-logging queue. Without this flush the subprocess
+            # exits before traces.json uploads, leaving a trace whose info is
+            # searchable but whose spans 404 (MlflowTraceDataNotFound) — i.e.
+            # an empty/unreadable trace in the UI. terminate=False keeps the
+            # queue alive so flow runs with multiple crews still export.
+            try:
+                import mlflow
+                mlflow.flush_trace_async_logging(terminate=False)
+                logger.info(
+                    f"[OTel-MLflow][{self._job_id}] Flushed async trace logging "
+                    f"(trace_id={root_trace_id})"
+                )
+            except Exception as flush_err:
+                logger.warning(
+                    f"[OTel-MLflow][{self._job_id}] Could not flush async trace "
+                    f"logging (span data may not persist): {flush_err}"
+                )
         except Exception as e:
             logger.error(
                 f"[OTel-MLflow][{self._job_id}] Error building MLflow trace: {e}",
