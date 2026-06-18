@@ -337,11 +337,20 @@ async def configure_mlflow_in_subprocess(
         # -------------------------------------------------------
         # 9. Async logging
         # -------------------------------------------------------
+        # Async logging is DISABLED on purpose. Crew/flow tracing runs in a
+        # subprocess that tears down immediately after the crew completes.
+        # With async logging on, end_trace writes the trace *info*
+        # synchronously but uploads the span-data artifact (traces.json) on a
+        # background worker — which the subprocess kills before it finishes,
+        # leaving a trace whose info is searchable but whose spans 404
+        # (MlflowTraceDataNotFound). flush_trace_async_logging() does not
+        # reliably cover the low-level client trace API here, so the robust fix
+        # is a synchronous upload inside end_trace.
         try:
-            mlflow.config.enable_async_logging()
-            alog.info("[SUBPROCESS] MLflow async logging enabled")
+            mlflow.config.enable_async_logging(False)
+            alog.info("[SUBPROCESS] MLflow async logging DISABLED (synchronous trace upload — required for subprocess lifecycle)")
         except Exception as async_log_err:
-            alog.info(f"[SUBPROCESS] MLflow async logging not available: {async_log_err}")
+            alog.info(f"[SUBPROCESS] MLflow async logging config not available: {async_log_err}")
 
         # Log MLflow state summary
         alog.info(f"[SUBPROCESS] MLflow tracking URI: {mlflow.get_tracking_uri()}")
