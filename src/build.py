@@ -40,11 +40,17 @@ class Builder:
                 shutil.rmtree(frontend_public_docs)
             frontend_public_docs.mkdir(parents=True, exist_ok=True)
             
-            # Copy all markdown files from docs directory
-            for item in self.docs_dir.iterdir():
-                if item.is_file() and item.suffix == '.md':
-                    logger.info(f"Copying documentation file: {item.name}")
-                    shutil.copy2(item, frontend_public_docs)
+            # Copy all markdown files (and image assets) from the docs directory,
+            # recursing into subdirectories (e.g. powerbi/, Blueprints/) and
+            # preserving their structure so nested docs and their images resolve.
+            doc_suffixes = {'.md', '.png', '.jpg', '.jpeg', '.gif', '.svg'}
+            for item in self.docs_dir.rglob('*'):
+                if item.is_file() and item.suffix.lower() in doc_suffixes:
+                    rel = item.relative_to(self.docs_dir)
+                    dest = frontend_public_docs / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Copying documentation file: {rel}")
+                    shutil.copy2(item, dest)
             
             # Run the build
             logger.info("Building React application...")
@@ -80,9 +86,12 @@ class Builder:
             # Copy docs to frontend_static as well
             frontend_static_docs = frontend_static_dest / "docs"
             frontend_static_docs.mkdir(parents=True, exist_ok=True)
-            for item in self.docs_dir.iterdir():
-                if item.is_file() and item.suffix == '.md':
-                    shutil.copy2(item, frontend_static_docs)
+            for item in self.docs_dir.rglob('*'):
+                if item.is_file() and item.suffix.lower() in doc_suffixes:
+                    rel = item.relative_to(self.docs_dir)
+                    dest = frontend_static_docs / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, dest)
             
             logger.info("Frontend build completed successfully")
             logger.info(f"Static files available at: {frontend_static_dest}")
