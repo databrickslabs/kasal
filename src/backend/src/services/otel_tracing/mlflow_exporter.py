@@ -396,6 +396,64 @@ class KasalMLflowSpanExporter(SpanExporter):
 
         return paired, instants
 
+    def _derive_root_io(
+        self,
+        paired: List[_PairedSpan],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Best-effort (request, response) for the root span.
+
+        The root span should read prompt -> response like a normal MLflow
+        trace, not the exporter's bookkeeping. The crew/flow kickoff inputs
+        are stamped as ``kasal.extra.inputs`` and the final result as
+        ``kasal.output_content`` (-> outputs["content"]) by the event bridge.
+
+        Request resolution: crew/flow kickoff inputs if meaningful, else the
+        earliest task's prompt/name. Response resolution: crew/flow completion
+        output, else the latest task output.
+        """
+        request: Optional[str] = None
+        response: Optional[str] = None
+        crew_inputs: Optional[str] = None
+
+        root_evts = ("flow_started", "crew_started")
+        for p in paired:
+            if p.event_type in root_evts:
+                content = p.outputs.get("content")
+                if content and response is None:
+                    response = str(content)[:8000]
+                inp = p.attributes.get("kasal.extra.inputs")
+                if inp and str(inp) not in ("{}", "None", "") and crew_inputs is None:
+                    crew_inputs = str(inp)[:8000]
+
+        if crew_inputs:
+            request = crew_inputs
+        else:
+            # Earliest task carries the closest thing to "what was asked".
+            task_spans = sorted(
+                [p for p in paired if p.event_type == "task_started"],
+                key=lambda p: p.start_time,
+            )
+            for p in task_spans:
+                req = (
+                    p.attributes.get("kasal.extra.task_prompt")
+                    or p.attributes.get("kasal.extra.task_name")
+                    or p.task_name
+                )
+                if req:
+                    request = str(req)[:8000]
+                    break
+
+        # Fallback response: latest task output if no crew/flow output present.
+        if response is None:
+            with_content = sorted(
+                [p for p in paired if p.outputs.get("content")],
+                key=lambda p: p.end_time,
+            )
+            if with_content:
+                response = str(with_content[-1].outputs.get("content"))[:8000]
+
+        return request, response
+
     def _determine_hierarchy_level(self, event_type: str) -> str:
         """Determine hierarchy level: 'crew', 'agent', 'task', or 'leaf'."""
         if event_type in _CREW_EVENTS:
@@ -482,12 +540,24 @@ class KasalMLflowSpanExporter(SpanExporter):
         first_time = min(start_times)
         last_time = max(end_times) if end_times else first_time
 
-        # Build trace inputs
-        trace_inputs: Dict[str, Any] = {"job_id": self._job_id}
+        # Derive the real request/response so the root span reads
+        # prompt -> response instead of the exporter's bookkeeping.
+        root_request, root_response = self._derive_root_io(paired)
+
+        # Build trace inputs: the request is the primary input; job_id/group_id
+        # are identifiers kept as trace attributes, not as the "input".
+        trace_inputs: Dict[str, Any] = {}
+        if root_request:
+            trace_inputs["request"] = root_request
+        trace_attributes: Dict[str, Any] = {"job_id": self._job_id}
         if self._group_context:
             gid = getattr(self._group_context, "primary_group_id", None)
             if gid:
-                trace_inputs["group_id"] = str(gid)
+                trace_attributes["group_id"] = str(gid)
+        # If no request could be derived, fall back to identifiers as input so
+        # the trace is never created with empty inputs.
+        if not trace_inputs:
+            trace_inputs = dict(trace_attributes)
 
         experiment_id = getattr(self._mlflow_result, "experiment_id", None)
 
@@ -496,6 +566,7 @@ class KasalMLflowSpanExporter(SpanExporter):
                 "name": f"kasal:{self._job_id}",
                 "start_time_ns": first_time,
                 "inputs": trace_inputs,
+                "attributes": trace_attributes,
             }
             if experiment_id:
                 start_trace_kwargs["experiment_id"] = str(experiment_id)
@@ -673,17 +744,23 @@ class KasalMLflowSpanExporter(SpanExporter):
                     status=item["status"],
                 )
 
-            # End root trace
+            # End root trace. The response is the primary output so the trace
+            # reads prompt -> response; the span-count summary is kept as
+            # attributes (diagnostics), not as the output.
+            trace_summary = {
+                "paired_spans": len(paired),
+                "instant_spans": len(instants),
+                "total_otel_spans": len(all_spans),
+                "agents": list(agent_spans.keys()),
+                "tasks": len(task_spans),
+            }
             client.end_trace(
                 trace_id=root_trace_id,
                 end_time_ns=last_time,
-                outputs={
-                    "paired_spans": len(paired),
-                    "instant_spans": len(instants),
-                    "total_otel_spans": len(all_spans),
-                    "agents": list(agent_spans.keys()),
-                    "tasks": len(task_spans),
-                },
+                outputs=(
+                    {"response": root_response} if root_response else trace_summary
+                ),
+                attributes=trace_summary,
             )
 
             # CRITICAL: flush the async trace-logging queue NOW.
