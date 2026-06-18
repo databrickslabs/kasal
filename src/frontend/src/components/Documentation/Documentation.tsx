@@ -40,6 +40,13 @@ const docSections: DocSection[] = [
     ],
   },
   {
+    label: 'Observability / Tracing',
+    items: [
+      { label: '📊 MLflow Tracing — Setup & Requirements', file: 'mlflow-tracing-setup' },
+      { label: 'Lakebase Setup (Persistence)', file: 'lakebase-deployment' },
+    ],
+  },
+  {
     label: 'Security',
     items: [
       { label: 'Security Compliance', file: 'README_SECURITY_COMPLIANCE' },
