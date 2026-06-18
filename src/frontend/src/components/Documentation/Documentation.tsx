@@ -163,7 +163,17 @@ const Documentation: React.FC = () => {
       const response = await fetch(`/docs/${filename}.md`);
       if (response.ok) {
         const content = await response.text();
-        setDocContent(content);
+        // A dev/SPA server answers an unknown /docs/*.md path with the app's
+        // index.html shell (HTTP 200), not a 404 — so a missing doc would
+        // otherwise render that raw HTML as if it were the document. Treat an
+        // HTML shell as "not found" instead.
+        const isHtmlShell =
+          /^\s*<!doctype html>/i.test(content) || /<div id="root">/i.test(content);
+        if (isHtmlShell) {
+          setDocContent(`# Document Not Found\n\nThe document "${filename}.md" could not be loaded.`);
+        } else {
+          setDocContent(content);
+        }
       } else {
         setDocContent(`# Document Not Found\n\nThe document "${filename}.md" could not be loaded.`);
       }
