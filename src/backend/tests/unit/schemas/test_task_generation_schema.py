@@ -780,7 +780,9 @@ class TestLLMGuardrailConfig:
             description="Validate output format and accuracy"
         )
         assert config.description == "Validate output format and accuracy"
-        assert config.llm_model == "databricks-claude-sonnet-4-5"  # Default
+        # llm_model now defaults to None — the guardrail uses the run's model
+        # (the chat-input selection), resolved server-side at execution.
+        assert config.llm_model is None
 
     def test_llm_guardrail_config_with_custom_model(self):
         """Test LLMGuardrailConfig with custom LLM model."""
@@ -817,7 +819,7 @@ class TestTaskGenerationResponseWithGuardrail:
         )
         assert response.llm_guardrail is not None
         assert response.llm_guardrail.description == "Ensure output meets quality standards"
-        assert response.llm_guardrail.llm_model == "databricks-claude-sonnet-4-5"
+        assert response.llm_guardrail.llm_model is None
 
     def test_task_generation_response_without_guardrail(self):
         """Test TaskGenerationResponse without llm_guardrail (default None)."""

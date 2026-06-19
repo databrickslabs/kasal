@@ -20,8 +20,9 @@ class LLMGuardrailConfig(BaseModel):
     """
     description: str = Field(..., description="Validation criteria description")
     llm_model: Optional[str] = Field(
-        default="databricks-claude-sonnet-4-5",
-        description="LLM model to use for validation"
+        default=None,
+        description="Deprecated/ignored — the guardrail validates with the model "
+                    "the run uses (the chat-input selection), resolved at execution.",
     )
 
 

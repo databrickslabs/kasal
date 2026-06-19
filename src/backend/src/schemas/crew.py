@@ -24,7 +24,7 @@ class Style(BaseModel):
 class LLMGuardrailConfig(BaseModel):
     """Configuration for LLM-based output validation guardrail."""
     description: str = Field(..., description="Validation criteria for the task output")
-    llm_model: Optional[str] = Field("databricks-claude-sonnet-4-5", description="LLM model to use for validation")
+    llm_model: Optional[str] = Field(None, description="Deprecated/ignored — guardrail uses the run's model (the chat-input selection)")
 
 
 class TaskConfig(BaseModel):

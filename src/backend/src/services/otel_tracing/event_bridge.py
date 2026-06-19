@@ -202,6 +202,18 @@ class OTelEventBridge:
         # correlation between two events on the same thread, not a
         # time-based fallback cache.
         self._pending_save_content: Optional[str] = None
+        # An LLM guardrail validates a task's output by making its OWN LLM
+        # call(s) through CrewAI's internal "Guardrail Agent", which carries no
+        # task. Those child spans would otherwise land in a separate
+        # "Guardrail Agent / Unassigned" lane instead of under the task being
+        # validated. We track the guardrail window (between its started and
+        # completed/failed events) and the task that owns it, then re-attribute
+        # the guardrail's task-less child spans to that task. The guardrail
+        # LIFECYCLE events already carry the task; only its inner LLM calls don't.
+        self._guardrail_active: bool = False
+        self._guardrail_owner_agent: Optional[str] = None
+        self._guardrail_owner_task: Optional[str] = None
+        self._guardrail_owner_task_id: Optional[str] = None
 
     def register(self, event_bus: Any) -> int:
         """Register span-creating handlers for all available CrewAI event types.
@@ -324,6 +336,35 @@ class OTelEventBridge:
             tool_name = _get_tool_name(event)
             output = _get_output(event)
             event_task_id = getattr(event, "task_id", None)
+
+            # ── Guardrail window ──────────────────────────────────────────
+            # Keep the guardrail's own LLM calls under the task they validate.
+            # On guardrail_started, remember the task that owns the guardrail
+            # (the currently-running task). While the guardrail is active, its
+            # internal LLM-call spans arrive with agent="Guardrail Agent" and no
+            # task — re-attribute those to the owner task so they nest under it
+            # instead of a separate "Guardrail Agent / Unassigned" lane. Done
+            # BEFORE the _current_* updates below so "Guardrail Agent" never
+            # pollutes the running-agent tracker.
+            if event_type == "guardrail_started":
+                self._guardrail_active = True
+                self._guardrail_owner_agent = self._current_agent_name
+                self._guardrail_owner_task = self._current_task_name
+                self._guardrail_owner_task_id = self._current_task_id
+            elif event_type == "llm_guardrail":  # guardrail completed / failed
+                self._guardrail_active = False
+            guardrail_child = (
+                self._guardrail_active
+                and event_type not in ("guardrail_started", "llm_guardrail")
+                and not event_task_id
+            )
+            if guardrail_child:
+                if self._guardrail_owner_agent:
+                    agent_name = self._guardrail_owner_agent
+                if self._guardrail_owner_task:
+                    task_name = self._guardrail_owner_task
+                if self._guardrail_owner_task_id:
+                    event_task_id = self._guardrail_owner_task_id
 
             # Track the most-recent agent / task / task_id from events that carry
             # them, then use them to attribute memory events that don't. CrewAI's
@@ -453,8 +494,12 @@ class OTelEventBridge:
                 # Stamp the resolved task_id so the frontend groups this span
                 # under the running task instead of "Unassigned" (getTaskId reads
                 # task_id from the span's metadata before falling back to parent).
-                if event_type.startswith("memory_") and event_task_id:
+                if (event_type.startswith("memory_") or guardrail_child) and event_task_id:
                     span.set_attribute("kasal.extra.task_id", str(event_task_id))
+                # Mark a re-attributed guardrail LLM call so it's still
+                # identifiable as guardrail validation within the task.
+                if guardrail_child:
+                    span.set_attribute("kasal.extra.guardrail_validation", True)
                 if tool_name:
                     span.set_attribute("kasal.tool_name", tool_name)
                 if output:

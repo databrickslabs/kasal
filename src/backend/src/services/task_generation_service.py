@@ -72,6 +72,67 @@ class TaskGenerationService:
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
 
+    async def suggest_guardrail(
+        self,
+        description: str,
+        expected_output: Optional[str] = None,
+        model: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ) -> str:
+        """Generate a concise LLM-guardrail validation criteria for a task.
+
+        Reads the task's description and expected output and returns a single
+        sentence describing what makes the task's output valid and complete —
+        the text that goes in ``llm_guardrail.description``.
+        """
+        model = model or os.getenv("TASK_MODEL", DEFAULT_TASK_MODEL)
+        system = (
+            "You write validation criteria for an AI task-output guardrail. "
+            "Given a task's description and expected output, respond with ONE "
+            "concise sentence (no preamble, no quotes, no markdown) stating what "
+            "makes the output valid and complete — concrete, checkable conditions "
+            "a reviewer LLM can verify, aligned with the expected output. "
+            "Start with 'Must '."
+        )
+        user = f"TASK DESCRIPTION:\n{description}\n\nEXPECTED OUTPUT:\n{expected_output or '(not specified)'}"
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        try:
+            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            content = await LLMManager.completion(
+                messages=messages,
+                model=model,
+                temperature=0.2,
+                max_tokens=200,
+                extra_headers=get_user_agent_header(KasalProduct.TASK_GENERATION),
+            )
+            criteria = (content or "").strip().strip('"').strip()
+            if not criteria:
+                raise ValueError("Empty guardrail suggestion received from LLM")
+            await self._log_llm_interaction(
+                endpoint='suggest-guardrail',
+                prompt=f"System: {system}\nUser: {user}",
+                response=criteria,
+                model=model,
+                group_context=group_context,
+            )
+            return criteria
+        except Exception as e:
+            error_msg = f"Error suggesting guardrail: {str(e)}"
+            logger.error(error_msg)
+            await self._log_llm_interaction(
+                endpoint='suggest-guardrail',
+                prompt=f"System: {system}\nUser: {user}",
+                response="",
+                model=model,
+                status='error',
+                error_message=str(e),
+                group_context=group_context,
+            )
+            raise
+
     async def _get_relevant_documentation(self, user_prompt: str, agent_context: Optional[str] = None, limit: int = 5) -> str:
         """
         Retrieve relevant documentation embeddings based on the task generation request.

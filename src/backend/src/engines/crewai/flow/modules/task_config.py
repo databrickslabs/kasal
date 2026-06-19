@@ -130,6 +130,13 @@ class TaskConfig:
                     from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
                     from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
 
+                    # LLM-backed factory guardrails judge output with an LLM, so
+                    # stamp the run's model (the agent's, top-down) into their
+                    # config — same model as the run, not the hardcoded default.
+                    if isinstance(guardrail_config, dict) and guardrail_config.get('type') in {'self_reflection', 'prompt_injection_check'}:
+                        from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
+                        guardrail_config = {**guardrail_config, 'llm_model': resolve_guardrail_model(guardrail_config.get('llm_model'), agent)}
+
                     # Convert guardrail config to JSON string if it's a dictionary
                     if isinstance(guardrail_config, dict):
                         guardrail_config = json.dumps(guardrail_config)
@@ -169,13 +176,18 @@ class TaskConfig:
                     from src.core.llm_manager import LLMManager
                     from src.utils.user_context import UserContext
 
-                    # Extract configuration
+                    # Extract description and any user-picked model. The guardrail
+                    # uses the model the user EXPLICITLY chose, if any; otherwise
+                    # it defaults to the model this task's agent runs with (the
+                    # chat-input selection, top-down).
                     if isinstance(llm_guardrail_config, dict):
                         guardrail_description = llm_guardrail_config.get('description', 'Validate the task output')
-                        llm_model = llm_guardrail_config.get('llm_model', 'databricks-claude-sonnet-4-5')
+                        explicit_model = llm_guardrail_config.get('llm_model')
                     else:
                         guardrail_description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
-                        llm_model = getattr(llm_guardrail_config, 'llm_model', 'databricks-claude-sonnet-4-5')
+                        explicit_model = getattr(llm_guardrail_config, 'llm_model', None)
+                    from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
+                    llm_model = resolve_guardrail_model(explicit_model, agent)
 
                     # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
                     if guardrail_description and guardrail_description != 'Validate the task output':
@@ -186,10 +198,6 @@ class TaskConfig:
                         )
                         task.description = task.description + validation_augmentation
                         logger.info(f"Augmented task {task_data.name} description with guardrail criteria")
-
-                    # Strip provider prefix — LLMManager adds it from DB config
-                    if llm_model and llm_model.startswith('databricks/'):
-                        llm_model = llm_model[len('databricks/'):]
 
                     # Create guardrail LLM via LLMManager (gets AI Gateway routing + API keys)
                     gc = UserContext.get_group_context()

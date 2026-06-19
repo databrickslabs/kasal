@@ -4,6 +4,7 @@ import {
   Button,
   Box,
   FormControl,
+  FormHelperText,
   InputLabel,
   Select,
   Typography,
@@ -38,7 +39,9 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
 import { TaskService } from '../../api/TaskService';
+import { GenerateService } from '../../api/GenerateService';
 import { DatabricksService } from '../../api/DatabricksService';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelector';
@@ -394,10 +397,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   // Handle LLM guardrail toggle
   const handleLlmGuardrailToggle = (enabled: boolean) => {
     if (enabled) {
-      // Use the LLM-suggested guardrail if available, otherwise use default
+      // Use the LLM-suggested guardrail if available, otherwise use a default.
+      // No llm_model is set by default — the guardrail validates with the model
+      // selected for the run (the chat-input model). Users can still pick a
+      // specific model from the dropdown to override.
       const guardrailConfig: LLMGuardrailConfig = suggestedGuardrail || {
         description: 'Validate the task output for accuracy and completeness',
-        llm_model: 'databricks-claude-sonnet-4-5'
       };
       setFormData(prev => ({
         ...prev,
@@ -417,15 +422,41 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
     }
   };
 
+  // On-demand guardrail suggestion (the "Suggest" button) — generates the
+  // validation-criteria text from the task's current description + expected
+  // output. Never runs automatically; only when the user clicks.
+  const [isSuggestingGuardrail, setIsSuggestingGuardrail] = useState(false);
+  // The model chosen in the chat input (run config). The suggestion uses the
+  // guardrail's explicitly-picked model if set, else this chat-input model —
+  // a Databricks model the user already has working auth for. Never the
+  // hardcoded codex default.
+  const chatInputModel = useCrewExecutionStore((s) => s.selectedModel);
+  const handleSuggestGuardrail = async () => {
+    setIsSuggestingGuardrail(true);
+    try {
+      const suggestion = await GenerateService.suggestGuardrail(
+        formData.description,
+        formData.expected_output,
+        formData.config?.llm_guardrail?.llm_model || chatInputModel,
+      );
+      if (suggestion) {
+        handleLlmGuardrailChange('description', suggestion);
+      }
+    } finally {
+      setIsSuggestingGuardrail(false);
+    }
+  };
+
   // Handle LLM guardrail field changes
   const handleLlmGuardrailChange = (field: keyof LLMGuardrailConfig, value: string) => {
     const currentConfig = formData.config?.llm_guardrail || suggestedGuardrail || {
       description: 'Validate the task output for accuracy and completeness',
-      llm_model: 'databricks-claude-sonnet-4-5'
     };
     const updatedConfig = {
       ...currentConfig,
-      [field]: value
+      // An empty model selection means "use the run's model" — store it as
+      // undefined so the backend inherits the chat-input model.
+      [field]: field === 'llm_model' && !value ? undefined : value,
     };
     setFormData(prev => ({
       ...prev,
@@ -1283,6 +1314,17 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
 
               {formData.config?.llm_guardrail && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={handleSuggestGuardrail}
+                      disabled={isSuggestingGuardrail || (!formData.description && !formData.expected_output)}
+                      startIcon={isSuggestingGuardrail ? <CircularProgress size={16} /> : undefined}
+                    >
+                      {isSuggestingGuardrail ? 'Suggesting…' : 'Suggest criteria from task'}
+                    </Button>
+                  </Box>
                   <TextField
                     label="Validation Criteria"
                     value={formData.config.llm_guardrail.description || ''}
@@ -1291,24 +1333,46 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                     multiline
                     rows={2}
                     placeholder="Describe how the LLM should validate the task output..."
-                    helperText="Describe the criteria the LLM will use to validate the task output"
+                    helperText="Describe the criteria the LLM will use to validate the task output, or click Suggest to generate it from the task description and expected output"
                   />
                   <FormControl fullWidth>
                     <InputLabel>Validation LLM Model</InputLabel>
                     <Select
-                      value={formData.config.llm_guardrail.llm_model || 'databricks-claude-sonnet-4-5'}
+                      value={formData.config.llm_guardrail.llm_model || ''}
                       onChange={(e) => handleLlmGuardrailChange('llm_model', e.target.value)}
                       label="Validation LLM Model"
                       disabled={llmModelsLoading}
                       startAdornment={llmModelsLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
                     >
+                      <MenuItem value="">
+                        <em>Use the model selected for the run (default)</em>
+                      </MenuItem>
                       {llmModels.map((model) => (
                         <MenuItem key={model.name} value={model.name}>
                           {model.name}
                         </MenuItem>
                       ))}
                     </Select>
+                    <FormHelperText>
+                      Defaults to the model selected for the run (the chat input model).
+                      Pick a specific model to override.
+                    </FormHelperText>
                   </FormControl>
+                  <TextField
+                    label="Max retries on validation failure"
+                    type="number"
+                    value={formData.config?.max_retries ?? 3}
+                    onChange={(e) => {
+                      const parsed = Math.max(0, Math.min(10, parseInt(e.target.value, 10) || 0));
+                      setFormData(prev => ({
+                        ...prev,
+                        config: { ...prev.config, max_retries: parsed },
+                      }));
+                    }}
+                    fullWidth
+                    inputProps={{ min: 0, max: 10 }}
+                    helperText="How many times the task is retried if the guardrail rejects the output (default 3)"
+                  />
                 </Box>
               )}
             </Box>

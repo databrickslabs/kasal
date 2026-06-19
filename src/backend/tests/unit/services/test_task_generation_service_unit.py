@@ -120,6 +120,49 @@ class TestInit:
 
 
 # ---------------------------------------------------------------------------
+# Tests for suggest_guardrail (on-demand guardrail criteria generation)
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestGuardrail:
+    @pytest.mark.asyncio
+    async def test_returns_trimmed_criteria_using_passed_model(self):
+        svc = TaskGenerationService(MagicMock())
+        svc._log_llm_interaction = AsyncMock()
+        with patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockLLM.completion = AsyncMock(return_value='  "Must include at least 4 KPI tiles."  ')
+            result = await svc.suggest_guardrail(
+                "Build a dashboard", "A dashboard with KPIs", model="databricks-claude-sonnet-4-5",
+            )
+        # Surrounding whitespace/quotes stripped.
+        assert result == "Must include at least 4 KPI tiles."
+        # Uses the model passed (the chat-input selection), not a hardcoded one.
+        assert MockLLM.completion.call_args.kwargs["model"] == "databricks-claude-sonnet-4-5"
+        svc._log_llm_interaction.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_a_default_model_when_none_passed(self):
+        svc = TaskGenerationService(MagicMock())
+        svc._log_llm_interaction = AsyncMock()
+        with patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockLLM.completion = AsyncMock(return_value="Must be valid.")
+            await svc.suggest_guardrail("desc", None, model=None)
+        # A non-empty fallback model is always used (never empty/None).
+        assert MockLLM.completion.call_args.kwargs["model"]
+
+    @pytest.mark.asyncio
+    async def test_empty_llm_response_raises(self):
+        svc = TaskGenerationService(MagicMock())
+        svc._log_llm_interaction = AsyncMock()
+        with patch("src.services.task_generation_service.LLMManager") as MockLLM:
+            MockLLM.completion = AsyncMock(return_value="   ")
+            with pytest.raises(ValueError):
+                await svc.suggest_guardrail("desc", "out", model="m")
+        # The error path is logged (status='error').
+        assert svc._log_llm_interaction.await_args.kwargs.get("status") == "error"
+
+
+# ---------------------------------------------------------------------------
 # Tests for _log_llm_interaction
 # ---------------------------------------------------------------------------
 
