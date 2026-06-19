@@ -783,6 +783,68 @@ class TestConfigureMlflowFullSPNPath:
         assert result.tracing_ready is True
 
     @pytest.mark.asyncio
+    async def test_async_logging_disabled_in_subprocess(self, monkeypatch):
+        """Async logging MUST be disabled (enable_async_logging(False)).
+
+        The crew/flow subprocess tears down immediately after the crew
+        completes. With async logging ON, span-data artifacts upload on a
+        background worker that the subprocess kills before it finishes,
+        leaving traces whose spans 404. So configure_mlflow_in_subprocess
+        must call mlflow.config.enable_async_logging(False) — NOT enable it.
+        """
+        for k, v in _make_full_spn_env().items():
+            monkeypatch.setenv(k, v)
+
+        import sys
+        mock_mlflow = MagicMock()
+        mock_exp = MagicMock()
+        mock_exp.experiment_id = "exp-async"
+        mock_mlflow.set_experiment.return_value = mock_exp
+        mock_mlflow.tracing = MagicMock()
+        mock_mlflow.tracing.enable = MagicMock()
+        mock_mlflow.config = MagicMock()
+        mock_mlflow.config.enable_async_logging = MagicMock()
+        mock_mlflow.get_tracking_uri.return_value = "databricks"
+
+        # SPN auth returns a Bearer token so the full config path runs.
+        mock_wc_instance = MagicMock()
+        mock_wc_instance.config.authenticate.return_value = {
+            "Authorization": "Bearer async-spn-token"
+        }
+        mock_databricks_sdk = MagicMock()
+        mock_databricks_sdk.WorkspaceClient = MagicMock(return_value=mock_wc_instance)
+
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.get_databricks_config = AsyncMock(return_value=None)
+
+        with patch.dict(sys.modules, {
+            "mlflow": mock_mlflow,
+            "databricks.sdk": mock_databricks_sdk,
+        }):
+            with (
+                patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
+                patch("src.services.databricks_service.DatabricksService",
+                      MagicMock(return_value=mock_service_instance)),
+            ):
+                result = await configure_mlflow_in_subprocess(
+                    db_config=_make_db_config(True),
+                    job_id="job-async",
+                    execution_id="exec-async",
+                    group_id="grp-1",
+                )
+
+        # Regression assertion: async logging is explicitly DISABLED.
+        mock_mlflow.config.enable_async_logging.assert_called_once_with(False)
+        # And never enabled (no zero-arg / True call).
+        assert call() not in mock_mlflow.config.enable_async_logging.call_args_list
+        assert call(True) not in mock_mlflow.config.enable_async_logging.call_args_list
+        assert result.enabled is True
+
+    @pytest.mark.asyncio
     async def test_configure_with_spn_bearer_extraction(self, monkeypatch):
         """Configure function extracts Bearer token from SPN auth headers."""
         for k, v in _make_full_spn_env().items():
