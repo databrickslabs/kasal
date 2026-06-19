@@ -803,6 +803,51 @@ class TestGetAuthContext:
             self._restore(s)
 
     @pytest.mark.asyncio
+    async def test_pat_found_under_non_primary_group(self):
+        """A user in multiple groups whose PAT is configured under a NON-primary
+        group still authenticates: get_auth_context searches ALL group_ids, not
+        just primary_group_id. (Regression: PAT under 'user_dev_localhost' was
+        missed because primary was 'bi-specialist'.)"""
+        from src.utils.databricks_auth import invalidate_pat_cache
+        invalidate_pat_cache()  # avoid stale cache bleeding from other tests
+        s = self._save()
+        _databricks_auth._workspace_host = "https://h.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+
+        # The PAT only exists under the THIRD (non-primary) group.
+        def make_service(session, group_id=None):
+            svc = MagicMock()
+            if group_id == "g3":
+                key = MagicMock()
+                key.encrypted_value = "enc"
+                svc.find_by_name = AsyncMock(return_value=key)
+            else:
+                svc.find_by_name = AsyncMock(return_value=None)
+            return svc
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_group_ctx = MagicMock()
+        mock_group_ctx.group_ids = ["g1", "g2", "g3"]
+        mock_group_ctx.primary_group_id = "g1"
+        try:
+            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
+                 patch("src.services.api_keys_service.ApiKeysService", side_effect=make_service), \
+                 patch("src.db.session.async_session_factory", return_value=mock_session), \
+                 patch("src.utils.user_context.UserContext") as mock_uc, \
+                 patch("src.utils.encryption_utils.EncryptionUtils") as enc:
+                mock_uc.get_group_context.return_value = mock_group_ctx
+                enc.decrypt_value.return_value = "pat_from_g3"
+                result = await get_auth_context()  # no group_id param → searches all groups
+            assert result is not None, "PAT under a non-primary group should still resolve"
+            assert result.auth_method == "pat" and result.token == "pat_from_g3"
+        finally:
+            invalidate_pat_cache()
+            self._restore(s)
+
+    @pytest.mark.asyncio
     async def test_pat_user_context_exception(self):
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
