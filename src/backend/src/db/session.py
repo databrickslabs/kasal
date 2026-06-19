@@ -479,6 +479,22 @@ async def request_scoped_session():
             yield session
 
 
+def detach_request_session() -> None:
+    """Clear the request-scoped session for the CURRENT context.
+
+    A task spawned with ``asyncio.create_task`` during an HTTP request inherits
+    a COPY of that request's context — including ``_request_session`` pointing at
+    the request-scoped DB session, which FastAPI closes the instant the response
+    returns. Such a background task must call this FIRST so that any later
+    ``request_scoped_session()`` (e.g. the model-config read inside
+    ``LLMManager.configure_crewai_llm``) opens a fresh standalone session instead
+    of operating on the closed one (``sqlite3.ProgrammingError: Cannot operate on
+    a closed database``). Setting the var here only affects this task's copied
+    context, never the originating request.
+    """
+    _request_session.set(None)
+
+
 # Create separate session factories for pooled and nullpool engines
 pooled_session_factory = None
 nullpool_session_factory = None

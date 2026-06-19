@@ -1590,6 +1590,47 @@ class TestProgressiveGeneration:
     # ------------------------------------------------------------------
 
     @pytest.mark.asyncio
+    async def test_create_crew_progressive_detaches_request_session(self):
+        """Regression: the background task (asyncio.create_task) inherits a COPY
+        of the dispatch request's context, including the request-scoped session
+        that FastAPI closes once the response returns. create_crew_progressive
+        must detach it before planning so the model-config read inside
+        configure_crewai_llm runs on a fresh session, not the closed one
+        ('Cannot operate on a closed database')."""
+        from src.db.session import _request_session
+
+        request = Mock()
+        request.prompt = "gather swiss ai data"
+        request.original_prompt = "gather swiss ai data"
+        request.model = None
+        request.tools = []
+
+        captured = {}
+
+        async def capture_then_stop(*args, **kwargs):
+            captured["session_during_planning"] = _request_session.get(None)
+            raise RuntimeError("stop after capturing the detached state")
+
+        # Simulate the leaked, already-closed request session in the context.
+        token = _request_session.set(AsyncMock())
+        try:
+            with (
+                patch.object(
+                    self.service, "_generate_crew_plan", side_effect=capture_then_stop
+                ),
+                patch("src.services.crew_generation_service.sse_manager") as sse,
+            ):
+                sse.broadcast_to_job = AsyncMock()
+                await self.service.create_crew_progressive(
+                    request, None, "gen-detach-test"
+                )
+
+            # By the time planning runs, the inherited session has been detached.
+            assert captured["session_during_planning"] is None
+        finally:
+            _request_session.reset(token)
+
+    @pytest.mark.asyncio
     async def test_generate_crew_plan_success(self):
         """_generate_crew_plan returns dict with agents/tasks/process_type/complexity."""
         request = Mock()
