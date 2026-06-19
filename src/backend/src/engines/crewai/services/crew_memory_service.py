@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -24,6 +25,11 @@ from src.engines.crewai.memory.memory_backend_factory import (
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
 logger = LoggerManager.get_instance().crew
+
+
+def _sanitize_dir_component(value: str) -> str:
+    """Make a string safe to embed in a filesystem directory name."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value))
 
 
 class CrewMemoryService:
@@ -232,7 +238,7 @@ class CrewMemoryService:
         elif backend_type == "lakebase":
             storage_dirname = f"kasal_lakebase_{crew_id}"
         else:
-            storage_dirname = f"kasal_default_{crew_id}"
+            storage_dirname = self._default_storage_dirname(crew_id)
 
         os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
 
@@ -270,6 +276,37 @@ class CrewMemoryService:
                 "Creating NEW storage directory - this is the FIRST run with this configuration"
             )
         logger.info("=" * 80)
+
+    def _default_storage_dirname(self, crew_id: str) -> str:
+        """Storage directory for LOCAL (DEFAULT) memory, scoped like Lakebase.
+
+        Local memory persists in a per-directory LanceDB store, and the
+        directory name is the ONLY read-scope key. Keying it by ``crew_id``
+        walls every run off from prior memory, because ``crew_id`` is a hash of
+        the crew STRUCTURE (agents/tasks/model) and changes on nearly every
+        chat prompt — so the first read of each new prompt opens an empty store.
+
+        Mirror the Lakebase read-scope model instead (see
+        ``LakebaseStorageBackend._tenant_where``): scope by ``group_id``
+        (workspace-wide recall, the default) or ``group_id`` + ``session_id``
+        (recall confined to this chat session). ``crew_id`` is intentionally
+        NOT part of the name, so memory persists across runs in the workspace.
+        """
+        group_id = self.config.get("group_id") or "default"
+        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
+        if workspace_wide:
+            scope_key = group_id
+        else:
+            # Stable chat-session id partitions session-only recall; fall back
+            # to the per-run id (and finally crew_id) when no session exists.
+            session_scope_id = (
+                self.config.get("session_id")
+                or self.config.get("execution_id")
+                or self.config.get("job_id")
+                or crew_id
+            )
+            scope_key = f"{group_id}_session_{session_scope_id}"
+        return f"kasal_default_{_sanitize_dir_component(scope_key)}"
 
     async def create_unified_storage(
         self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any

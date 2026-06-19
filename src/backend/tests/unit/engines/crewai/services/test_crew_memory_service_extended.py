@@ -246,8 +246,9 @@ class TestSetupStorageDirectory:
 
         assert os.environ.get("CREWAI_STORAGE_DIR") == "kasal_lakebase_my_crew_id"
 
-    def test_sets_default_storage_dir(self):
-        service = CrewMemoryService({})
+    def _setup_default(self, config, crew_id="my_crew_id"):
+        """Run setup_storage_directory for the default backend and return the dir."""
+        service = CrewMemoryService(config)
         mock_path = MagicMock()
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
@@ -257,9 +258,49 @@ class TestSetupStorageDirectory:
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
             }):
-                service.setup_storage_directory("my_crew_id", {"backend_type": "default"})
+                service.setup_storage_directory(crew_id, {"backend_type": "default"})
+        return os.environ.get("CREWAI_STORAGE_DIR")
 
-        assert os.environ.get("CREWAI_STORAGE_DIR") == "kasal_default_my_crew_id"
+    def test_sets_default_storage_dir(self):
+        # Empty config → group_id defaults to "default", workspace-wide default.
+        assert self._setup_default({}) == "kasal_default_default"
+
+    def test_default_dir_scoped_by_group_id_not_crew_id(self):
+        """LOCAL memory keys on group_id (like Lakebase), NOT the volatile crew_id."""
+        result = self._setup_default(
+            {"group_id": "user_dev_localhost"}, crew_id="user_dev_localhost_crew_abc123"
+        )
+        assert result == "kasal_default_user_dev_localhost"
+        assert "crew_abc123" not in result
+
+    def test_default_dir_stable_across_crew_ids(self):
+        """Two different crew_ids in the same group resolve to the SAME store.
+
+        This is the regression guard for the bug where every chat prompt got a
+        new crew_id → a fresh, empty local memory directory.
+        """
+        first = self._setup_default({"group_id": "grp"}, crew_id="grp_crew_aaaaaaaa")
+        os.environ.pop("CREWAI_STORAGE_DIR", None)
+        second = self._setup_default({"group_id": "grp"}, crew_id="grp_crew_bbbbbbbb")
+        assert first == second == "kasal_default_grp"
+
+    def test_default_dir_session_only_scope(self):
+        """Session-only recall (toggle off) keys on group_id + session_id."""
+        result = self._setup_default(
+            {
+                "group_id": "grp",
+                "session_id": "chat-sess-1",
+                "memory_workspace_scope": False,
+            },
+            crew_id="grp_crew_abc123",
+        )
+        assert result == "kasal_default_grp_session_chat-sess-1"
+        assert "crew_abc123" not in result
+
+    def test_default_dir_sanitizes_unsafe_chars(self):
+        """Path-unsafe characters in scope keys are neutralized."""
+        result = self._setup_default({"group_id": "a/b c"})
+        assert result == "kasal_default_a_b_c"
 
     def test_saves_original_storage_dir(self):
         os.environ["CREWAI_STORAGE_DIR"] = "original_value"
