@@ -308,3 +308,27 @@ class TestAppConfiguration:
         """Importing main should not raise any exceptions."""
         import src.main
         assert src.main.app is not None
+
+
+class TestMiddlewareOrder:
+    """Regression: middleware registration order for local-dev auth."""
+
+    def test_localdevauth_runs_before_usercontext(self):
+        """LocalDevAuthMiddleware must run BEFORE UserContextMiddleware.
+
+        LocalDevAuth injects the x-forwarded-email header for local dev;
+        UserContextMiddleware reads it to set the request's group/user context.
+        If UserContext ran first, local-dev requests would have no group context
+        and group-scoped auth (the API-Keys PAT lookup) would silently fail
+        (Lakebase / LLM calls couldn't authenticate). Starlette runs
+        user_middleware[0] OUTERMOST (first), so LocalDevAuth must have a LOWER
+        index than UserContext.
+        """
+        from src.main import app
+
+        names = [getattr(m.cls, "__name__", "") for m in app.user_middleware]
+        assert "LocalDevAuthMiddleware" in names, names
+        assert "UserContextMiddleware" in names, names
+        assert names.index("LocalDevAuthMiddleware") < names.index("UserContextMiddleware"), (
+            f"LocalDevAuthMiddleware must run before UserContextMiddleware; order={names}"
+        )

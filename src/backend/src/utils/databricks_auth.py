@@ -1125,52 +1125,60 @@ async def get_auth_context(
                 from src.db.session import async_session_factory
                 from src.utils.user_context import UserContext
 
-                # Get group_id for multi-tenant isolation
-                # Priority: 1. Passed group_id parameter (for background threads)
-                #           2. UserContext (for request context)
-                effective_group_id = group_id  # Use passed group_id if available
-                if not effective_group_id:
+                # Build the candidate group_ids to look the PAT up under.
+                # Priority: 1. an explicit group_id parameter (background threads);
+                #           2. ALL of the request's groups (UserContext), primary
+                #              first. A user can belong to several groups and have
+                #              their PAT configured under ANY of them, so checking
+                #              only primary_group_id silently misses it (the bug
+                #              behind "No PAT found with group_id=<primary>").
+                candidate_group_ids: list = []
+                if group_id:
+                    candidate_group_ids = [group_id]
+                else:
                     try:
                         group_context = UserContext.get_group_context()
-                        logger.debug(f"[AUTH PAT] Retrieved group_context: {group_context}")
-                        if group_context and hasattr(group_context, 'primary_group_id'):
-                            effective_group_id = group_context.primary_group_id
-                            logger.debug(f"[AUTH PAT] ✓ Using group_id from UserContext: {effective_group_id}")
-                        else:
-                            logger.debug(f"[AUTH PAT] No group_context or primary_group_id. group_context={group_context}")
+                        if group_context is not None:
+                            gids = getattr(group_context, 'group_ids', None)
+                            gids = list(gids) if isinstance(gids, (list, tuple)) else []
+                            primary = getattr(group_context, 'primary_group_id', None)
+                            # Try the primary group first, then the rest.
+                            if primary:
+                                gids = [primary] + [g for g in gids if g != primary]
+                            candidate_group_ids = gids
+                            logger.debug(f"[AUTH PAT] Candidate group_ids for PAT lookup: {candidate_group_ids}")
                     except Exception as e:
-                        logger.debug(f"[AUTH PAT] Could not get group_id from UserContext: {e}")
-                else:
-                    logger.debug(f"[AUTH PAT] ✓ Using passed group_id parameter: {effective_group_id}")
+                        logger.debug(f"[AUTH PAT] Could not get group_ids from UserContext: {e}")
 
-                if effective_group_id:
-                    cached_pat = _pat_cache_get(effective_group_id)
-                    if cached_pat is not None:
-                        pat_token = cached_pat[0]
-                        logger.debug(f"[AUTH PAT] ✓ PAT cache hit for group_id={effective_group_id}")
-                    else:
-                        logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={effective_group_id}")
-                        async with async_session_factory() as session:
-                            api_service = ApiKeysService(session, group_id=effective_group_id)
-
-                            for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
-                                try:
-                                    logger.debug(f"[AUTH PAT] Looking for key: {key_name}")
-                                    api_key = await api_service.find_by_name(key_name)
-                                    logger.debug(f"[AUTH PAT] Key {key_name} found: {api_key is not None}")
-                                    if api_key and api_key.encrypted_value:
-                                        from src.utils.encryption_utils import EncryptionUtils
-                                        pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                        logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={effective_group_id}")
-                                        break
-                                except Exception as e:
-                                    logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
-
-                        _pat_cache_put(effective_group_id, pat_token)
-                        if not pat_token:
-                            logger.debug(f"[AUTH] Priority 2: No PAT found in database with group_id={effective_group_id}")
-                else:
+                if not candidate_group_ids:
                     logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
+
+                for gid in candidate_group_ids:
+                    cached_pat = _pat_cache_get(gid)
+                    if cached_pat is not None:
+                        if cached_pat[0]:
+                            pat_token = cached_pat[0]
+                            logger.debug(f"[AUTH PAT] ✓ PAT cache hit for group_id={gid}")
+                            break
+                        # Cached negative result for this group — try the next one.
+                        continue
+                    logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={gid}")
+                    async with async_session_factory() as session:
+                        api_service = ApiKeysService(session, group_id=gid)
+                        for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
+                            try:
+                                api_key = await api_service.find_by_name(key_name)
+                                if api_key and api_key.encrypted_value:
+                                    from src.utils.encryption_utils import EncryptionUtils
+                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                                    logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={gid}")
+                                    break
+                            except Exception as e:
+                                logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
+                    _pat_cache_put(gid, pat_token)
+                    if pat_token:
+                        break
+                    logger.debug(f"[AUTH PAT] No PAT found in database with group_id={gid}")
 
             except Exception as e:
                 logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")

@@ -519,12 +519,22 @@ class LocalDevAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-app.add_middleware(LocalDevAuthMiddleware)
-
-# Add user context middleware to extract user tokens from Databricks Apps headers
+# Middleware run order is OUTERMOST-first, and add_middleware registers the
+# LAST-added as the OUTERMOST (it runs first). UserContextMiddleware reads the
+# X-Forwarded-Email / X-Forwarded-Access-Token headers to set the request's
+# group + user context; LocalDevAuthMiddleware injects those headers for local
+# dev. So UserContextMiddleware must be registered BEFORE LocalDevAuthMiddleware
+# — that makes LocalDevAuth the OUTER middleware (runs first, injects the header)
+# and UserContext the inner one (runs next, reads it). Registering them the other
+# way around left the group context unset on local-dev requests, so group-scoped
+# auth (the API-Keys PAT lookup) silently found nothing and Lakebase / LLM calls
+# couldn't authenticate.
 from src.utils.user_context import UserContextMiddleware  # noqa: E402
 
 app.add_middleware(UserContextMiddleware)
+
+# Add LAST of these two so it is OUTERMOST and runs BEFORE UserContextMiddleware.
+app.add_middleware(LocalDevAuthMiddleware)
 
 # API rate limiting (pure-ASGI, SSE-safe). No-op if the `limits` package is
 # unavailable or RATE_LIMIT_ENABLED is false, so this never breaks a running
