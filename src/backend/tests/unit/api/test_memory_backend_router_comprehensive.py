@@ -570,6 +570,142 @@ class TestSaveLakbaseConfig:
 
 
 # ---------------------------------------------------------------------------
+# save_default_config
+# ---------------------------------------------------------------------------
+
+class TestSaveDefaultConfig:
+    @pytest.mark.asyncio
+    async def test_raises_403_for_non_admin(self):
+        from src.api.memory_backend_router import save_default_config
+        svc = AsyncMock()
+
+        with _patch_admin(False):
+            with pytest.raises(ForbiddenError):
+                await save_default_config(
+                    request={},
+                    group_context=_regular_ctx(),
+                    service=svc,
+                )
+
+    @pytest.mark.asyncio
+    async def test_creates_active_default_config_with_cognitive_tuning(self):
+        """Local save must persist an ACTIVE DEFAULT config carrying the
+        cognitive tuning, so crew execution loads it (the whole fix)."""
+        from src.api.memory_backend_router import save_default_config
+        from src.models.memory_backend import MemoryBackend
+        from src.schemas.memory_backend import MemoryBackendType
+        from uuid import uuid4
+
+        mock_backend = MagicMock(spec=MemoryBackend)
+        mock_backend.id = uuid4()
+
+        svc = AsyncMock()
+        svc.get_memory_backends = AsyncMock(return_value=[])
+        svc.create_memory_backend = AsyncMock(return_value=mock_backend)
+        svc.set_default_backend = AsyncMock()
+
+        cognitive = {
+            "memory_llm_model": "databricks-claude-haiku-4-5",
+            "query_analysis_threshold": 99977,
+            "exploration_budget": 0,
+        }
+        with _patch_admin(True):
+            result = await save_default_config(
+                request={"cognitive_config": cognitive},
+                group_context=_admin_ctx(),
+                service=svc,
+            )
+
+        assert result["success"] is True
+        # The config handed to create_memory_backend is a DEFAULT backend that
+        # carries the cognitive tuning (so get_active_config later loads it).
+        created = svc.create_memory_backend.await_args.args[1]
+        assert created.backend_type == MemoryBackendType.DEFAULT
+        assert created.cognitive_config is not None
+        assert created.cognitive_config.memory_llm_model == "databricks-claude-haiku-4-5"
+        assert created.cognitive_config.query_analysis_threshold == 99977
+        assert created.cognitive_config.exploration_budget == 0
+        svc.set_default_backend.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_creates_config_without_cognitive_tuning(self):
+        from src.api.memory_backend_router import save_default_config
+        from src.models.memory_backend import MemoryBackend
+        from uuid import uuid4
+
+        mock_backend = MagicMock(spec=MemoryBackend)
+        mock_backend.id = uuid4()
+        svc = AsyncMock()
+        svc.get_memory_backends = AsyncMock(return_value=[])
+        svc.create_memory_backend = AsyncMock(return_value=mock_backend)
+        svc.set_default_backend = AsyncMock()
+
+        with _patch_admin(True):
+            result = await save_default_config(
+                request={},
+                group_context=_admin_ctx(),
+                service=svc,
+            )
+
+        assert result["success"] is True
+        created = svc.create_memory_backend.await_args.args[1]
+        assert created.cognitive_config is None
+
+
+# ---------------------------------------------------------------------------
+# _browse_default_records / _delete_default_records (local LanceDB store)
+# ---------------------------------------------------------------------------
+
+class TestLocalDefaultStoreReadDelete:
+    def test_browse_returns_empty_when_store_missing(self, tmp_path):
+        from src.api.memory_backend_router import _browse_default_records
+
+        with patch(
+            "src.api.memory_backend_router.local_memory_store_dir",
+            return_value=tmp_path / "nope",
+        ):
+            result = _browse_default_records(group_id="g", scope=None, limit=10, offset=0)
+        assert result == []
+
+    def test_browse_reads_the_group_store_and_passes_scope(self, tmp_path):
+        """Reads the ONE deterministic group store and forwards the scope filter
+        (workspace=/group, session=/group/session) to the storage layer."""
+        from src.api.memory_backend_router import _browse_default_records
+
+        store = tmp_path / "kasal_default_g"
+        store.mkdir()
+        storage = MagicMock()
+        storage.list_records.return_value = ["rec"]
+        memory_obj = MagicMock(_storage=storage)
+
+        with patch(
+            "src.api.memory_backend_router.local_memory_store_dir", return_value=store
+        ), patch.dict(
+            "sys.modules",
+            {"crewai.memory": MagicMock(Memory=MagicMock(return_value=memory_obj))},
+        ), patch(
+            "src.api.memory_backend_router._memory_record_to_dict",
+            return_value={"created_at": "2026-01-01", "metadata": {}},
+        ):
+            result = _browse_default_records(
+                group_id="g", scope="/g/sess1", limit=10, offset=0
+            )
+
+        assert len(result) == 1
+        storage.list_records.assert_called_once()
+        assert storage.list_records.call_args.kwargs.get("scope_prefix") == "/g/sess1"
+
+    def test_delete_returns_zero_when_store_missing(self, tmp_path):
+        from src.api.memory_backend_router import _delete_default_records
+
+        with patch(
+            "src.api.memory_backend_router.local_memory_store_dir",
+            return_value=tmp_path / "nope",
+        ):
+            assert _delete_default_records(group_id="g", scope=None) == 0
+
+
+# ---------------------------------------------------------------------------
 # switch_to_disabled_mode
 # ---------------------------------------------------------------------------
 

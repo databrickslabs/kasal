@@ -214,6 +214,11 @@ async def configure_flow_crew_memory(
 
     try:
         crew_id = memory_service.generate_crew_id()
+        # Align flow memory with the crew path: point CREWAI_STORAGE_DIR at the
+        # deterministic local store so flow DEFAULT memory writes/reads the same
+        # place crews do (the known KASAL_MEMORY_DIR root), not CrewAI's default
+        # location. Crews do this in crew_preparation right after generate_crew_id.
+        memory_service.setup_storage_directory(crew_id, memory_backend_config)
         backend_type = memory_backend_config.get("backend_type")
         embedder_for_backend = (
             custom_embedder

@@ -246,61 +246,92 @@ class TestSetupStorageDirectory:
 
         assert os.environ.get("CREWAI_STORAGE_DIR") == "kasal_lakebase_my_crew_id"
 
-    def _setup_default(self, config, crew_id="my_crew_id"):
-        """Run setup_storage_directory for the default backend and return the dir."""
+    def _setup_default(self, config, crew_id="my_crew_id", mem_root="/tmp/kasal_mem_test"):
+        """Run setup_storage_directory for the default backend; returns the dir.
+
+        Pins ``KASAL_MEMORY_DIR`` so the absolute store path is deterministic.
+        """
         service = CrewMemoryService(config)
         mock_path = MagicMock()
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch.dict(os.environ, {"KASAL_MEMORY_DIR": mem_root}), \
+             patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
             }):
                 service.setup_storage_directory(crew_id, {"backend_type": "default"})
-        return os.environ.get("CREWAI_STORAGE_DIR")
+                # Capture INSIDE the patch.dict block — it reverts os.environ
+                # (including CREWAI_STORAGE_DIR) when the context exits.
+                value = os.environ.get("CREWAI_STORAGE_DIR")
+                assert value is not None, "setup_storage_directory did not set CREWAI_STORAGE_DIR"
+                return value
 
     def test_sets_default_storage_dir(self):
-        # Empty config → group_id defaults to "default", workspace-wide default.
-        assert self._setup_default({}) == "kasal_default_default"
+        # Empty config → group_id "default"; absolute path under the memory root.
+        result = self._setup_default({})
+        assert os.path.basename(result) == "kasal_default_default"
+        assert result.startswith("/tmp/kasal_mem_test")
+
+    def test_default_dir_under_known_root_not_source_tree(self):
+        """The store lives under KASAL_MEMORY_DIR (deterministic), not CWD."""
+        result = self._setup_default({"group_id": "grp"}, mem_root="/tmp/custom_kasal_root")
+        assert result == "/tmp/custom_kasal_root/kasal_default_grp"
 
     def test_default_dir_scoped_by_group_id_not_crew_id(self):
-        """LOCAL memory keys on group_id (like Lakebase), NOT the volatile crew_id."""
+        """LOCAL memory keys on group_id, NOT the volatile crew_id."""
         result = self._setup_default(
             {"group_id": "user_dev_localhost"}, crew_id="user_dev_localhost_crew_abc123"
         )
-        assert result == "kasal_default_user_dev_localhost"
+        assert os.path.basename(result) == "kasal_default_user_dev_localhost"
         assert "crew_abc123" not in result
 
     def test_default_dir_stable_across_crew_ids(self):
         """Two different crew_ids in the same group resolve to the SAME store.
 
-        This is the regression guard for the bug where every chat prompt got a
-        new crew_id → a fresh, empty local memory directory.
+        Regression guard for the bug where every chat prompt got a new crew_id
+        → a fresh, empty local memory directory.
         """
         first = self._setup_default({"group_id": "grp"}, crew_id="grp_crew_aaaaaaaa")
         os.environ.pop("CREWAI_STORAGE_DIR", None)
         second = self._setup_default({"group_id": "grp"}, crew_id="grp_crew_bbbbbbbb")
-        assert first == second == "kasal_default_grp"
+        assert first == second
+        assert os.path.basename(first) == "kasal_default_grp"
 
-    def test_default_dir_session_only_scope(self):
-        """Session-only recall (toggle off) keys on group_id + session_id."""
-        result = self._setup_default(
-            {
-                "group_id": "grp",
-                "session_id": "chat-sess-1",
-                "memory_workspace_scope": False,
-            },
-            crew_id="grp_crew_abc123",
+    def test_default_dir_same_store_for_session_scope(self):
+        """Session-only mode does NOT partition the directory — session lives in
+        the record scope path (root_scope), so the store stays the group store."""
+        workspace = self._setup_default({"group_id": "grp"})
+        os.environ.pop("CREWAI_STORAGE_DIR", None)
+        session = self._setup_default(
+            {"group_id": "grp", "session_id": "chat-sess-1", "memory_workspace_scope": False}
         )
-        assert result == "kasal_default_grp_session_chat-sess-1"
-        assert "crew_abc123" not in result
+        assert workspace == session
+        assert os.path.basename(session) == "kasal_default_grp"
+        assert "session" not in os.path.basename(session)
 
     def test_default_dir_sanitizes_unsafe_chars(self):
-        """Path-unsafe characters in scope keys are neutralized."""
+        """Path-unsafe characters in the group id are neutralized in the dir name."""
         result = self._setup_default({"group_id": "a/b c"})
-        assert result == "kasal_default_a_b_c"
+        assert os.path.basename(result) == "kasal_default_a_b_c"
+
+    def test_root_scope_workspace_vs_session(self):
+        """root_scope mirrors ChatMode: /<group> workspace-wide, /<group>/<session>
+        when the session toggle is off."""
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+
+        cfg = MemoryBackendConfig(backend_type=MemoryBackendType.DEFAULT)
+        ws = CrewMemoryService({"group_id": "grp"})._build_memory_kwargs(
+            {}, None, "grp_crew_x", cfg, None
+        )
+        assert ws["root_scope"] == "/grp"
+
+        ses = CrewMemoryService(
+            {"group_id": "grp", "session_id": "sess1", "memory_workspace_scope": False}
+        )._build_memory_kwargs({}, None, "grp_crew_x", cfg, None)
+        assert ses["root_scope"] == "/grp/sess1"
 
     def test_saves_original_storage_dir(self):
         os.environ["CREWAI_STORAGE_DIR"] = "original_value"
