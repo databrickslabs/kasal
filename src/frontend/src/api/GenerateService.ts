@@ -70,6 +70,33 @@ export class GenerateService {
     }
   }
 
+  /**
+   * On-demand: generate a suggested guardrail validation-criteria sentence from
+   * a task's description and expected output. Returns the suggestion text, or
+   * null on failure (the caller keeps the user's current text).
+   */
+  static async suggestGuardrail(
+    description: string,
+    expectedOutput?: string,
+    model?: string,
+  ): Promise<string | null> {
+    try {
+      const response = await apiClient.post<{ description: string }>(
+        '/task-generation/suggest-guardrail',
+        {
+          description,
+          expected_output: expectedOutput || undefined,
+          model: model || undefined,
+        },
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      return response.data?.description || null;
+    } catch (error) {
+      console.error('Error suggesting guardrail:', error);
+      return null;
+    }
+  }
+
   static async generateTemplates(request: TemplateRequest): Promise<TemplateResponse | null> {
     try {
       const response = await apiClient.post<TemplateResponse>(

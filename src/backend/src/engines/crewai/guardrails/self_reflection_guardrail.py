@@ -23,6 +23,7 @@ from collections import OrderedDict
 from typing import Any, Dict
 
 from src.engines.crewai.guardrails.base_guardrail import BaseGuardrail
+from src.engines.crewai.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
 from src.engines.crewai.guardrails.llm_injection_guardrail import _run_completion
 from src.core.logger import LoggerManager
 
@@ -75,7 +76,9 @@ class SelfReflectionGuardrail(BaseGuardrail):
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
-        model: str = config.get("llm_model", "databricks-claude-sonnet-4-5")
+        # llm_model is stamped with the run's model by the guardrail-build site
+        # (the model the validated agent runs with); DEFAULT is a last resort.
+        model: str = config.get("llm_model") or DEFAULT_GUARDRAIL_MODEL
         # Strip provider prefix — LLMManager adds it from DB config
         if model.startswith("databricks/"):
             model = model[len("databricks/"):]

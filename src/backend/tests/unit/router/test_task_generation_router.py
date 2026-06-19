@@ -38,6 +38,7 @@ def mock_task_service():
     """Create a mock TaskGenerationService instance."""
     svc = AsyncMock()
     svc.generate_task = AsyncMock()
+    svc.suggest_guardrail = AsyncMock()
     return svc
 
 
@@ -236,3 +237,89 @@ class TestGenerateTask:
         assert adv["retry_on_fail"] is True
         assert adv["max_retries"] == 3
         assert adv["cache_response"] is True
+
+
+class TestSuggestGuardrail:
+    """Tests for POST /task-generation/suggest-guardrail."""
+
+    def test_success_returns_suggestion_response(self, client, mock_task_service):
+        """Successful suggestion returns 200 with the wrapped criteria string."""
+        mock_task_service.suggest_guardrail.return_value = "Must include 4 KPI tiles."
+
+        response = client.post(
+            "/task-generation/suggest-guardrail",
+            json={"description": "build dashboard", "expected_output": "a dashboard"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"description": "Must include 4 KPI tiles."}
+
+        mock_task_service.suggest_guardrail.assert_awaited_once()
+        call_kwargs = mock_task_service.suggest_guardrail.call_args.kwargs
+        assert call_kwargs["description"] == "build dashboard"
+        assert call_kwargs["expected_output"] == "a dashboard"
+        assert call_kwargs["model"] is None
+        gc = call_kwargs["group_context"]
+        assert gc.group_ids == ["g1"]
+
+    def test_model_forwarded_to_service(self, client, mock_task_service):
+        """The optional 'model' from the body is forwarded to the service."""
+        mock_task_service.suggest_guardrail.return_value = "Some criteria."
+
+        response = client.post(
+            "/task-generation/suggest-guardrail",
+            json={
+                "description": "build dashboard",
+                "expected_output": "a dashboard",
+                "model": "test-model",
+            },
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_task_service.suggest_guardrail.call_args.kwargs
+        assert call_kwargs["model"] == "test-model"
+
+    def test_missing_description_returns_422(self, client, mock_task_service):
+        """Missing required 'description' field returns 422."""
+        response = client.post(
+            "/task-generation/suggest-guardrail",
+            json={"expected_output": "a dashboard"},
+        )
+
+        assert response.status_code == 422
+
+    def test_publishes_user_token_for_obo(self, mock_task_service):
+        """The endpoint publishes the request's access token to UserContext so
+        LLMManager can do OBO auth — mirrors the dispatcher. Without this,
+        OpenAI-protocol models (e.g. gpt-5-3-codex) fail with
+        'OPENAI_API_KEY is required' even though crew generation works."""
+        app = FastAPI()
+        app.include_router(router)
+        register_exception_handlers(app)
+
+        async def override_group_context():
+            return GroupContext(
+                group_ids=["g1"],
+                group_email="u@example.com",
+                email_domain="example.com",
+                access_token="tok-123",
+            )
+
+        async def override_session():
+            return AsyncMock()
+
+        app.dependency_overrides[get_group_context] = override_group_context
+        app.dependency_overrides[get_smart_db_session] = override_session
+        mock_task_service.suggest_guardrail.return_value = "Must be valid."
+
+        with patch(
+            "src.api.task_generation_router.TaskGenerationService",
+            return_value=mock_task_service,
+        ), patch("src.utils.user_context.UserContext") as MockUC:
+            resp = TestClient(app).post(
+                "/task-generation/suggest-guardrail", json={"description": "d"}
+            )
+
+        assert resp.status_code == 200
+        MockUC.set_group_context.assert_called_once()
+        MockUC.set_user_token.assert_called_once_with("tok-123")

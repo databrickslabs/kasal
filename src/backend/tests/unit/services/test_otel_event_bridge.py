@@ -681,6 +681,56 @@ class TestOTelEventBridgeEmitSpan:
         ]
         assert stamped == []
 
+    def test_guardrail_llm_call_reattributed_to_owner_task(self):
+        """A guardrail's own LLM call (agent='Guardrail Agent', no task) is
+        re-attributed to the task being validated, so it nests under that task
+        instead of a separate 'Guardrail Agent / Unassigned' lane."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-gr")
+
+        # Running task establishes the owner agent/task/task_id.
+        bridge._emit_span(
+            "CrewAI.task.execute",
+            "task_started",
+            _make_event(agent_role="Researcher", task_name="Gather", task_id="task-7"),
+        )
+        # Guardrail starts → captures the owner task.
+        bridge._emit_span("kasal.guardrail.started", "guardrail_started", _make_event())
+
+        # The guardrail's own LLM call: carries the internal "Guardrail Agent"
+        # and NO task of its own.
+        span.set_attribute.reset_mock()
+        bridge._emit_span("CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent"))
+
+        span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
+        span.set_attribute.assert_any_call("kasal.task_name", "Gather")
+        span.set_attribute.assert_any_call("kasal.extra.task_id", "task-7")
+        span.set_attribute.assert_any_call("kasal.extra.guardrail_validation", True)
+        # The "Guardrail Agent" name must NOT leak into the running-agent tracker.
+        assert bridge._current_agent_name == "Researcher"
+
+    def test_guardrail_window_closes_on_completion(self):
+        """After the guardrail completes, later task-less LLM calls are NOT
+        re-attributed (the window is bounded by started→completed/failed)."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-gr2")
+        bridge._emit_span(
+            "CrewAI.task.execute",
+            "task_started",
+            _make_event(agent_role="Researcher", task_name="Gather", task_id="task-7"),
+        )
+        bridge._emit_span("kasal.guardrail.started", "guardrail_started", _make_event())
+        bridge._emit_span("kasal.guardrail.completed", "llm_guardrail", _make_event())
+
+        span.set_attribute.reset_mock()
+        bridge._emit_span("CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent"))
+
+        marked = [
+            c for c in span.set_attribute.call_args_list
+            if c.args and c.args[0] == "kasal.extra.guardrail_validation"
+        ]
+        assert marked == []
+
     def test_memory_write_completion_attributed_to_starting_task(self):
         """A background save that finishes during a later task is attributed to
         the task that STARTED it, not the task active at completion time."""

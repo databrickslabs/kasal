@@ -12,7 +12,20 @@ from pydantic import BaseModel, Field
 class LLMGuardrailConfig(BaseModel):
     """Configuration for LLM-based output validation guardrail."""
     description: str = Field(..., description="Validation criteria for the task output")
-    llm_model: Optional[str] = Field("databricks-claude-sonnet-4-5", description="LLM model to use for validation")
+    llm_model: Optional[str] = Field(None, description="Deprecated/ignored — guardrail uses the run's model (the chat-input selection)")
+
+
+class GuardrailSuggestionRequest(BaseModel):
+    """Request to generate a suggested LLM-guardrail validation criteria from a
+    task's description and expected output."""
+    description: str = Field(..., description="The task description")
+    expected_output: Optional[str] = Field(None, description="The task's expected output")
+    model: Optional[str] = Field(None, description="Optional LLM model for generating the suggestion")
+
+
+class GuardrailSuggestionResponse(BaseModel):
+    """A suggested guardrail validation criteria."""
+    description: str = Field(..., description="Suggested validation criteria for the task output")
 
 
 class Agent(BaseModel):

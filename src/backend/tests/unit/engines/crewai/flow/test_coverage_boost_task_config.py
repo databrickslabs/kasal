@@ -256,6 +256,62 @@ class TestConfigureTask:
         assert task.retry_on_fail is True
 
     @pytest.mark.asyncio
+    async def test_configure_task_guardrail_self_reflection_stamps_run_model(self):
+        """An LLM-backed code guardrail (self_reflection / prompt_injection_check)
+        gets the run's model stamped into its config via resolve_guardrail_model
+        (from the agent), so the LLM judge uses the SAME model as the run rather
+        than the hardcoded default. Covers task_config.py:136-138."""
+        task_data = _make_task_data(guardrail={"type": "self_reflection"})
+        task, agent = _make_real_task_with_mock_agent()
+        # Agent runs with this model (chat-input selection, top-down).
+        agent.llm.model = "databricks/databricks-claude-sonnet-4-5"
+
+        captured = {}
+
+        def _capture(cfg):
+            captured["cfg"] = cfg
+            return MagicMock()
+
+        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
+             patch("crewai.Task", return_value=task), \
+             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
+             patch("src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
+            MockGF.create_guardrail.side_effect = _capture
+
+            await TaskConfig.configure_task(task_data, agent=agent)
+
+        # Reached the factory as JSON with the resolved (prefix-stripped) model stamped.
+        sent = json.loads(captured["cfg"])
+        assert sent["type"] == "self_reflection"
+        assert sent["llm_model"] == "databricks-claude-sonnet-4-5"
+
+    @pytest.mark.asyncio
+    async def test_configure_task_guardrail_non_llm_type_not_stamped(self):
+        """A non-LLM code guardrail (e.g. company_count) must NOT get an llm_model
+        stamped — only self_reflection/prompt_injection_check do. Guards the
+        branch condition at task_config.py:136."""
+        task_data = _make_task_data(guardrail={"type": "company_count", "max": 5})
+        task, agent = _make_real_task_with_mock_agent()
+        agent.llm.model = "databricks/databricks-claude-sonnet-4-5"
+
+        captured = {}
+
+        def _capture(cfg):
+            captured["cfg"] = cfg
+            return MagicMock()
+
+        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
+             patch("crewai.Task", return_value=task), \
+             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
+             patch("src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
+            MockGF.create_guardrail.side_effect = _capture
+
+            await TaskConfig.configure_task(task_data, agent=agent)
+
+        sent = json.loads(captured["cfg"])
+        assert "llm_model" not in sent
+
+    @pytest.mark.asyncio
     async def test_configure_task_guardrail_factory_returns_none(self):
         task_data = _make_task_data(guardrail='{"type": "unknown"}')
         task, agent = _make_real_task_with_mock_agent()
@@ -330,17 +386,12 @@ class TestConfigureTask:
 
         assert result is task
 
-    @pytest.mark.asyncio
-    async def test_configure_task_llm_guardrail_adds_databricks_prefix(self):
-        """llm_model without 'databricks/' prefix gets it stripped before calling LLMManager.
-
-        LLMManager.configure_crewai_llm receives the model name without 'databricks/' prefix
-        because the prefix is added internally by LLMManager from DB config.
-        """
-        task_data = _make_task_data(
-            config={"llm_guardrail": {"description": "Validate", "llm_model": "databricks-claude-sonnet"}}
-        )
+    async def _run_guardrail_and_get_model(self, guardrail_cfg, agent_model):
+        """Configure a task with the given guardrail config + agent model,
+        returning the model name passed to LLMManager.configure_crewai_llm."""
+        task_data = _make_task_data(config={"llm_guardrail": guardrail_cfg})
         task, agent = _make_real_task_with_mock_agent()
+        agent.llm.model = agent_model
 
         mock_gc = MagicMock()
         mock_gc.primary_group_id = "test-group"
@@ -352,16 +403,30 @@ class TestConfigureTask:
              patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new=mock_configure_llm), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
-
             await TaskConfig.configure_task(task_data, agent=agent)
 
-        # LLMManager.configure_crewai_llm should have been called with the model name
-        # (without 'databricks/' prefix since it doesn't have one in the input)
         mock_configure_llm.assert_called_once()
         call_args = mock_configure_llm.call_args
-        model_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("model_name", "")
-        # The model "databricks-claude-sonnet" does NOT start with "databricks/" so no stripping occurs
-        assert model_arg == "databricks-claude-sonnet"
+        return call_args.args[0] if call_args.args else call_args.kwargs.get("model_name", "")
+
+    @pytest.mark.asyncio
+    async def test_configure_task_llm_guardrail_defaults_to_agent_model(self):
+        """With no explicit guardrail model, the guardrail defaults to the model
+        its AGENT runs with (the chat-input selection), prefix-stripped."""
+        model = await self._run_guardrail_and_get_model(
+            {"description": "Validate"},  # no llm_model -> inherit run/agent model
+            agent_model="databricks/run-selected-model",
+        )
+        assert model == "run-selected-model"
+
+    @pytest.mark.asyncio
+    async def test_configure_task_llm_guardrail_explicit_model_wins(self):
+        """An explicitly chosen guardrail model overrides the agent/run model."""
+        model = await self._run_guardrail_and_get_model(
+            {"description": "Validate", "llm_model": "databricks-claude-opus-4"},
+            agent_model="databricks/run-selected-model",
+        )
+        assert model == "databricks-claude-opus-4"
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_augments_description(self):

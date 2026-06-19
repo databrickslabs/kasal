@@ -896,6 +896,118 @@ class TestCreateTaskGuardrail:
         assert task is not None
 
     @pytest.mark.asyncio
+    async def test_code_guardrail_inherits_agent_model_when_no_explicit_model(self):
+        """A code-based (factory) self_reflection / prompt_injection_check
+        guardrail with NO llm_model must inherit the task AGENT's model
+        (databricks/ prefix stripped), NOT the hardcoded guardrail default.
+
+        The model is stamped into the config before GuardrailFactory builds
+        the guardrail, so capturing the config the factory receives is the
+        robust assertion."""
+        agent = _make_agent()
+        # Agent runs with this model (the chat-input selection, top-down).
+        agent.llm = MagicMock()
+        agent.llm.model = "databricks/run-model"
+        # Code-based guardrail (has a 'type'), stored under 'guardrail', no llm_model.
+        guardrail_cfg = json.dumps({"type": "self_reflection"})
+        task_config = _base_task_config(guardrail=guardrail_cfg)
+
+        captured = {}
+
+        def _capture_create_guardrail(factory_config):
+            cfg = json.loads(factory_config) if isinstance(factory_config, str) else factory_config
+            captured["config"] = cfg
+            return MagicMock()
+
+        with patch("src.services.mcp_service.MCPService"), \
+             patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.db.session.request_scoped_session") as mock_sess, \
+             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
+             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+
+            mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_sess.return_value = mock_session
+            mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
+            mock_gf.create_guardrail = MagicMock(side_effect=_capture_create_guardrail)
+            mock_gw.return_value = MagicMock()
+
+            task = await create_task(
+                task_key="code-guardrail-inherit-task",
+                task_config=task_config,
+                agent=agent,
+            )
+
+        assert task is not None
+        # Factory was called with the agent's model stamped in (prefix stripped),
+        # NOT the hardcoded default.
+        mock_gf.create_guardrail.assert_called_once()
+        assert captured["config"]["type"] == "self_reflection"
+        assert captured["config"]["llm_model"] == "run-model"
+        assert captured["config"]["llm_model"] != "databricks-claude-sonnet-4-5"
+
+    @pytest.mark.asyncio
+    async def test_code_guardrail_explicit_model_wins(self):
+        """An explicit llm_model on a code-based guardrail config wins over the
+        agent's model."""
+        agent = _make_agent()
+        # Agent runs with a DIFFERENT model than the guardrail's explicit pick.
+        agent.llm = MagicMock()
+        agent.llm.model = "databricks/run-model"
+        guardrail_cfg = json.dumps({
+            "type": "prompt_injection_check",
+            "llm_model": "databricks-claude-opus-4",
+        })
+        task_config = _base_task_config(guardrail=guardrail_cfg)
+
+        captured = {}
+
+        def _capture_create_guardrail(factory_config):
+            cfg = json.loads(factory_config) if isinstance(factory_config, str) else factory_config
+            captured["config"] = cfg
+            return MagicMock()
+
+        with patch("src.services.mcp_service.MCPService"), \
+             patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.db.session.request_scoped_session") as mock_sess, \
+             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
+             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+
+            mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_sess.return_value = mock_session
+            mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
+            mock_gf.create_guardrail = MagicMock(side_effect=_capture_create_guardrail)
+            mock_gw.return_value = MagicMock()
+
+            task = await create_task(
+                task_key="code-guardrail-explicit-task",
+                task_config=task_config,
+                agent=agent,
+            )
+
+        assert task is not None
+        # Explicit per-task model wins over the agent's model.
+        mock_gf.create_guardrail.assert_called_once()
+        assert captured["config"]["type"] == "prompt_injection_check"
+        assert captured["config"]["llm_model"] == "databricks-claude-opus-4"
+        assert captured["config"]["llm_model"] != "run-model"
+
+    @pytest.mark.asyncio
     async def test_llm_guardrail_config(self):
         """Task with llm_guardrail config should create LLMGuardrail."""
         agent = _make_agent()
@@ -975,6 +1087,153 @@ class TestCreateTaskGuardrail:
             model_arg = call_args.get("model", "") if isinstance(call_args, dict) else ""
             # Prefix should be added
             assert model_arg.startswith("databricks/") if model_arg else True
+
+    @pytest.mark.asyncio
+    async def test_llm_guardrail_inherits_agent_model_when_no_explicit_model(self):
+        """When llm_guardrail has NO llm_model, the guardrail must use the
+        task's AGENT model (prefix-stripped), NOT a hardcoded default."""
+        agent = _make_agent()
+        # Agent runs with this model (the chat-input selection, top-down).
+        agent.llm = MagicMock()
+        agent.llm.model = "databricks/run-model"
+        # No llm_model in the guardrail config -> must inherit the agent model.
+        llm_guardrail = {
+            "description": "Validate output quality",
+        }
+        task_config = _base_task_config(llm_guardrail=llm_guardrail)
+
+        with patch("src.services.mcp_service.MCPService"), \
+             patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.db.session.request_scoped_session") as mock_sess, \
+             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
+             patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm",
+                   new_callable=AsyncMock) as mock_configure:
+
+            mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_sess.return_value = mock_session
+            mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
+            mock_configure.return_value = MagicMock()
+            mock_llm_g.return_value = MagicMock()
+
+            task = await create_task(
+                task_key="llm-guardrail-inherit-task",
+                task_config=task_config,
+                agent=agent,
+                config={"group_id": "test-group"},
+            )
+
+        assert task is not None
+        # configure_crewai_llm must be called with the AGENT's model
+        # (databricks/ provider prefix stripped), NOT the old hardcoded default.
+        assert mock_configure.called
+        model_arg = mock_configure.call_args[0][0]
+        assert model_arg == "run-model"
+        assert model_arg != "databricks-claude-sonnet-4-5"
+
+    @pytest.mark.asyncio
+    async def test_llm_guardrail_explicit_model_wins(self):
+        """An explicit llm_guardrail.llm_model wins over the agent's model."""
+        agent = _make_agent()
+        # Agent runs with a DIFFERENT model than the guardrail's explicit pick.
+        agent.llm = MagicMock()
+        agent.llm.model = "databricks/run-model"
+        llm_guardrail = {
+            "description": "Validate output quality",
+            "llm_model": "databricks-claude-opus-4",
+        }
+        task_config = _base_task_config(llm_guardrail=llm_guardrail)
+
+        with patch("src.services.mcp_service.MCPService"), \
+             patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.db.session.request_scoped_session") as mock_sess, \
+             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
+             patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm",
+                   new_callable=AsyncMock) as mock_configure:
+
+            mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_sess.return_value = mock_session
+            mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
+            mock_configure.return_value = MagicMock()
+            mock_llm_g.return_value = MagicMock()
+
+            task = await create_task(
+                task_key="llm-guardrail-explicit-task",
+                task_config=task_config,
+                agent=agent,
+                config={"group_id": "test-group"},
+            )
+
+        assert task is not None
+        # The explicit per-task model wins over the agent's model.
+        assert mock_configure.called
+        model_arg = mock_configure.call_args[0][0]
+        assert model_arg == "databricks-claude-opus-4"
+        assert model_arg != "run-model"
+
+    @pytest.mark.asyncio
+    async def test_llm_guardrail_object_config(self):
+        """llm_guardrail may arrive as an OBJECT (not a dict) — description and
+        the explicit llm_model are read via getattr. Covers the non-dict branch
+        in task_helpers.py:686-687."""
+        from types import SimpleNamespace
+        agent = _make_agent()
+        agent.llm = MagicMock()
+        agent.llm.model = "databricks/run-model"
+        # Object-style config (e.g. a pydantic-ish/attr object), NOT a dict.
+        llm_guardrail = SimpleNamespace(
+            description="Validate output quality",
+            llm_model="databricks-claude-opus-4",
+        )
+        task_config = _base_task_config(llm_guardrail=llm_guardrail)
+
+        with patch("src.services.mcp_service.MCPService"), \
+             patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.db.session.request_scoped_session") as mock_sess, \
+             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
+             patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
+             patch("src.core.llm_manager.LLMManager.configure_crewai_llm",
+                   new_callable=AsyncMock) as mock_configure:
+
+            mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_sess.return_value = mock_session
+            mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
+            mock_configure.return_value = MagicMock()
+            mock_llm_g.return_value = MagicMock()
+
+            task = await create_task(
+                task_key="llm-guardrail-object-task",
+                task_config=task_config,
+                agent=agent,
+                config={"group_id": "test-group"},
+            )
+
+        assert task is not None
+        # The object's explicit llm_model is read via getattr and wins.
+        assert mock_configure.called
+        assert mock_configure.call_args[0][0] == "databricks-claude-opus-4"
 
     @pytest.mark.asyncio
     async def test_llm_guardrail_augments_description(self):

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from typing import List, Dict, Any, Union
 
 from src.schemas.task import (
-    ConditionConfig, TaskConfig, TaskBase, TaskCreate, TaskUpdate,
+    ConditionConfig, LLMGuardrailConfig, TaskConfig, TaskBase, TaskCreate, TaskUpdate,
     TaskInDBBase, Task, TaskResponse
 )
 
@@ -669,3 +669,35 @@ class TestSchemaIntegration:
         assert output_task.output == {"format": "pdf", "template": "standard"}
         assert output_task.markdown is True
         assert output_task.callback == "report_ready_callback"
+
+
+class TestLLMGuardrailConfig:
+    """Test cases for LLMGuardrailConfig schema."""
+
+    def test_llm_model_defaults_to_none(self):
+        """llm_model defaults to None so the guardrail uses the run model.
+
+        Regression test: the default was previously a hardcoded model
+        ("databricks-claude-sonnet-4-5"). The guardrail model is now resolved
+        at execution from the run/agent, so the schema default must be None.
+        """
+        config = LLMGuardrailConfig(description="x")
+        assert config.llm_model is None
+
+    def test_llm_model_explicit_value_is_preserved(self):
+        """An explicitly provided llm_model is preserved unchanged."""
+        config = LLMGuardrailConfig(
+            description="x", llm_model="databricks-claude-opus-4"
+        )
+        assert config.llm_model == "databricks-claude-opus-4"
+
+    def test_description_is_required(self):
+        """description is a required field; omitting it raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            LLMGuardrailConfig()
+
+        errors = exc_info.value.errors()
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
+        assert "description" in missing_fields
