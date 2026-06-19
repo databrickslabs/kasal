@@ -72,7 +72,7 @@ import { EndpointsDisplay } from './EndpointsDisplay';
 import { IndexDocumentsDialog } from './IndexDocumentsDialog';
 import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
 
-export const DatabricksOneClickSetup: React.FC = () => {
+export const MemoryConfiguration: React.FC = () => {
   const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
   const [setupMode, setSetupMode] = useState<'auto' | 'manual'>('auto');
   const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
@@ -449,28 +449,31 @@ export const DatabricksOneClickSetup: React.FC = () => {
     }
   };
 
-  // Persist cognitive tuning against the active config, independent of backend
-  // type. Used by the local (DEFAULT) mode, where there is no backend-specific
-  // "Save Configuration" button to piggyback on. Lakebase mode saves the same
-  // cognitive_config through handleSaveLakebaseConfig / Initialize Tables.
-  const handleSaveCognitiveConfig = async () => {
-    const backendId = savedConfig?.backend_id;
-    if (!backendId) {
-      setError('No saved memory configuration yet — pick a memory mode first, then save tuning.');
-      return;
-    }
+  // Persist the LOCAL (DEFAULT / LanceDB) memory backend as an ACTIVE config so
+  // crew execution loads its cognitive tuning (memory LLM, recall thresholds)
+  // via get_active_config. Local has no connection step, so this creates the
+  // active config AND saves the tuning in one call — there's no pre-existing
+  // backend_id to PUT against (the chicken-and-egg that left the old button
+  // permanently disabled). Lakebase saves the same cognitive_config through
+  // handleSaveLakebaseConfig / Initialize Tables.
+  const handleSaveLocalMemoryConfig = async () => {
     try {
-      await apiClient.put(`/memory-backend/configs/${backendId}`, {
-        cognitive_config: config.cognitive_config || {},
-      });
+      const result = await MemoryBackendService.saveDefaultConfig(config);
+      if (!result.success) {
+        setError(result.message || 'Failed to save local memory configuration');
+        return;
+      }
+      if (result.backend_id) {
+        setSavedConfig({ backend_id: result.backend_id });
+      }
       window.dispatchEvent(
         new CustomEvent('show-notification', {
-          detail: { message: 'Memory tuning saved' },
+          detail: { message: 'Local memory settings saved', severity: 'success' },
         }),
       );
     } catch (saveError) {
       setError(
-        `Failed to save memory tuning: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`,
+        `Failed to save local memory configuration: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`,
       );
     }
   };
@@ -1955,23 +1958,49 @@ export const DatabricksOneClickSetup: React.FC = () => {
           }
         >
           CrewAI unified cognitive memory is stored locally in LanceDB under
-          <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;_crew_&lt;hash&gt;/memory/</code>
-          relative to the backend working directory. No external infrastructure required.
-          Click &ldquo;Browse Memory&rdquo; to inspect the records your crews have persisted.
+          <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
+          relative to the backend working directory — one store per workspace, no
+          external infrastructure required. Click &ldquo;Browse Memory&rdquo; to
+          inspect the records your crews have persisted.
         </Alert>
 
-        {/* Recall-speed & memory-LLM tuning also applies to the local backend.
-            Local mode has no backend "Save Configuration" button, so persist the
-            tuning directly against the active config. */}
+        {/* Cognitive tuning (recall weights, speed, memory LLM) applies to local
+            memory too — but only once saved as an ACTIVE config, which is what the
+            Save button below does (it creates/updates the local backend config). */}
         <CognitiveMemoryPanel />
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+
+        <Box
+          sx={{
+            mt: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {savedConfig?.backend_id && (
+              <Chip
+                icon={<CheckCircleIcon />}
+                label="Saved"
+                color="success"
+                size="small"
+                variant="outlined"
+              />
+            )}
+            <Typography variant="caption" color="text.secondary">
+              {savedConfig?.backend_id
+                ? 'Saved — this tuning applies to every local crew run in the workspace.'
+                : 'Not saved yet. Save to apply this tuning (memory LLM, recall speed) to local crew runs.'}
+            </Typography>
+          </Box>
           <Button
-            variant="outlined"
+            variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!savedConfig?.backend_id}
-            onClick={handleSaveCognitiveConfig}
+            onClick={handleSaveLocalMemoryConfig}
           >
-            Save memory tuning
+            Save Local Memory Settings
           </Button>
         </Box>
       </Collapse>

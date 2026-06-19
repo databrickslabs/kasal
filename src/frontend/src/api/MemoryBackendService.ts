@@ -137,6 +137,34 @@ export class MemoryBackendService {
   }
 
   /**
+   * Persist the local (DEFAULT / LanceDB) memory backend as an ACTIVE config so
+   * crew execution loads its cognitive tuning via ``get_active_config``. Saving
+   * to localStorage alone never reaches the backend runtime, so the memory LLM /
+   * recall thresholds were silently ignored for local memory. Mirrors the
+   * Lakebase save flow on the backend.
+   */
+  static async saveDefaultConfig(
+    config: MemoryBackendConfig
+  ): Promise<{ success: boolean; backend_id?: string; message: string }> {
+    try {
+      const response = await apiClient.post<{ success: boolean; backend_id?: string; message: string }>(
+        '/memory-backend/default/save-config',
+        { cognitive_config: config.cognitive_config ?? null }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error saving default memory backend config:', error);
+      const errorMessage = error instanceof AxiosError
+        ? error.response?.data?.detail
+        : 'Failed to save configuration';
+      return {
+        success: false,
+        message: errorMessage || 'Failed to save configuration',
+      };
+    }
+  }
+
+  /**
    * Get current memory backend configuration
    */
   static async getConfig(): Promise<MemoryBackendConfig | null> {
