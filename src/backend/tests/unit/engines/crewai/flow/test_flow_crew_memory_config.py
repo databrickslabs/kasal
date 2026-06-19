@@ -73,6 +73,9 @@ async def test_backend_config_wires_unified_memory():
             {"memory": True}, [_agent()], [MagicMock(description="t")], "crew", "g", "tok"
         )
 
+        # Flow points CREWAI_STORAGE_DIR at the deterministic store, same as the
+        # crew path — so flow DEFAULT memory writes/reads where crews do.
+        svc.setup_storage_directory.assert_called_once_with("g_crew_abc", backend_cfg)
         # Unified storage built with the callable embedder for lakebase backend.
         svc.create_unified_storage.assert_awaited_once()
         _, kwargs = svc.create_unified_storage.await_args

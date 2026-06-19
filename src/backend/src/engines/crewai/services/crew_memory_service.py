@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,13 +22,9 @@ from src.engines.crewai.memory.memory_backend_factory import (
     MemoryBackendFactory,
 )
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+from src.utils.memory_paths import local_memory_store_dir
 
 logger = LoggerManager.get_instance().crew
-
-
-def _sanitize_dir_component(value: str) -> str:
-    """Make a string safe to embed in a filesystem directory name."""
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value))
 
 
 class CrewMemoryService:
@@ -238,7 +233,7 @@ class CrewMemoryService:
         elif backend_type == "lakebase":
             storage_dirname = f"kasal_lakebase_{crew_id}"
         else:
-            storage_dirname = self._default_storage_dirname(crew_id)
+            storage_dirname = self._default_storage_dirname()
 
         os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
 
@@ -277,36 +272,21 @@ class CrewMemoryService:
             )
         logger.info("=" * 80)
 
-    def _default_storage_dirname(self, crew_id: str) -> str:
-        """Storage directory for LOCAL (DEFAULT) memory, scoped like Lakebase.
+    def _default_storage_dirname(self) -> str:
+        """Absolute storage dir for LOCAL (DEFAULT) memory — ONE store per group.
 
-        Local memory persists in a per-directory LanceDB store, and the
-        directory name is the ONLY read-scope key. Keying it by ``crew_id``
-        walls every run off from prior memory, because ``crew_id`` is a hash of
-        the crew STRUCTURE (agents/tasks/model) and changes on nearly every
-        chat prompt — so the first read of each new prompt opens an empty store.
+        Deterministic path under the known memory root (``KASAL_MEMORY_DIR``,
+        default ``~/.kasal/memory``), outside the backend source tree, so the
+        runtime writer and the memory browser always read/write the same place
+        (CrewAI resolves a *relative* ``CREWAI_STORAGE_DIR`` inconsistently).
 
-        Mirror the Lakebase read-scope model instead (see
-        ``LakebaseStorageBackend._tenant_where``): scope by ``group_id``
-        (workspace-wide recall, the default) or ``group_id`` + ``session_id``
-        (recall confined to this chat session). ``crew_id`` is intentionally
-        NOT part of the name, so memory persists across runs in the workspace.
+        Neither ``crew_id`` nor ``session_id`` is part of the directory:
+        ``crew_id`` changes every chat prompt (would orphan recall), and session
+        scoping is encoded in the record scope path (see ``_build_memory_kwargs``)
+        so a session record stays visible workspace-wide — mirroring ChatMode.
         """
         group_id = self.config.get("group_id") or "default"
-        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
-        if workspace_wide:
-            scope_key = group_id
-        else:
-            # Stable chat-session id partitions session-only recall; fall back
-            # to the per-run id (and finally crew_id) when no session exists.
-            session_scope_id = (
-                self.config.get("session_id")
-                or self.config.get("execution_id")
-                or self.config.get("job_id")
-                or crew_id
-            )
-            scope_key = f"{group_id}_session_{session_scope_id}"
-        return f"kasal_default_{_sanitize_dir_component(scope_key)}"
+        return str(local_memory_store_dir(group_id))
 
     async def create_unified_storage(
         self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
@@ -653,16 +633,25 @@ class CrewMemoryService:
         if embedder is not None:
             kwargs["embedder"] = embedder
 
-        # Structural root scope: the tenant/workspace namespace ONLY — we do not
-        # nest per crew_id here. Recall isolation (workspace-wide vs this chat
-        # session) is enforced at the column level by the backend's tenant WHERE
-        # (group_id, or crew_id+group_id when the user opts into session-only).
-        # A crew_id subtree in the scope prefix would wall every run off from the
-        # rest of the workspace — a second crew could never recall the first
-        # crew's memories even though both share the workspace — which is the
-        # legacy per-crew partitioning the unified memory replaces.
+        # Root scope mirrors ChatMode's workspace/session toggle. group_id is
+        # ALWAYS the tenant boundary; the toggle decides whether we ALSO narrow
+        # to the chat session:
+        #   - workspace (default): root_scope = /<group>  → recall sees every
+        #     session in the workspace (session sub-scopes nest under it).
+        #   - session-only: root_scope = /<group>/<session> → recall is confined
+        #     to this chat session, yet the record stays visible workspace-wide
+        #     because it nests under /<group>.
+        # For the custom Databricks/Lakebase backends this same intent is enforced
+        # by their tenant WHERE clause; for the local LanceDB store the scope PATH
+        # is the lever. crew_id is never part of the scope (it changes per prompt
+        # and would wall every run off from the rest of the workspace).
         group_id = self.config.get("group_id") or "default"
-        kwargs["root_scope"] = f"/{group_id}"
+        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
+        session_id = self.config.get("session_id")
+        if workspace_wide or not session_id:
+            kwargs["root_scope"] = f"/{group_id}"
+        else:
+            kwargs["root_scope"] = f"/{group_id}/{session_id}"
 
         cognitive = getattr(memory_config, "cognitive_config", None)
         cognitive_dict = (

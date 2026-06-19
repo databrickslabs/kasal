@@ -32,6 +32,7 @@ from src.schemas.memory_backend import (
 )
 from src.services.memory_backend_service import MemoryBackendService
 from src.utils.databricks_auth import extract_user_token_from_request
+from src.utils.memory_paths import local_memory_store_dir
 
 logger = LoggerManager.get_instance().api
 
@@ -261,6 +262,59 @@ async def save_lakebase_config(
         "success": True,
         "backend_id": str(backend.id),
         "message": "Lakebase memory backend configured successfully",
+    }
+
+
+@router.post("/default/save-config")
+async def save_default_config(
+    request: Dict[str, Any],
+    group_context: GroupContextDep,
+    service: Annotated[MemoryBackendService, Depends(get_memory_backend_service)],
+) -> Dict[str, Any]:
+    """Save the local (DEFAULT / LanceDB) memory backend configuration.
+
+    Local memory has no connection settings, but it DOES carry cognitive tuning
+    (recall weights, query-analysis threshold, exploration budget, memory LLM).
+    Those only take effect when persisted on an ACTIVE config that crew
+    execution loads via ``get_active_config`` — saving them to the browser's
+    localStorage never reaches the runtime, so the tuning was silently ignored
+    for local memory. Mirror the Lakebase save flow: create an active DEFAULT
+    config carrying ``cognitive_config``, then remove the old configs.
+    """
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can configure memory backends")
+
+    group_id = group_context.primary_group_id
+    cognitive_config = request.get("cognitive_config")
+
+    from src.schemas.memory_backend import CognitiveMemoryConfig
+
+    # Create the new config FIRST (count stays > 0 so the "cannot delete the only
+    # config" guard never trips), then clean up the OLD ones — same ordering as
+    # the Lakebase setup above.
+    config = MemoryBackendCreate(
+        name=f"Local (LanceDB) {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        backend_type=MemoryBackendType.DEFAULT,
+        cognitive_config=(
+            CognitiveMemoryConfig(**cognitive_config) if cognitive_config else None
+        ),
+    )
+    backend = await service.create_memory_backend(group_id, config)
+
+    try:
+        existing = await service.get_memory_backends(group_id)
+        for old in existing:
+            if str(old.id) != str(backend.id):
+                await service.delete_memory_backend(group_id, str(old.id))
+    except Exception as e:
+        logger.warning(f"Error cleaning up existing configs: {e}")
+
+    await service.set_default_backend(group_id, str(backend.id))
+
+    return {
+        "success": True,
+        "backend_id": str(backend.id),
+        "message": "Local memory backend configured successfully",
     }
 
 
@@ -1400,8 +1454,8 @@ async def delete_memory_records(
 
     The caller can only delete records for their own group — both the
     Databricks / Lakebase paths enforce ``group_id`` in the filter, and the
-    local (LanceDB) path only touches directories named
-    ``kasal_default_<group_id>_crew_*``.
+    local (LanceDB) path only touches the group's store directory
+    ``kasal_default_<group_id>``.
     """
     group_id = group_context.primary_group_id
     user_token = extract_user_token_from_request(request) if request else None
@@ -1557,13 +1611,12 @@ def _browse_default_records(
     limit: int,
     offset: int,
 ) -> List[Dict[str, Any]]:
-    """Aggregate records from every local LanceDB memory store owned by the group.
+    """Read records from the LOCAL LanceDB memory store for the group.
 
     Kasal's DEFAULT backend sets ``CREWAI_STORAGE_DIR`` to
-    ``kasal_default_{group_id}_crew_{hash}`` per crew, which CrewAI resolves
-    relative to the backend process's CWD. This helper discovers every such
-    directory for the caller's group, reads its LanceDB store, and merges the
-    records tagged with their originating crew id.
+    ``kasal_default_{group_id}`` — one workspace-scoped store — which CrewAI
+    resolves as a relative name (under the backend CWD or the platform data
+    dir). This helper finds that store and reads its LanceDB records.
     """
     import os
     from pathlib import Path
@@ -1574,40 +1627,19 @@ def _browse_default_records(
         logger.warning("Default memory browse failed (crewai.memory missing): %s", exc)
         return []
 
-    # Search the backend process CWD plus a couple of plausible roots where
-    # CrewAI might drop storage dirs (its default is platform-dependent).
-    candidate_roots: List[Path] = [Path.cwd()]
-    xdg_data = os.environ.get("XDG_DATA_HOME")
-    if xdg_data:
-        candidate_roots.append(Path(xdg_data) / "CrewAI")
-    candidate_roots.append(Path.home() / ".local" / "share" / "CrewAI")
-    candidate_roots.append(Path.home() / "Library" / "Application Support" / "CrewAI")
-
-    pattern = f"kasal_default_{group_id}_crew_*"
-    storage_dirs: List[Path] = []
-    seen: set[str] = set()
-    for root in candidate_roots:
-        if not root.exists():
-            continue
-        try:
-            for match in root.glob(pattern):
-                key = str(match.resolve())
-                if key in seen:
-                    continue
-                seen.add(key)
-                storage_dirs.append(match)
-        except OSError:
-            continue
-
-    if not storage_dirs:
+    # ONE deterministic store per group at the known memory root
+    # (KASAL_MEMORY_DIR) — the exact path the runtime writes to, so the browser
+    # never reads a different location than the writer used. (Legacy per-crew
+    # stores are intentionally NOT read; the unified backend keeps one per group.)
+    store_dir = local_memory_store_dir(group_id)
+    if not store_dir.is_dir():
         logger.info(
-            "[memory/records] No local Kasal memory stores found for group %s "
-            "(looked for '%s' under %s)",
+            "[memory/records] No local memory store for group %s at %s",
             group_id,
-            pattern,
-            [str(r) for r in candidate_roots],
+            store_dir,
         )
         return []
+    storage_dirs: List[Path] = [store_dir]
 
     aggregated: List[Dict[str, Any]] = []
     original_storage = os.environ.get("CREWAI_STORAGE_DIR")
@@ -1830,44 +1862,25 @@ def _delete_default_records(
     group_id: str,
     scope: Optional[str],
 ) -> int:
-    """Wipe local LanceDB stores for the group's crews on the backend host.
+    """Wipe the local LanceDB store for the group on the backend host.
 
-    Matches the same candidate-roots we scan in ``_browse_default_records``.
-    When ``scope`` is provided, we delete only records matching that prefix
-    via ``crewai.memory.Memory`` (the LanceDB storage exposes scope-aware
-    ``delete``). When ``scope`` is unset, the entire per-crew directory is
-    removed — this is the cleanest way to guarantee no orphan LanceDB
-    manifest files remain.
+    Looks in the same candidate roots as ``_browse_default_records``. When
+    ``scope`` is provided, deletes only records matching that prefix via
+    ``crewai.memory.Memory`` (the LanceDB storage exposes scope-aware
+    ``delete``). When ``scope`` is unset, the entire group store directory is
+    removed — the cleanest way to guarantee no orphan LanceDB manifest files
+    remain.
     """
     import os
     import shutil
     from pathlib import Path
 
-    candidate_roots: List[Path] = [Path.cwd()]
-    xdg_data = os.environ.get("XDG_DATA_HOME")
-    if xdg_data:
-        candidate_roots.append(Path(xdg_data) / "CrewAI")
-    candidate_roots.append(Path.home() / ".local" / "share" / "CrewAI")
-    candidate_roots.append(Path.home() / "Library" / "Application Support" / "CrewAI")
-
-    pattern = f"kasal_default_{group_id}_crew_*"
-    storage_dirs: List[Path] = []
-    seen: set[str] = set()
-    for root in candidate_roots:
-        if not root.exists():
-            continue
-        try:
-            for match in root.glob(pattern):
-                key = str(match.resolve())
-                if key in seen:
-                    continue
-                seen.add(key)
-                storage_dirs.append(match)
-        except OSError:
-            continue
-
-    if not storage_dirs:
+    # ONE deterministic store per group at the known memory root — the same path
+    # the runtime writes to and the browser reads (legacy per-crew stores untouched).
+    store_dir = local_memory_store_dir(group_id)
+    if not store_dir.is_dir():
         return 0
+    storage_dirs: List[Path] = [store_dir]
 
     deleted = 0
     # Scope-filtered delete → use the Memory API so we leave other records
