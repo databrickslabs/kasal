@@ -301,12 +301,29 @@ async def event_stream_generator(
     try:
         start_time = datetime.now()
 
-        # Replay missed events on reconnect (Databricks Apps proxy drops)
-        if last_event_id is not None:
-            missed = sse_manager.get_replay_events(job_id, last_event_id)
+        # Replay buffered events the subscriber missed.
+        #
+        # On RECONNECT the browser sends Last-Event-ID and we replay everything
+        # after it (Databricks Apps proxy drops the stream periodically).
+        #
+        # On a FRESH connect to a specific job we replay the WHOLE per-job buffer
+        # (after id 0). A producer often emits BEFORE its subscriber arrives — a
+        # crew generation can finish in ~60ms, broadcasting its entire
+        # plan_ready..generation_complete sequence to zero subscribers, all of it
+        # buffered here. The client then opens the stream a few hundred ms later;
+        # without this replay it waits on an empty queue forever ("Thinking..."
+        # hang). Excluded for "all_groups_" streams, whose global buffer holds
+        # unrelated cross-job history we must not flood a fresh page with.
+        replay_after = last_event_id
+        if replay_after is None and not job_id.startswith("all_groups_"):
+            replay_after = 0
+        if replay_after is not None:
+            missed = sse_manager.get_replay_events(job_id, replay_after)
             if missed:
                 logger.info(
-                    f"[SSE_STREAM] Replaying {len(missed)} events after id {last_event_id}"
+                    f"[SSE_STREAM] Replaying {len(missed)} events after id "
+                    f"{replay_after} (fresh_connect={last_event_id is None}) | "
+                    f"job={job_id}"
                 )
                 for evt in missed:
                     yield evt.format()

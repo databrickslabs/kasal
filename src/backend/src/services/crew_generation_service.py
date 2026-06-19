@@ -856,9 +856,17 @@ class CrewGenerationService:
         so all database work uses an independent session created here.
         """
         from contextlib import nullcontext, asynccontextmanager
-        from src.db.session import async_session_factory
+        from src.db.session import async_session_factory, detach_request_session
         from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
+
+        # This runs via asyncio.create_task, so it inherited a COPY of the
+        # dispatch request's context — including the request-scoped DB session,
+        # which FastAPI has already closed. Detach it so every
+        # request_scoped_session() below (notably the model-config read inside
+        # LLMManager.configure_crewai_llm during planning) opens a fresh session
+        # instead of failing with "Cannot operate on a closed database".
+        detach_request_session()
 
         if mlflow_enabled:
             try:

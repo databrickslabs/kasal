@@ -352,6 +352,62 @@ describe('addMessage', () => {
     );
     expect(db.renameSession).toHaveBeenCalledWith('auto-created', 'kick off a chat');
   });
+
+  it('creates only ONE session when two messages arrive before the create resolves (Bug 1: double session)', async () => {
+    // Regression: on a fresh chat the dispatcher fires addMessage twice in the
+    // same tick (user prompt + "Thinking..." placeholder). Under network latency
+    // both ran ensureAndPersist, both read currentSessionId===null, and both
+    // created a session — leaving an orphaned "New Chat". A controllable
+    // createSession promise reproduces that latency window deterministically.
+    useSessionStore.setState({ currentSessionId: null });
+    let resolveCreate!: (s: ChatSession) => void;
+    (db.createSession as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise<ChatSession>((res) => {
+        resolveCreate = res;
+      }),
+    );
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('the-one')]);
+
+    // Two messages back-to-back in the same tick, create still pending.
+    useSessionStore.getState().addMessage('user', 'hello there');
+    useSessionStore.getState().addMessage('assistant', 'Thinking...');
+    await flush();
+
+    // Both turns must share ONE in-flight create, not spawn two sessions.
+    expect(db.createSession).toHaveBeenCalledTimes(1);
+
+    // Resolve the create; both messages land in the same session.
+    resolveCreate(makeSession('the-one'));
+    await flush();
+
+    expect(db.createSession).toHaveBeenCalledTimes(1);
+    const targetedSessions = (db.addMessageToSession as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0],
+    );
+    expect(targetedSessions).toEqual(['the-one', 'the-one']);
+    expect(useSessionStore.getState().currentSessionId).toBe('the-one');
+  });
+
+  it('creates a fresh session again after a previous create settled', async () => {
+    // The in-flight guard must release once settled so a later new chat can
+    // create its own session (it must not be pinned to the previous one).
+    useSessionStore.setState({ currentSessionId: null });
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(makeSession('first'));
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('first')]);
+    useSessionStore.getState().addMessage('user', 'first chat');
+    await flush();
+    expect(db.createSession).toHaveBeenCalledTimes(1);
+
+    // Simulate starting a brand-new chat (fresh, no current session).
+    useSessionStore.setState({ currentSessionId: null });
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(makeSession('second'));
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([makeSession('second')]);
+    useSessionStore.getState().addMessage('user', 'second chat');
+    await flush();
+
+    expect(db.createSession).toHaveBeenCalledTimes(2);
+    expect(useSessionStore.getState().currentSessionId).toBe('second');
+  });
 });
 
 describe('addMessageToTargetSession', () => {

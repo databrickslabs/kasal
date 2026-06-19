@@ -79,6 +79,16 @@ type SessionStore = SessionState & SessionActions;
 // Track which sessions have been auto-titled
 const autoTitled = new Set<string>();
 
+// Guards lazy session creation. On a fresh chat the first turn fires addMessage
+// more than once in the same tick (the user prompt AND the "Thinking..."
+// placeholder — see useDispatcher), each running an async ensureAndPersist that
+// reads currentSessionId. That id stays null until a create's network POST
+// returns, so without this guard every caller reads null and EACH creates a
+// session — leaving an orphaned "New Chat" alongside the real one. The window
+// only opens under network latency (Databricks Apps' remote Postgres); local
+// dev's sub-millisecond DB hides it. Concurrent callers share this one promise.
+let pendingSessionCreate: Promise<string> | null = null;
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   // --- State ---
   sessions: [],
@@ -201,11 +211,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const ensureAndPersist = async () => {
       let sessionId = get().currentSessionId;
       if (!sessionId) {
-        const session = await dbCreateSession('New Chat', currentGroupId());
-        sessionId = session.id;
-        localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
-        const allSessions = await dbListSessions(currentGroupId());
-        set({ currentSessionId: sessionId, sessions: allSessions });
+        // Reuse an in-flight create so messages arriving in the same tick share
+        // ONE session instead of each spawning its own (the double-session bug).
+        if (!pendingSessionCreate) {
+          const create = (async () => {
+            const session = await dbCreateSession('New Chat', currentGroupId());
+            localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
+            const allSessions = await dbListSessions(currentGroupId());
+            set({ currentSessionId: session.id, sessions: allSessions });
+            return session.id;
+          })();
+          pendingSessionCreate = create;
+          // Release once settled so a later fresh chat can create again. Only one
+          // create is ever in flight (the guard above blocks a second), so a plain
+          // reset is safe.
+          void create.finally(() => {
+            pendingSessionCreate = null;
+          });
+        }
+        sessionId = await pendingSessionCreate;
       }
       await addMessageToSession(sessionId, { ...message, sessionId });
 

@@ -276,3 +276,55 @@ class TestEventStreamGenerator:
         # Should contain the replayed event data
         all_output = "".join(chunks)
         assert "missed" in all_output
+
+    @pytest.mark.asyncio
+    async def test_generator_replays_buffered_events_on_fresh_connect(self):
+        """Regression: a fast producer can emit its WHOLE sequence before any
+        subscriber connects (a crew generation finishing in ~60ms broadcasts to
+        zero listeners). A FRESH connect (no Last-Event-ID) must replay the
+        per-job buffer so the late subscriber still receives the result instead
+        of hanging on an empty queue ('Thinking...' forever)."""
+        from src.core.sse_manager import sse_manager
+
+        # Producer emits BEFORE any subscriber exists (no create_event_queue).
+        done = SSEEvent(
+            data={"type": "generation_complete", "agents": []},
+            event="generation_complete",
+        )
+        await sse_manager.broadcast_to_job("fast-gen-race", done)
+
+        chunks = []
+        gen = event_stream_generator(
+            "fast-gen-race", timeout=1, heartbeat_interval=9999, last_event_id=None
+        )
+        async for chunk in gen:
+            chunks.append(chunk)
+            if len(chunks) >= 3:
+                break
+
+        # The completed-before-subscribe event is replayed on the fresh connect.
+        assert "generation_complete" in "".join(chunks)
+
+    @pytest.mark.asyncio
+    async def test_generator_fresh_connect_skips_global_stream_replay(self):
+        """A fresh connect to an 'all_groups_' stream must NOT replay the global
+        buffer (unrelated cross-job history) — only reconnects (Last-Event-ID)
+        replay there. Guards against flooding a freshly loaded page."""
+        from src.core.sse_manager import sse_manager
+
+        # Put an event in the global buffer via a normal job broadcast.
+        await sse_manager.broadcast_to_job(
+            "some-job", SSEEvent(data={"msg": "old-global"})
+        )
+
+        chunks = []
+        gen = event_stream_generator(
+            "all_groups_userX", timeout=1, heartbeat_interval=9999, last_event_id=None
+        )
+        async for chunk in gen:
+            chunks.append(chunk)
+            if len(chunks) >= 2:
+                break
+
+        # Fresh all_groups_ connect yields connected/heartbeat, not old history.
+        assert "old-global" not in "".join(chunks)
