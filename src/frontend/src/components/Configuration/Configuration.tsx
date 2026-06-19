@@ -46,7 +46,7 @@ import PromptConfiguration from './PromptConfiguration';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
-import { DatabricksOneClickSetup } from '../MemoryBackend';
+import { MemoryConfiguration } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
 import GroupManagement from './GroupManagement';
 import UIConfigurator from './UIConfigurator';
@@ -746,7 +746,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             if (item.label === t('configuration.memoryBackend.tab', { defaultValue: 'Memory' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <DatabricksOneClickSetup />
+                  <MemoryConfiguration />
                 </ContentPanel>
               );
             }

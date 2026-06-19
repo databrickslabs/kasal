@@ -235,6 +235,59 @@ describe('MemoryBackendService', () => {
     });
   });
 
+  describe('saveDefaultConfig', () => {
+    it('persists local cognitive tuning to the backend default/save-config endpoint', async () => {
+      const mockConfig: MemoryBackendConfig = {
+        backend_type: MemoryBackendType.DEFAULT,
+        cognitive_config: {
+          memory_llm_model: 'databricks-claude-haiku-4-5',
+          query_analysis_threshold: 99977,
+          exploration_budget: 0,
+        },
+      };
+      const mockResponse = { success: true, backend_id: 'abc', message: 'Local memory backend configured successfully' };
+      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
+
+      const result = await MemoryBackendService.saveDefaultConfig(mockConfig);
+
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/memory-backend/default/save-config',
+        { cognitive_config: mockConfig.cognitive_config }
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('sends null cognitive_config when none is set', async () => {
+      const mockConfig: MemoryBackendConfig = { backend_type: MemoryBackendType.DEFAULT };
+      (apiClient.post as Mock).mockResolvedValue({ data: { success: true, message: 'ok' } });
+
+      await MemoryBackendService.saveDefaultConfig(mockConfig);
+
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/memory-backend/default/save-config',
+        { cognitive_config: null }
+      );
+    });
+
+    it('returns a failure result on error', async () => {
+      const mockConfig: MemoryBackendConfig = { backend_type: MemoryBackendType.DEFAULT };
+      const mockError = new AxiosError('Save failed');
+      mockError.response = {
+        data: { detail: 'Only workspace admins can configure memory backends' },
+        status: 403,
+        statusText: 'Forbidden',
+        headers: {},
+        config: { headers: {} } as any,
+      };
+      (apiClient.post as Mock).mockRejectedValue(mockError);
+
+      const result = await MemoryBackendService.saveDefaultConfig(mockConfig);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Only workspace admins can configure memory backends');
+    });
+  });
+
   describe('getConfig', () => {
     it('should fetch config successfully', async () => {
       const mockConfig: MemoryBackendConfig = {

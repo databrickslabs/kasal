@@ -38,6 +38,7 @@ const {
     getLakebaseTableStats: vi.fn().mockResolvedValue({}),
     testLakebaseConnection: vi.fn().mockResolvedValue({ success: true, message: 'Connected' }),
     initializeLakebaseTables: vi.fn().mockResolvedValue({ success: true, message: 'Tables created' }),
+    saveDefaultConfig: vi.fn().mockResolvedValue({ success: true, backend_id: 'b1', message: 'ok' }),
   },
   mockValidateIndex: vi.fn().mockReturnValue(true),
   capturedProps: { current: {} as Record<string, Record<string, unknown>> },
@@ -52,7 +53,7 @@ vi.mock('../../config/api/ApiConfig', () => ({
 }));
 
 vi.mock('../../store/memoryBackend', () => ({
-  // Support both the no-arg destructure (DatabricksOneClickSetup) and the
+  // Support both the no-arg destructure (MemoryConfiguration) and the
   // selector form used by CognitiveMemoryPanel (state => state.updateCognitiveConfig).
   useMemoryBackendStore: (selector?: (state: unknown) => unknown) => {
     const state = {
@@ -160,7 +161,7 @@ vi.mock('./MemoryRecordsBrowser', () => ({
 // Import component
 // ---------------------------------------------------------------------------
 
-import { DatabricksOneClickSetup } from './DatabricksOneClickSetup';
+import { MemoryConfiguration } from './MemoryConfiguration';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -171,7 +172,7 @@ const theme = createTheme();
 function renderComponent() {
   return render(
     <ThemeProvider theme={theme}>
-      <DatabricksOneClickSetup />
+      <MemoryConfiguration />
     </ThemeProvider>,
   );
 }
@@ -302,7 +303,7 @@ function makeAxios404(): AxiosError {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('DatabricksOneClickSetup', () => {
+describe('MemoryConfiguration', () => {
   let confirmSpy: ReturnType<typeof vi.spyOn>;
   let alertSpy: ReturnType<typeof vi.spyOn>;
 
@@ -393,6 +394,20 @@ describe('DatabricksOneClickSetup', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('memory-records-browser')).toHaveAttribute('data-open', 'true');
+    });
+  });
+
+  it('persists local cognitive tuning via /memory-backend/default/save-config', async () => {
+    await act(async () => renderComponent());
+    await waitForLoaded();
+
+    const saveBtn = screen.getByRole('button', { name: /Save Local Memory Settings/i });
+    await act(async () => fireEvent.click(saveBtn));
+
+    // Local save creates an ACTIVE default config (the fix that makes the
+    // cognitive tuning actually load at crew execution).
+    await waitFor(() => {
+      expect(mockMBService.saveDefaultConfig).toHaveBeenCalled();
     });
   });
 
