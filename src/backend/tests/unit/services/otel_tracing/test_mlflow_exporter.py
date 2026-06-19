@@ -643,6 +643,182 @@ class TestBuildMlflowTrace:
         exporter._executor.shutdown(wait=False)
 
 
+class TestDeriveRootIO:
+    """Tests for _derive_root_io — root span (request, response) resolution.
+
+    Precedence rules under test:
+      request  = crew/flow kickoff inputs (kasal.extra.inputs) if meaningful,
+                 else earliest task_started prompt/name fallback.
+      response = crew/flow paired span outputs["content"] if present,
+                 else latest task output with content.
+    """
+
+    def _crew_span(self, *, inputs=None, content=None, event_type="crew_started",
+                   start_time=100, end_time=200):
+        attrs = {}
+        if inputs is not None:
+            attrs["kasal.extra.inputs"] = inputs
+        outputs = {}
+        if content is not None:
+            outputs["content"] = content
+        return _PairedSpan(
+            name=event_type,
+            start_time=start_time,
+            end_time=end_time,
+            event_type=event_type,
+            inputs={},
+            outputs=outputs,
+            attributes=attrs,
+        )
+
+    def _task_span(self, *, task_prompt=None, task_name_attr=None, task_name="",
+                   content=None, start_time=100, end_time=200):
+        attrs = {}
+        if task_prompt is not None:
+            attrs["kasal.extra.task_prompt"] = task_prompt
+        if task_name_attr is not None:
+            attrs["kasal.extra.task_name"] = task_name_attr
+        outputs = {}
+        if content is not None:
+            outputs["content"] = content
+        return _PairedSpan(
+            name="task",
+            start_time=start_time,
+            end_time=end_time,
+            event_type="task_started",
+            task_name=task_name,
+            inputs={},
+            outputs=outputs,
+            attributes=attrs,
+        )
+
+    # ── request resolution ──────────────────────────────────────────────
+
+    def test_crew_inputs_win_for_request(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(inputs="{'topic': 'AI agents'}"),
+            self._task_span(task_prompt="Research the topic deeply"),
+        ]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "{'topic': 'AI agents'}"
+
+    def test_flow_inputs_also_win_for_request(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(inputs="flow kickoff inputs", event_type="flow_started"),
+            self._task_span(task_prompt="task prompt fallback"),
+        ]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "flow kickoff inputs"
+
+    def test_empty_crew_inputs_fall_back_to_task_prompt(self):
+        exporter = _make_exporter()
+        # "{}" / "None" / "" are treated as not-meaningful.
+        for empty in ("{}", "None", ""):
+            paired = [
+                self._crew_span(inputs=empty),
+                self._task_span(task_prompt="Research the topic deeply"),
+            ]
+            request, _ = exporter._derive_root_io(paired)
+            assert request == "Research the topic deeply", f"empty={empty!r}"
+
+    def test_no_crew_inputs_fall_back_to_task_prompt(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(inputs=None),
+            self._task_span(task_prompt="Write a report"),
+        ]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "Write a report"
+
+    def test_task_fallback_uses_earliest_task(self):
+        exporter = _make_exporter()
+        # Out of order; earliest start_time should be chosen.
+        paired = [
+            self._task_span(task_prompt="second", start_time=500),
+            self._task_span(task_prompt="first", start_time=100),
+        ]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "first"
+
+    def test_task_request_falls_through_prompt_then_name_attr_then_task_name(self):
+        exporter = _make_exporter()
+        # No prompt, but task_name attr present.
+        paired = [self._task_span(task_name_attr="NamedTask")]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "NamedTask"
+
+        # No prompt, no name attr, but .task_name field present.
+        paired = [self._task_span(task_name="FieldTask")]
+        request, _ = exporter._derive_root_io(paired)
+        assert request == "FieldTask"
+
+    def test_request_none_when_nothing_available(self):
+        exporter = _make_exporter()
+        paired = [self._crew_span(inputs=None, content="some output")]
+        request, _ = exporter._derive_root_io(paired)
+        assert request is None
+
+    # ── response resolution ─────────────────────────────────────────────
+
+    def test_crew_output_wins_for_response(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(content="final crew answer"),
+            self._task_span(content="task output", end_time=999),
+        ]
+        _, response = exporter._derive_root_io(paired)
+        assert response == "final crew answer"
+
+    def test_flow_output_wins_for_response(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(content="flow answer", event_type="flow_started"),
+            self._task_span(content="task output", end_time=999),
+        ]
+        _, response = exporter._derive_root_io(paired)
+        assert response == "flow answer"
+
+    def test_response_falls_back_to_latest_task_output(self):
+        exporter = _make_exporter()
+        # No crew/flow content; latest (by end_time) task output wins.
+        paired = [
+            self._task_span(content="earlier output", end_time=100),
+            self._task_span(content="latest output", end_time=900),
+        ]
+        _, response = exporter._derive_root_io(paired)
+        assert response == "latest output"
+
+    def test_response_none_when_no_content_anywhere(self):
+        exporter = _make_exporter()
+        paired = [
+            self._crew_span(inputs="some inputs"),
+            self._task_span(task_prompt="a prompt"),
+        ]
+        _, response = exporter._derive_root_io(paired)
+        assert response is None
+
+    def test_empty_paired_returns_none_none(self):
+        exporter = _make_exporter()
+        request, response = exporter._derive_root_io([])
+        assert request is None
+        assert response is None
+
+    def test_independent_request_and_response_resolution(self):
+        exporter = _make_exporter()
+        # crew inputs drive request; crew has no content so response comes
+        # from the latest task output.
+        paired = [
+            self._crew_span(inputs="the user's request"),
+            self._task_span(content="first task", end_time=100),
+            self._task_span(content="last task", end_time=800),
+        ]
+        request, response = exporter._derive_root_io(paired)
+        assert request == "the user's request"
+        assert response == "last task"
+
+
 class TestEventPairsConstants:
     def test_all_start_events_have_end_events(self):
         for start, end in _EVENT_PAIRS.items():
