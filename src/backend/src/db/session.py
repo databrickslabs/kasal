@@ -1,27 +1,27 @@
-from typing import AsyncGenerator, Generator, Optional
-import os
-import logging
-import re
-from pathlib import Path
-from datetime import datetime, timezone
-import sys
 import asyncio
+import logging
+import os
+import re
+import sys
 import time
-from functools import wraps
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
+from functools import wraps
+from pathlib import Path
+from typing import AsyncGenerator, Generator, Optional
 
-from sqlalchemy import text, event
+from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.exc import OperationalError
 
 from src.config.settings import settings
-from src.db.base import Base
 from src.core.logger import LoggerManager
+from src.db.base import Base
 
 # SQL identifier validation to prevent injection in dynamic SQL
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -187,7 +187,7 @@ class SQLAlchemyLogger:
 sql_logger = SQLAlchemyLogger()
 
 # Import pool classes
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool, StaticPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, StaticPool
 
 # Determine if we should use NullPool for event loop isolation
 # This is necessary when running in environments with multiple event loops
@@ -244,17 +244,23 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
 
 
 def get_sqlite_poolclass():
-    """Pool class for the SQLite engine: NullPool.
+    """Pool class for the SQLite engine: StaticPool.
 
-    StaticPool shares ONE aiosqlite connection across every thread and event
-    loop (API loop, trace writer, OTel exporter thread, subprocess helpers);
-    whichever context drops the last reference then closes/rolls back the
-    shared connection outside SQLAlchemy's greenlet bridge, raising
-    MissingGreenlet / "Cannot operate on a closed database" at run teardown.
-    NullPool opens a fresh connection per checkout in the caller's own
-    context; WAL mode + busy_timeout (configure_sqlite) keep that safe.
+    NullPool opens a FRESH aiosqlite connection per checkout, so every
+    concurrent writer (API loop, trace/logs writer, OTel exporter thread,
+    flow/crew subprocess) gets its own connection. On SQLite — a single-writer
+    database — those connections contend for the one write lock and, once write
+    load grows (memory/chat-session writes, multi-crew HITL flow resumes),
+    callers exceed busy_timeout and fail with "database is locked".
+
+    StaticPool shares ONE connection so writes serialize through it, which
+    eliminates that contention. WAL mode + busy_timeout (configure_sqlite) plus
+    check_same_thread=False keep the shared connection safe across threads. This
+    reverts the StaticPool->NullPool switch from 205b5f57; that switch was made
+    to avoid MissingGreenlet / "Cannot operate on a closed database" at
+    cross-loop teardown, so watch for those if connection lifetimes change.
     """
-    return NullPool
+    return StaticPool
 
 
 isolation_level = get_isolation_level(str(settings.DATABASE_URI))
@@ -264,17 +270,15 @@ connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
 # Strategy: Use pooled connections for main app, NullPool for background tasks
 
 if str(settings.DATABASE_URI).startswith("sqlite"):
-    # SQLite: NullPool — a FRESH aiosqlite connection per checkout, opened and
-    # closed inside the same task/event-loop context that uses it. StaticPool
-    # previously shared ONE connection across every thread and event loop
-    # (API loop, trace writer, OTel exporter thread, subprocess helpers);
-    # whichever context dropped the last reference then closed/rolled back the
-    # shared connection outside SQLAlchemy's greenlet bridge, producing
-    # MissingGreenlet / "Cannot operate on a closed database" on run teardown.
-    # WAL mode + busy_timeout (configure_sqlite, applied per-connection via
-    # the "connect" event) keep concurrent access safe without sharing.
+    # SQLite: StaticPool — ONE shared aiosqlite connection so concurrent writers
+    # serialize through it instead of each opening its own connection and
+    # contending for SQLite's single write lock ("database is locked"). WAL mode
+    # + busy_timeout (configure_sqlite, applied via the "connect" event) and
+    # check_same_thread=False keep the shared connection safe across threads.
+    # See get_sqlite_poolclass() for the NullPool trade-off (205b5f57).
     logger.info(
-        "SQLite detected - using NullPool (fresh connection per session, no cross-loop sharing)"
+        "SQLite detected - using StaticPool (single shared connection) to "
+        "serialize writes and avoid 'database is locked'"
     )
     engine = create_async_engine(
         str(settings.DATABASE_URI),
@@ -734,6 +738,7 @@ async def init_db() -> None:
     try:
         # Import all models to ensure they're registered
         import importlib
+
         import src.db.all_models
 
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
