@@ -252,6 +252,28 @@ class TestSanitizeMessagesForDatabricks:
         assert result is original
         assert original[0]["content"] == "Calling tools."
 
+    def test_strips_cache_breakpoint_field(self):
+        """CrewAI stamps a top-level cache_breakpoint flag for prompt caching, but
+        non-Claude Databricks endpoints (llama/qwen/gemma/gpt-oss/gemini) 400 on
+        the unknown field — it must be stripped from the sent messages."""
+        msgs = [
+            {"role": "system", "content": "sys", "cache_breakpoint": True},
+            {"role": "user", "content": "hi", "cache_breakpoint": True},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert all("cache_breakpoint" not in m for m in msgs)
+        assert msgs[0] == {"role": "system", "content": "sys"}
+        assert msgs[1] == {"role": "user", "content": "hi"}
+
+    def test_cache_breakpoint_strip_does_not_mutate_caller_dict(self):
+        """The flag is removed from a COPY, so CrewAI's reusable message buffer
+        keeps its markers for providers that actually cache."""
+        original = {"role": "user", "content": "hi", "cache_breakpoint": True}
+        msgs = [original]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert "cache_breakpoint" not in msgs[0]          # stripped in the sent list
+        assert original.get("cache_breakpoint") is True   # caller's dict untouched
+
     def test_handles_non_dict_items(self):
         msgs = ["plain string", {"role": "user", "content": "Hello"}]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
