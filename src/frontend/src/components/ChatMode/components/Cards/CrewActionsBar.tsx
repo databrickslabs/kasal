@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GenerationCompleteData } from '../../hooks/useGenerationStream';
+import { GenerationCompleteData } from '../../types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
 

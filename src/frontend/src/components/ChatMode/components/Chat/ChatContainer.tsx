@@ -1,8 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
-import { ModelConfigResponse } from '../../types/dispatcher';
+import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
-import { GenerationCompleteData } from '../../hooks/useGenerationStream';
 import ChatMessageComponent, { TraceEntryData, formatDurationMs } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';

@@ -2215,6 +2215,72 @@ class TestDispatchWithSuggestedTools:
         assert streaming_req.tools == ["UserSelectedTool"]
 
     @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_sets_auto_execute_and_run_settings(self):
+        """ChatMode generate_crew must flag auto_execute and carry the run
+        settings onto the streaming request so the backend runs the crew with
+        the chat's own memory scope + attached MCP data sources."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
+
+        request = DispatcherRequest(
+            # `message` carries the frontend's intent-steering prefix; the clean
+            # request rides in `original_prompt` and must win for grounding.
+            message="create a crew plan with agents and tasks: top customers",
+            original_prompt="top customers",
+            model="m",
+            auto_execute=True,  # ChatMode
+            session_id="chat-session-7",
+            memory_workspace_scope=False,
+            disable_memory=True,
+            mcp_servers=["Databricks Genie: Sales"],
+        )
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
+
+        streaming_req = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_req.auto_execute is True
+        assert streaming_req.session_id == "chat-session-7"
+        assert streaming_req.memory_workspace_scope is False
+        assert streaming_req.disable_memory is True
+        assert streaming_req.mcp_servers == ["Databricks Genie: Sales"]
+        # The CLEAN chat message grounds the run, not the steering-prefixed one.
+        assert streaming_req.original_prompt == "top customers"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_canvas_does_not_auto_execute(self):
+        """The crew canvas omits auto_execute (defaults False): the backend renders
+        the plan but does NOT run it — the user runs it via Play. Auto-executing
+        here too would double-run the crew."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        def capture_create_task(coro):
+            coro.close()
+            return MagicMock()
+
+        # No auto_execute → defaults False (crew canvas path).
+        request = DispatcherRequest(message="find syrian poets", model="m")
+        with patch("asyncio.create_task", side_effect=capture_create_task):
+            await svc.dispatch(request)
+
+        streaming_req = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_req.auto_execute is False
+
+    @pytest.mark.asyncio
     async def test_dispatch_suggested_tools_in_agent_generation(self):
         """suggested_tools should be passed to agent generation when no request tools."""
         svc = _build_service()

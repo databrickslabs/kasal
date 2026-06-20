@@ -836,6 +836,108 @@ class CrewGenerationService:
     #  Progressive / Streaming crew generation
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def build_crew_config_from_generated(
+        request: "CrewStreamingRequest",
+        agent_results: List[Dict[str, Any]],
+        clean_tasks: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Build an executable crew config (CrewConfig dict) from the agents/tasks
+        just produced by progressive generation.
+
+        Backend mirror of the frontend ``buildCrewConfigFromGenerated`` used by
+        ChatMode: keys agents as ``agent_<id>`` and tasks as ``task_<id>``, injects
+        the selected MCP servers into each agent's and task's ``tool_configs``,
+        grounds task descriptions with the user's request, resolves task→agent and
+        task→task (context) links, and applies the chat memory settings. Used only
+        for ChatMode auto-execute (``request.auto_execute``); the AgentBuilder /
+        crew canvas never calls this — it renders the plan as nodes instead.
+        """
+        mcp_servers = list(request.mcp_servers or [])
+        user_request = request.original_prompt or request.prompt
+
+        OPTIONAL_AGENT_FIELDS = (
+            "llm", "function_calling_llm", "max_iter", "max_rpm",
+            "max_execution_time", "memory", "verbose", "allow_delegation",
+            "cache", "system_template", "prompt_template", "response_template",
+            "allow_code_execution", "code_execution_mode", "max_retry_limit",
+            "use_system_prompt", "respect_context_window",
+        )
+
+        agents_yaml: Dict[str, Dict[str, Any]] = {}
+        agent_id_to_key: Dict[str, str] = {}
+        for agent in agent_results:
+            aid = str(agent.get("id") or "")
+            key = f"agent_{aid}"
+            agent_id_to_key[aid] = key
+            cfg: Dict[str, Any] = {
+                "role": agent.get("role") or "",
+                "goal": agent.get("goal") or "",
+                "backstory": agent.get("backstory") or "",
+                "tools": agent.get("tools") or [],
+            }
+            for field in OPTIONAL_AGENT_FIELDS:
+                if agent.get(field) is not None:
+                    cfg[field] = agent[field]
+            if mcp_servers:
+                cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            # "No memory" mode: force every agent to be created without memory so
+            # the backend disables crew memory entirely (nothing recalled/persisted).
+            if request.disable_memory:
+                cfg["memory"] = False
+            agents_yaml[key] = cfg
+
+        tasks_yaml: Dict[str, Dict[str, Any]] = {}
+        for task in clean_tasks:
+            tid = str(task.get("id") or "")
+            key = f"task_{tid}"
+            agent_id = str(task.get("agent_id") or task.get("agent") or "")
+            agent_key = agent_id_to_key.get(agent_id)
+            context: List[str] = []
+            for dep in (task.get("context") or []):
+                if isinstance(dep, str):
+                    context.append(f"task_{dep}")
+                elif isinstance(dep, dict) and dep.get("id"):
+                    context.append(f"task_{dep['id']}")
+            # Generated task descriptions are often generic mission statements;
+            # ground the run with the chat prompt + attached MCP sources so the
+            # crew has a concrete question and actually queries its tools.
+            base_desc = str(task.get("description") or "")
+            grounding: List[str] = []
+            if user_request:
+                grounding.append(f"USER REQUEST — this run exists to answer it:\n{user_request}")
+            if mcp_servers:
+                grounding.append(
+                    f"MCP data sources attached — query them for data questions: {', '.join(mcp_servers)}"
+                )
+            description = f"{base_desc}\n\n" + "\n\n".join(grounding) if grounding else base_desc
+            entry: Dict[str, Any] = {
+                "id": tid,
+                "description": description,
+                "expected_output": task.get("expected_output") or "",
+                "tools": task.get("tools") or [],
+                "context": context,
+                "agent": agent_key,
+                "async_execution": bool(task.get("async_execution")),
+                "output_file": task.get("output_file") or f"output/{tid}.md",
+            }
+            if mcp_servers:
+                entry.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            tasks_yaml[key] = entry
+
+        return {
+            "agents_yaml": agents_yaml,
+            "tasks_yaml": tasks_yaml,
+            "inputs": {},
+            "planning": False,
+            "reasoning": False,
+            "model": request.model or None,
+            "execution_type": "crew",
+            "schema_detection_enabled": True,
+            "session_id": request.session_id,
+            "memory_workspace_scope": request.memory_workspace_scope,
+        }
+
     async def create_crew_progressive(
         self,
         request: CrewStreamingRequest,
@@ -1422,13 +1524,58 @@ class CrewGenerationService:
 
                 # ── Done ──────────────────────────────────────────────────
                 clean_tasks = [{k: v for k, v in t.items() if k != "_plan"} for t in task_results]
+                gen_complete_data = {
+                    "type": "generation_complete",
+                    "status": "completed",
+                    "agents": agent_results,
+                    "tasks": clean_tasks,
+                }
+
+                # ── ChatMode auto-execute ─────────────────────────────────
+                # ChatMode generates AND runs in one backend flow so the run
+                # survives the user switching sessions before the plan finishes
+                # — the frontend never has to round-trip a createExecution call
+                # (which is what used to drop the run on session switch). The
+                # execution id is FOLDED INTO generation_complete (a single
+                # terminal event) so the frontend can stop the generation stream
+                # immediately — no open-window for SSE reconnect/replay to
+                # re-deliver and cross-route trace events. AgentBuilder leaves
+                # auto_execute False and only renders the plan as nodes.
+                if getattr(request, "auto_execute", False):
+                    try:
+                        from src.schemas.execution import CrewConfig
+                        from src.services.execution_service import ExecutionService
+
+                        crew_config = CrewConfig(
+                            **self.build_crew_config_from_generated(
+                                request, agent_results, clean_tasks
+                            )
+                        )
+                        # session=None: the whole execution stack opens its own
+                        # request_scoped_session() (already detached above), so a
+                        # request-scoped session would only be a closed handle.
+                        # background_tasks=None launches via asyncio.create_task.
+                        exec_result = await ExecutionService(session=None).create_execution(
+                            config=crew_config,
+                            background_tasks=None,
+                            group_context=group_context,
+                        )
+                        gen_complete_data["execution_id"] = exec_result.get("execution_id")
+                        gen_complete_data["run_name"] = exec_result.get("run_name")
+                        logger.info(
+                            f"PROGRESSIVE [{generation_id}]: Auto-execute launched "
+                            f"execution {exec_result.get('execution_id')}"
+                        )
+                    except Exception as exec_err:
+                        logger.error(
+                            f"PROGRESSIVE [{generation_id}]: Auto-execute failed: "
+                            f"{exec_err}"
+                        )
+                        logger.error(traceback.format_exc())
+                        gen_complete_data["execution_error"] = str(exec_err)
+
                 await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                    data={
-                        "type": "generation_complete",
-                        "status": "completed",
-                        "agents": agent_results,
-                        "tasks": clean_tasks,
-                    },
+                    data=gen_complete_data,
                     event="generation_complete",
                 ))
                 logger.info(f"PROGRESSIVE [{generation_id}]: Generation complete")

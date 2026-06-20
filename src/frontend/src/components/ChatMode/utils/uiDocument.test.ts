@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseUiDocument,
   findUiSurface,
+  findUiDocument,
   resolveValue,
   applyConfiguredTheme,
   inferSurfaceDeliverable,
@@ -529,6 +530,39 @@ describe('findUiSurface — A2UI nested anywhere in a result tree', () => {
 
   it('finds a document among array elements', () => {
     expect(findUiSurface([{ junk: 1 }, doc])!.rootId).toBe('root');
+  });
+
+  describe('findUiDocument — returns the RAW renderable node', () => {
+    const json = JSON.stringify(doc);
+
+    it('returns the doc object for a clean top-level document', () => {
+      expect(findUiDocument(doc)).toBe(doc);
+    });
+
+    it('returns the original string for a top-level document string', () => {
+      expect(findUiDocument(json)).toBe(json);
+    });
+
+    it('returns the INNER node out of a wrapped result (object)', () => {
+      const wrapped = { success: true, crew_a: doc };
+      expect(findUiDocument(wrapped)).toBe(doc);
+    });
+
+    it('returns the JSON string value out of a multi-key envelope', () => {
+      const wrapped = { output: 'done', meta: json };
+      expect(findUiDocument(wrapped)).toBe(json);
+    });
+
+    it('returns null when there is no A2UI document', () => {
+      expect(findUiDocument({ output: 'just text', n: 1 })).toBeNull();
+      expect(findUiDocument('plain prose, no doc')).toBeNull();
+    });
+
+    it('extracted node re-renders identically via parseUiDocument', () => {
+      // The whole point: hand the extracted node to the preview pane unchanged.
+      const node = findUiDocument({ result: doc })!;
+      expect(parseUiDocument(node as never)!.rootId).toBe('root');
+    });
   });
 
   it('returns the OUTERMOST/first surface when several exist', () => {

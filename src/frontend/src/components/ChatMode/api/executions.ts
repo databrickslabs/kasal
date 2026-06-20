@@ -22,6 +22,17 @@ export async function getExecutionStatus(id: string): Promise<Execution> {
   return response.data;
 }
 
+/**
+ * Fetch a single execution INCLUDING its full `result` (the crew output that
+ * holds the rendered deliverable). Unlike `getExecutionStatus` (/status, which
+ * omits the result), this hits /executions/{id}. Used to derive the chat
+ * preview on demand from the stored result instead of a separate preview copy.
+ */
+export async function getExecution(id: string): Promise<Execution> {
+  const response = await getClient().get<Execution>(`/executions/${id}`);
+  return response.data;
+}
+
 export async function stopExecution(id: string): Promise<void> {
   await getClient().post(`/executions/${id}/stop`, {
     stop_type: 'graceful',

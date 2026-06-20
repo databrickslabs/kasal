@@ -23,6 +23,30 @@ export interface DispatcherRequest {
   message: string;
   model?: string;
   tools?: string[];
+  // The user's CLEAN message (before the intent-steering prefix is added to
+  // `message`). The backend grounds the generated crew's run with this so the
+  // crew answers the real request, not "create a crew plan with…".
+  original_prompt?: string;
+  // When true (ChatMode only), the backend runs the generated crew immediately.
+  // The crew canvas omits this (defaults false): it renders the plan and the
+  // user runs it via Play — sending it true here would double-run the crew.
+  auto_execute?: boolean;
+  // ChatMode run settings — carried to the backend so a generated crew is
+  // auto-executed with the chat's own memory scope + attached data sources,
+  // without a frontend round-trip. AgentBuilder doesn't send these.
+  session_id?: string;
+  memory_workspace_scope?: boolean;
+  disable_memory?: boolean;
+  mcp_servers?: string[];
+}
+
+/** ChatMode run settings gathered from the execution store at dispatch time. */
+export interface DispatchRunSettings {
+  auto_execute?: boolean;
+  session_id?: string;
+  memory_workspace_scope?: boolean;
+  disable_memory?: boolean;
+  mcp_servers?: string[];
 }
 
 export interface DispatcherResponse {
@@ -55,6 +79,18 @@ export interface GeneratedTask {
   expected_output: string;
   tools?: string[];
   agent_id?: string;
+}
+
+/** The agents/tasks a crew generation produced (the generation_complete event). */
+export interface GenerationCompleteData {
+  agents: Record<string, unknown>[];
+  tasks: Record<string, unknown>[];
+  /**
+   * The chat prompt that triggered this generation. Generated task descriptions
+   * are often generic mission statements; the executed config appends this so
+   * the run answers the user's ACTUAL request instead of asking for a question.
+   */
+  user_request?: string;
 }
 
 export interface GeneratedCrew {

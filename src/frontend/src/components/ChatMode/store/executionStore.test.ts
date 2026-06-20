@@ -3,6 +3,7 @@ import { useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
 import { saveSessionPreview, getSessionPreview } from '../db/sessionApi';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
+import { deriveSessionPreviews } from '../utils/sessionPreview';
 
 // --- Mocks for sibling modules ---
 vi.mock('./sessionStore', () => {
@@ -21,6 +22,7 @@ vi.mock('./sessionStore', () => {
 vi.mock('../db/sessionApi', () => ({
   saveSessionPreview: vi.fn(),
   getSessionPreview: vi.fn(() => Promise.resolve(undefined)),
+  getSessionMessages: vi.fn(() => Promise.resolve([])),
   setSessionRunningJob: vi.fn(() => Promise.resolve()),
   getSessionRunningJob: vi.fn(() => Promise.resolve(null)),
   clearSessionRunningJob: vi.fn(() => Promise.resolve()),
@@ -28,6 +30,10 @@ vi.mock('../db/sessionApi', () => ({
 
 vi.mock('../components/Preview/PreviewPanel', () => ({
   parsePreviewContent: vi.fn(),
+}));
+
+vi.mock('../utils/sessionPreview', () => ({
+  deriveSessionPreviews: vi.fn(() => Promise.resolve({ history: [], current: null })),
 }));
 
 // Typed helpers to access the mocked sessionStore state
@@ -39,6 +45,7 @@ const setCurrentSessionId = (id: string | null) => {
 const mockedSave = saveSessionPreview as unknown as ReturnType<typeof vi.fn>;
 const mockedGet = getSessionPreview as unknown as ReturnType<typeof vi.fn>;
 const mockedParse = parsePreviewContent as unknown as ReturnType<typeof vi.fn>;
+const mockedDerive = deriveSessionPreviews as unknown as ReturnType<typeof vi.fn>;
 
 // Capture the pristine initial state so each test resets cleanly
 const initialState = useExecutionStore.getState();
@@ -303,6 +310,7 @@ describe('executionStore - preview history', () => {
   });
 
   it('startExecution clears preview history', () => {
+    setCurrentSessionId('sess-X'); // viewing the run's owner → drives the live slot
     useExecutionStore.setState({ previewHistory: [a, b] as any, previewIndex: 1 });
     useExecutionStore.getState().startExecution('job-1', 'sess-X');
     const s = useExecutionStore.getState();
@@ -311,6 +319,7 @@ describe('executionStore - preview history', () => {
   });
 
   it('startExecution with preservePreview keeps the existing preview + history (refine continuation)', () => {
+    setCurrentSessionId('sess-X'); // viewing the run's owner → drives the live slot
     useExecutionStore.setState({
       previewContent: b as any,
       previewOwnerSessionId: 'sess-X',
@@ -384,7 +393,10 @@ describe('executionStore - reopenPreview', () => {
     expect(s.previewIndex).toBe(0);
   });
 
-  it('keeps existing preview history when reopening', async () => {
+  it('reopens the viewed entry from in-memory history without refetching', async () => {
+    // Fast path: history is still in memory (clearPreview keeps it), so reopen
+    // restores the entry the user was on (previewIndex) and never hits the
+    // persisted-preview fallback.
     setCurrentSessionId('sess-A');
     const existing = [
       { type: 'ui', data: '# x', title: 'X' },
@@ -393,10 +405,9 @@ describe('executionStore - reopenPreview', () => {
     useExecutionStore.setState({ previewHistory: existing as any, previewIndex: 1 });
     mockedGet.mockResolvedValue({ type: 'ui', data: '{}', title: 'JT' });
     useExecutionStore.getState().reopenPreview();
-    await vi.waitFor(() => {
-      expect(useExecutionStore.getState().previewContent).toEqual({ type: 'ui', data: '{}', title: 'JT' });
-    });
+    expect(useExecutionStore.getState().previewContent).toEqual(existing[1]);
     expect(useExecutionStore.getState().previewHistory).toEqual(existing);
+    expect(mockedGet).not.toHaveBeenCalled(); // no refetch when history is present
   });
 
   it('ignores stored preview if session switched away', async () => {
@@ -424,6 +435,7 @@ describe('executionStore - reopenPreview', () => {
 
 describe('executionStore - startExecution & updateExecutionStatus', () => {
   it('startExecution uses provided sessionId', () => {
+    setCurrentSessionId('sess-X'); // viewing the owner → live slot reflects it
     useExecutionStore.getState().startExecution('job-1', 'sess-X');
     const s = useExecutionStore.getState();
     expect(s.executionOwnerSessionId).toBe('sess-X');
@@ -445,6 +457,32 @@ describe('executionStore - startExecution & updateExecutionStatus', () => {
     setCurrentSessionId(null);
     useExecutionStore.getState().startExecution('job-noowner');
     expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull(); // owner falsy → no persist
+  });
+
+  it('startExecution for a BACKGROUNDED run snapshots it without seizing the live slot', () => {
+    // Viewing sess-current, but a run starts for sess-bg (e.g. its generation
+    // finished on the backend while you're elsewhere). It must NOT take over the
+    // viewed session's live slot — it parks a running snapshot for sess-bg.
+    setCurrentSessionId('sess-current');
+    useExecutionStore.setState({
+      executionOwnerSessionId: 'sess-current',
+      isExecuting: false,
+      activeExecution: null,
+    });
+    useExecutionStore.getState().startExecution('job-bg', 'sess-bg');
+    const s = useExecutionStore.getState();
+    // Live slot untouched (still the viewed session, not executing here).
+    expect(s.executionOwnerSessionId).toBe('sess-current');
+    expect(s.activeExecution).toBeNull();
+    // But the job is owned by sess-bg, and switching to it restores the run.
+    expect(s.jobOwnerOf('job-bg')).toBe('sess-bg');
+    setCurrentSessionId('sess-bg');
+    useExecutionStore.setState({ executionOwnerSessionId: null });
+    useExecutionStore.getState().restoreSessionState('sess-bg');
+    const r = useExecutionStore.getState();
+    expect(r.isExecuting).toBe(true);
+    expect(r.activeExecution).toEqual({ jobId: 'job-bg', status: 'running' });
+    expect(r.executionOwnerSessionId).toBe('sess-bg');
   });
 
   it('updateExecutionStatus updates when active execution exists', () => {
@@ -522,6 +560,7 @@ describe('executionStore - completeExecution', () => {
       'sess-O',
       'assistant',
       'plain text',
+      undefined, // no jobId in this legacy path -> no executionId extra
     );
   });
 
@@ -530,7 +569,7 @@ describe('executionStore - completeExecution', () => {
     mockedParse.mockReturnValue(null);
     useExecutionStore.setState({ executionOwnerSessionId: null });
     useExecutionStore.getState().completeExecution('plain text');
-    expect(sessionState().addMessage).toHaveBeenCalledWith('assistant', 'plain text');
+    expect(sessionState().addMessage).toHaveBeenCalledWith('assistant', 'plain text', undefined);
     // isViewingOwner true (null === null), no snapshot delete attempted
     expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull();
   });
@@ -543,6 +582,7 @@ describe('executionStore - completeExecution', () => {
       'sess-O',
       'assistant',
       'Execution completed.',
+      undefined,
     );
     // parsePreviewContent not invoked because resultText falsy
     expect(mockedParse).not.toHaveBeenCalled();
@@ -555,6 +595,7 @@ describe('executionStore - completeExecution', () => {
     expect(sessionState().addMessage).toHaveBeenCalledWith(
       'assistant',
       'Execution completed.',
+      undefined,
     );
   });
 
@@ -578,7 +619,7 @@ describe('executionStore - completeExecution', () => {
     });
     useExecutionStore.getState().completeExecution('plain');
     // ownerSession null -> addMessage path
-    expect(sessionState().addMessage).toHaveBeenCalledWith('assistant', 'plain');
+    expect(sessionState().addMessage).toHaveBeenCalledWith('assistant', 'plain', undefined);
     // neither isViewingOwner (VIEW !== null) nor else-if (ownerSession null) -> state untouched
     expect(useExecutionStore.getState().isExecuting).toBe(true);
     expect(useExecutionStore.getState().hasActiveExecution('sess-VIEW')).toBe(false);
@@ -593,6 +634,7 @@ describe('executionStore - completeExecution', () => {
       'sess-O',
       'assistant',
       'plain',
+      undefined,
     );
     expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull();
     // snapshot has null preview, restore yields null
@@ -888,6 +930,25 @@ describe('executionStore - saveSessionState / restoreSessionState / hasActiveExe
     expect(useExecutionStore.getState().previewOwnerSessionId).toBe('sess-NONE');
   });
 
+  it('restoreSessionState with no snapshot derives the deliverable from run results', async () => {
+    // The single-source path: when a session has no in-memory snapshot, its
+    // preview is derived from each run's stored execution.result — so a run that
+    // finished while the session was backgrounded still shows on switch-back.
+    setCurrentSessionId('sess-DERIVE');
+    const derived = { type: 'ui' as const, data: '{"messages":[]}' };
+    mockedDerive.mockResolvedValueOnce({ history: [derived], current: derived });
+
+    useExecutionStore.getState().restoreSessionState('sess-DERIVE');
+
+    await vi.waitFor(() => {
+      expect(useExecutionStore.getState().previewContent).toEqual(derived);
+    });
+    expect(useExecutionStore.getState().previewHistory).toEqual([derived]);
+    expect(useExecutionStore.getState().previewOwnerSessionId).toBe('sess-DERIVE');
+    // Derived deliverable wins — the legacy persisted-preview fallback is skipped.
+    expect(mockedGet).not.toHaveBeenCalled();
+  });
+
   it('restoreSessionState with no snapshot ignores persisted preview if session switched', async () => {
     setCurrentSessionId('sess-NONE');
     mockedGet.mockImplementation(() => {
@@ -991,7 +1052,14 @@ describe('executionStore - parallel sessions (jobId routing)', () => {
     setCurrentSessionId('sess-B');
     useExecutionStore.getState().completeExecution('A result', 'job-A');
     // Message lands in sess-A (the owner), and B's live owner is untouched.
-    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith('sess-A', 'assistant', 'A result');
+    // The message is stamped with the run's executionId so the preview pane can
+    // later derive the deliverable from execution.result on demand.
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-A',
+      'assistant',
+      'A result',
+      { executionId: 'job-A' },
+    );
     expect(useExecutionStore.getState().executionOwnerSessionId).toBe('sess-B');
   });
 
@@ -1106,6 +1174,7 @@ describe('executionStore - stashSessionPreview', () => {
   });
 
   it('appends to history and preserves in-flight run flags', () => {
+    setCurrentSessionId('sess-Y'); // viewing the owner → run drives the live slot
     useExecutionStore.getState().startExecution('job-S', 'sess-Y');
     useExecutionStore.getState().saveSessionState('sess-Y'); // running snapshot
     useExecutionStore.getState().stashSessionPreview('sess-Y', pv1);
@@ -1142,10 +1211,31 @@ describe('executionStore - restoreSessionState concurrency', () => {
     expect(useExecutionStore.getState().executionOwnerSessionId).toBe('sess-A');
   });
 
+  it('clears a foreign session preview when switching to a session with no run of its own', () => {
+    // A previous run (sess-french) left its result in the live preview slot.
+    useExecutionStore.setState({
+      previewContent: { type: 'ui', data: '<p>french</p>' } as any,
+      previewOwnerSessionId: 'sess-french',
+      previewHistory: [{ type: 'ui', data: '<p>french</p>' }] as any,
+      previewIndex: 0,
+      executionOwnerSessionId: null,
+    });
+    // Switch into a brand-new session (sess-korean) that has no snapshot/result:
+    // its preview pane must NOT inherit the other session's result.
+    setCurrentSessionId('sess-korean');
+    useExecutionStore.getState().restoreSessionState('sess-korean');
+    const s = useExecutionStore.getState();
+    expect(s.previewContent).toBeNull();
+    expect(s.previewOwnerSessionId).toBeNull();
+  });
+
   it('restores a backgrounded running snapshot and re-takes slot ownership', () => {
-    // sess-A is running and gets parked; sess-B then owns the live slot.
+    // sess-A is running and gets parked; sess-B then owns the live slot. Each
+    // run starts while viewing its own session (owner-aware startExecution).
+    setCurrentSessionId('sess-A');
     useExecutionStore.getState().startExecution('job-A', 'sess-A');
     useExecutionStore.getState().saveSessionState('sess-A');
+    setCurrentSessionId('sess-B');
     useExecutionStore.getState().startExecution('job-B', 'sess-B'); // B now owns slot
     useExecutionStore.getState().saveSessionState('sess-B');
     // Switch back to A: its running snapshot restores and A re-owns the slot.

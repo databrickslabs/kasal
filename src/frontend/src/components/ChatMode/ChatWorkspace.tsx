@@ -1,14 +1,15 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
-import { saveGeneratedCrew, usesGenieTool, stripGenieTools, CrewNameConflictError } from './api/crews';
+import { saveGeneratedCrew, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
 import { useAppStore } from './store/appStore';
 import { useDispatcher, PlanData, FlowData } from './hooks/useDispatcher';
 import { useExecutionStream } from './hooks/useExecutionStream';
-import { useGenerationStream, GenerationCompleteData } from './hooks/useGenerationStream';
+import { startGenerationStream, stopAllGenerationStreams } from './utils/generationStreamManager';
+import { GenerationCompleteData } from './types/dispatcher';
 import { generateId } from './utils/markdown';
 import { buildCrewConfig, buildFlowConfig, buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 import { detectVariablesFromNodes, detectVariablesFromGenerated } from './utils/variableDetector';
@@ -434,6 +435,13 @@ const ChatWorkspace: React.FC = () => {
       setHasHiddenPreview(false);
       return;
     }
+    // A run's deliverable is derived from its execution result and held in
+    // previewHistory (populated by restoreSessionState). A non-empty history with
+    // the pane closed means there's a deliverable to reopen.
+    if (useExecutionStore.getState().previewHistory.length > 0) {
+      setHasHiddenPreview(true);
+      return;
+    }
     getSessionPreview(currentSessionId).then((stored) => {
       if (stored) {
         setHasHiddenPreview(true);
@@ -523,11 +531,11 @@ const ChatWorkspace: React.FC = () => {
   // carry no job id, so we stamp completion with this; backgrounded runs finalize
   // via the REST poller's window events, which DO carry an explicit job id.
   const sseJobIdRef = useRef<string | undefined>(undefined);
-  // The session that started the in-flight generation (single generation stream).
-  // Generation completion routes by this, not the global owner — otherwise a
-  // generation finishing after you switch to another running session clears the
-  // wrong session's run.
-  const genOwnerRef = useRef<string | undefined>(undefined);
+  // Origin session per in-flight generation, keyed by generationId. Generations
+  // run as concurrent streams, so every trace / completion / execution-start
+  // routes by the generation's OWN origin — never a single global owner, which
+  // cross-contaminated run-activity traces between parallel sessions.
+  const genOriginRef = useRef<Map<string, string>>(new Map());
   // The most recent generated crew in this session — the target for `/save`.
   // (The bookmark on each crew card saves its own specific crew directly.)
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
@@ -780,8 +788,7 @@ const ChatWorkspace: React.FC = () => {
   // tool calls (no crew card in the conversation): each step posts a trace
   // entry, and the only interactive remnant is the Genie-space prompt when a
   // crew needs one. Final output renders in the preview pane as usual.
-  const addGenerationTrace = useCallback((label: string, sublabel?: string) => {
-    const ownerSession = useExecutionStore.getState().executionOwnerSessionId;
+  const addGenerationTrace = useCallback((ownerSession: string | undefined, label: string, sublabel?: string) => {
     const sessionStore = useSessionStore.getState();
     const extra = {
       resultType: 'trace',
@@ -797,93 +804,23 @@ const ChatWorkspace: React.FC = () => {
     else sessionStore.addMessage('assistant', '', extra);
   }, []);
 
-  const generationStream = useGenerationStream({
-    onPlanReady: (plan) => {
-      const agents = Array.isArray(plan?.agents) ? (plan.agents as unknown[]).length : 0;
-      const tasks = Array.isArray(plan?.tasks) ? (plan.tasks as unknown[]).length : 0;
-      addGenerationTrace('Crew planned', `${agents} agent${agents === 1 ? '' : 's'} · ${tasks} task${tasks === 1 ? '' : 's'}`);
-    },
-    onAgentDetail: (agent) => {
-      addGenerationTrace('Agent ready', String(agent?.name || agent?.role || ''));
-    },
-    onTaskDetail: (task) => {
-      addGenerationTrace('Task ready', String(task?.name || ''));
-    },
-    onComplete: (raw: GenerationCompleteData) => {
-      // The session that STARTED this generation (single generation stream) —
-      // not the global owner, which a parallel session may have taken over.
-      const ownerSession = genOwnerRef.current
-        ?? useExecutionStore.getState().executionOwnerSessionId;
-      const sessionStore = useSessionStore.getState();
-      // When a Genie MCP server is selected for this run, the crew reaches
-      // Genie through MCP — drop the auto-detected GenieTool so the legacy
-      // tool (and its space prompt) doesn't double up with the MCP server.
-      const genieViaMcp = useExecutionStore
-        .getState()
-        .selectedMcpServers.some((name) =>
-          name.toLowerCase().startsWith('databricks genie:'),
-        );
-      const stripped = genieViaMcp
-        ? stripGenieTools(raw, useAppStore.getState().toolNameMap)
-        : raw;
-      // Ground the run with the chat prompt that asked for it: generated task
-      // descriptions are often generic mission statements, so without this the
-      // crew runs with no actual question (and never queries tools like Genie).
-      const data: GenerationCompleteData = lastUserPromptRef.current
-        ? { ...stripped, user_request: lastUserPromptRef.current }
-        : stripped;
-      // A Genie crew can't run until the user picks a Genie space, so don't
-      // auto-run it — surface a minimal space prompt (no crew card).
-      const needsGenieSpace = usesGenieTool(data, useAppStore.getState().toolNameMap);
-
-      if (needsGenieSpace) {
-        const id = generateId();
-        const extra = { id, resultType: 'genie_space_prompt', resultData: data };
-        if (ownerSession) sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra);
-        else sessionStore.addMessage('assistant', '', extra);
-      }
-
-      // Park the actions row (bookmark + thumbs feedback) — it posts only
-      // AFTER the run's result comes back, so users rate what they've seen.
-      pendingActionsRef.current = { data, ownerSession: ownerSession ?? null };
-
-      dispatcher.setLastGenerated(data);
-      // Remember it as the /save target.
-      lastGeneratedRef.current = data;
-
-      useExecutionStore.getState().completeGeneration(ownerSession ?? undefined);
-
-      // Auto-run the generated crew so the user doesn't have to click "Run crew".
-      // handleExecuteGenerated handles variable detection and will open the
-      // variables dialog if any inputs are required. Genie crews are NOT
-      // auto-run — the user runs them from the card after choosing a space.
-      if (!needsGenieSpace) {
-        // Run under the generation's origin session (where the prompt was
-        // submitted) — not whatever session is on screen now.
-        handleExecuteGenerated(data, undefined, ownerSession);
-      }
-    },
-    onFailed: (error) => {
-      useExecutionStore.getState().failGeneration(
-        error,
-        genOwnerRef.current
-          ?? useExecutionStore.getState().executionOwnerSessionId
-          ?? undefined,
-      );
-    },
-  });
-
-  // --- Execution handlers ---
-  const handleStartGenerationStream = useCallback(
-    (generationId: string, sessionId: string) => {
-      const origin = sessionId || useSessionStore.getState().currentSessionId;
-      genOwnerRef.current = origin || undefined;
-      useExecutionStore.getState().startGeneration(origin || undefined);
-      generationStream.startStream(generationId);
-    },
-    [generationStream],
+  // The origin session of a generation. handleStartGenerationStream always
+  // registers it before any event arrives, so the map is the source of truth;
+  // the global-owner fallback is a safety net only (it never fires in the real
+  // flow, where genId is always registered).
+  const ownerForGen = useCallback(
+    (generationId: string) =>
+      genOriginRef.current.get(generationId)
+      ?? useExecutionStore.getState().executionOwnerSessionId
+      ?? undefined,
+    [],
   );
 
+  // The plan produced by each in-flight generation, keyed by generationId, so
+  // execution-start can show the right crew even when several runs overlap.
+  const genDataRef = useRef<Map<string, GenerationCompleteData>>(new Map());
+
+  // --- Execution handlers ---
   const handleStartExecutionStream = useCallback(
     (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => {
       const origin = sessionId || useSessionStore.getState().currentSessionId;
@@ -891,11 +828,19 @@ const ChatWorkspace: React.FC = () => {
       // back to it by job_id even if the user switches sessions mid-run.
       if (origin) jobOwnerRef.current.set(jobId, origin);
       useExecutionStore.getState().startExecution(jobId, origin || undefined, opts);
-      traceMessageIdsRef.current.clear();
-      seenTraceIdsRef.current.clear();
-      // This job now owns the single live SSE stream.
-      sseJobIdRef.current = jobId;
-      executionStream.startStream(jobId);
+      // Only seize the single live SSE stream when the run's OWNER is on screen.
+      // A backgrounded run (a generation that finished for another session while
+      // you're elsewhere) must not take over the viewed session's stream — its
+      // traces/completion still arrive via the global poller (jobCreated below),
+      // routed back by job owner.
+      const viewingOwner = !origin || origin === useSessionStore.getState().currentSessionId;
+      if (viewingOwner) {
+        traceMessageIdsRef.current.clear();
+        seenTraceIdsRef.current.clear();
+        // This job now owns the single live SSE stream.
+        sseJobIdRef.current = jobId;
+        executionStream.startStream(jobId);
+      }
       // Announce the job so the globally-mounted useTracePolling
       // (SSEConnectionManager) starts its REST polling fallback for it. When the
       // Databricks Apps HTTP/2 proxy kills SSE, the poller delivers traces +
@@ -905,6 +850,89 @@ const ChatWorkspace: React.FC = () => {
     },
     [executionStream],
   );
+
+  const handleStartGenerationStream = useCallback(
+    (generationId: string, sessionId: string) => {
+      const origin = sessionId || useSessionStore.getState().currentSessionId;
+      // Tie this generation to its origin so all its events route there, even if
+      // the user switches sessions (or starts other generations) before it ends.
+      if (origin) genOriginRef.current.set(generationId, origin);
+      useExecutionStore.getState().startGeneration(origin || undefined);
+      // Observe via the module-level manager (not a React hook): concurrent-safe
+      // and independent of this component's render lifecycle, like the execution
+      // side. Callbacks are passed per-call and route by the generation's origin.
+      startGenerationStream(generationId, {
+        onPlanReady: (genId, plan) => {
+          const owner = ownerForGen(genId);
+          const agents = Array.isArray(plan?.agents) ? (plan.agents as unknown[]).length : 0;
+          const tasks = Array.isArray(plan?.tasks) ? (plan.tasks as unknown[]).length : 0;
+          addGenerationTrace(owner, 'Crew planned', `${agents} agent${agents === 1 ? '' : 's'} · ${tasks} task${tasks === 1 ? '' : 's'}`);
+        },
+        onAgentDetail: (genId, agent) => {
+          addGenerationTrace(ownerForGen(genId), 'Agent ready', String(agent?.name || agent?.role || ''));
+        },
+        onTaskDetail: (genId, task) => {
+          addGenerationTrace(ownerForGen(genId), 'Task ready', String(task?.name || ''));
+        },
+        onComplete: (genId, raw: GenerationCompleteData) => {
+          // Route by THIS generation's own origin — never a global owner, which a
+          // parallel session's run may hold. The crew is generated AND run on the
+          // BACKEND now (auto-execute); the frontend just records the plan and the
+          // backend folds the execution id into this event (see onExecutionStarted).
+          const ownerSession = ownerForGen(genId);
+          const data = raw;
+          genDataRef.current.set(genId, data);
+          // Park the actions row (bookmark + thumbs feedback) — it posts only
+          // AFTER the run's result comes back, so users rate what they've seen.
+          pendingActionsRef.current = { data, ownerSession: ownerSession ?? null };
+          dispatcher.setLastGenerated(data);
+          lastGeneratedRef.current = data; // /save target
+          useExecutionStore.getState().completeGeneration(ownerSession ?? undefined);
+        },
+        onExecutionStarted: (genId, executionId) => {
+          // The backend launched the run; observe it under the session that asked
+          // for it (origin), even if the user has since switched sessions.
+          const ownerSession = ownerForGen(genId);
+          const data = genDataRef.current.get(genId);
+          // Only drive the live crew display when the owner is on screen — a
+          // backgrounded run must not overwrite the viewed session's context.
+          const viewingOwner = !ownerSession
+            || ownerSession === useSessionStore.getState().currentSessionId;
+          if (data && viewingOwner) {
+            useExecutionStore.getState().setExecutionContext({
+              crewName: 'Generated Crew',
+              agents: (data.agents || []).map((a) => ({
+                name: (a.name as string) || (a.role as string) || 'Agent',
+                role: (a.role as string) || undefined,
+              })),
+              tasks: (data.tasks || []).map((t) => ({
+                name: (t.name as string) || (t.description as string)?.slice(0, 40) || 'Task',
+              })),
+            });
+          }
+          handleStartExecutionStream(executionId, ownerSession ?? undefined);
+          genOriginRef.current.delete(genId);
+          genDataRef.current.delete(genId);
+        },
+        onFailed: (genId, error) => {
+          useExecutionStore.getState().failGeneration(error, ownerForGen(genId));
+          genOriginRef.current.delete(genId);
+          genDataRef.current.delete(genId);
+        },
+      });
+    },
+    // `dispatcher` is intentionally not a dep: useDispatcher consumes this
+    // callback (onStartGenerationStream), so depending on it here would be a
+    // declaration cycle. Its methods (setLastGenerated) are stable useCallbacks,
+    // and this runs only after dispatcher is initialized.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ownerForGen, addGenerationTrace, handleStartExecutionStream],
+  );
+
+  // Close any open generation streams when ChatMode is fully torn down. It's kept
+  // mounted across app-mode switches (so streams survive those), so this fires
+  // only on a real unmount (leaving the workspace) — not on mode toggles.
+  useEffect(() => () => stopAllGenerationStreams(), []);
 
   // Reconnect to a still-running crew after a page refresh. The in-memory store
   // is wiped on reload, so without this the Stop button (and live updates)

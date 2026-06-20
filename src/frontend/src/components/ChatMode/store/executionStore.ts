@@ -6,11 +6,13 @@ import { useSessionStore } from './sessionStore';
 import {
   saveSessionPreview,
   getSessionPreview,
+  getSessionMessages,
 } from '../db/sessionApi';
 import {
   persistActiveExecution,
   clearActiveExecution,
 } from './activeExecutionMarker';
+import { deriveSessionPreviews } from '../utils/sessionPreview';
 
 interface SessionExecSnapshot {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
@@ -148,6 +150,51 @@ const sessionSnapshots = new Map<string, SessionExecSnapshot>();
 // outside Zustand (pure routing data, no re-render needed), like sessionSnapshots.
 const jobOwners = new Map<string, string>();
 
+// Load a session's preview into the live slot when there's no in-memory
+// snapshot. Single source of truth: derive each run's deliverable from its
+// stored execution.result (survives navigating away mid-run), falling back to
+// the legacy persisted preview copy for sessions whose runs predate executionId
+// stamping. Shared by restoreSessionState and reopenPreview. No-ops if the user
+// navigates away while the (cached) results are fetched.
+async function loadDerivedOrStoredPreview(
+  sessionId: string,
+  set: (partial: Partial<ExecutionStore>) => void,
+): Promise<void> {
+  const stillHere = () =>
+    useSessionStore.getState().currentSessionId === sessionId;
+  let history: PreviewContent[] = [];
+  try {
+    const msgs = await getSessionMessages(sessionId);
+    history = (await deriveSessionPreviews(msgs)).history;
+  } catch {
+    /* fall through to the legacy persisted preview */
+  }
+  if (!stillHere()) return;
+  if (history.length) {
+    set({
+      previewContent: history[history.length - 1],
+      previewOwnerSessionId: sessionId,
+      previewHistory: history,
+      previewIndex: history.length - 1,
+    });
+    return;
+  }
+  const stored = await getSessionPreview(sessionId);
+  if (stored && stillHere()) {
+    const content: PreviewContent = {
+      type: stored.type as PreviewContent['type'],
+      data: stored.data,
+      title: stored.title,
+    };
+    set({
+      previewContent: content,
+      previewOwnerSessionId: sessionId,
+      previewHistory: [content],
+      previewIndex: 0,
+    });
+  }
+}
+
 export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   // --- State ---
   activeExecution: null,
@@ -243,29 +290,21 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   reopenPreview: () => {
     const sessionId = useSessionStore.getState().currentSessionId;
     if (!sessionId) return;
-    getSessionPreview(sessionId).then((stored) => {
-      if (stored) {
-        const currentId = useSessionStore.getState().currentSessionId;
-        if (currentId === sessionId) {
-          const content: PreviewContent = {
-            type: stored.type as PreviewContent['type'],
-            data: stored.data,
-            title: stored.title,
-          };
-          set((s) => {
-            // If history is empty (e.g. after a refresh), seed it so the user
-            // still has a single navigable entry.
-            const previewHistory = s.previewHistory.length ? s.previewHistory : [content];
-            return {
-              previewContent: content,
-              previewOwnerSessionId: sessionId,
-              previewHistory,
-              previewIndex: previewHistory.length - 1,
-            };
-          });
-        }
-      }
-    });
+    // Fast path: the history is still in memory (clearPreview keeps it on close,
+    // and restoreSessionState resets it per session on switch) — reopen the entry
+    // the user was viewing, no refetch.
+    const s0 = get();
+    if (s0.previewHistory.length) {
+      const idx =
+        s0.previewIndex >= 0 && s0.previewIndex < s0.previewHistory.length
+          ? s0.previewIndex
+          : s0.previewHistory.length - 1;
+      set({ previewContent: s0.previewHistory[idx], previewOwnerSessionId: sessionId });
+      return;
+    }
+    // History was dropped (e.g. after a page reload): derive from each run's
+    // stored execution.result (single source), legacy persisted preview as fallback.
+    void loadDerivedOrStoredPreview(sessionId, set);
   },
 
   // --- Execution lifecycle ---
@@ -274,24 +313,45 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     // Remember which session owns this job so its completion routes correctly
     // even if the user switches away and another session's run takes the slot.
     if (owner) jobOwners.set(jobId, owner);
+    // Persist so a page refresh can reconnect to this still-running job.
+    if (owner) persistActiveExecution(owner, jobId);
     // A refine continues the same artifact lineage, so it keeps the existing
     // preview + history and just appends the revised output. A fresh run clears
     // the previous preview so an unrelated prompt doesn't inherit stale output.
     const preserve = opts?.preservePreview;
-    const s = get();
-    set({
-      executionOwnerSessionId: owner,
-      isExecuting: true,
-      isLoading: true,
-      activeExecution: { jobId, status: 'running' },
-      previewContent: preserve ? s.previewContent : null,
-      previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
-      previewHistory: preserve ? s.previewHistory : [],
-      previewIndex: preserve ? s.previewIndex : 0,
-      executionLog: [],
-    });
-    // Persist so a page refresh can reconnect to this still-running job.
-    if (owner) persistActiveExecution(owner, jobId);
+    const currentSessionId = useSessionStore.getState().currentSessionId;
+    const isViewingOwner = !owner || owner === currentSessionId;
+    if (isViewingOwner) {
+      const s = get();
+      set({
+        executionOwnerSessionId: owner,
+        isExecuting: true,
+        isLoading: true,
+        activeExecution: { jobId, status: 'running' },
+        previewContent: preserve ? s.previewContent : null,
+        previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
+        previewHistory: preserve ? s.previewHistory : [],
+        previewIndex: preserve ? s.previewIndex : 0,
+        executionLog: [],
+      });
+    } else {
+      // Backgrounded run (started for a session that isn't on screen — e.g. a
+      // generation that finished after you switched away). Park a RUNNING
+      // snapshot so switching to that session restores its Stop button + tracker,
+      // and leave the live slot (the viewed session) untouched. Completion still
+      // routes by job owner via the global poller.
+      const prev = sessionSnapshots.get(owner);
+      sessionSnapshots.set(owner, {
+        activeExecution: { jobId, status: 'running' },
+        isExecuting: true,
+        isGenerating: false,
+        isLoading: true,
+        executionContext: prev?.executionContext ?? null,
+        previewContent: preserve ? prev?.previewContent ?? null : null,
+        previewHistory: preserve ? prev?.previewHistory ?? [] : [],
+        previewIndex: preserve ? prev?.previewIndex ?? 0 : 0,
+      });
+    }
   },
 
   updateExecutionStatus: (status) => {
@@ -316,6 +376,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
+    // Anchor this run's message to its execution so the preview pane can derive
+    // the deliverable from execution.result on demand (survives navigating away).
+    const runExtra = jobId ? { executionId: jobId } : undefined;
 
     // Run is over — drop the persisted reconnect marker.
     if (ownerSession) clearActiveExecution(ownerSession);
@@ -352,9 +415,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
             ownerSession,
             'assistant',
             resultText,
+            runExtra,
           );
         } else {
-          sessionStore.addMessage('assistant', resultText);
+          sessionStore.addMessage('assistant', resultText, runExtra);
         }
       }
     } else {
@@ -363,9 +427,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
           ownerSession,
           'assistant',
           'Execution completed.',
+          runExtra,
         );
       } else {
-        sessionStore.addMessage('assistant', 'Execution completed.');
+        sessionStore.addMessage('assistant', 'Execution completed.', runExtra);
       }
     }
 
@@ -641,6 +706,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         // A completed-preview snapshot leaves the slot ownerless (no live run).
         ...(restoringRun ? { executionOwnerSessionId: sessionId } : {}),
       });
+      // A run that COMPLETED while this session was backgrounded finalizes its
+      // snapshot with NO preview (its deliverable never reached the live slot).
+      // Derive it from the run's stored execution.result so the deliverable
+      // shows on switch-back instead of a blank pane.
+      if (!snap.previewContent && !restoringRun) {
+        void loadDerivedOrStoredPreview(sessionId, set);
+      }
     } else {
       // No in-memory snapshot — try to load persisted preview from IndexedDB
       set({
@@ -654,25 +726,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         previewHistory: [],
         previewIndex: 0,
       });
-      getSessionPreview(sessionId).then((stored) => {
-        if (stored) {
-          // Only apply if we're still on the same session
-          const currentId = useSessionStore.getState().currentSessionId;
-          if (currentId === sessionId) {
-            const content: PreviewContent = {
-              type: stored.type as PreviewContent['type'],
-              data: stored.data,
-              title: stored.title,
-            };
-            set({
-              previewContent: content,
-              previewOwnerSessionId: sessionId,
-              previewHistory: [content],
-              previewIndex: 0,
-            });
-          }
-        }
-      });
+      // Derive the deliverable from each run's stored execution.result (single
+      // source of truth), falling back to the legacy persisted preview.
+      void loadDerivedOrStoredPreview(sessionId, set);
     }
   },
 

@@ -3,6 +3,7 @@ import {
   createExecution,
   listExecutions,
   getExecutionStatus,
+  getExecution,
   stopExecution,
 } from './executions';
 import { getClient } from './client';
@@ -67,6 +68,18 @@ describe('ChatMode executions api', () => {
       const result = await getExecutionStatus('exec-9');
 
       expect(get).toHaveBeenCalledWith('/executions/exec-9/status');
+      expect(result).toBe(execution);
+    });
+  });
+
+  describe('getExecution', () => {
+    it('GETs /executions/:id (full record incl. result) and returns data', async () => {
+      const execution = { id: 'exec-5', result: { messages: [] } } as unknown as Execution;
+      get.mockResolvedValue({ data: execution });
+
+      const result = await getExecution('exec-5');
+
+      expect(get).toHaveBeenCalledWith('/executions/exec-5');
       expect(result).toBe(execution);
     });
   });

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
+import { useExecutionStore } from '../store/executionStore';
 import {
   DispatchResult,
   GeneratedCrew,
@@ -13,7 +14,7 @@ import {
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
-import { GenerationCompleteData } from './useGenerationStream';
+import { GenerationCompleteData } from '../types/dispatcher';
 
 export type PlanData = NonNullable<CatalogLoadResult['plan']>;
 export type FlowData = NonNullable<FlowLoadResult['flow']>;
@@ -293,7 +294,20 @@ export function useDispatcher(options: UseDispatcherOptions) {
       }
 
       try {
-        const result = await dispatch(dispatchMessage, model, tools);
+        // ChatMode run settings: the backend auto-executes the generated crew
+        // with the chat's own memory scope + attached MCP data sources, so the
+        // run survives a session switch before the plan finishes. Read at
+        // dispatch time so the values reflect the user's current choices.
+        const execState = useExecutionStore.getState();
+        const result = await dispatch(dispatchMessage, model, tools, {
+          // ChatMode runs the generated crew on the backend (the crew canvas
+          // doesn't — it runs via Play, so it omits this and defaults false).
+          auto_execute: true,
+          session_id: originSessionId || undefined,
+          memory_workspace_scope: execState.workspaceMemory,
+          disable_memory: !execState.memoryEnabled,
+          mcp_servers: execState.selectedMcpServers,
+        }, message);
 
         const content = getAssistantResponse(result);
         const resultType = getResultType(result);

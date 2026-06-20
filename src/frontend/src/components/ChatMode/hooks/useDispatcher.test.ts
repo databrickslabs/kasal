@@ -3,8 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { useDispatcher } from './useDispatcher';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
-import type { DispatchResult } from '../types/dispatcher';
-import type { GenerationCompleteData } from './useGenerationStream';
+import type { DispatchResult, GenerationCompleteData } from '../types/dispatcher';
 
 vi.mock('../api/dispatcher', () => ({
   dispatch: vi.fn(),
@@ -45,6 +44,18 @@ function result(
     service_called: null,
   };
 }
+
+// ChatMode run settings the hook passes to dispatch() as the 4th arg. Defaults:
+// session-1 (getCurrentSessionId), and the execution store's own defaults
+// (workspace-wide memory recall, memory on, no MCP servers). The 5th arg is the
+// CLEAN user message (before the intent-steering prefix is added to dispatch).
+const RUN_SETTINGS = {
+  auto_execute: true,
+  session_id: 'session-1',
+  memory_workspace_scope: true,
+  disable_memory: false,
+  mcp_servers: [],
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -158,7 +169,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('/help');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined);
+      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined, RUN_SETTINGS, '/help');
     });
 
     it('does NOT augment messages already containing a crew hint', async () => {
@@ -170,7 +181,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('build me a crew', 'my-model');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined);
+      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew');
     });
 
     it('augments plain messages with the crew steering prefix', async () => {
@@ -186,6 +197,8 @@ describe('useDispatcher', () => {
         'create a crew plan with agents and tasks: do something cool',
         undefined,
         undefined,
+        RUN_SETTINGS,
+        'do something cool',
       );
     });
 
@@ -210,6 +223,8 @@ describe('useDispatcher', () => {
         'build me a crew\n\n[Knowledge files attached: a.txt.]',
         'm',
         ['DatabricksKnowledgeSearchTool'],
+        RUN_SETTINGS,
+        'build me a crew',
       );
     });
 
@@ -791,7 +806,7 @@ describe('useDispatcher', () => {
       // The displayed user message uses displayAs, not the raw message.
       expect(opts.addMessage).toHaveBeenCalledWith('user', 'Open crew: My Plan', undefined);
       // The raw message is still dispatched (slash command -> not augmented).
-      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined);
+      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1');
     });
   });
 

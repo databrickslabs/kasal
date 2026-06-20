@@ -172,6 +172,35 @@ describe('sessionApi - messages', () => {
     });
   });
 
+  it('round-trips executionId through the __chatmode extras (preview-derive anchor)', async () => {
+    // Unpack: an executionId in the wire extras lands on the ChatMessage so the
+    // preview pane can later derive the deliverable from that execution.result.
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [{
+          id: 'm1', session_id: 's1', message_type: 'assistant', content: 'done',
+          generation_result: { __chatmode: { resultType: 'crew', executionId: 'job-42' } },
+          timestamp: '2026-06-11T07:00:00',
+        }],
+      },
+    });
+    const [msg] = await api.getSessionMessages('s1');
+    expect(msg.executionId).toBe('job-42');
+
+    // Pack: a message's executionId is persisted back into the extras so the
+    // anchor survives a reload / session switch.
+    mockPost.mockResolvedValue({ data: {} });
+    await api.addMessageToSession('s1', {
+      id: 'm2', role: 'assistant', content: 'result', timestamp: new Date(),
+      executionId: 'job-42',
+    });
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/messages', {
+      id: 'm2', session_id: 's1', message_type: 'assistant', content: 'result',
+      intent: null,
+      generation_result: { __chatmode: { executionId: 'job-42' } },
+    });
+  });
+
   it('skips empty-content messages (backend requires content)', async () => {
     await api.addMessageToSession('s1', {
       id: 'm1', role: 'assistant', content: '', timestamp: new Date(),
