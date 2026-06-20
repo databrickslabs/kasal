@@ -1973,13 +1973,28 @@ class TestProgressiveGeneration:
     # create_crew_progressive -- integration-level with mocks
     # ------------------------------------------------------------------
 
-    def _make_progressive_request(self, prompt="build a crew", model="test-model", tools=None):
-        """Create a mock CrewStreamingRequest."""
+    def _make_progressive_request(self, prompt="build a crew", model="test-model", tools=None,
+                                  auto_execute=False, session_id=None,
+                                  memory_workspace_scope=True, disable_memory=False,
+                                  mcp_servers=None):
+        """Create a mock CrewStreamingRequest.
+
+        auto_execute defaults to False (AgentBuilder: generate-only) so the
+        backend run branch is skipped; ChatMode tests pass auto_execute=True.
+        The run-setting attrs are set explicitly because a bare Mock would make
+        ``getattr(req, "auto_execute", False)`` truthy and ``request.mcp_servers``
+        a non-iterable Mock.
+        """
         req = Mock()
         req.prompt = prompt
         req.model = model
         req.tools = tools or []
         req.original_prompt = None
+        req.auto_execute = auto_execute
+        req.session_id = session_id
+        req.memory_workspace_scope = memory_workspace_scope
+        req.disable_memory = disable_memory
+        req.mcp_servers = mcp_servers or []
         return req
 
     def _make_plan(self, agents=None, tasks=None, process_type="sequential", complexity="standard"):
@@ -2144,6 +2159,91 @@ class TestProgressiveGeneration:
             assert event_types.index("plan_ready") < event_types.index("agent_detail")
             assert event_types.index("agent_detail") < event_types.index("task_detail")
             assert event_types.index("task_detail") < event_types.index("generation_complete")
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_auto_executes_when_requested(self):
+        """ChatMode (auto_execute=True): the backend runs the crew itself and folds
+        the new execution id INTO generation_complete (one terminal event) so the
+        run survives a session switch before the plan finishes."""
+        request = self._make_progressive_request(
+            auto_execute=True,
+            session_id="chat-1",
+            mcp_servers=["Databricks Genie: Sales"],
+        )
+        gen_id = "gen-auto"
+
+        with self._progressive_patches() as m:
+            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+                mock_exec = Mock()
+                mock_exec.create_execution = AsyncMock(
+                    return_value={
+                        "execution_id": "job-auto-1",
+                        "status": "running",
+                        "run_name": "Auto Run",
+                    }
+                )
+                mock_exec_cls.return_value = mock_exec
+
+                await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+            # No separate execution_started event — it's folded in.
+            assert "execution_started" not in event_types
+
+            complete = next(c for c in calls if c.args[1].data["type"] == "generation_complete")
+            assert complete.args[1].data["execution_id"] == "job-auto-1"
+            assert complete.args[1].data["run_name"] == "Auto Run"
+
+            # The crew was executed via a CrewConfig built from the generated
+            # agents/tasks, carrying the chat's session + memory scope.
+            cfg = mock_exec.create_execution.call_args.kwargs["config"]
+            assert cfg.session_id == "chat-1"
+            assert any(k.startswith("agent_") for k in cfg.agents_yaml)
+            # Not launched via FastAPI BackgroundTasks (none in this context).
+            assert mock_exec.create_execution.call_args.kwargs["background_tasks"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_no_auto_execute_for_agentbuilder(self):
+        """AgentBuilder (auto_execute=False, the default): the plan is generated
+        and rendered, but the backend never starts a run."""
+        request = self._make_progressive_request(auto_execute=False)
+        gen_id = "gen-no-auto"
+
+        with self._progressive_patches() as m:
+            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+                await self.service.create_crew_progressive(request, None, gen_id)
+                mock_exec_cls.assert_not_called()
+
+            complete = next(
+                c for c in m["sse"].broadcast_to_job.call_args_list
+                if c.args[1].data["type"] == "generation_complete"
+            )
+            assert "execution_id" not in complete.args[1].data
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_auto_execute_failure_is_isolated(self):
+        """A failure starting the backend run is reported via execution_error on
+        generation_complete (not generation_failed) — generation itself succeeded."""
+        request = self._make_progressive_request(auto_execute=True, session_id="chat-2")
+        gen_id = "gen-auto-fail"
+
+        with self._progressive_patches() as m:
+            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+                mock_exec = Mock()
+                mock_exec.create_execution = AsyncMock(side_effect=RuntimeError("no capacity"))
+                mock_exec_cls.return_value = mock_exec
+
+                await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            assert "generation_complete" in event_types
+            assert "generation_failed" not in event_types
+            complete = next(c for c in calls if c.args[1].data["type"] == "generation_complete")
+            assert "execution_id" not in complete.args[1].data
+            assert "no capacity" in complete.args[1].data["execution_error"]
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_planning_failure(self):
@@ -3291,3 +3391,60 @@ class TestProgressiveGeneration:
 
             assert result == plan_dict
             assert "agents" in result
+
+
+class TestBuildCrewConfigFromGenerated:
+    """build_crew_config_from_generated mirrors the frontend builder for the
+    ChatMode auto-execute path (AgentBuilder never calls it)."""
+
+    @staticmethod
+    def _req(**kw):
+        from src.schemas.crew import CrewStreamingRequest
+        return CrewStreamingRequest(prompt="p", **kw)
+
+    def test_keys_links_and_top_level(self):
+        req = self._req(original_prompt="find swiss poets", model="m1", session_id="s1",
+                        memory_workspace_scope=False)
+        agents = [{"id": "a1", "role": "Researcher", "goal": "g", "backstory": "b", "tools": ["x"]}]
+        tasks = [{"id": "t1", "description": "do it", "expected_output": "out",
+                  "agent_id": "a1", "context": ["t0"], "tools": []}]
+        cfg = CrewGenerationService.build_crew_config_from_generated(req, agents, tasks)
+        # agent_<id> / task_<id> keys, role copied, task→agent + task→task links resolved
+        assert cfg["agents_yaml"]["agent_a1"]["role"] == "Researcher"
+        assert cfg["tasks_yaml"]["task_t1"]["agent"] == "agent_a1"
+        assert cfg["tasks_yaml"]["task_t1"]["context"] == ["task_t0"]
+        # description grounded with the user request
+        assert "find swiss poets" in cfg["tasks_yaml"]["task_t1"]["description"]
+        # top-level execution config
+        assert cfg["model"] == "m1" and cfg["execution_type"] == "crew"
+        assert cfg["planning"] is False and cfg["reasoning"] is False
+        assert cfg["session_id"] == "s1" and cfg["memory_workspace_scope"] is False
+
+    def test_mcp_servers_injected_into_agents_and_tasks(self):
+        req = self._req(mcp_servers=["Databricks Genie: Sales"])
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": []}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        servers = {"servers": ["Databricks Genie: Sales"]}
+        assert cfg["agents_yaml"]["agent_a1"]["tool_configs"]["MCP_SERVERS"] == servers
+        assert cfg["tasks_yaml"]["task_t1"]["tool_configs"]["MCP_SERVERS"] == servers
+        assert "Databricks Genie: Sales" in cfg["tasks_yaml"]["task_t1"]["description"]
+
+    def test_disable_memory_forces_agent_memory_false(self):
+        req = self._req(disable_memory=True)
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req, [{"id": "a1", "role": "r"}], [])
+        assert cfg["agents_yaml"]["agent_a1"]["memory"] is False
+
+    def test_no_mcp_leaves_no_tool_configs(self):
+        req = self._req()  # prompt="p" → grounds with the user request, no MCP
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req, [{"id": "a1", "role": "r"}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}])
+        assert "tool_configs" not in cfg["agents_yaml"]["agent_a1"]
+        assert "tool_configs" not in cfg["tasks_yaml"]["task_t1"]
+        desc = cfg["tasks_yaml"]["task_t1"]["description"]
+        assert desc.startswith("d") and "USER REQUEST" in desc
+        assert "MCP data sources" not in desc

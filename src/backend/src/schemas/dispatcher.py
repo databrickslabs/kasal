@@ -47,6 +47,36 @@ class DispatcherRequest(BaseModel):
     tools: Optional[List[str]] = Field(
         default_factory=list, description="Available tools for generation"
     )
+    original_prompt: Optional[str] = Field(
+        None,
+        description="The user's clean message (message may carry an intent-steering "
+        "prefix); used to ground the generated crew's run with the real request",
+    )
+    # ── ChatMode run settings ─────────────────────────────────────────────
+    # Carried through to the backend auto-execute so a generated crew runs with
+    # the chat's own memory scope and attached data sources, without a frontend
+    # round-trip. AgentBuilder doesn't send these (it never auto-executes).
+    auto_execute: bool = Field(
+        False,
+        description="When true (ChatMode only), run the generated crew on the backend "
+        "immediately. The AgentBuilder / crew canvas leaves this False — it renders the "
+        "plan and the user runs it via the Play button (sending it twice would double-run).",
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="Chat session id — scopes session-only memory recall for the run",
+    )
+    memory_workspace_scope: Optional[bool] = Field(
+        True,
+        description="True/None = workspace-wide memory recall, False = restrict to this session",
+    )
+    disable_memory: bool = Field(
+        False, description="When true, run the generated crew with memory fully disabled"
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        default_factory=list,
+        description="MCP servers (e.g. Genie spaces) to attach to the generated crew's run",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

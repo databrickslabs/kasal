@@ -1,5 +1,5 @@
 import { getClient } from './client';
-import { GenerationCompleteData } from '../hooks/useGenerationStream';
+import { GenerationCompleteData } from '../types/dispatcher';
 
 /**
  * Save a chat-generated crew "plan" (its agents + tasks) to the catalog.

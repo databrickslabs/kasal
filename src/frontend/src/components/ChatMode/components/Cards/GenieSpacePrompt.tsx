@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import GenieSpaceSelector from './GenieSpaceSelector';
-import { GenerationCompleteData } from '../../hooks/useGenerationStream';
+import { GenerationCompleteData } from '../../types/dispatcher';
 import { stripGenieTools } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
 

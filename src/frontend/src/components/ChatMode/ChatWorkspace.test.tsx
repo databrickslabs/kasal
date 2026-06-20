@@ -145,11 +145,16 @@ vi.mock('./hooks/useExecutionStream', () => ({
     return { startStream: h.startStream, stopStream: h.stopStream };
   },
 }));
-vi.mock('./hooks/useGenerationStream', () => ({
-  useGenerationStream: (opts: Record<string, (...a: unknown[]) => void>) => {
-    Object.assign(h.genOpts, opts);
-    return { startStream: h.startStream, stopStream: h.stopStream };
+vi.mock('./utils/generationStreamManager', () => ({
+  // Capture the per-call callbacks (the consumer passes them when it starts a
+  // generation) into h.genOpts so tests can fire stream events on them, then
+  // record the stream start like the old hook's startStream.
+  startGenerationStream: (generationId: string, callbacks: Record<string, (...a: unknown[]) => void>) => {
+    Object.assign(h.genOpts, callbacks);
+    h.startStream(generationId);
   },
+  stopGenerationStream: (generationId: string) => h.stopStream(generationId),
+  stopAllGenerationStreams: () => h.stopStream(),
 }));
 vi.mock('./api/executions', () => ({
   createExecution: (...a: unknown[]) => h.createExecution(...a),
@@ -623,34 +628,48 @@ describe('ChatWorkspace component', () => {
     expect(h.saveSessionPreview).toHaveBeenCalled();
   });
 
-  it('generation onComplete adds a message and auto-runs the crew', async () => {
+  it('generation onComplete finalizes the plan; the backend runs it and execution_started observes the run', async () => {
     render(<ChatWorkspace />);
+    startGen();
     await act(async () => {
-      h.genOpts.onComplete({ agents: [{ id: 'a1', role: 'r' }], tasks: [{ id: 't1' }] });
+      h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1', role: 'r' }], tasks: [{ id: 't1' }] });
     });
     expect(h.exec.completeGeneration).toHaveBeenCalled();
-    expect(h.createExecution).toHaveBeenCalled();
+    // The crew is generated AND run on the backend now — the frontend no longer
+    // builds a config or calls createExecution on generation_complete.
+    expect(h.createExecution).not.toHaveBeenCalled();
+    expect(h.exec.startExecution).not.toHaveBeenCalled();
+
+    // The backend folds the execution id into generation_complete; the frontend
+    // just observes that run (sets context + attaches the execution stream).
+    await act(async () => {
+      h.genOpts.onExecutionStarted('gen-1', 'job-99');
+    });
+    expect(h.exec.setExecutionContext).toHaveBeenCalled();
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-99', 's1', undefined);
+    expect(h.createExecution).not.toHaveBeenCalled();
   });
 
   it('generation onFailed marks the generation failed', () => {
     render(<ChatWorkspace />);
-    act(() => h.genOpts.onFailed('gen error'));
+    startGen();
+    act(() => h.genOpts.onFailed('gen-1', 'gen error'));
     // Routed to the generation's origin session (falls back to the live owner).
     expect(h.exec.failGeneration).toHaveBeenCalledWith('gen error', 's1');
   });
 
   it('generation onFailed routes to the generation origin captured at stream start', () => {
     render(<ChatWorkspace />);
-    // Starting the generation stream records its origin session (genOwnerRef).
+    // Starting the generation stream records its origin session per generationId.
     act(() => { h.dispatcherOpts.onStartGenerationStream('gen-x', 's5'); });
-    act(() => h.genOpts.onFailed('boom'));
+    act(() => h.genOpts.onFailed('gen-x', 'boom'));
     expect(h.exec.failGeneration).toHaveBeenCalledWith('boom', 's5');
   });
 
   it('generation onFailed passes undefined when there is no owner at all', () => {
     h.exec.executionOwnerSessionId = null;
     render(<ChatWorkspace />);
-    act(() => h.genOpts.onFailed('boom'));
+    act(() => h.genOpts.onFailed('gen-1', 'boom'));
     expect(h.exec.failGeneration).toHaveBeenCalledWith('boom', undefined);
   });
 
@@ -776,6 +795,14 @@ describe('ChatWorkspace component', () => {
   async function send(msg: string) {
     (globalThis as { __ccMsg?: string }).__ccMsg = msg;
     await act(async () => { fireEvent.click(screen.getByTestId('cc-send')); });
+  }
+
+  // The generation-stream manager exposes its callbacks per startGenerationStream
+  // call (not at render), so start a generation first to capture them into
+  // h.genOpts before firing stream events. Pass session='' to leave the
+  // generation UNregistered (to exercise the no-owner fallback).
+  function startGen(generationId = 'gen-1', session = 's1') {
+    act(() => { h.dispatcherOpts.onStartGenerationStream(generationId, session); });
   }
 
   it('/clear clears messages and resets', async () => {
@@ -956,7 +983,8 @@ describe('ChatWorkspace component', () => {
   it('/save persists the last generated crew and confirms by name', async () => {
     render(<ChatWorkspace />);
     // a generation completes → becomes the /save target
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save');
     expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined, expect.anything());
     expect(h.session.addMessage).toHaveBeenCalledWith(
@@ -967,7 +995,8 @@ describe('ChatWorkspace component', () => {
 
   it('/save <name> passes the explicit name through', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save Oil Crew');
     expect(h.saveGeneratedCrew).toHaveBeenCalledWith(expect.anything(), 'Oil Crew', expect.anything());
   });
@@ -975,7 +1004,8 @@ describe('ChatWorkspace component', () => {
   it('/save reports an error when the save fails', async () => {
     h.saveGeneratedCrew.mockRejectedValueOnce(new Error('nope'));
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save');
     expect(h.session.addMessage).toHaveBeenCalledWith(
       'assistant',
@@ -989,48 +1019,27 @@ describe('ChatWorkspace component', () => {
     expect(h.saveGeneratedCrew).toHaveBeenCalledWith({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }, undefined, expect.anything());
   });
 
-  // --- Genie crews are not auto-run ---
-  it('does NOT auto-run a Genie crew and prompts to pick a space', async () => {
+  // --- Genie crews: the gate is gone (backend runs them; attach Genie via "+") ---
+  it('does NOT post a Genie-space prompt or run a Genie crew on the frontend', async () => {
     render(<ChatWorkspace />);
     await act(async () => {
-      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
+      h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
     });
-    // generation finalized, but no execution kicked off
+    // Generation finalizes; the backend owns tool wiring + execution now, so the
+    // frontend neither posts the legacy Genie-space prompt nor runs the crew.
     expect(h.exec.completeGeneration).toHaveBeenCalled();
     expect(h.createExecution).not.toHaveBeenCalled();
-    // No crew card anymore — a slim Genie-space prompt is posted instead
-    expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
-      's1',
-      'assistant',
-      '',
-      expect.objectContaining({ resultType: 'genie_space_prompt' }),
-    );
-  });
-
-  it('a selected Genie MCP server strips the auto-detected GenieTool and auto-runs', async () => {
-    h.exec.selectedMcpServers = ['Databricks Genie: Sales Space'];
-    render(<ChatWorkspace />);
-    await act(async () => {
-      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool', 'OtherTool'] }], tasks: [] });
-    });
-    // Genie rides in through MCP — no space prompt, the crew auto-runs…
     expect(h.session.addMessageToTargetSession).not.toHaveBeenCalledWith(
       's1',
       'assistant',
       '',
       expect.objectContaining({ resultType: 'genie_space_prompt' }),
     );
-    expect(h.createExecution).toHaveBeenCalled();
-    // …and the crew handed to the config builder no longer carries the
-    // legacy GenieTool (the MCP server covers Genie instead).
-    const builtFrom = JSON.stringify(mockedBuildGenerated.mock.calls[0][0]);
-    expect(builtFrom).not.toContain('GenieTool');
-    expect(builtFrom).toContain('OtherTool');
   });
 
   it('generation progress traces carry agent/task counts and route to the owner session', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onPlanReady({ agents: [{}], tasks: [{}] }); });
+    await act(async () => { h.genOpts.onPlanReady('gen-1', { agents: [{}], tasks: [{}] }); });
     expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
       's1',
       'assistant',
@@ -1042,12 +1051,15 @@ describe('ChatWorkspace component', () => {
     );
   });
 
-  it('generation traces and the genie prompt fall back to the current session without an owner', async () => {
+  it('generation traces fall back to the current session when there is no owner', async () => {
     h.exec.executionOwnerSessionId = null;
     render(<ChatWorkspace />);
+    // Capture the callbacks via a DIFFERENT generation so 'gen-1' stays
+    // unregistered — with no owner, its traces fall back to addMessage.
+    startGen('warmup');
     await act(async () => {
-      h.genOpts.onPlanReady({ agents: [{}, {}], tasks: [] });
-      h.genOpts.onComplete({ agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
+      h.genOpts.onPlanReady('gen-1', { agents: [{}, {}], tasks: [] });
+      h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1', tools: ['GenieTool'] }], tasks: [] });
     });
     expect(h.session.addMessage).toHaveBeenCalledWith(
       'assistant',
@@ -1057,32 +1069,22 @@ describe('ChatWorkspace component', () => {
         resultData: expect.objectContaining({ label: 'Crew planned', sublabel: '2 agents · 0 tasks' }),
       }),
     );
-    expect(h.session.addMessage).toHaveBeenCalledWith(
+    // The legacy Genie-space prompt is gone — onComplete posts no such message.
+    expect(h.session.addMessage).not.toHaveBeenCalledWith(
       'assistant',
       '',
       expect.objectContaining({ resultType: 'genie_space_prompt' }),
     );
   });
 
-  it('grounds the auto-run with the chat prompt that asked for the crew', async () => {
-    render(<ChatWorkspace />);
-    (globalThis as { __ccMsg?: string }).__ccMsg = 'top customers from bakehouse?';
-    await act(async () => { fireEvent.click(screen.getByTestId('cc-send')); });
-    await act(async () => {
-      h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] });
-    });
-    const args = mockedBuildGenerated.mock.calls.at(-1) as unknown[];
-    // 11th positional arg = userRequest, appended to task descriptions so the
-    // run answers the user's actual question.
-    expect(args[10]).toBe('top customers from bakehouse?');
-    // The prompt also rides on the generation data (persists through the
-    // genie-space prompt for later runs).
-    expect((args[0] as unknown[])).toEqual([{ id: 'a1' }]);
-  });
+  // NOTE: the chat prompt is now grounded into task descriptions on the BACKEND
+  // (build_crew_config_from_generated, exercised in the backend suite) instead of
+  // by the frontend config builder, so there is no frontend grounding test here.
 
   it('the actions row posts to the owner session when one exists', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [], tasks: [] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [], tasks: [] }); });
     h.exec.activeExecution = { jobId: 'job-act-1', status: 'running' };
     await act(async () => { h.streamOpts.onComplete({ result: 'final output' }); });
     expect(h.session.addMessageToTargetSession).toHaveBeenCalledWith(
@@ -1362,8 +1364,11 @@ describe('ChatWorkspace component', () => {
   it('the actions row appears only AFTER the result comes back, not at generation complete', async () => {
     h.exec.executionOwnerSessionId = null;
     render(<ChatWorkspace />);
+    // Capture callbacks via a different generation so 'gen-1' stays unregistered
+    // (no owner → the actions row posts via addMessage, not a target session).
+    startGen('warmup');
     h.session.addMessage.mockClear();
-    await act(async () => { h.genOpts.onComplete({ agents: [], tasks: [] }); });
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [], tasks: [] }); });
     // Generation done, run still in flight → no actions row yet
     const typesAtGen = h.session.addMessage.mock.calls
       .map((c: unknown[]) => (c[2] as { resultType?: string } | undefined)?.resultType)
@@ -1623,7 +1628,8 @@ describe('ChatWorkspace component', () => {
 
   it('/save reports a generic error on a non-Error rejection', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     h.saveGeneratedCrew.mockRejectedValueOnce('save-str'); // non-Error -> generic message
     await send('/save');
     expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to save crew'));
@@ -2140,7 +2146,8 @@ describe('ChatWorkspace component', () => {
   // --- /save overwrite + name-conflict ------------------------------------
   it('/save overwrite replaces an existing crew and confirms with "Updated … in"', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     h.app.loadCatalog.mockClear();
     await send('/save overwrite');
     expect(h.saveGeneratedCrew).toHaveBeenCalledWith(
@@ -2155,7 +2162,8 @@ describe('ChatWorkspace component', () => {
 
   it('/save overwrite <name> forwards the explicit name', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save overwrite Renamed Crew');
     expect(h.saveGeneratedCrew).toHaveBeenCalledWith(
       expect.anything(), 'Renamed Crew', expect.objectContaining({ overwrite: true }),
@@ -2166,7 +2174,8 @@ describe('ChatWorkspace component', () => {
     const { CrewNameConflictError } = await import('./api/crews');
     h.saveGeneratedCrew.mockRejectedValueOnce(new CrewNameConflictError('Dup Crew'));
     render(<ChatWorkspace />);
-    await act(async () => { h.genOpts.onComplete({ agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
+    startGen();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [{ id: 'a1' }], tasks: [{ id: 't1' }] }); });
     await send('/save');
     expect(h.session.addMessage).toHaveBeenCalledWith(
       'assistant',

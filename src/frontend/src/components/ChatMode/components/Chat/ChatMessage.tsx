@@ -7,9 +7,9 @@ import {
   FlowLoadResult,
   GeneratedAgent,
   GeneratedTask,
+  GenerationCompleteData,
 } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
-import { GenerationCompleteData } from '../../hooks/useGenerationStream';
 import { useAppStore } from '../../store/appStore';
 import { isGenieToolRef, CrewNameConflictError } from '../../api/crews';
 import { TraceDetail, findInlineTraceRenderer } from './traces';

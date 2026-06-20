@@ -178,6 +178,9 @@ export function streamGeneration(
       'agent_detail',
       'task_detail',
       'entity_error',
+      // ChatMode auto-execute folds the backend run's execution_id INTO this
+      // single terminal event (no separate execution_started), so the stream
+      // closes on generation_complete — no open window for reconnect/replay.
       'generation_complete',
       'generation_failed',
       'connected',

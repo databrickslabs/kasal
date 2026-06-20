@@ -289,6 +289,33 @@ export function findUiSurface(raw: unknown, depth = 0): UiSurface | null {
   return null;
 }
 
+/**
+ * Like {@link findUiSurface}, but returns the RAW A2UI document node (the
+ * string or object that {@link parseUiDocument} accepts) rather than the parsed
+ * surface. Use this to extract a clean, TOP-LEVEL document out of a wrapped
+ * execution result so it can be stored/handed to the preview pane exactly like a
+ * native deliverable — `parseUiDocument(node)` then renders it and the pane's
+ * Customize / Look / refine / download all operate on a normal document. Returns
+ * the matched node (outermost-first), or null when there is no surface.
+ */
+export function findUiDocument(
+  raw: unknown,
+  depth = 0,
+): string | Record<string, unknown> | null {
+  if (raw == null || depth > 6) return null;
+  if (typeof raw === 'string') return parseUiDocument(raw) ? raw : null;
+  if (typeof raw !== 'object') return null;
+  if (parseUiDocument(raw as Record<string, unknown>)) {
+    return raw as Record<string, unknown>;
+  }
+  const children = Array.isArray(raw) ? raw : Object.values(raw as Record<string, unknown>);
+  for (const child of children) {
+    const found = findUiDocument(child, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 /* NOTE: the crew "emit a UI document" instruction is built BACKEND-side
  * (src/backend/src/engines/crewai/helpers/ui_emission.py) so every execution
  * channel behaves the same. This module only parses + renders UI documents. */

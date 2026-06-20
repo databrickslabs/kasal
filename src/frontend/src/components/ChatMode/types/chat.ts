@@ -12,6 +12,13 @@ export interface ChatMessage {
   isStreaming?: boolean;
   /** Names of knowledge files attached to a user message (shown as chips). */
   attachments?: string[];
+  /**
+   * The execution (job) id of the run this message anchors. The deliverable
+   * shown in the preview pane is derived on demand from that execution's stored
+   * result (findUiSurface), so the output survives navigating away — no separate
+   * per-session preview copy is needed. Persisted in the __chatmode extras.
+   */
+  executionId?: string;
 }
 
 export interface ChatSession {

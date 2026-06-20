@@ -297,6 +297,13 @@ class CrewStreamingRequest(BaseModel):
     original_prompt: Optional[str] = Field(None, description="Original user message before LLM rewrite, used for cap computation")
     model: Optional[str] = Field(None, description="LLM model to use for generation")
     tools: Optional[List[str]] = Field(default_factory=list, description="List of available tools for the crew")
+    # --- ChatMode auto-execute. AgentBuilder/crew canvas leaves these at the
+    # defaults, so it stays generate-only (renders the plan as nodes, no run). ---
+    auto_execute: bool = Field(False, description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.")
+    session_id: Optional[str] = Field(None, description="Chat session id — memory partition + run ownership for the auto-executed run")
+    memory_workspace_scope: Optional[bool] = Field(True, description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only")
+    disable_memory: bool = Field(False, description="'No memory' mode — build agents without memory for the auto-executed run")
+    mcp_servers: Optional[List[str]] = Field(default_factory=list, description="MCP server names to equip the auto-executed crew with")
 
 
 class CrewStreamingResponse(BaseModel):

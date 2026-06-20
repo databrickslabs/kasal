@@ -77,6 +77,73 @@ describe('dispatcher api', () => {
       });
       expect(result).toBe(dispatchResult);
     });
+
+    it('includes ChatMode run settings + the clean original prompt', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      await dispatch(
+        'create a crew plan with agents and tasks: top customers',
+        'm',
+        undefined,
+        {
+          auto_execute: true,
+          session_id: 'chat-1',
+          memory_workspace_scope: false,
+          disable_memory: true,
+          mcp_servers: ['Databricks Genie: Sales'],
+        },
+        'top customers',
+      );
+
+      expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
+        message: 'create a crew plan with agents and tasks: top customers',
+        model: 'm',
+        original_prompt: 'top customers',
+        auto_execute: true,
+        session_id: 'chat-1',
+        memory_workspace_scope: false,
+        disable_memory: true,
+        mcp_servers: ['Databricks Genie: Sales'],
+      });
+    });
+
+    it('omits auto_execute when false/absent (crew canvas path)', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      await dispatch('hi', undefined, undefined, {
+        auto_execute: false,
+        memory_workspace_scope: true,
+        disable_memory: false,
+        mcp_servers: [],
+      });
+
+      // auto_execute:false is omitted so the backend default (false) applies —
+      // the crew canvas renders the plan and runs it via Play, not on dispatch.
+      expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        memory_workspace_scope: true,
+        disable_memory: false,
+      });
+    });
+
+    it('omits empty mcp_servers and falsy run settings from the payload', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      await dispatch('hi', undefined, undefined, {
+        session_id: undefined,
+        memory_workspace_scope: true,
+        disable_memory: false,
+        mcp_servers: [],
+      });
+
+      // memory_workspace_scope/disable_memory are sent even when default
+      // (booleans are meaningful), but no session_id and no empty mcp_servers.
+      expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        memory_workspace_scope: true,
+        disable_memory: false,
+      });
+    });
   });
 
   describe('detectIntent', () => {

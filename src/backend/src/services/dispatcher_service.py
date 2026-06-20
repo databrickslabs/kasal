@@ -1234,9 +1234,21 @@ Please analyze this message and provide your intent classification."""
                     generation_id = str(_uuid.uuid4())
                     streaming_request = CrewStreamingRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
-                        original_prompt=request.message,
+                        # Ground the run with the user's CLEAN message when the
+                        # frontend sent it (message may carry a steering prefix).
+                        original_prompt=request.original_prompt or request.message,
                         model=request.model,
                         tools=effective_tools or [],
+                        # ChatMode generates AND runs on the backend so the run
+                        # survives a session switch before the plan completes. The
+                        # crew canvas leaves this False (default) — it renders the
+                        # plan and the user runs it via Play; auto-executing here
+                        # too would double-run the crew.
+                        auto_execute=request.auto_execute,
+                        session_id=request.session_id,
+                        memory_workspace_scope=request.memory_workspace_scope,
+                        disable_memory=request.disable_memory,
+                        mcp_servers=request.mcp_servers or [],
                     )
                     # Spawn progressive generation in background
                     asyncio.create_task(
