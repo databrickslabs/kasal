@@ -293,22 +293,15 @@ DEFAULT_MODELS = {
         "context_window": 1048576,
         "max_output_tokens": 65536
     },
-    "databricks-gemini-2-5-pro": {
-        "name": "databricks-gemini-2-5-pro",
+    "databricks-gemini-3-1-flash-lite": {
+        "name": "databricks-gemini-3-1-flash-lite",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1000000,
         "max_output_tokens": 65536
     },
-    "databricks-gemini-3-flash": {
-        "name": "databricks-gemini-3-flash",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1000000,
-        "max_output_tokens": 65536
-    },
-    "databricks-gemini-3-pro": {
-        "name": "databricks-gemini-3-pro",
+    "databricks-gemini-3-5-flash": {
+        "name": "databricks-gemini-3-5-flash",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1000000,
@@ -335,20 +328,6 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
-    "databricks-gpt-5-1-codex-max": {
-        "name": "databricks-gpt-5-1-codex-max",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 400000,
-        "max_output_tokens": 128000
-    },
-    "databricks-gpt-5-1-codex-mini": {
-        "name": "databricks-gpt-5-1-codex-mini",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 400000,
-        "max_output_tokens": 64000
-    },
     "databricks-gpt-5-2": {
         "name": "databricks-gpt-5-2",
         "temperature": 0.7,
@@ -370,19 +349,19 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 128000
     },
-    "databricks-gpt-5-5": {
-        "name": "databricks-gpt-5-5",
+    "databricks-gpt-5-4-mini": {
+        "name": "databricks-gpt-5-4-mini",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 400000,
-        "max_output_tokens": 128000
+        "max_output_tokens": 64000
     },
-    "databricks-gpt-5-5-pro": {
-        "name": "databricks-gpt-5-5-pro",
+    "databricks-gpt-5-4-nano": {
+        "name": "databricks-gpt-5-4-nano",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 400000,
-        "max_output_tokens": 128000
+        "max_output_tokens": 32000
     },
     "databricks-gpt-5-mini": {
         "name": "databricks-gpt-5-mini",
@@ -398,33 +377,12 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 32000
     },
-    "databricks-gpt-oss-120b": {
-        "name": "databricks-gpt-oss-120b",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 25000  # Maximum supported by Databricks endpoint
-    },
-    "databricks-gpt-oss-20b": {
-        "name": "databricks-gpt-oss-20b",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 16384
-    },
     "databricks-llama-4-maverick": {
         "name": "databricks-llama-4-maverick",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 128000,
         "max_output_tokens": 8000
-    },
-    "databricks-meta-llama-3-1-405b-instruct": {
-        "name": "databricks-meta-llama-3-1-405b-instruct",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 128000,
-        "max_output_tokens": 4096
     },
     "databricks-meta-llama-3-1-8b-instruct": {
         "name": "databricks-meta-llama-3-1-8b-instruct",
@@ -445,7 +403,9 @@ DEFAULT_MODELS = {
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 262144,
-        "max_output_tokens": 16384
+        # Endpoint caps output at 10000 ("max_tokens cannot exceed 10000"); a
+        # higher value 400s on real crew runs.
+        "max_output_tokens": 10000
     },
 }
 
@@ -462,15 +422,32 @@ REMOVED_MODEL_KEYS = [
     "claude-3-7-sonnet-20250219-thinking",
     "claude-3-opus-20240229",
     "databricks-claude-3-7-sonnet",
-    # Not a real serving endpoint — selecting it fails generation with
-    # ENDPOINT_NOT_FOUND. Never in DEFAULT_MODELS; prune it from any DB it was
-    # manually added to. Use databricks-gemini-3-flash / 2-5-flash instead.
-    "databricks-gemini-3-1-flash-lite",
     # Anthropic suspended Claude Fable 5 on 2026-06-12 (US export-control
     # directive); the endpoint returns TEMPORARILY_UNAVAILABLE for all callers.
     # Prune it from any DB it was seeded/added to so it leaves the model picker.
     # Re-add to DEFAULT_MODELS (and drop from here) if the suspension is lifted.
     "databricks-claude-fable-5",
+    # Audited 2026-06-20 against the fevm-serverless-stable workspace with a
+    # hello-world run through Kasal's own LLM path: these Databricks endpoints no
+    # longer work — removed/renamed in the workspace, or only support the
+    # Responses API (which Kasal's chat-completions path can't use). Pruned so
+    # they also leave the model picker on already-seeded DBs.
+    "databricks-gemini-3-flash",                 # endpoint removed -> use gemini-3-5-flash / gemini-3-1-flash-lite
+    "databricks-gemini-3-pro",                   # endpoint removed
+    "databricks-gpt-5-1-codex-max",              # endpoint removed
+    "databricks-gpt-5-1-codex-mini",             # endpoint removed
+    "databricks-gpt-5-5-pro",                    # Responses-API-only (unsupported via chat completions)
+    "databricks-gpt-5-5",                        # function tools unsupported via chat completions (Responses API only) — breaks tool crews
+    "databricks-gemini-2-5-pro",                 # removed per request (superseded by gemini-3-5-flash / gemini-3-1-flash-lite)
+    "databricks-meta-llama-3-1-405b-instruct",   # NOT_FOUND (pay-per-token disabled)
+    # Reasoning model: answers the JSON-only planning prompt with a "thinking"
+    # preamble ("1. Analyze the Request: ..."), so crew planning fails with
+    # "Could not parse response as JSON". Not suited to one-shot JSON generation.
+    "databricks-qwen35-122b-a10b",
+    # GPT-OSS reasoning models fail crew runs (reasoning-block / JSON-planning
+    # quirks). Pruned per audit.
+    "databricks-gpt-oss-120b",
+    "databricks-gpt-oss-20b",
 ]
 
 async def seed_async():

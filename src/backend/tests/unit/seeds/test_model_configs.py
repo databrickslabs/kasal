@@ -40,13 +40,15 @@ class TestDefaultModelsDataStructure:
         assert "databricks-gpt-5-3-codex" in DEFAULT_MODELS
 
     def test_new_frontier_models_present(self):
-        """The latest Databricks Claude (>4.6) and GPT (>5.3) models are seeded."""
+        """The latest Databricks Claude (>4.6) and GPT (>5.3) models are seeded.
+        (gpt-5-5 and gpt-5-5-pro are intentionally NOT here — they're
+        Responses-API-only for tools, see TestAuditedDatabricksModels.)"""
         for key in (
             "databricks-claude-opus-4-7",
             "databricks-claude-opus-4-8",
             "databricks-gpt-5-4",
-            "databricks-gpt-5-5",
-            "databricks-gpt-5-5-pro",
+            "databricks-gpt-5-4-mini",
+            "databricks-gpt-5-4-nano",
         ):
             assert key in DEFAULT_MODELS, f"expected new model {key}"
             assert DEFAULT_MODELS[key]["provider"] == "databricks"
@@ -598,3 +600,70 @@ class TestMainBlock:
             import asyncio
             asyncio.run(mock_seed())
             mock_seed.assert_awaited_once()
+
+
+class TestAuditedDatabricksModels:
+    """Regression test for the 2026-06-20 Databricks model audit (hello-world run
+    through Kasal's own LLM path against the fevm-serverless-stable workspace).
+    Locks in which endpoints were removed and which working ones were added."""
+
+    # Endpoints that no longer work and were pruned (removed from DEFAULT_MODELS
+    # and registered for DB pruning).
+    AUDIT_REMOVED = (
+        "databricks-gemini-3-flash",
+        "databricks-gemini-3-pro",
+        "databricks-gpt-5-1-codex-max",
+        "databricks-gpt-5-1-codex-mini",
+        "databricks-gpt-5-5-pro",
+        "databricks-gpt-5-5",
+        "databricks-gemini-2-5-pro",
+        "databricks-meta-llama-3-1-405b-instruct",
+        # Reasoning model: emits a "thinking" preamble instead of pure JSON, so
+        # crew planning fails to parse it. Unsuited to one-shot JSON generation.
+        "databricks-qwen35-122b-a10b",
+        # GPT-OSS reasoning models fail crew runs.
+        "databricks-gpt-oss-120b",
+        "databricks-gpt-oss-20b",
+    )
+    # New workspace endpoints verified working and added.
+    AUDIT_ADDED = (
+        "databricks-gemini-3-1-flash-lite",
+        "databricks-gemini-3-5-flash",
+        "databricks-gpt-5-4-mini",
+        "databricks-gpt-5-4-nano",
+    )
+
+    def test_broken_models_pruned(self):
+        """Each broken endpoint is gone from DEFAULT_MODELS and listed for pruning."""
+        for key in self.AUDIT_REMOVED:
+            assert key not in DEFAULT_MODELS, f"{key} should be removed from DEFAULT_MODELS"
+            assert key in REMOVED_MODEL_KEYS, f"{key} must be registered for DB pruning"
+
+    def test_new_working_models_added(self):
+        """Each newly-verified working endpoint is seeded as a databricks model."""
+        for key in self.AUDIT_ADDED:
+            assert key in DEFAULT_MODELS, f"{key} should be added to DEFAULT_MODELS"
+            assert DEFAULT_MODELS[key]["provider"] == "databricks"
+
+    def test_gemini_3_1_flash_lite_no_longer_pruned(self):
+        """It used to be (wrongly) in REMOVED_MODEL_KEYS; the workspace now serves
+        it, so it must be seeded and NOT pruned."""
+        assert "databricks-gemini-3-1-flash-lite" in DEFAULT_MODELS
+        assert "databricks-gemini-3-1-flash-lite" not in REMOVED_MODEL_KEYS
+
+    def test_codex_model_that_works_via_kasal_kept(self):
+        """gpt-5-3-codex 400s on raw /invocations but works through Kasal's
+        litellm path, so it stays."""
+        assert "databricks-gpt-5-3-codex" in DEFAULT_MODELS
+
+    def test_no_overlap_default_and_removed(self):
+        """A key must never be both seeded and pruned."""
+        assert set(DEFAULT_MODELS).isdisjoint(REMOVED_MODEL_KEYS)
+
+    def test_qwen3_next_max_tokens_within_endpoint_cap(self):
+        """The qwen3-next endpoint caps output at 10000 ('max_tokens cannot
+        exceed 10000'); the seed must not exceed it or real runs 400."""
+        assert (
+            DEFAULT_MODELS["databricks-qwen3-next-80b-a3b-instruct"]["max_output_tokens"]
+            <= 10000
+        )
