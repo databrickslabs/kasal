@@ -115,35 +115,6 @@ class CrewPreparation:
         """Delegate to the shared security helper in tool_capability_manifest."""
         pass  # Handled by _run_security_checks below via run_crew_security_checks
 
-    def _needs_entity_extraction_fallback(self, model_name: str) -> bool:
-        """
-        Check if a model needs fallback for entity extraction.
-
-        Args:
-            model_name: The model name to check
-
-        Returns:
-            True if the model needs fallback for entity extraction
-        """
-        if not model_name:
-            return False
-
-        model_lower = str(model_name).lower()
-
-        # Models that have issues with entity extraction via Instructor/tool calling
-        problematic_patterns = [
-            'databricks-claude',     # Databricks Claude has strict JSON schema requirements
-            'gpt-oss',              # GPT-OSS returns empty responses for complex schemas
-            'databricks-gpt-oss',   # Full name for GPT-OSS
-        ]
-
-        for pattern in problematic_patterns:
-            if pattern in model_lower:
-                logger.info(f"Model {model_name} identified as needing entity extraction fallback")
-                return True
-
-        return False
-
     def _append_genie_mcp_formatting(self, task_config: Dict[str, Any]) -> None:
         """
         Append formatting instructions for Genie MCP output to match Genie Tool format.
@@ -213,90 +184,6 @@ class CrewPreparation:
             logger.info(f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}")
             return True
         return False
-
-    async def _apply_entity_extraction_fallback_patch(self):
-        """
-        Apply runtime patch to CrewAI's Converter to use fallback model for entity extraction.
-        This is needed because EntityMemory doesn't accept a custom LLM parameter.
-        """
-        try:
-            from crewai.utilities.converter import Converter
-            from crewai.utilities.evaluators.task_evaluator import TaskEvaluator
-            from crewai.llm import LLM
-            from src.core.llm_manager import LLMManager
-
-            # Store the original methods
-            if not hasattr(Converter, '_original_to_pydantic'):
-                Converter._original_to_pydantic = Converter.to_pydantic
-            if not hasattr(TaskEvaluator, '_original_evaluate'):
-                TaskEvaluator._original_evaluate = TaskEvaluator.evaluate
-
-            # Create the fallback LLM instance
-            # SECURITY: Pass group_id for multi-tenant isolation
-            group_id = self.config.get('group_id') if self.config else None
-            if not group_id:
-                raise ValueError("group_id is REQUIRED for LLM configuration")
-            fallback_llm = await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", group_id)
-
-            # Ensure fallback LLM has all necessary attributes
-            if not hasattr(fallback_llm, 'function_calling_llm'):
-                fallback_llm.function_calling_llm = fallback_llm
-
-            def patched_to_pydantic(self, current_attempt=1):
-                """Patched version that uses fallback LLM for problematic models."""
-                # Always use fallback for problematic models - simpler and more reliable
-                if hasattr(self, 'llm') and hasattr(self.llm, 'model'):
-                    model_name = str(self.llm.model).lower()
-                    # Check if this is a problematic model
-                    if 'databricks-claude' in model_name or 'gpt-oss' in model_name:
-                        # Store original LLM and its attributes
-                        original_llm = self.llm
-                        original_func_calling = getattr(self.llm, 'function_calling_llm', None)
-
-                        # Use fallback and ensure it has function_calling_llm
-                        self.llm = fallback_llm
-                        if not hasattr(self.llm, 'function_calling_llm'):
-                            self.llm.function_calling_llm = fallback_llm
-
-                        logger.info(f"Using databricks-llama-4-maverick fallback for {model_name}")
-                        try:
-                            result = Converter._original_to_pydantic(self, current_attempt)
-                            return result
-                        finally:
-                            # Restore original LLM and attributes
-                            self.llm = original_llm
-                            if original_func_calling is not None:
-                                self.llm.function_calling_llm = original_func_calling
-
-                # Use original method for non-problematic models
-                return Converter._original_to_pydantic(self, current_attempt)
-
-            def patched_evaluate(self, task, output):
-                """Patched TaskEvaluator that uses fallback LLM for problematic models."""
-                # Check if the original agent has a problematic LLM
-                if hasattr(self, 'original_agent') and hasattr(self.original_agent, 'llm'):
-                    model_name = str(self.original_agent.llm.model).lower() if hasattr(self.original_agent.llm, 'model') else ""
-                    if 'databricks-claude' in model_name or 'gpt-oss' in model_name:
-                        # Temporarily replace the LLM with fallback
-                        original_llm = self.llm
-                        self.llm = fallback_llm
-                        logger.info(f"Using fallback LLM for TaskEvaluator with {model_name}")
-                        try:
-                            return TaskEvaluator._original_evaluate(self, task, output)
-                        finally:
-                            self.llm = original_llm
-
-                # Use original method for non-problematic models
-                return TaskEvaluator._original_evaluate(self, task, output)
-
-            # Apply the patches
-            Converter.to_pydantic = patched_to_pydantic
-            TaskEvaluator.evaluate = patched_evaluate
-            logger.info("Applied entity extraction and task evaluation fallback patches")
-
-        except Exception as e:
-            logger.error(f"Failed to apply entity extraction fallback patch: {e}")
-            # Continue without patch - will fail on entity extraction but rest will work
 
     async def prepare(self) -> bool:
         """
