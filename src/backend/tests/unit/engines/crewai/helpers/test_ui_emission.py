@@ -495,3 +495,42 @@ class TestCatalogSlicing:
 )
 def test_infer_deliverable_flashcards(text, expected):
     assert _infer_deliverable(text) == expected
+
+
+# --- quiz question count: defer to the user's request, don't hard-cap ------
+
+
+def test_quiz_default_directive_defers_to_requested_count():
+    """Regression: the quiz default directive must NOT hard-cap the count (it
+    used to say 'write exactly 5 questions'), so a chat prompt asking for 50 or
+    100 questions is honored instead of being limited to 5."""
+    from src.engines.crewai.helpers.ui_emission import _DEFAULT_DIRECTIVES
+
+    quiz = _DEFAULT_DIRECTIVES["quiz"]
+    assert "exactly 5 questions" not in quiz
+    # It instructs the agent to use the count from the request.
+    assert "request" in quiz.lower()
+    # A sensible fallback only when no count is given.
+    assert "default" in quiz.lower()
+
+
+@pytest.mark.asyncio
+async def test_apply_ui_emission_quiz_directive_not_capped_at_five():
+    """A quiz task on an un-customized workspace (no configured directives) gets
+    the default quiz directive, which defers to the requested count rather than
+    forcing exactly 5."""
+    tasks = [{"description": "Build an interactive quiz with 50 questions about Rome",
+              "expected_output": "an interactive quiz"}]
+    rss, svc_patch = _patch_config(None)
+    with rss, svc_patch as Svc:
+        inst = MagicMock()
+        # Enabled, but no style/directives configured → default directive applies.
+        inst.get_config = AsyncMock(
+            return_value=MagicMock(enabled=True, style_json=json.dumps({}))
+        )
+        Svc.return_value = inst
+        await apply_ui_emission(tasks, "g1")
+
+    desc = tasks[0]["description"]
+    assert "exactly 5 questions" not in desc
+    assert "as many questions as the request asks for" in desc
