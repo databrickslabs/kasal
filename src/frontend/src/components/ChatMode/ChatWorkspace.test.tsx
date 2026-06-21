@@ -1386,6 +1386,22 @@ describe('ChatWorkspace component', () => {
     );
   });
 
+  it('the actions row carries the run executionId (for the memory-graph link)', async () => {
+    h.exec.executionOwnerSessionId = null;
+    render(<ChatWorkspace />);
+    startGen('warmup');
+    h.session.addMessage.mockClear();
+    await act(async () => { h.genOpts.onComplete('gen-1', { agents: [], tasks: [] }); });
+    // Stream starts with this run's job id → it must anchor the actions row.
+    await act(async () => { h.genOpts.onExecutionStarted('gen-1', 'job-graph-1'); });
+    await act(async () => { h.streamOpts.onComplete({ result: 'final output' }); });
+    expect(h.session.addMessage).toHaveBeenCalledWith(
+      'assistant',
+      '',
+      expect.objectContaining({ resultType: 'crew_actions', executionId: 'job-graph-1' }),
+    );
+  });
+
   it('onComplete handles a string result that JSON-parses to a non-object', () => {
     render(<ChatWorkspace />);
     act(() => { h.streamOpts.onComplete({ result: '123' }); });

@@ -665,17 +665,23 @@ class TestLocalDefaultStoreReadDelete:
             return_value=tmp_path / "nope",
         ):
             result = _browse_default_records(group_id="g", scope=None, limit=10, offset=0)
-        assert result == []
+        # Returns (records, total) so the client can paginate.
+        assert result == ([], 0)
 
     def test_browse_reads_the_group_store_and_passes_scope(self, tmp_path):
         """Reads the ONE deterministic group store and forwards the scope filter
-        (workspace=/group, session=/group/session) to the storage layer."""
+        (workspace=/group, session=/group/session) to the storage layer.
+
+        Also returns the full store count as ``total`` (via ``storage.count``)
+        so the browser knows how many pages exist beyond the one returned.
+        """
         from src.api.memory_backend_router import _browse_default_records
 
         store = tmp_path / "kasal_default_g"
         store.mkdir()
         storage = MagicMock()
         storage.list_records.return_value = ["rec"]
+        storage.count.return_value = 412
         memory_obj = MagicMock(_storage=storage)
 
         with patch(
@@ -687,13 +693,16 @@ class TestLocalDefaultStoreReadDelete:
             "src.api.memory_backend_router._memory_record_to_dict",
             return_value={"created_at": "2026-01-01", "metadata": {}},
         ):
-            result = _browse_default_records(
+            records, total = _browse_default_records(
                 group_id="g", scope="/g/sess1", limit=10, offset=0
             )
 
-        assert len(result) == 1
+        assert len(records) == 1
+        # `total` reflects the full store count, not just the returned page.
+        assert total == 412
         storage.list_records.assert_called_once()
         assert storage.list_records.call_args.kwargs.get("scope_prefix") == "/g/sess1"
+        assert storage.count.call_args.kwargs.get("scope_prefix") == "/g/sess1"
 
     def test_delete_returns_zero_when_store_missing(self, tmp_path):
         from src.api.memory_backend_router import _delete_default_records

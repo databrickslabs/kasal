@@ -417,16 +417,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
   }, [isFullscreen]);
 
   // ---- Render ----
-  if (!nodes.length) {
-    return (
-      <Box sx={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary', border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
-        <Typography variant="body2">
-          No concepts yet — run a crew with cognitive memory enabled.
-        </Typography>
-      </Box>
-    );
-  }
-
+  // NOTE: the canvas container is ALWAYS rendered (even with no nodes) so the
+  // one-shot init effect can attach to it. Early-returning a placeholder when
+  // nodes are momentarily empty (e.g. while records load) left the container
+  // unmounted, so the graph never initialised until it was remounted by a tab
+  // switch. The empty state is now an overlay instead.
+  const isEmpty = !nodes.length;
   const tipNode      = hoveredId ? physicsNodes.find((n) => n.id === hoveredId) : null;
   const tipNbrCount  = hoveredId ? neighbours.get(hoveredId)?.size ?? 0 : 0;
 
@@ -449,6 +445,27 @@ export const ConceptForceGraph: React.FC<Props> = ({
         ref={containerRef}
         sx={{ width: '100%', height: '100%', cursor: 'grab' }}
       />
+
+      {/* Empty-state overlay (container stays mounted underneath) */}
+      {isEmpty && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'text.secondary',
+            pointerEvents: 'none',
+            px: 2,
+            textAlign: 'center',
+          }}
+        >
+          <Typography variant="body2">
+            No concepts yet — run a crew with cognitive memory enabled.
+          </Typography>
+        </Box>
+      )}
 
       {/* Hover tooltip */}
       {tipNode && (

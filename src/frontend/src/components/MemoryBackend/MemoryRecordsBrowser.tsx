@@ -30,6 +30,7 @@ import {
   IconButton,
   InputAdornment,
   LinearProgress,
+  MenuItem,
   Paper,
   Slider,
   Snackbar,
@@ -54,6 +55,11 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 import { apiClient } from '../../config/api/ApiConfig';
 import { ConceptForceGraph } from './ConceptForceGraph';
+import { runService } from '../../api/ExecutionHistoryService';
+import { Run } from '../../types/run';
+
+// Sentinel run id for the opt-in "show every run at once" (full graph) view.
+const ALL_RUNS = '__all__';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,18 +82,55 @@ interface RecordsResponse {
   backend: string;
   records: MemoryRecord[];
   count: number;
+  // Total records available in the store for the active scope. The browser
+  // pages through them with `offset` until loaded === total.
+  total?: number;
 }
 
 interface MemoryRecordsBrowserProps {
   open: boolean;
   onClose: () => void;
+  /** Open scoped to a specific run (job_id) instead of defaulting to latest. */
+  initialRunId?: string;
+  /** Open directly on a given view (e.g. 'graph' from a ChatMode run). */
+  initialView?: 'cards' | 'concepts' | 'graph';
 }
 
 // ---------------------------------------------------------------------------
 // Data helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULT_LIMIT = 250;
+// Records fetched per page for the card list. We page through the store with
+// `offset` ("Load more") so we never mount thousands of card DOM nodes at once.
+const PAGE_SIZE = 250;
+
+// The concept/graph views need the WHOLE store at once (they aggregate every
+// record into a single visualization that re-runs an expensive force
+// simulation on each data change). So they fetch the entire remainder in ONE
+// request — one round-trip, one simulation — capped at this many records.
+const BULK_FETCH = 5000;
+
+// Memory can be written a little after a run's completed_at; extend the window
+// end by this much so trailing writes still fall inside the run.
+const RUN_END_BUFFER_MS = 2 * 60 * 1000;
+
+/**
+ * Parse a timestamp to epoch ms; 0 when missing/invalid.
+ *
+ * Memory records come from Python `str(datetime)` ("2026-06-21 13:00:00.123456"
+ * — space separator + microseconds, which `Date.parse` rejects) while run
+ * timestamps are ISO ("2026-06-21T13:02:00"). Both are naive UTC. We normalize
+ * both to comparable UTC epochs: space→T, trim fractional seconds to ms, and
+ * append 'Z' when no timezone is present (treat as UTC).
+ */
+const timeMs = (iso: string | null | undefined): number => {
+  if (!iso) return 0;
+  let s = iso.trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+  const hasTz = /[Zz]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
+  if (!hasTz) s += 'Z';
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? 0 : t;
+};
 
 /** Normalise a category label so variants collapse to the same key. */
 const normalizeCategory = (raw: string): string =>
@@ -604,18 +647,45 @@ const CategoryBubbleMap: React.FC<CategoryBubbleMapProps> = ({
 export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   open,
   onClose,
+  initialRunId,
+  initialView,
 }) => {
   const [records, setRecords] = useState<MemoryRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  // True once a fetch returns fewer rows than asked for — i.e. we've pulled the
+  // whole store. Derived from the result (not records.length >= total) so an
+  // over-estimated `total` can't drive an endless reload loop.
+  const [fullyLoaded, setFullyLoaded] = useState(false);
   const [backend, setBackend] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Crew runs (from the executions API) define the time boundaries we bucket
+  // memory records into. The graph/concepts views default to the LATEST run;
+  // ALL_RUNS is the opt-in full graph across every run.
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [runsLoaded, setRunsLoaded] = useState(false);
+  // For a selected run: 'saved' = what it persisted (records in its window);
+  // 'recalled' = what it READ (record ids from its memory_retrieval traces).
+  const [memoryMode, setMemoryMode] = useState<'saved' | 'recalled'>('saved');
+  const [recalledIds, setRecalledIds] = useState<Set<string>>(new Set());
+  // When opened scoped to a specific run (e.g. from a ChatMode message), start
+  // on that run; otherwise '' lets the latest run-with-memory be auto-picked.
+  const [selectedRunId, setSelectedRunId] = useState<string>(initialRunId || '');
+  // Load the WHOLE store only on demand — the default (latest run) loads just
+  // the first page so opening is fast and doesn't flicker. Turns true when the
+  // user picks a run / "All runs", or when opened pinned to a run (ChatMode),
+  // because then we need every record to show that run's full context.
+  const [loadAll, setLoadAll] = useState<boolean>(Boolean(initialRunId));
 
   const [search, setSearch] = useState('');
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [importanceRange, setImportanceRange] = useState<[number, number]>([0, 1]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<'cards' | 'concepts' | 'graph'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'concepts' | 'graph'>(
+    initialView || 'cards',
+  );
 
   // Delete state
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -625,24 +695,44 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
     message: string;
   } | null>(null);
 
-  const fetchRecords = useCallback(async () => {
+  // Load the newest `limit` records from the top of the store, REPLACING the
+  // list. We always read from offset 0 (no append/dedup paging) so there's no
+  // offset drift and no per-chunk re-render loop — one fetch, one update. Two
+  // sizes are used: PAGE_SIZE for the fast default, BULK_FETCH for "load all".
+  const load = useCallback(async (limit: number) => {
     setLoading(true);
     setError(null);
     try {
       const response = await apiClient.get<RecordsResponse>(
         '/memory-backend/records',
-        { params: { limit: DEFAULT_LIMIT, offset: 0 } },
+        { params: { limit, offset: 0 } },
       );
-      setRecords(response.data.records || []);
+      const page = response.data.records || [];
+      setRecords(page);
       setBackend(response.data.backend || '');
+      setTotal(response.data.total ?? page.length);
+      // Fewer rows than requested ⇒ that's the whole store.
+      setFullyLoaded(page.length < limit);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Failed to load memory records: ${msg}`);
       setRecords([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const fetchRecords = useCallback(() => {
+    // Re-pick the default run once the fresh page is in — unless we were opened
+    // pinned to a specific run (ChatMode graph), in which case keep that.
+    setSelectedRunId(initialRunId || '');
+    // Back to the fast default (latest run only) unless pinned to a run.
+    setLoadAll(Boolean(initialRunId));
+    return load(PAGE_SIZE);
+  }, [load, initialRunId]);
+
+  const hasMore = !fullyLoaded && records.length < total;
 
   useEffect(() => {
     if (open) {
@@ -650,11 +740,137 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
     }
   }, [open, fetchRecords]);
 
+  // Load the group's crew runs, newest first — exactly like the crew-canvas job
+  // history. We bypass the runs cache so a crew you JUST ran shows up as the
+  // latest instead of a stale entry.
+  const loadRuns = useCallback(async () => {
+    try {
+      runService.invalidateRunsCache();
+      const resp = await runService.getRuns(100);
+      const sorted = [...(resp.runs || [])].sort(
+        (a, b) => timeMs(b.created_at) - timeMs(a.created_at),
+      );
+      setRuns(sorted);
+    } catch {
+      setRuns([]);
+    } finally {
+      setRunsLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) loadRuns();
+  }, [open, loadRuns]);
+
+  // For the selected run, pull the record ids it RECALLED from its
+  // memory_retrieval traces (the trace content embeds id='<uuid>' for each
+  // retrieved MemoryRecord). We then look those ids up in the loaded store
+  // records to build the "Recalled" graph with full categories.
+  useEffect(() => {
+    if (!open || !selectedRunId || selectedRunId === ALL_RUNS) {
+      setRecalledIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiClient.get<{
+          traces?: Array<{ event_type?: string; output?: unknown }>;
+        }>(`/traces/job/${selectedRunId}`);
+        const ids = new Set<string>();
+        for (const tr of resp.data?.traces || []) {
+          if (!/memory_retrieval/.test(tr.event_type || '')) continue;
+          const text =
+            typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output ?? '');
+          for (const m of text.matchAll(/id='([0-9a-fA-F-]{36})'/g)) ids.add(m[1]);
+        }
+        if (!cancelled) setRecalledIds(ids);
+      } catch {
+        if (!cancelled) setRecalledIds(new Set());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedRunId]);
+
+  // The concept bubble map and force graph aggregate the WHOLE store into one
+  // visualization (you pan/scroll it — there are no pages) and re-run an
+  // expensive force simulation on every data change. So when either view is
+  // open, pull the entire remaining store in a SINGLE request — one round-trip,
+  // one simulation — instead of dozens of 250-record pages. Cards view stays
+  // manually paged ("Load more") to avoid mounting thousands of card nodes.
+
+  // Per-run [start, end] time window. Each run owns only the records written
+  // during its OWN execution — start = created_at, end = completed_at (+ buffer
+  // Time window for the selected run, anchored on completed_at.
+  //
+  // IMPORTANT: a run's `created_at` is stored in LOCAL time, while `completed_at`
+  // and memory record `created_at` are UTC — so created_at is NOT comparable to
+  // memory timestamps (it can be hours off). We therefore window on completed_at:
+  // a run owns records written after the previous (older) run finished, up to
+  // its own completion (+ a small buffer for trailing writes). For a still-
+  // running latest run we extend to "now". We test only the SELECTED run's own
+  // window, so runs can't steal each other's records (the old "swap").
+  const runWindow = useMemo(() => {
+    if (selectedRunId === ALL_RUNS || !selectedRunId) return null;
+    const idx = runs.findIndex((r) => r.job_id === selectedRunId);
+    if (idx < 0) return null;
+    const completedMs = (r: Run | undefined) =>
+      r && r.completed_at ? timeMs(r.completed_at) : null;
+    const end = (completedMs(runs[idx]) ?? Date.now()) + RUN_END_BUFFER_MS;
+    // Start = the nearest OLDER run that has a completion time.
+    let start = -Infinity;
+    for (let j = idx + 1; j < runs.length; j++) {
+      const c = completedMs(runs[j]);
+      if (c != null) {
+        start = c;
+        break;
+      }
+    }
+    return { start, end };
+  }, [runs, selectedRunId]);
+
+  // Default the view to the LATEST run (newest first), like the job history —
+  // that's the run you just kicked off. Set once, as soon as runs load.
+  useEffect(() => {
+    if (!runsLoaded || selectedRunId) return;
+    setSelectedRunId(runs.length ? runs[0].job_id : ALL_RUNS);
+  }, [runsLoaded, selectedRunId, runs]);
+
+  const latestRunId = runs[0]?.job_id;
+
+  // On demand, load the WHOLE store in ONE request (offset 0, replace) — no
+  // paging loop, so no flicker. Runs once when the user asks for more than the
+  // default latest run (loadAll) and we don't already have everything.
+  useEffect(() => {
+    if (!open || !runsLoaded || !loadAll || loading || fullyLoaded) return;
+    load(BULK_FETCH);
+  }, [open, runsLoaded, loadAll, loading, fullyLoaded, load]);
+
   // ------------------------------------------------------------------
   // Derived data
   // ------------------------------------------------------------------
 
-  const index = useMemo(() => deriveIndex(records), [records]);
+  // Records scoped to the selected run (or all records for the full graph).
+  // Every view (cards/concepts/graph) and the derived index work off this set,
+  // so picking a run focuses the whole browser on that run.
+  const scopedRecords = useMemo(() => {
+    if (selectedRunId === ALL_RUNS || !selectedRunId) return records;
+    if (memoryMode === 'recalled') {
+      // What the run READ: records whose ids appear in its retrieval traces.
+      if (recalledIds.size === 0) return [];
+      return records.filter((r) => r.id && recalledIds.has(r.id));
+    }
+    // What the run SAVED: records written within its window.
+    if (!runWindow) return records;
+    return records.filter((r) => {
+      const t = timeMs(r.created_at);
+      return t > runWindow.start && t <= runWindow.end;
+    });
+  }, [records, selectedRunId, memoryMode, recalledIds, runWindow]);
+
+  const index = useMemo(() => deriveIndex(scopedRecords), [scopedRecords]);
 
   const categoryStats = useMemo(
     () => [...index.categories.values()].sort((a, b) => b.count - a.count || b.avgImportance - a.avgImportance),
@@ -668,7 +884,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
 
   const filteredRecords = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = records.filter((record) => {
+    const filtered = scopedRecords.filter((record) => {
       if (record.importance < importanceRange[0] || record.importance > importanceRange[1]) {
         return false;
       }
@@ -693,7 +909,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
       if (byImp !== 0) return byImp;
       return (b.created_at || '').localeCompare(a.created_at || '');
     });
-  }, [records, search, selectedAgents, selectedCategories, importanceRange]);
+  }, [scopedRecords, search, selectedAgents, selectedCategories, importanceRange]);
 
   // ------------------------------------------------------------------
   // Handlers
@@ -758,7 +974,6 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
       setDeleting(false);
       setConfirmOpen(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchRecords]);
 
   const filtersActive =
@@ -786,7 +1001,14 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
           <Chip size="small" label={backendChipLabel} color={backendChipColor} variant="outlined" />
           <Box sx={{ flexGrow: 1 }} />
           <Tooltip title="Refresh">
-            <IconButton size="small" onClick={fetchRecords} disabled={loading}>
+            <IconButton
+              size="small"
+              onClick={() => {
+                loadRuns();
+                fetchRecords();
+              }}
+              disabled={loading}
+            >
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -807,7 +1029,15 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
           </IconButton>
         </Stack>
         <Stack direction="row" spacing={1.5} sx={{ mt: 1.5 }} useFlexGap flexWrap="wrap">
-          <StatTile label="Records" value={records.length} />
+          <StatTile
+            label="Records"
+            value={selectedRunId === ALL_RUNS ? (total || records.length) : scopedRecords.length}
+            hint={
+              selectedRunId === ALL_RUNS
+                ? hasMore ? `${records.length} loaded` : 'all runs'
+                : `this run · ${total} total`
+            }
+          />
           <StatTile
             label="Concepts"
             value={index.categories.size}
@@ -816,8 +1046,8 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
           <StatTile
             label="Avg importance"
             value={index.avgImportance.toFixed(2)}
-            hint={`Range ${Math.min(...records.map((r) => r.importance) || [0]).toFixed(2)} – ${
-              Math.max(...records.map((r) => r.importance) || [0]).toFixed(2)
+            hint={`Range ${Math.min(...scopedRecords.map((r) => r.importance) || [0]).toFixed(2)} – ${
+              Math.max(...scopedRecords.map((r) => r.importance) || [0]).toFixed(2)
             }`}
           />
           <StatTile label="Visible" value={filteredRecords.length} hint={filtersActive ? 'filtered' : 'all'} />
@@ -992,6 +1222,60 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
                   Graph
                 </ToggleButton>
               </ToggleButtonGroup>
+
+              <TextField
+                select
+                size="small"
+                label="Run"
+                value={runsLoaded && selectedRunId ? selectedRunId : ''}
+                onChange={(e) => {
+                  setSelectedRunId(e.target.value);
+                  setMemoryMode('saved');
+                  // Only "All runs" reads the entire store. Picking a single run
+                  // just filters what's already loaded — no full-memory read.
+                  setLoadAll(e.target.value === ALL_RUNS);
+                }}
+                disabled={!runsLoaded}
+                sx={{ minWidth: 240 }}
+              >
+                {(!runsLoaded || !selectedRunId) && (
+                  <MenuItem value="" disabled>
+                    {runsLoaded ? 'Select a run…' : 'Loading runs…'}
+                  </MenuItem>
+                )}
+                {runs.map((r) => (
+                  <MenuItem key={r.job_id} value={r.job_id}>
+                    {(r.job_id === latestRunId ? 'Latest · ' : '') +
+                      (r.run_name || `Run ${r.job_id.slice(0, 8)}`) +
+                      ` · ${formatRelative(r.created_at)}`}
+                  </MenuItem>
+                ))}
+                <MenuItem value={ALL_RUNS}>All runs (full graph)</MenuItem>
+              </TextField>
+
+              {/* For a single run: what it SAVED vs what it RECALLED (read). */}
+              {selectedRunId && selectedRunId !== ALL_RUNS && (
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={memoryMode}
+                  onChange={(_e, v) => {
+                    if (!v) return;
+                    setMemoryMode(v);
+                    // Recalled memories can come from any past run, so the whole
+                    // store must be loaded to resolve their ids.
+                    if (v === 'recalled') setLoadAll(true);
+                  }}
+                >
+                  <ToggleButton value="saved" aria-label="saved">
+                    Saved
+                  </ToggleButton>
+                  <ToggleButton value="recalled" aria-label="recalled">
+                    Recalled
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              )}
+
               {selectedCategories.size > 0 && (
                 <Stack direction="row" spacing={0.5} alignItems="center">
                   <Typography variant="caption" color="text.secondary">
@@ -1116,6 +1400,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
                 </Collapse>
               </Box>
             )}
+
           </Box>
         </Box>
       </DialogContent>
