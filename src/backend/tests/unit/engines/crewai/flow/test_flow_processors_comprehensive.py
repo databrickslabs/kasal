@@ -165,8 +165,8 @@ class TestProcessStartingPoints:
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
         # Mock the AgentConfig and TaskConfig at their source modules (imports happen inside functions)
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_obj.role = "Test Agent"
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -225,8 +225,8 @@ class TestProcessStartingPoints:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config, \
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
              patch('crewai.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -291,8 +291,8 @@ class TestProcessStartingPoints:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config, \
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
              patch('crewai.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -454,8 +454,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -523,8 +523,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -585,8 +585,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -755,8 +755,8 @@ class TestProcessRouters:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -823,8 +823,8 @@ class TestProcessRouters:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_config.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_config.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 

@@ -724,7 +724,7 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -753,7 +753,7 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -798,7 +798,7 @@ class TestCreateTasks:
         cp = CrewPreparation(config=config)
         cp.agents = {"ag1": MagicMock()}
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.side_effect = Exception("task creation error")
             result = await cp._create_tasks()
 
@@ -830,7 +830,7 @@ class TestCreateTasks:
         task2 = MagicMock()
         task2.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.side_effect = [task1, task2]
             result = await cp._create_tasks()
 
@@ -863,7 +863,7 @@ class TestCreateTasks:
         task2.context = None
         task2.agent = mock_agent
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct, \
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct, \
              patch("src.engines.crewai.crew_preparation.Task") as mock_task_cls_module, \
              patch("crewai.Task") as mock_task_cls_crewai:
             mock_ct.side_effect = [task1, task2]
@@ -913,7 +913,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -949,7 +949,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -989,7 +989,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_helpers.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 

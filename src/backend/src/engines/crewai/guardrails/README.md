@@ -116,7 +116,7 @@ WHERE company_name IS NULL;
 1. Create a new Python file in this directory with your guardrail class
 2. Implement a validation method that returns a tuple of `(bool, result_or_error)`
 3. Add your new guardrail class to the `__init__.py` export list
-4. Update the `task_helpers.py` file to handle your new guardrail type
+4. Update the `task_adapter.py` file to handle your new guardrail type
 
 ## Full Example
 
@@ -132,7 +132,7 @@ task_config = {
 }
 
 # Using the guardrail in code
-from src.engines.crewai.helpers.task_helpers import create_task
+from src.engines.crewai.helpers.task_adapter import create_task
 
 task = await create_task(
     task_key="find_tech_companies",

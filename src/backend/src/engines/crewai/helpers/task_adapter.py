@@ -18,6 +18,7 @@ from src.core.logger import LoggerManager
 from src.engines.crewai.helpers.tool_helpers import resolve_tool_ids_to_names
 from src.core.unit_of_work import UnitOfWork
 from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
+from src.engines.crewai.common.task_builder import build_task_args
 
 
 # Get loggers from the centralized logging system
@@ -441,52 +442,6 @@ async def create_task(
     else:
         logger.info(f"Task {task_key} will use agent's default tools")
     
-    # Prepare task arguments
-    task_args = {
-        "description": task_config["description"],
-        "expected_output": task_config["expected_output"],
-        "tools": task_tools,
-        "agent": agent,
-        "async_execution": task_config.get("async_execution", False),
-        "retry_on_fail": task_config.get("retry_on_fail", False),
-        "max_retries": task_config.get("max_retries", 3),
-        "markdown": task_config.get("markdown", False)
-    }
-
-    # KNOWLEDGE INTEGRATION FIX: Search vector index for relevant knowledge chunks
-    # that this specific agent has access to, based on task context
-    try:
-        # Get agent ID for access control filtering
-        agent_id = None
-        if hasattr(agent, 'id'):
-            agent_id = agent.id
-        elif hasattr(agent, '_agent_id'):
-            agent_id = agent._agent_id
-
-        # Try to get agent_id from config if not available directly
-        if not agent_id and hasattr(config, 'get'):
-            # Look for agent configurations that match this agent
-            for agent_config in config.get('agents', []):
-                config_agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
-                if config_agent_name == agent_name:
-                    agent_id = agent_config.get('id')
-                    break
-
-        if agent_id:
-            logger.info(f"Task {task_key}: Found agent ID {agent_id} for access control")
-            logger.info(f"Task {task_key}: Knowledge retrieval will be handled automatically by CrewAI's agent knowledge sources")
-        else:
-            logger.warning(f"Task {task_key}: Could not determine agent ID for knowledge access control")
-
-    except Exception as knowledge_error:
-        logger.error(f"Task {task_key}: Error processing agent knowledge with access control: {knowledge_error}", exc_info=True)
-        # Continue with task creation even if knowledge extraction fails
-
-    # If markdown is enabled, append markdown instructions
-    if task_args["markdown"]:
-        task_args["description"] += "\n\nPlease format your response using markdown syntax."
-        task_args["expected_output"] += "\n\nYour response should be formatted in markdown."
-
     # Store any existing callback from the task_config for later use
     existing_callback = task_config.get('callback', None)
     callback_config = task_config.get('callback_config', None)
@@ -556,106 +511,15 @@ async def create_task(
             logger.debug(f"Could not check global volume configuration or memory backend: {e}")
             # Continue without global config
     
-    # Handle guardrail if present in the task configuration
-    if 'guardrail' in task_config and task_config['guardrail']:
-        guardrail_config = task_config['guardrail']
-        guardrail_logger.info(f"Task {task_key} has guardrail configuration: {guardrail_config}")
 
-        # Detect if this is an LLM guardrail config (has 'description'/'llm_model' but no 'type')
-        # stored under the 'guardrail' key instead of the 'llm_guardrail' key.
-        # Parse the config to inspect its fields.
-        _parsed_config = guardrail_config
-        if isinstance(_parsed_config, str):
-            try:
-                _parsed_config = json.loads(_parsed_config)
-            except (json.JSONDecodeError, TypeError):
-                _parsed_config = {}
+    # Assemble the Task args via the shared builder (base fields + markdown +
+    # Genie formatting + code/LLM guardrails + output_pydantic) — shared with flow.
+    task_args = await build_task_args(task_config, agent, task_tools, config=config)
 
-        # If description matches a known factory type, promote it to the type field
-        _KNOWN_FACTORY_TYPES = {'prompt_injection_check', 'self_reflection'}
-        if (
-            isinstance(_parsed_config, dict)
-            and 'type' not in _parsed_config
-            and _parsed_config.get('description') in _KNOWN_FACTORY_TYPES
-        ):
-            _parsed_config = dict(_parsed_config)
-            _parsed_config['type'] = _parsed_config.pop('description')
-            guardrail_logger.info(
-                f"Task {task_key} guardrail: promoted description '{_parsed_config['type']}' to type field"
-            )
-
-        _is_llm_guardrail = (
-            isinstance(_parsed_config, dict)
-            and ('description' in _parsed_config or 'llm_model' in _parsed_config)
-            and 'type' not in _parsed_config
-        )
-
-        if _is_llm_guardrail:
-            # Route to LLM guardrail handler — the config was stored under 'guardrail'
-            # but is actually an LLM guardrail (description + llm_model, no code-based type).
-            guardrail_logger.info(f"Task {task_key} guardrail config detected as LLM guardrail (has description/llm_model, no type) — routing to LLM guardrail handler")
-            task_config['llm_guardrail'] = _parsed_config
-        else:
-            try:
-                # Import guardrail factory only when needed
-                from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
-
-                # LLM-backed factory guardrails (self_reflection / prompt_injection_check)
-                # judge output with an LLM, so stamp the run's model (the agent's,
-                # top-down from the chat input) into their config — same model as
-                # the run, not the hardcoded guardrail default.
-                if isinstance(_parsed_config, dict) and _parsed_config.get('type') in {'self_reflection', 'prompt_injection_check'}:
-                    from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
-                    _parsed_config = {**_parsed_config, 'llm_model': resolve_guardrail_model(_parsed_config.get('llm_model'), agent, config)}
-
-                # Use promoted _parsed_config (may have type field added) rather than original
-                factory_config = json.dumps(_parsed_config) if isinstance(_parsed_config, dict) else _parsed_config
-
-                # Create the guardrail instance
-                guardrail = GuardrailFactory.create_guardrail(factory_config)
-                if guardrail:
-                    # Create a callable wrapper for this guardrail
-                    # Using GuardrailWrapper class instead of a closure because:
-                    # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
-                    # on the guardrail function, which fails for closures with
-                    # "OSError: could not get source code". The wrapper class is defined
-                    # in a source file, so getsource() can inspect it properly.
-                    guardrail_wrapper = GuardrailWrapper(guardrail, task_key)
-
-                    # Instead of setting as callback, set as guardrail function
-                    # This integrates with CrewAI's native retry mechanism
-                    task_args['guardrail'] = guardrail_wrapper.__call__
-
-                    # Make sure retry_on_fail is set to True
-                    if 'retry_on_fail' not in task_config:
-                        task_args['retry_on_fail'] = True
-
-                    guardrail_logger.info(f"Added guardrail validation to task {task_key}")
-                else:
-                    guardrail_logger.warning(f"Failed to create guardrail for task {task_key}, guardrail will not be applied")
-                    # If guardrail creation failed but we have an existing callback, use it
-                    if existing_callback:
-                        if isinstance(existing_callback, str):
-                            callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
-                            if callback_func:
-                                task_args['callback'] = callback_func
-                        else:
-                            task_args['callback'] = existing_callback
-            except Exception as e:
-                guardrail_logger.error(f"Error setting up guardrail for task {task_key}: {str(e)}")
-                guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
-                # If guardrail setup failed but we have an existing callback, use it
-                if existing_callback:
-                    if isinstance(existing_callback, str):
-                        callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
-                        if callback_func:
-                            task_args['callback'] = callback_func
-                    else:
-                        task_args['callback'] = existing_callback
-    elif existing_callback:
-        # No guardrail, but we have an existing callback
+    # Attach the callback only when no guardrail took over (a guardrail uses
+    # CrewAI's native retry mechanism instead of a callback).
+    if 'guardrail' not in task_args and existing_callback:
         if isinstance(existing_callback, str):
-            # Create callback from string name
             callback_func = create_callback_from_string(existing_callback, task_key, callback_config, execution_name)
             if callback_func:
                 task_args['callback'] = callback_func
@@ -663,143 +527,8 @@ async def create_task(
             else:
                 logger.warning(f"Could not create callback {existing_callback} for task {task_key}, skipping callback")
         else:
-            # Callback is already a function
             task_args['callback'] = existing_callback
 
-    # Handle LLM guardrail if present (takes priority over code-based guardrail if both exist)
-    # This uses CrewAI's OSS LLMGuardrail which validates task output using an LLM agent
-    if 'llm_guardrail' in task_config and task_config['llm_guardrail']:
-        llm_guardrail_config = task_config['llm_guardrail']
-        guardrail_logger.info(f"Task {task_key} has LLM guardrail configuration: {llm_guardrail_config}")
-
-        try:
-            from crewai.tasks.llm_guardrail import LLMGuardrail
-
-            # Extract description and any user-picked model (handle dict/object).
-            # The guardrail validates with the model the user EXPLICITLY chose
-            # for it, if any; otherwise it defaults to the model this task's agent
-            # runs with (the chat-input selection, top-down) — resolved below.
-            if isinstance(llm_guardrail_config, dict):
-                description = llm_guardrail_config.get('description', 'Validate the task output')
-                explicit_model = llm_guardrail_config.get('llm_model')
-            else:
-                description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
-                explicit_model = getattr(llm_guardrail_config, 'llm_model', None)
-            from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
-            llm_model = resolve_guardrail_model(explicit_model, agent, config)
-
-            # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
-            # This ensures the agent knows the requirements BEFORE execution, reducing unnecessary retries
-            # CrewAI's native guardrail is reactive (agent only learns after failing validation)
-            # By augmenting the description, the agent can align with requirements on the first attempt
-            if description and description != 'Validate the task output':
-                validation_augmentation = (
-                    f"\n\n=== VALIDATION REQUIREMENTS ===\n"
-                    f"Your output will be validated against these criteria: {description}\n"
-                    f"Ensure your response meets these requirements to pass validation."
-                )
-                task_args['description'] = task_args['description'] + validation_augmentation
-                guardrail_logger.info(f"Augmented task {task_key} description with guardrail criteria for proactive alignment")
-
-            # Create guardrail LLM via LLMManager (gets AI Gateway routing + API keys + telemetry)
-            from src.core.llm_manager import LLMManager
-            from src.utils.user_context import UserContext
-            gc = UserContext.get_group_context()
-            group_id = (gc.primary_group_id if gc else None) or (config.get('group_id') if config else None)
-            if not group_id:
-                # Mirror agent_helpers: never silently fall back to a shared
-                # "default" group — that would defeat multi-tenant isolation.
-                raise ValueError("group_id is REQUIRED for LLM guardrail configuration")
-            guardrail_llm = await LLMManager.configure_crewai_llm(llm_model, group_id)
-
-            # Create LLMGuardrail (OSS-compatible, NOT HallucinationGuardrail)
-            llm_guardrail = LLMGuardrail(
-                description=description,
-                llm=guardrail_llm
-            )
-
-            # Set the LLM guardrail in task args
-            # This overrides any code-based guardrail if both are present
-            task_args['guardrail'] = llm_guardrail
-            guardrail_logger.info(f"Configured LLM guardrail for task {task_key} using model {llm_model}")
-            guardrail_logger.info(f"LLM guardrail description: {description}")
-
-            # Ensure retry_on_fail is enabled for guardrails
-            if not task_args.get('retry_on_fail'):
-                task_args['retry_on_fail'] = True
-                guardrail_logger.info(f"Enabled retry_on_fail for task {task_key} with LLM guardrail")
-
-        except ImportError as e:
-            guardrail_logger.error(f"Could not import LLMGuardrail for task {task_key}: {str(e)}")
-            guardrail_logger.error("Make sure crewai is installed with guardrail support")
-        except ValueError:
-            # Missing group_id — never run the task with its guardrail
-            # silently dropped; surface the multi-tenant violation instead.
-            raise
-        except Exception as e:
-            guardrail_logger.error(f"Error configuring LLM guardrail for task {task_key}: {str(e)}")
-            guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
-
-
-    # Special handling for output_pydantic - look up the model in the database
-    if 'output_pydantic' in task_config and task_config['output_pydantic']:
-        output_pydantic_name = task_config['output_pydantic']
-        logger.info(f"Task {task_key} has output_pydantic: {output_pydantic_name}")
-        
-        # Look up the Pydantic model class
-        pydantic_class = await get_pydantic_class_from_name(output_pydantic_name)
-        if pydantic_class:
-            logger.info(f"Using Pydantic model class {pydantic_class.__name__} for output_pydantic")
-            
-            # Import the model conversion handler
-            from src.engines.crewai.helpers.model_conversion_handler import (
-                get_compatible_converter_for_model,
-                configure_output_json_approach
-            )
-            
-            # Get compatible converter and settings for this model
-            converter_cls, pydantic_cls, use_output_json, is_compatible = get_compatible_converter_for_model(
-                agent, pydantic_class
-            )
-            
-            if is_compatible and use_output_json:
-                # Use the output_json approach for compatibility
-                task_args = configure_output_json_approach(task_args, pydantic_class)
-                logger.info(f"Using output_json approach for compatibility with {agent.llm.model}")
-            elif is_compatible and converter_cls:
-                # Use the custom converter class
-                task_args['converter_cls'] = converter_cls
-                task_args['output_pydantic'] = pydantic_cls
-                converter_name = getattr(converter_cls, '__name__', str(converter_cls))
-                logger.info(f"Using custom converter {converter_name} for compatibility")
-            else:
-                # Standard approach
-                task_args['output_pydantic'] = pydantic_class
-        else:
-            logger.warning(f"Could not resolve Pydantic model '{output_pydantic_name}', removing output_pydantic from task arguments")
-            # Do not include output_pydantic if we can't get a proper model class
-            # Including a string value would cause a validation error as CrewAI expects a Pydantic model class
-    
-    # Handle other optional task configurations
-    optional_fields = [
-        'async_execution',
-        'context',
-        'human_input',
-        'converter_cls',
-        'output_json'
-    ]
-    
-    # Include optional fields if they exist in the config
-    for field in optional_fields:
-        if field in task_config:
-            # Special case for output_json that might be a string
-            if field == 'output_json' and isinstance(task_config[field], str):
-                # Skip string values for output_json as CrewAI expects a BaseModel class
-                # The string handling was for legacy compatibility but doesn't work with current CrewAI
-                continue
-            else:
-                task_args[field] = task_config[field]
-    
     # Create the task instance
     try:
         # Create the task with properly separated parameters

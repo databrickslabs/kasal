@@ -193,7 +193,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                         logger.info(f"Agent {idx} - All attributes: {agent_attrs}")
                     
                     # Check for agents with custom LLM configurations
-                    # Note: agent_helpers.py should have already configured LLMs properly
+                    # Note: agent_adapter.py should have already configured LLMs properly
                     # This is just a fallback for any agents that might still need configuration
                     agents_needing_llm = []
                     for agent in crew.agents:

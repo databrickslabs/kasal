@@ -579,8 +579,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.engines.crewai.tools.custom.powerbi_metadata_reducer_tool',  # Metadata Reducer tool logs
         'src.engines.crewai.tools.custom.powerbi_semantic_model_fetcher_tool',  # Fetcher tool logs
         'src.engines.crewai.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
-        'src.engines.crewai.helpers.task_helpers',  # Task tool resolution logs
-        'src.engines.crewai.helpers.agent_helpers',  # Agent tool resolution logs
+        'src.engines.crewai.helpers.task_adapter',  # Task tool resolution logs
+        'src.engines.crewai.helpers.agent_adapter',  # Agent tool resolution logs
         'src.engines.crewai.security.tool_capability_manifest',  # Trifecta detection warnings
         'src.engines.crewai.security.prompt_injection_detector',  # Injection detection warnings
         'src.utils.telemetry',  # Add telemetry logger for LogfoodTelemetry logging

@@ -871,9 +871,9 @@ class TestProcessStartingPoints:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_config.TaskConfig.configure_task",
+             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_starting_points(
                 flow_config=flow_config,
@@ -965,9 +965,9 @@ class TestProcessListeners:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_config.TaskConfig.configure_task",
+             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_listeners(
                 flow_config=flow_config,
@@ -1112,9 +1112,9 @@ class TestProcessRouters:
         mock_agent_obj = MagicMock()
         mock_task_obj = MagicMock()
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_config.TaskConfig.configure_task",
+             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_routers(
                 flow_config=flow_config,

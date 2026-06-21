@@ -22,8 +22,8 @@ from crewai.flow.flow import Flow as CrewAIFlow
 from src.core.llm_manager import LLMManager
 
 # Import the refactored modules
-from src.engines.crewai.flow.modules.agent_config import AgentConfig
-from src.engines.crewai.flow.modules.task_config import TaskConfig
+from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
 from src.engines.crewai.flow.modules.callback_manager import CallbackManager
 from src.engines.crewai.tools.tool_factory import ToolFactory

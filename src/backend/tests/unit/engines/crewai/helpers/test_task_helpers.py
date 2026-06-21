@@ -10,7 +10,7 @@ from crewai.tasks.task_output import TaskOutput
 from crewai.tools import BaseTool
 from pydantic import BaseModel, create_model
 
-from src.engines.crewai.helpers.task_helpers import (
+from src.engines.crewai.helpers.task_adapter import (
     is_data_missing,
     get_pydantic_class_from_name,
     create_task
@@ -64,7 +64,7 @@ class TestGetPydanticClassFromName:
     """Test cases for get_pydantic_class_from_name function."""
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_schema_not_found(self, mock_uow_class):
         """Test when schema is not found in database."""
         # Create async context manager mock
@@ -81,7 +81,7 @@ class TestGetPydanticClassFromName:
         mock_uow.schema_repository.find_by_name.assert_called_once_with("NonExistentSchema")
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_invalid_schema_definition(self, mock_uow_class):
         """Test when schema has invalid definition."""
         # Create async context manager mock
@@ -99,7 +99,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_simple_types(self, mock_uow_class):
         """Test creating Pydantic model with simple field types."""
         # Create async context manager mock
@@ -136,7 +136,7 @@ class TestGetPydanticClassFromName:
         assert "is_active" in fields
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_array_types(self, mock_uow_class):
         """Test creating Pydantic model with array field types."""
         # Create async context manager mock
@@ -164,7 +164,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_object_and_any_types(self, mock_uow_class):
         """Test creating Pydantic model with object and any types."""
         # Create async context manager mock
@@ -189,7 +189,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_nullable_fields(self, mock_uow_class):
         """Test creating Pydantic model with nullable fields."""
         # Create async context manager mock
@@ -214,7 +214,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_creation_error(self, mock_uow_class):
         """Test when Pydantic model creation fails."""
         # Create async context manager mock
@@ -232,13 +232,13 @@ class TestGetPydanticClassFromName:
         mock_uow_class.return_value.__aenter__.return_value = mock_uow
         mock_uow_class.return_value.__aexit__.return_value = None
         
-        with patch('src.engines.crewai.helpers.task_helpers.create_model', side_effect=Exception("Model creation failed")):
+        with patch('src.engines.crewai.helpers.task_adapter.create_model', side_effect=Exception("Model creation failed")):
             result = await get_pydantic_class_from_name("ErrorSchema")
         
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_uow_not_initialized(self, mock_uow_class):
         """Test when UnitOfWork is not initialized."""
         # Create async context manager mock
@@ -259,7 +259,7 @@ class TestGetPydanticClassFromName:
         # Note: With async context manager, initialization is handled differently
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_field_definition_error(self, mock_uow_class):
         """Test when field definition causes an error."""
         # Create async context manager mock
@@ -284,7 +284,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_general_exception(self, mock_uow_class):
         """Test when a general exception occurs during schema lookup."""
         # Make the context manager creation itself fail
@@ -295,7 +295,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_schema_definition_not_dict(self, mock_uow_class):
         """Test when schema definition is not a dictionary."""
         # Create async context manager mock
@@ -313,7 +313,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_empty_properties(self, mock_uow_class):
         """Test creating Pydantic model with empty properties."""
         # Create async context manager mock
@@ -338,7 +338,7 @@ class TestGetPydanticClassFromName:
         assert result.__doc__ == "Empty model"
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_no_description(self, mock_uow_class):
         """Test creating Pydantic model without description."""
         # Create async context manager mock
@@ -364,8 +364,8 @@ class TestGetPydanticClassFromName:
         assert result.__doc__ == "Model for NoDescSchema"  # Default description
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
-    @patch('src.engines.crewai.helpers.task_helpers.List')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.List')
     async def test_get_pydantic_class_field_definition_exception(self, mock_list, mock_uow_class):
         """Test field definition that causes an exception (covering lines 126-128)."""
         # Create async context manager mock
@@ -394,7 +394,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_helpers.UnitOfWork')
+    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_field_assignment_exception(self, mock_uow_class):
         """Test direct field assignment exception to cover lines 126-128."""
         # Create async context manager mock
@@ -420,7 +420,7 @@ class TestGetPydanticClassFromName:
                 # This will cause an exception when List[str] is accessed in line 108
                 raise Exception("List type access failed")
         
-        with patch('src.engines.crewai.helpers.task_helpers.List', FailingList()):
+        with patch('src.engines.crewai.helpers.task_adapter.List', FailingList()):
             result = await get_pydantic_class_from_name("ExceptionFieldSchema")
             
             # Should handle exception and create model with Any type fields
@@ -692,7 +692,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.get_pydantic_class_from_name') as mock_get_pydantic, \
+             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
              patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
@@ -722,7 +722,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.get_pydantic_class_from_name') as mock_get_pydantic:
+             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -1151,7 +1151,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.Task', side_effect=Exception("Task creation failed")):
+             patch('src.engines.crewai.helpers.task_adapter.Task', side_effect=Exception("Task creation failed")):
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2711,7 +2711,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.get_pydantic_class_from_name') as mock_get_pydantic, \
+             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
              patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
@@ -2758,7 +2758,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.get_pydantic_class_from_name') as mock_get_pydantic, \
+             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
              patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
@@ -2797,7 +2797,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.get_pydantic_class_from_name') as mock_get_pydantic, \
+             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
              patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_converter, \
              patch('src.engines.crewai.helpers.model_conversion_handler.configure_output_json_approach') as mock_configure:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
@@ -3303,7 +3303,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_task_uow:
+             patch('src.engines.crewai.helpers.task_adapter.UnitOfWork') as mock_task_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
@@ -3349,7 +3349,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_task_uow:
+             patch('src.engines.crewai.helpers.task_adapter.UnitOfWork') as mock_task_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
@@ -3633,7 +3633,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.crewai.helpers.task_helpers.UnitOfWork') as mock_sync_uow:
+             patch('src.engines.crewai.helpers.task_adapter.UnitOfWork') as mock_sync_uow:
             
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))

@@ -494,6 +494,15 @@ class FlowMethodFactory:
             else:
                 logger.warning("No job_id available, skipping execution callbacks setup")
 
+            # Attach execution trace context to the crew's tools + memory (parity
+            # with the crew path) so flow tool/memory traces carry job_id + group
+            # attribution (e.g. custom llm_call trace events). Shared entry point
+            # with the crew path; builds a minimal service from group_id+job_id.
+            from src.engines.crewai.common.trace_context import attach_execution_trace_context
+            attach_execution_trace_context(
+                crew, crew_kwargs, group_id=group_id, job_id=job_id
+            )
+
             try:
                 # Enhanced logging for truncation diagnosis
                 import time
@@ -873,6 +882,15 @@ class FlowMethodFactory:
                     logger.warning(f"Failed to set execution callbacks on listener: {callback_error}")
             else:
                 logger.warning("No job_id available for listener, skipping execution callbacks setup")
+
+            # Attach execution trace context to the crew's tools + memory (parity
+            # with the crew path) so flow tool/memory traces carry job_id + group
+            # attribution (e.g. custom llm_call trace events). Shared entry point
+            # with the crew path; builds a minimal service from group_id+job_id.
+            from src.engines.crewai.common.trace_context import attach_execution_trace_context
+            attach_execution_trace_context(
+                crew, crew_kwargs, group_id=group_id, job_id=job_id
+            )
 
             try:
                 # Enhanced logging for truncation diagnosis

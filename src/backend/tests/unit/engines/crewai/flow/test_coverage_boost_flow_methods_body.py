@@ -212,6 +212,46 @@ class TestStartingPointMethodBody:
         assert crew_kwargs_captured.get("memory") is not True
 
     @pytest.mark.asyncio
+    async def test_attaches_trace_context_to_tools_and_memory(self):
+        """Flow crews attach execution trace context (parity with the crew path)
+        so tool/memory traces carry job_id + group attribution."""
+        task = _make_task()
+        crew_data = MagicMock()
+        crew_data.memory = False  # skip memory wiring → isolate the trace attach
+        crew_data.process = None
+        crew_data.verbose = None
+        crew_data.planning = False
+        crew_data.reasoning = False
+
+        method = FlowMethodFactory.create_starting_point_crew_method(
+            method_name="starting_point_0",
+            task_list=[task],
+            crew_name="Test Crew",
+            callbacks={"job_id": "job-trace-1"},
+            group_context=None,
+            create_execution_callbacks=_make_create_callbacks(),
+            crew_data=crew_data,
+        )
+        mock_flow = _make_flow_instance()
+
+        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.common.trace_context.attach_execution_trace_context") as mock_attach:
+            MockCrew.return_value = MagicMock()
+            mock_result = MagicMock()
+            mock_result.raw = "res"
+            mock_wait.return_value = mock_result
+
+            await method._meth(mock_flow)
+
+        # Flow delegates to the shared common entry point (the SAME one the crew
+        # path uses), passing the crew + crew_kwargs and the group/job for attribution.
+        mock_attach.assert_called_once()
+        args, kwargs = mock_attach.call_args
+        assert args[0] is MockCrew.return_value
+        assert "group_id" in kwargs and "job_id" in kwargs
+
+    @pytest.mark.asyncio
     async def test_crew_hierarchical_process(self):
         """Covers lines 282-283: hierarchical process type."""
         task = _make_task()

@@ -10,7 +10,7 @@ from crewai import Process
 
 from src.core.logger import LoggerManager
 from src.core.llm_manager import LLMManager
-from src.engines.crewai.helpers.agent_helpers import create_agent
+from src.engines.crewai.helpers.agent_adapter import create_agent
 
 logger = LoggerManager.get_instance().crew
 

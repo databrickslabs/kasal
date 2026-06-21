@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch, call
 from pydantic import BaseModel
 
-from src.engines.crewai.helpers.task_helpers import (
+from src.engines.crewai.helpers.task_adapter import (
     is_data_missing,
     get_pydantic_class_from_name,
     create_callback_from_string,
@@ -68,7 +68,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         }
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_string_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"name": {"type": "string"}}, required=["name"]
@@ -89,7 +89,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.name == "Alice"
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_integer_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"count": {"type": "integer"}}, required=["count"]
@@ -110,7 +110,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.count == 5
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_number_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"value": {"type": "number"}}, required=["value"]
@@ -131,7 +131,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.value == pytest.approx(3.14)
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_boolean_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"active": {"type": "boolean"}}, required=["active"]
@@ -152,7 +152,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.active is True
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_array_of_strings_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"tags": {"type": "array", "items": {"type": "string"}}},
@@ -174,7 +174,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.tags == ["a", "b"]
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_array_of_integers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"scores": {"type": "array", "items": {"type": "integer"}}},
@@ -194,7 +194,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_array_of_numbers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"values": {"type": "array", "items": {"type": "number"}}},
@@ -214,7 +214,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_array_of_booleans_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"flags": {"type": "array", "items": {"type": "boolean"}}},
@@ -233,7 +233,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_array_of_unknown_type_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"items": {"type": "array", "items": {"type": "object"}}},
@@ -252,7 +252,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_object_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"meta": {"type": "object"}},
@@ -271,7 +271,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_unknown_field_type_falls_back_to_any(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"data": {"type": "unknown_type"}},
@@ -290,7 +290,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_nullable_optional_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"note": {"type": "string", "nullable": True}},
@@ -310,7 +310,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_schema_not_found_returns_none(self, mock_uow_cls):
         mock_uow = AsyncMock()
         mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
@@ -323,7 +323,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_invalid_schema_definition_returns_none(self, mock_uow_cls):
         mock_schema = MagicMock()
         mock_schema.schema_definition = None
@@ -339,7 +339,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.engines.crewai.helpers.task_helpers.UnitOfWork")
+    @patch("src.engines.crewai.helpers.task_adapter.UnitOfWork")
     async def test_exception_returns_none(self, mock_uow_cls):
         mock_uow_cls.side_effect = Exception("DB error")
         result = await get_pydantic_class_from_name("ErrorSchema")
@@ -449,7 +449,7 @@ async def _create_task_patched(task_key, task_config, agent, **kwargs):
     with patch("src.services.mcp_service.MCPService"), \
          patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
          patch("src.db.session.request_scoped_session") as mock_sess, \
-         patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+         patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
          patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
          patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc:
 
@@ -552,7 +552,7 @@ class TestCreateTaskBasic:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc:
 
@@ -587,10 +587,10 @@ class TestCreateTaskToolResolution:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.crewai.helpers.task_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.helpers.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -628,10 +628,10 @@ class TestCreateTaskToolResolution:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.crewai.helpers.task_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.helpers.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -668,10 +668,10 @@ class TestCreateTaskToolResolution:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.crewai.helpers.task_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.helpers.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -710,7 +710,7 @@ class TestCreateTaskToolResolution:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc:
 
@@ -754,10 +754,10 @@ class TestCreateTaskToolResolution:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.crewai.helpers.task_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.helpers.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -791,11 +791,11 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+             patch("src.engines.crewai.helpers.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -834,7 +834,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
@@ -869,11 +869,11 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+             patch("src.engines.crewai.helpers.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -922,11 +922,11 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+             patch("src.engines.crewai.helpers.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -977,11 +977,11 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.engines.crewai.helpers.task_helpers.GuardrailWrapper") as mock_gw:
+             patch("src.engines.crewai.helpers.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1020,7 +1020,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1057,7 +1057,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1105,7 +1105,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1154,7 +1154,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1205,7 +1205,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1247,7 +1247,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as mock_llm_g, \
@@ -1287,7 +1287,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
@@ -1318,7 +1318,7 @@ class TestCreateTaskGuardrail:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc:
 
@@ -1352,7 +1352,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.engines.crewai.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
@@ -1398,7 +1398,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
         with patch("src.services.mcp_service.MCPService"), \
              patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.engines.crewai.helpers.task_helpers.Task") as mock_task_cls, \
+             patch("src.engines.crewai.helpers.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc:
 

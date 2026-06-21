@@ -3,9 +3,8 @@ Task configuration module for CrewAI flow execution.
 
 This module handles the configuration of tasks for CrewAI flows.
 """
-import logging
 import json
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
@@ -87,130 +86,23 @@ class TaskConfig:
             # Check if task has specific tools and add them to the agent
             await TaskConfig._configure_task_tools(task_data, agent, flow_data, group_context)
             
-            # Create basic required parameters - this avoids all the complex validation issues
-            description = str(task_data.description)
-            expected_output = str(task_data.expected_output) if hasattr(task_data, 'expected_output') and task_data.expected_output else ""
-            
-            # Add markdown instructions if enabled
-            if getattr(task_data, 'markdown', False):
-                description += "\n\nPlease format the output using Markdown syntax."
-                expected_output += "\n\nThe output should be formatted using Markdown."
-            
-            # Create the task using basic parameters only
-            from crewai import Task
-            task = Task(
-                description=description,
-                expected_output=expected_output,
-                agent=agent,
-                markdown=getattr(task_data, 'markdown', False)
+            # Assemble the Task args via the shared builder (base + markdown + Genie
+            # formatting + code/LLM guardrails + output_pydantic) — shared with the crew path.
+            spec = TaskConfig._task_data_to_spec(task_data)
+            group_id = getattr(group_context, 'primary_group_id', None) if group_context else None
+            from src.engines.crewai.common.task_builder import build_task_args
+            # Flow assigns tools to the agent (see _configure_task_tools), so the task
+            # itself carries no tools list.
+            task_args = await build_task_args(
+                spec, agent, [], config={'group_id': group_id} if group_id else None
             )
-            
-            # If task output callback provided, configure it
+
+            from crewai import Task
+            task = Task(**task_args)
+
+            # Flow execution output callback (separate from any guardrail).
             if task_output_callback:
-                # Use callback instead of output_callback in newer versions of crewAI
                 task.callback = task_output_callback
-
-            # Add other parameters one by one if they exist
-            if hasattr(task_data, 'async_execution'):
-                task.async_execution = bool(task_data.async_execution)
-                
-            if hasattr(task_data, 'human_input'):
-                task.human_input = bool(task_data.human_input)
-                
-            # Note: We're deliberately NOT setting context here because that's causing problems
-
-            # Handle code-based guardrail if present in task configuration
-            # This uses custom guardrails from GuardrailFactory (e.g., CompanyCountGuardrail)
-            try:
-                guardrail_config = getattr(task_data, 'guardrail', None)
-
-                if guardrail_config:
-                    logger.info(f"Task {task_data.name} has code-based guardrail configuration: {guardrail_config}")
-
-                    from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
-                    from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
-
-                    # LLM-backed factory guardrails judge output with an LLM, so
-                    # stamp the run's model (the agent's, top-down) into their
-                    # config — same model as the run, not the hardcoded default.
-                    if isinstance(guardrail_config, dict) and guardrail_config.get('type') in {'self_reflection', 'prompt_injection_check'}:
-                        from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
-                        guardrail_config = {**guardrail_config, 'llm_model': resolve_guardrail_model(guardrail_config.get('llm_model'), agent)}
-
-                    # Convert guardrail config to JSON string if it's a dictionary
-                    if isinstance(guardrail_config, dict):
-                        guardrail_config = json.dumps(guardrail_config)
-
-                    # Create the guardrail instance
-                    guardrail = GuardrailFactory.create_guardrail(guardrail_config)
-                    if guardrail:
-                        # Create a callable wrapper for this guardrail
-                        # Using GuardrailWrapper class instead of a closure because:
-                        # CrewAI's LLMGuardrailStartedEvent.__init__ calls inspect.getsource()
-                        # on the guardrail function, which fails for closures with
-                        # "OSError: could not get source code". The wrapper class is defined
-                        # in a source file, so getsource() can inspect it properly.
-                        guardrail_wrapper = GuardrailWrapper(guardrail, task_data.name)
-
-                        task.guardrail = guardrail_wrapper
-                        task.retry_on_fail = True
-                        logger.info(f"Applied code-based guardrail to task {task_data.name}")
-                    else:
-                        logger.warning(f"Failed to create guardrail for task {task_data.name}, guardrail will not be applied")
-            except Exception as guardrail_error:
-                logger.warning(f"Error setting up code-based guardrail for task {task_data.name}: {guardrail_error}")
-                # Continue without guardrail - task is still valid
-
-            # Handle LLM guardrail if explicitly enabled by the user in config
-            # NOTE: LLM guardrail takes priority over code-based guardrail if both exist
-            # Read from config (user's explicit choice), not from the column (which
-            # stores the LLM-generated suggestion and may not reflect the toggle state)
-            try:
-                task_config_dict = getattr(task_data, 'config', None) or {}
-                llm_guardrail_config = task_config_dict.get('llm_guardrail') if isinstance(task_config_dict, dict) else None
-
-                if llm_guardrail_config:
-                    logger.info(f"Task {task_data.name} has LLM guardrail configuration: {llm_guardrail_config}")
-
-                    from crewai.tasks.llm_guardrail import LLMGuardrail
-                    from src.core.llm_manager import LLMManager
-                    from src.utils.user_context import UserContext
-
-                    # Extract description and any user-picked model. The guardrail
-                    # uses the model the user EXPLICITLY chose, if any; otherwise
-                    # it defaults to the model this task's agent runs with (the
-                    # chat-input selection, top-down).
-                    if isinstance(llm_guardrail_config, dict):
-                        guardrail_description = llm_guardrail_config.get('description', 'Validate the task output')
-                        explicit_model = llm_guardrail_config.get('llm_model')
-                    else:
-                        guardrail_description = getattr(llm_guardrail_config, 'description', 'Validate the task output')
-                        explicit_model = getattr(llm_guardrail_config, 'llm_model', None)
-                    from src.engines.crewai.guardrails.guardrail_model import resolve_guardrail_model
-                    llm_model = resolve_guardrail_model(explicit_model, agent)
-
-                    # PROACTIVE GUARDRAIL AUGMENTATION: Inject validation criteria into task description
-                    if guardrail_description and guardrail_description != 'Validate the task output':
-                        validation_augmentation = (
-                            f"\n\n=== VALIDATION REQUIREMENTS ===\n"
-                            f"Your output will be validated against these criteria: {guardrail_description}\n"
-                            f"Ensure your response meets these requirements to pass validation."
-                        )
-                        task.description = task.description + validation_augmentation
-                        logger.info(f"Augmented task {task_data.name} description with guardrail criteria")
-
-                    # Create guardrail LLM via LLMManager (gets AI Gateway routing + API keys)
-                    gc = UserContext.get_group_context()
-                    group_id = gc.primary_group_id if gc else "default"
-                    guardrail_llm = await LLMManager.configure_crewai_llm(llm_model, group_id)
-                    llm_guardrail = LLMGuardrail(description=guardrail_description, llm=guardrail_llm)
-                    task.guardrail = llm_guardrail
-                    task.retry_on_fail = True
-                    logger.info(f"Applied LLM guardrail to task {task_data.name} using model {llm_model}")
-
-            except Exception as guardrail_error:
-                logger.warning(f"Error setting up guardrail for task {task_data.name}: {guardrail_error}")
-                # Continue without guardrail - task is still valid
 
             logger.info(f"Successfully configured task: {task_data.name} with agent role: {agent.role}")
 
@@ -221,6 +113,36 @@ class TaskConfig:
         except Exception as e:
             logger.error(f"Error configuring task {getattr(task_data, 'name', 'unknown')}: {e}", exc_info=True)
             return None
+
+    @staticmethod
+    def _task_data_to_spec(task_data):
+        """Map a flow task ORM object to the crew-style spec dict the shared
+        ``build_task_args`` consumes, so flow tasks get the SAME assembly,
+        guardrails and output_pydantic handling as crew tasks."""
+        spec = {
+            'name': getattr(task_data, 'name', None),
+            'description': str(task_data.description),
+            'expected_output': (
+                str(task_data.expected_output)
+                if getattr(task_data, 'expected_output', None) else ''
+            ),
+            'markdown': getattr(task_data, 'markdown', False),
+            'tool_configs': getattr(task_data, 'tool_configs', {}) or {},
+        }
+        for key in (
+            'async_execution', 'human_input', 'retry_on_fail', 'max_retries',
+            'guardrail', 'output_pydantic',
+        ):
+            val = getattr(task_data, key, None)
+            if val is not None:
+                spec[key] = val
+        # Flow reads the LLM guardrail from task_data.config (the user's explicit
+        # toggle), not a column. Context is intentionally omitted — flow chains
+        # tasks via the graph, not CrewAI task context.
+        cfg = getattr(task_data, 'config', None) or {}
+        if isinstance(cfg, dict) and cfg.get('llm_guardrail'):
+            spec['llm_guardrail'] = cfg['llm_guardrail']
+        return spec
 
     @staticmethod
     async def _resolve_agent_for_task(task_data, flow_data, repositories, group_context: Optional[GroupContext] = None):
@@ -236,7 +158,7 @@ class TaskConfig:
         Returns:
             Agent: The resolved agent for the task
         """
-        from src.engines.crewai.flow.modules.agent_config import AgentConfig
+        from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
         
         # If task has an agent_id, try to get that agent
         if hasattr(task_data, 'agent_id') and task_data.agent_id:

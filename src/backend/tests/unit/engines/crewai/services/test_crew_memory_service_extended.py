@@ -779,6 +779,10 @@ class TestAttachToolsTraceContext:
         service.attach_tools_trace_context(mock_crew, {})
 
 
+# NOTE: attach_execution_trace_context moved to the shared common package; its
+# tests live in tests/unit/engines/crewai/common/test_trace_context.py.
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # set_crew_reference_on_memory
 # ─────────────────────────────────────────────────────────────────────────────
