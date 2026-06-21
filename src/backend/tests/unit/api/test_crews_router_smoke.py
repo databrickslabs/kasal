@@ -43,6 +43,46 @@ def make_crew(i=None):
     )
 
 
+def test_crew_schemas_carry_reasoning_config():
+    """reasoning_config must round-trip through CrewCreate/Update (create persists
+    via model_dump, update via model_dump(exclude_none=True))."""
+    rc = {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
+    created = CrewCreate(name="t", agent_ids=[], task_ids=[], reasoning=True, reasoning_config=rc)
+    assert created.model_dump()["reasoning_config"] == rc
+    updated = CrewUpdate(reasoning_config=rc)
+    assert updated.model_dump(exclude_none=True)["reasoning_config"] == rc
+
+
+def test_crew_to_response_carries_execution_config():
+    """Regression: the response serializer must include reasoning_config / planning /
+    reasoning / llms — they were dropped before, so a catalog-saved crew reloaded
+    with empty execution config."""
+    from src.api.crews_router import _crew_to_response
+    crew = make_crew()
+    crew.process = "hierarchical"
+    crew.planning = True
+    crew.planning_llm = "databricks-claude-haiku-4-5"
+    crew.reasoning = True
+    crew.reasoning_llm = "databricks-claude-haiku-4-5"
+    crew.reasoning_config = {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
+    crew.manager_llm = "m"
+    crew.tool_configs = {}
+    crew.memory = False
+    crew.verbose = True
+    crew.max_rpm = 10
+
+    resp = _crew_to_response(crew)
+    assert resp.reasoning is True
+    assert resp.reasoning_config == {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
+    assert resp.planning is True
+    assert resp.planning_llm == "databricks-claude-haiku-4-5"
+    assert resp.process == "hierarchical"
+
+    # defensive default path (stub without config fields) must not raise
+    bare = _crew_to_response(make_crew())
+    assert bare.reasoning_config is None and bare.reasoning is False
+
+
 @pytest.mark.asyncio
 async def test_list_get_create_paths():
     svc = AsyncMock()

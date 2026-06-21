@@ -343,7 +343,7 @@ async def run_crew(execution_id: str, crew: Crew, running_jobs: Dict, group_cont
                     all_inputs = config.get('inputs', {})
                     logger.info(f"All inputs received in execution_runner: {all_inputs}")
                     # System inputs that should not be passed to crew.kickoff
-                    system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'process', 'max_rpm', 'planning', 'reasoning'}
+                    system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'reasoning_config', 'process', 'max_rpm', 'planning', 'reasoning'}
                     # Filter out system inputs to get only user-provided inputs
                     user_inputs = {k: v for k, v in all_inputs.items() if k not in system_inputs}
                     if user_inputs:
@@ -611,7 +611,7 @@ async def run_crew_in_process(
             all_inputs = config.get('inputs', {})
             logger.info(f"All inputs received for process execution: {all_inputs}")
             # System inputs that should not be passed to crew.kickoff
-            system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'process', 'max_rpm', 'planning', 'reasoning'}
+            system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'reasoning_config', 'process', 'max_rpm', 'planning', 'reasoning'}
             # Filter out system inputs to get only user-provided inputs
             user_inputs = {k: v for k, v in all_inputs.items() if k not in system_inputs}
             if user_inputs:

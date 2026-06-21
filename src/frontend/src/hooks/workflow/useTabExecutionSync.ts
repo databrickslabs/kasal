@@ -22,12 +22,14 @@ export const useTabExecutionSync = () => {
     planningLLM,
     reasoningEnabled,
     reasoningLLM,
+    reasoningConfig,
     managerLLM,
     setProcessType,
     setPlanningEnabled,
     setPlanningLLM,
     setReasoningEnabled,
     setReasoningLLM,
+    setReasoningConfig,
     setManagerLLM,
     isLoadingCrew
   } = useCrewExecutionStore();
@@ -53,6 +55,7 @@ export const useTabExecutionSync = () => {
       planningLLM,
       reasoningEnabled,
       reasoningLLM,
+      reasoningConfig,
       managerLLM
     };
 
@@ -65,6 +68,7 @@ export const useTabExecutionSync = () => {
     planningLLM,
     reasoningEnabled,
     reasoningLLM,
+    reasoningConfig,
     managerLLM,
     updateTabExecutionConfig,
     isLoadingCrew
@@ -101,6 +105,9 @@ export const useTabExecutionSync = () => {
     if (config.reasoningLLM !== undefined) {
       setReasoningLLM(config.reasoningLLM);
     }
+    if (config.reasoningConfig !== undefined) {
+      setReasoningConfig(config.reasoningConfig);
+    }
     if (config.managerLLM !== undefined) {
       setManagerLLM(config.managerLLM);
     }
@@ -116,6 +123,7 @@ export const useTabExecutionSync = () => {
     setPlanningLLM,
     setReasoningEnabled,
     setReasoningLLM,
+    setReasoningConfig,
     setManagerLLM
   ]);
 
@@ -142,6 +150,7 @@ export const useTabExecutionSync = () => {
           planningLLM,
           reasoningEnabled,
           reasoningLLM,
+          reasoningConfig,
           managerLLM
         };
         console.log('[useTabExecutionSync] Saving config to previous tab:', lastActiveTabIdRef.current, oldConfig);
@@ -164,6 +173,7 @@ export const useTabExecutionSync = () => {
     planningLLM,
     reasoningEnabled,
     reasoningLLM,
+    reasoningConfig,
     managerLLM,
     updateTabExecutionConfig,
     restoreConfigFromTab,
@@ -188,6 +198,7 @@ export const useTabExecutionSync = () => {
     planningLLM,
     reasoningEnabled,
     reasoningLLM,
+    reasoningConfig,
     managerLLM,
     saveConfigToTab,
     isLoadingCrew

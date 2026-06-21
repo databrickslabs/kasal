@@ -18,6 +18,25 @@ interface RunHistoryItem {
   error?: string;
 }
 
+// Agent-reasoning controls (CrewAI 1.14.x PlanningConfig). Defined in types/crews
+// (a leaf module) and re-exported here so existing imports keep working without an
+// import cycle (tabManager <-> crewExecution). Sent to the backend as
+// `reasoning_config` only when reasoning is enabled.
+export type { ReasoningConfig } from '../types/crews';
+import type { ReasoningConfig } from '../types/crews';
+
+// Low/small by default: validated to make a non-converging agent self-terminate in
+// ~15s with a synthesized answer (vs. the medium/large profile that tripped the
+// workspace rate limit and retry-looped for minutes). Users can raise per crew.
+export const DEFAULT_REASONING_CONFIG: ReasoningConfig = {
+  reasoning_effort: 'low',
+  max_attempts: 1,
+  max_steps: 3,
+  max_step_iterations: 3,
+  step_timeout: 20,
+  max_replans: 0,
+};
+
 interface CrewExecutionState {
   // Execution state
   isExecuting: boolean;
@@ -26,6 +45,7 @@ interface CrewExecutionState {
   planningLLM: string;
   reasoningEnabled: boolean;
   reasoningLLM: string;
+  reasoningConfig: ReasoningConfig;
   schemaDetectionEnabled: boolean;
   processType: 'sequential' | 'hierarchical';
   managerLLM: string;
@@ -77,6 +97,7 @@ interface CrewExecutionState {
   setPlanningLLM: (model: string) => void;
   setReasoningEnabled: (enabled: boolean) => void;
   setReasoningLLM: (model: string) => void;
+  setReasoningConfig: (cfg: Partial<ReasoningConfig>) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   setProcessType: (type: 'sequential' | 'hierarchical') => void;
   setManagerLLM: (model: string) => void;
@@ -137,6 +158,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   planningLLM: '',
   reasoningEnabled: false,
   reasoningLLM: '',
+  reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
   schemaDetectionEnabled: true,
   processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
   managerLLM: localStorage.getItem('crewai-manager-llm') || '',
@@ -181,6 +203,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   setPlanningLLM: (model) => set({ planningLLM: model }),
   setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
   setReasoningLLM: (model) => set({ reasoningLLM: model }),
+  setReasoningConfig: (cfg) => set((state) => ({ reasoningConfig: { ...state.reasoningConfig, ...cfg } })),
   setSchemaDetectionEnabled: (enabled) => set({ schemaDetectionEnabled: enabled }),
   setProcessType: (type) => {
     console.log('[CrewExecutionStore] Setting process type to:', type);
@@ -326,7 +349,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeCrew - nodes:', nodes);
     console.log('[CrewExecution] executeCrew - edges:', edges);
 
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -434,6 +457,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
+      if (reasoningEnabled) {
+        additionalInputs.reasoning_config = reasoningConfig;
+      }
       if (processType === 'hierarchical' && managerLLM) {
         additionalInputs.manager_llm = managerLLM;
       }
@@ -531,7 +557,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
     console.log('[CrewExecution] executeFlow - resumeFromCrewSequence:', resumeFromCrewSequence);
 
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
@@ -571,6 +597,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (reasoningEnabled) {
+        additionalInputs.reasoning_config = reasoningConfig;
       }
 
       console.log('[FlowExecution] Executing flow with model:', selectedModel);
@@ -651,7 +680,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeTab: async (tabId, nodes, edges, tabName) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, schemaDetectionEnabled, processType, managerLLM } = get();
+    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -752,6 +781,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (reasoningEnabled) {
+        additionalInputs.reasoning_config = reasoningConfig;
       }
       if (processType === 'hierarchical' && managerLLM) {
         additionalInputs.manager_llm = managerLLM;
@@ -1058,7 +1090,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   handleGenerateCrew: async () => {
     const { nodes, edges } = useWorkflowStore.getState();
-    const { planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, selectedModel, schemaDetectionEnabled } = get();
+    const { planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, selectedModel, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
@@ -1069,6 +1101,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
+      }
+      if (reasoningEnabled) {
+        additionalInputs.reasoning_config = reasoningConfig;
       }
 
       const response = await jobExecutionService.executeJob(

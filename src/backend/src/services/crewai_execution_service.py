@@ -326,6 +326,12 @@ class CrewAIExecutionService:
             if inputs_with_run_name.get("reasoning_llm"):
                 crew_config_dict["reasoning_llm"] = inputs_with_run_name["reasoning_llm"]
 
+            # Reasoning PlanningConfig overrides (effort + step/replan caps) from the
+            # sidebar Reasoning section. Carried to each agent in CrewPreparation and
+            # turned into a bounded crewai PlanningConfig by the shared agent builder.
+            if inputs_with_run_name.get("reasoning_config"):
+                crew_config_dict["reasoning_config"] = inputs_with_run_name["reasoning_config"]
+
             execution_config = {
                 "agents": agents_list,
                 "tasks": tasks_list,

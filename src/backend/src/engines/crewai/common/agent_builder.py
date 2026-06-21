@@ -37,13 +37,73 @@ def redact_llm_repr(llm: Any) -> str:
 
 # Optional Agent params copied from the spec verbatim when present and not None.
 # Mirrors agent_adapter.create_agent / flow agent_adapter exactly.
+# NOTE: 'reasoning' / 'max_reasoning_attempts' are deliberately NOT here — they are
+# deprecated in CrewAI 1.14.x. Reasoning is configured via an explicit, bounded
+# PlanningConfig (see _apply_reasoning_planning_config below).
 _ADDITIONAL_AGENT_PARAMS = [
-    'max_iter', 'max_rpm', 'code_execution_mode',
+    'max_iter', 'max_rpm', 'max_execution_time', 'code_execution_mode',
     'max_context_window_size', 'max_tokens',
-    'reasoning', 'max_reasoning_attempts',
     # Date awareness settings (CrewAI 1.9+) — inject current date into agent context
     'inject_date', 'date_format',
 ]
+
+# Bounded defaults for the agent-reasoning loop (CrewAI 1.14.5 PlanningConfig).
+# CrewAI's OWN defaults are unbounded/expansive — max_attempts=None (refine forever),
+# max_steps=20, max_step_iterations=15, step_timeout=None, max_replans=3, i.e. up to
+# ~300 LLM turns with NO wall-clock cap — which lets a mistooled agent run effectively
+# forever. These are Kasal's shipping defaults; each is overridable per crew/agent via
+# the spec's 'reasoning_config' dict (wired from the sidebar Reasoning section).
+# Validated against the real databricks-claude-haiku-4-5: this low/small profile
+# made a non-converging agent (tool returning no usable data) STOP ON ITS OWN in
+# ~15s with a synthesized final answer (1 reasoning pass, 5 LLM calls, 0 replans).
+# The previous medium/large profile (effort=medium, steps=10, iter=10, replans=2)
+# fanned out enough calls to trip the workspace FMAPI rate limit and retry-loop for
+# minutes — the "runs forever" symptom. Keep this small so reasoning self-terminates
+# and stays under the rate limit; users can raise it per crew in the sidebar.
+DEFAULT_REASONING_CONFIG = {
+    'reasoning_effort': 'low',      # linear execution, NO replanning re-runs (fastest)
+    'max_attempts': 1,              # plan-refinement cap (None = forever)
+    'max_steps': 3,                 # steps in the generated plan
+    'max_step_iterations': 3,       # LLM turns per step
+    'step_timeout': 20,             # per-step wall-clock seconds (None = no cap)
+    'max_replans': 0,               # no full replanning attempts
+}
+
+
+def _build_planning_config(spec: Dict[str, Any]) -> Any:
+    """Build a bounded CrewAI ``PlanningConfig`` for agent reasoning from the spec.
+
+    Kasal's reasoning toggle (``spec['reasoning']``) plus an optional
+    ``spec['reasoning_config']`` override dict (effort + step/replan caps) map onto
+    CrewAI's PlanningConfig. We pass this explicitly instead of the deprecated
+    ``reasoning=True`` flag, which would auto-migrate to a PlanningConfig with the
+    expansive defaults above. Falls back to ``max_reasoning_attempts`` (legacy/flow
+    field) for the refine cap when present.
+    """
+    from crewai.agent.planning_config import PlanningConfig
+
+    rc = spec.get('reasoning_config') or {}
+    d = DEFAULT_REASONING_CONFIG
+
+    # max_attempts: reasoning_config wins, then legacy max_reasoning_attempts, then default.
+    max_attempts = rc.get('max_attempts')
+    if max_attempts is None:
+        max_attempts = spec.get('max_reasoning_attempts')
+    if max_attempts is None:
+        max_attempts = d['max_attempts']
+
+    # max_replans / step_timeout accept 0 / None as meaningful, so check membership.
+    max_replans = rc['max_replans'] if rc.get('max_replans') is not None else d['max_replans']
+    step_timeout = rc['step_timeout'] if 'step_timeout' in rc else d['step_timeout']
+
+    return PlanningConfig(
+        reasoning_effort=rc.get('reasoning_effort') or d['reasoning_effort'],
+        max_attempts=max_attempts,
+        max_steps=rc.get('max_steps') or d['max_steps'],
+        max_step_iterations=rc.get('max_step_iterations') or d['max_step_iterations'],
+        step_timeout=step_timeout,
+        max_replans=max_replans,
+    )
 
 
 async def build_agent_llm(
@@ -157,6 +217,17 @@ def build_agent_kwargs(
         if spec.get(param) is not None:
             agent_kwargs[param] = spec[param]
             logger.info(f"Setting agent parameter '{param}' to {spec[param]} for agent {label}")
+
+    # Agent reasoning (CrewAI 1.14.x). The deprecated reasoning=True flag auto-migrates
+    # to a PlanningConfig with expansive defaults (unbounded refine loop, up to ~300 step
+    # iterations, no wall-clock cap). We pass an explicit, bounded PlanningConfig instead
+    # — and do NOT set reasoning/max_reasoning_attempts (passing both makes CrewAI drop the
+    # cap). Shared builder => crew and flow get identical, bounded reasoning behavior.
+    if spec.get('reasoning'):
+        agent_kwargs['planning_config'] = _build_planning_config(spec)
+        logger.info(
+            f"Reasoning enabled for agent {label}: planning_config={agent_kwargs['planning_config']!r}"
+        )
 
     # Handle prompt templates. CrewAI's Agent field names are system_template /
     # prompt_template / response_template — the old system_prompt / task_prompt /

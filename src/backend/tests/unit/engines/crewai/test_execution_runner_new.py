@@ -580,6 +580,7 @@ class TestRunCrew:
                             "user_query": "test query",
                             "tools": ["some_tool"],
                             "planning_llm": "gpt-4",
+                            "reasoning_config": {"reasoning_effort": "low"},
                             "process": "sequential",
                         }
                     }
@@ -632,6 +633,7 @@ class TestRunCrew:
         assert "user_query" in passed_inputs
         assert "tools" not in passed_inputs
         assert "planning_llm" not in passed_inputs
+        assert "reasoning_config" not in passed_inputs  # filtered as a system input
 
 
 # ---------------------------------------------------------------------------
