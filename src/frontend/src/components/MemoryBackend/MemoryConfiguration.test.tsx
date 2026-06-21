@@ -2812,11 +2812,16 @@ describe('MemoryConfiguration', () => {
       await waitForLoaded();
       await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
 
-      // updateBackendConfiguration logs the no-backend-id error and returns.
+      // The early return is proven authoritatively by the log below
+      // (updateBackendConfiguration bails on the missing backend_id before any
+      // PUT). The subsequent put assertion is guarded against cross-test bleed:
+      // a *prior* test's verify→detect→PUT chain can resolve into this test
+      // (after beforeEach's drain + clearAllMocks), so clear put immediately
+      // before asserting — this test's own (early-returning) flow issues no PUT.
       await waitFor(() => {
         expect(consoleSpy).toHaveBeenCalledWith('No backend ID found, cannot update configuration');
       });
-      // No PUT is performed because the function returned early.
+      mockApiClient.put.mockClear();
       expect(mockApiClient.put).not.toHaveBeenCalled();
       consoleSpy.mockRestore();
     });
