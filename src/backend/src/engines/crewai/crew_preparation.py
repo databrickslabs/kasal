@@ -277,6 +277,12 @@ class CrewPreparation:
                 if crew_config.get('max_reasoning_attempts') and 'max_reasoning_attempts' not in agent_config:
                     agent_config['max_reasoning_attempts'] = crew_config['max_reasoning_attempts']
                     logger.info(f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config")
+                # PlanningConfig overrides (effort + step/replan caps) set in the sidebar
+                # Reasoning section. The shared agent builder turns this into a bounded
+                # crewai PlanningConfig; without it the agent gets CrewAI's expansive defaults.
+                if crew_config.get('reasoning_config') and 'reasoning_config' not in agent_config:
+                    agent_config['reasoning_config'] = crew_config['reasoning_config']
+                    logger.info(f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}")
 
                 agent = await create_agent(
                     agent_key=agent_name,

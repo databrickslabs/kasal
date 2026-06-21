@@ -8,6 +8,7 @@ from src.engines.crewai.common.agent_builder import (
     build_agent,
     build_agent_kwargs,
     build_agent_llm,
+    DEFAULT_REASONING_CONFIG,
 )
 
 
@@ -53,11 +54,70 @@ class TestBuildAgentKwargs:
         assert kw["tools"] == ["t1"]
 
     def test_additional_params_only_when_set(self):
-        kw = build_agent_kwargs(self._spec(max_iter=5, reasoning=True, max_rpm=None), [], None)
+        kw = build_agent_kwargs(self._spec(max_iter=5, max_execution_time=120, max_rpm=None), [], None)
         assert kw["max_iter"] == 5
-        assert kw["reasoning"] is True
+        assert kw["max_execution_time"] == 120
         # None values are not propagated
         assert "max_rpm" not in kw
+
+    # ── Reasoning → PlanningConfig (CrewAI 1.14.x migration) ──────────────────
+    def test_reasoning_off_sets_no_planning_config(self):
+        """No reasoning => no planning_config, and the deprecated reasoning flags
+        are never passed to the Agent."""
+        kw = build_agent_kwargs(self._spec(), [], None)
+        assert "planning_config" not in kw
+        assert "reasoning" not in kw
+        assert "max_reasoning_attempts" not in kw
+
+    def test_reasoning_on_builds_bounded_planning_config(self):
+        """reasoning=True => a bounded PlanningConfig (NOT CrewAI's expansive
+        defaults), and the deprecated reasoning flags are dropped to avoid the
+        'pass both → cap ignored' footgun."""
+        kw = build_agent_kwargs(self._spec(reasoning=True), [], None)
+        assert "reasoning" not in kw and "max_reasoning_attempts" not in kw
+        pc = kw["planning_config"]
+        assert pc.reasoning_effort == DEFAULT_REASONING_CONFIG["reasoning_effort"]
+        assert pc.max_attempts == DEFAULT_REASONING_CONFIG["max_attempts"]
+        assert pc.max_steps == DEFAULT_REASONING_CONFIG["max_steps"]
+        assert pc.max_step_iterations == DEFAULT_REASONING_CONFIG["max_step_iterations"]
+        assert pc.step_timeout == DEFAULT_REASONING_CONFIG["step_timeout"]
+        assert pc.max_replans == DEFAULT_REASONING_CONFIG["max_replans"]
+        # The bound that matters most: max_attempts must NOT be None (CrewAI's default),
+        # else the plan-refine loop runs `while not ready` forever.
+        assert pc.max_attempts is not None
+
+    def test_reasoning_config_overrides_apply(self):
+        kw = build_agent_kwargs(
+            self._spec(reasoning=True, reasoning_config={
+                "reasoning_effort": "low", "max_steps": 4,
+                "max_step_iterations": 3, "step_timeout": 30, "max_replans": 0,
+            }),
+            [], None,
+        )
+        pc = kw["planning_config"]
+        assert pc.reasoning_effort == "low"
+        assert pc.max_steps == 4
+        assert pc.max_step_iterations == 3
+        assert pc.step_timeout == 30
+        assert pc.max_replans == 0  # 0 is valid (no replanning) and must be honored
+
+    def test_legacy_max_reasoning_attempts_maps_to_max_attempts(self):
+        """The legacy/flow field still feeds PlanningConfig.max_attempts."""
+        kw = build_agent_kwargs(self._spec(reasoning=True, max_reasoning_attempts=5), [], None)
+        assert kw["planning_config"].max_attempts == 5
+
+    def test_default_profile_is_low_and_small(self):
+        """Pin the shipped default to the validated low/small profile (self-terminates
+        ~15s on the real model). A regression to medium/large reintroduces the
+        rate-limit retry-loop runaway."""
+        assert DEFAULT_REASONING_CONFIG == {
+            "reasoning_effort": "low",
+            "max_attempts": 1,
+            "max_steps": 3,
+            "max_step_iterations": 3,
+            "step_timeout": 20,
+            "max_replans": 0,
+        }
 
     def test_memory_never_propagated(self):
         kw = build_agent_kwargs(self._spec(memory=True), [], None)

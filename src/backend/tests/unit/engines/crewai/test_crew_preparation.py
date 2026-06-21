@@ -211,10 +211,40 @@ class TestCrewPreparation:
         """Test agent creation handles exceptions."""
         with patch('src.engines.crewai.crew_preparation.create_agent', side_effect=Exception("Test error")), \
              patch('src.engines.crewai.crew_preparation.handle_crew_error') as mock_handle_error:
-            
+
             result = await crew_preparation._create_agents()
             assert result is False
             mock_handle_error.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_crew_level_reasoning_config_propagated_to_agents(self, crew_preparation):
+        """Crew-level reasoning + reasoning_config must be fanned out to each agent's
+        config so the shared builder turns it into a bounded PlanningConfig."""
+        crew_preparation.config["crew"]["reasoning"] = True
+        crew_preparation.config["crew"]["reasoning_config"] = {
+            "reasoning_effort": "low", "max_steps": 3, "max_replans": 0,
+        }
+        with patch('src.engines.crewai.crew_preparation.create_agent',
+                   side_effect=[MagicMock(), MagicMock()]) as mock_create:
+            result = await crew_preparation._create_agents()
+
+            assert result is True
+            for ck in (c.kwargs for c in mock_create.call_args_list):
+                cfg = ck['agent_config']
+                assert cfg['reasoning'] is True
+                assert cfg['reasoning_config'] == {
+                    "reasoning_effort": "low", "max_steps": 3, "max_replans": 0,
+                }
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_config_when_crew_has_none(self, crew_preparation):
+        """Without a crew-level reasoning_config, none is injected onto agents."""
+        crew_preparation.config["crew"]["reasoning"] = False
+        with patch('src.engines.crewai.crew_preparation.create_agent',
+                   side_effect=[MagicMock(), MagicMock()]) as mock_create:
+            await crew_preparation._create_agents()
+            for ck in (c.kwargs for c in mock_create.call_args_list):
+                assert 'reasoning_config' not in ck['agent_config']
     
     @pytest.mark.asyncio
     async def test_create_tasks_success(self, crew_preparation):

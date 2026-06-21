@@ -14,7 +14,9 @@ import {
   MenuItem,
   CircularProgress,
   SelectChangeEvent,
-  Badge
+  Badge,
+  TextField,
+  Collapse
 } from '@mui/material';
 import {
   CleaningServices as ClearIcon,
@@ -27,10 +29,12 @@ import {
   Settings as SettingsIcon,
   InfoOutlined as InfoOutlinedIcon,
   HelpOutline as HelpOutlineIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
-import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useCrewExecutionStore, ReasoningConfig } from '../../store/crewExecution';
 import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';
 import { useUILayoutStore } from '../../store/uiLayout';
@@ -101,6 +105,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
+  const [reasoningAdvancedOpen, setReasoningAdvancedOpen] = useState(false);
   const [planningModel, setPlanningModel] = useState<string>('');
   const [reasoningModel, setReasoningModel] = useState<string>('');
   const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
@@ -132,6 +137,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     managerLLM: storeManagerLLM,
     planningLLM: storePlanningLLM,
     reasoningLLM: storeReasoningLLM,
+    reasoningConfig,
+    setReasoningConfig,
   } = useCrewExecutionStore();
 
   // Get user permissions
@@ -471,34 +478,90 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </Box>
 
               {reasoningEnabled && (
-                <FormControl size="small" fullWidth sx={{ mt: 1 }}>
-                  <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning LLM</InputLabel>
-                  <Select
-                    value={reasoningModel}
-                    onChange={handleReasoningModelChange}
-                    label="Reasoning LLM"
-                    disabled={isLoadingModels}
-                    sx={{ fontSize: '0.75rem' }}
-                    renderValue={(selected: string) => {
-                      const model = models[selected];
-                      return model ? model.name : selected;
-                    }}
-                  >
-                    {isLoadingModels ? (
-                      <MenuItem value="">
-                        <CircularProgress size={16} />
-                      </MenuItem>
-                    ) : Object.keys(models).length === 0 ? (
-                      <MenuItem value="">No models available</MenuItem>
-                    ) : (
-                      Object.entries(models).map(([key, model]) => (
-                        <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
-                          <span>{model.name}</span>
+                <>
+                  <FormControl size="small" fullWidth sx={{ mt: 1 }}>
+                    <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning LLM</InputLabel>
+                    <Select
+                      value={reasoningModel}
+                      onChange={handleReasoningModelChange}
+                      label="Reasoning LLM"
+                      disabled={isLoadingModels}
+                      sx={{ fontSize: '0.75rem' }}
+                      renderValue={(selected: string) => {
+                        const model = models[selected];
+                        return model ? model.name : selected;
+                      }}
+                    >
+                      {isLoadingModels ? (
+                        <MenuItem value="">
+                          <CircularProgress size={16} />
                         </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                </FormControl>
+                      ) : Object.keys(models).length === 0 ? (
+                        <MenuItem value="">No models available</MenuItem>
+                      ) : (
+                        Object.entries(models).map(([key, model]) => (
+                          <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
+                            <span>{model.name}</span>
+                          </MenuItem>
+                        ))
+                      )}
+                    </Select>
+                  </FormControl>
+
+                  {/* Reasoning effort — biggest lever: low skips replanning entirely */}
+                  <FormControl size="small" fullWidth sx={{ mt: 1 }}>
+                    <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning Effort</InputLabel>
+                    <Select
+                      value={reasoningConfig.reasoning_effort}
+                      label="Reasoning Effort"
+                      onChange={(e) => setReasoningConfig({ reasoning_effort: e.target.value as ReasoningConfig['reasoning_effort'] })}
+                      sx={{ fontSize: '0.75rem' }}
+                    >
+                      <MenuItem value="low" sx={{ fontSize: '0.75rem' }}>Low — no replanning (fastest)</MenuItem>
+                      <MenuItem value="medium" sx={{ fontSize: '0.75rem' }}>Medium — replan on failure</MenuItem>
+                      <MenuItem value="high" sx={{ fontSize: '0.75rem' }}>High — full adaptive (slowest)</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  {/* Advanced — bounded step/replan budget; hidden by default since
+                      the Effort selector covers the common case. */}
+                  <Box
+                    onClick={() => setReasoningAdvancedOpen((o) => !o)}
+                    sx={{ display: 'flex', alignItems: 'center', cursor: 'pointer', mt: 1, userSelect: 'none' }}
+                  >
+                    {reasoningAdvancedOpen
+                      ? <ExpandLessIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      : <ExpandMoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />}
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', ml: 0.25 }}>
+                      Advanced
+                    </Typography>
+                  </Box>
+                  <Collapse in={reasoningAdvancedOpen} timeout="auto" unmountOnExit>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                      {([
+                        ['Max steps', 'max_steps', 1],
+                        ['Step iters', 'max_step_iterations', 1],
+                        ['Step timeout (s)', 'step_timeout', 1],
+                        ['Max replans', 'max_replans', 0],
+                        ['Plan attempts', 'max_attempts', 1],
+                      ] as Array<[string, keyof ReasoningConfig, number]>).map(([label, key, min]) => (
+                        <TextField
+                          key={key}
+                          type="number"
+                          size="small"
+                          label={label}
+                          value={reasoningConfig[key]}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            setReasoningConfig({ [key]: Number.isNaN(n) ? min : Math.max(min, n) } as Partial<ReasoningConfig>);
+                          }}
+                          inputProps={{ min }}
+                          sx={{ flex: '1 1 45%', '& .MuiInputBase-input': { fontSize: '0.7rem' }, '& .MuiInputLabel-root': { fontSize: '0.7rem' } }}
+                        />
+                      ))}
+                    </Box>
+                  </Collapse>
+                </>
               )}
             </Box>
           </Box>

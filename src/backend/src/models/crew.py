@@ -26,6 +26,7 @@ class Crew(Base):
     planning_llm = Column(String(255), nullable=True)  # LLM for planning
     reasoning = Column(Boolean, default=False)  # Enable reasoning mode
     reasoning_llm = Column(String(255), nullable=True)  # LLM for reasoning
+    reasoning_config = Column(JSON, nullable=True)  # PlanningConfig overrides (effort, step/replan caps)
     manager_llm = Column(String(255), nullable=True)  # LLM for hierarchical manager
     tool_configs = Column(JSON, nullable=True)  # Crew-level tool configurations (MCP servers, etc.)
     memory = Column(Boolean, default=True)  # Enable memory

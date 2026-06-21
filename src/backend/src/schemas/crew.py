@@ -126,6 +126,7 @@ class CrewBase(BaseModel):
     planning_llm: Optional[str] = Field(None, description="LLM model for planning operations")
     reasoning: Optional[bool] = Field(False, description="Enable reasoning mode for enhanced decision-making")
     reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
+    reasoning_config: Optional[Dict[str, Any]] = Field(None, description="Reasoning PlanningConfig overrides (effort, step/replan caps)")
     manager_llm: Optional[str] = Field(None, description="LLM model for hierarchical process manager")
     tool_configs: Optional[Dict[str, Any]] = Field(None, description="Crew-level tool configurations (MCP servers, etc.)")
     memory: Optional[bool] = Field(True, description="Enable crew memory")
@@ -153,6 +154,7 @@ class CrewUpdate(BaseModel):
     planning_llm: Optional[str] = None
     reasoning: Optional[bool] = None
     reasoning_llm: Optional[str] = None
+    reasoning_config: Optional[Dict[str, Any]] = None
     manager_llm: Optional[str] = None
     tool_configs: Optional[Dict[str, Any]] = None
     memory: Optional[bool] = None
@@ -193,6 +195,7 @@ class CrewResponse(BaseModel):
     planning_llm: Optional[str] = None
     reasoning: Optional[bool] = False
     reasoning_llm: Optional[str] = None
+    reasoning_config: Optional[Dict[str, Any]] = None
     manager_llm: Optional[str] = None
     tool_configs: Optional[Dict[str, Any]] = None
     memory: Optional[bool] = True

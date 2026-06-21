@@ -34,6 +34,40 @@ def get_crew_service(session: SessionDep) -> CrewService:
     return CrewService(session)
 
 
+def _crew_to_response(crew) -> CrewResponse:
+    """Serialize a Crew model to CrewResponse including ALL execution-config fields.
+
+    Building CrewResponse field-by-field previously listed only id/name/ids/nodes/
+    edges/timestamps, silently dropping process/planning/reasoning/llms (and now
+    reasoning_config) on every GET/POST/PUT — so a crew saved to the catalog
+    reloaded with empty/default execution config. Centralized here so the response
+    can never diverge from the model again.
+    """
+    return CrewResponse(
+        id=crew.id,
+        name=crew.name,
+        agent_ids=crew.agent_ids,
+        task_ids=crew.task_ids,
+        nodes=crew.nodes or [],
+        edges=crew.edges or [],
+        created_at=crew.created_at.isoformat(),
+        updated_at=crew.updated_at.isoformat(),
+        # getattr defaults: real Crew models always have these columns; defensive
+        # against partial stubs (and forward-compatible if a column is missing).
+        process=getattr(crew, "process", None) or "sequential",
+        planning=getattr(crew, "planning", False),
+        planning_llm=getattr(crew, "planning_llm", None),
+        reasoning=getattr(crew, "reasoning", False),
+        reasoning_llm=getattr(crew, "reasoning_llm", None),
+        reasoning_config=getattr(crew, "reasoning_config", None),
+        manager_llm=getattr(crew, "manager_llm", None),
+        tool_configs=getattr(crew, "tool_configs", None),
+        memory=getattr(crew, "memory", True),
+        verbose=getattr(crew, "verbose", True),
+        max_rpm=getattr(crew, "max_rpm", None),
+    )
+
+
 @router.get("", response_model=List[CrewResponse])
 async def list_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
@@ -50,19 +84,7 @@ async def list_crews(
         List of crews for current group
     """
     crews = await service.find_by_group(group_context)
-    return [
-        CrewResponse(
-            id=crew.id,
-            name=crew.name,
-            agent_ids=crew.agent_ids,
-            task_ids=crew.task_ids,
-            nodes=crew.nodes or [],
-            edges=crew.edges or [],
-            created_at=crew.created_at.isoformat(),
-            updated_at=crew.updated_at.isoformat(),
-        )
-        for crew in crews
-    ]
+    return [_crew_to_response(crew) for crew in crews]
 
 
 def get_crew_feedback_service(session: SessionDep) -> CrewFeedbackService:
@@ -136,16 +158,7 @@ async def get_crew(
     crew = await service.get_by_group(crew_id, group_context)
     if not crew:
         raise NotFoundError("Crew not found")
-    return CrewResponse(
-        id=crew.id,
-        name=crew.name,
-        agent_ids=crew.agent_ids,
-        task_ids=crew.task_ids,
-        nodes=crew.nodes or [],
-        edges=crew.edges or [],
-        created_at=crew.created_at.isoformat(),
-        updated_at=crew.updated_at.isoformat(),
-    )
+    return _crew_to_response(crew)
 
 
 @router.post("", response_model=CrewResponse, status_code=status.HTTP_201_CREATED)
@@ -177,16 +190,7 @@ async def create_crew(
         crew = await service.create_with_group(crew_in, group_context, overwrite=overwrite)
 
         # Format the response
-        return CrewResponse(
-            id=crew.id,
-            name=crew.name,
-            agent_ids=crew.agent_ids,
-            task_ids=crew.task_ids,
-            nodes=crew.nodes or [],
-            edges=crew.edges or [],
-            created_at=crew.created_at.isoformat(),
-            updated_at=crew.updated_at.isoformat(),
-        )
+        return _crew_to_response(crew)
     except ValidationError as e:
         logger.error(f"Validation error: {e.errors()}")
         raise UnprocessableEntityError(str(e))
@@ -272,16 +276,7 @@ async def update_crew(
         )
         if not updated_crew:
             raise NotFoundError("Crew not found")
-        return CrewResponse(
-            id=updated_crew.id,
-            name=updated_crew.name,
-            agent_ids=updated_crew.agent_ids,
-            task_ids=updated_crew.task_ids,
-            nodes=updated_crew.nodes or [],
-            edges=updated_crew.edges or [],
-            created_at=updated_crew.created_at.isoformat(),
-            updated_at=updated_crew.updated_at.isoformat(),
-        )
+        return _crew_to_response(updated_crew)
     except ValidationError as e:
         logger.error(f"Validation error: {e.errors()}")
         raise UnprocessableEntityError(str(e))

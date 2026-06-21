@@ -162,6 +162,48 @@ class TestPrepareAndRunCrew:
         assert result['status'] == ExecutionStatus.RUNNING.value
 
     @pytest.mark.asyncio
+    async def test_reasoning_config_plumbed_into_crew_config(self, service, mock_config, mock_group_context):
+        """The sidebar's reasoning_config (PlanningConfig overrides) must reach the
+        engine on the crew config, so CrewPreparation can hand it to each agent."""
+        rc = {"reasoning_effort": "low", "max_steps": 4, "step_timeout": 30}
+        mock_config.inputs = {"reasoning_config": rc}
+
+        with patch.object(service, '_prepare_engine', new_callable=AsyncMock) as mock_prepare:
+            mock_engine = MagicMock()
+            mock_engine.run_execution = AsyncMock(return_value={'status': 'RUNNING'})
+            mock_engine._init_task = MagicMock()
+            mock_engine._init_task.done.return_value = True
+            mock_prepare.return_value = mock_engine
+
+            with patch('src.services.crewai_execution_service.request_scoped_session') as mock_factory:
+                mock_context = MagicMock()
+                mock_context.__aenter__ = AsyncMock(return_value=MagicMock())
+                mock_context.__aexit__ = AsyncMock(return_value=None)
+                mock_factory.return_value = mock_context
+
+                with patch('src.services.crewai_execution_service.AgentService') as mock_agent_svc:
+                    mock_agent_svc_inst = MagicMock()
+                    mock_agent_svc_inst.get = AsyncMock(return_value=None)
+                    mock_agent_svc_inst.find_by_name = AsyncMock(return_value=None)
+                    mock_agent_svc.return_value = mock_agent_svc_inst
+
+                    with patch('src.services.crewai_execution_service.TaskService') as mock_task_svc:
+                        mock_task_svc_inst = MagicMock()
+                        mock_task_svc_inst.find_by_name = AsyncMock(return_value=None)
+                        mock_task_svc_inst.get = AsyncMock(return_value=None)
+                        mock_task_svc.return_value = mock_task_svc_inst
+
+                        await service.prepare_and_run_crew(
+                            execution_id='exec-rc',
+                            config=mock_config,
+                            group_context=mock_group_context,
+                        )
+
+            # engine.run_execution(execution_id, execution_config, group_context, session)
+            execution_config = mock_engine.run_execution.call_args.args[1]
+            assert execution_config['crew']['reasoning_config'] == rc
+
+    @pytest.mark.asyncio
     async def test_prepare_and_run_crew_failure(self, service, mock_config, mock_group_context):
         """Test handling of execution failure."""
         execution_id = 'exec-123'

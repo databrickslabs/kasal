@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Node, Edge } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
+import { ReasoningConfig } from '../types/crews';
 
 // Execution configuration per tab
 export interface TabExecutionConfig {
@@ -10,6 +11,7 @@ export interface TabExecutionConfig {
   planningLLM?: string;
   reasoningEnabled?: boolean;
   reasoningLLM?: string;
+  reasoningConfig?: ReasoningConfig;  // PlanningConfig overrides (effort, step/replan caps)
   managerLLM?: string;
 }
 

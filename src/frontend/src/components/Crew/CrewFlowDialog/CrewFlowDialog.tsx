@@ -47,7 +47,7 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../store/flowConfig';
-import { useCrewExecutionStore } from '../../../store/crewExecution';
+import { useCrewExecutionStore, ReasoningConfig } from '../../../store/crewExecution';
 import { useTabManagerStore, TabExecutionConfig } from '../../../store/tabManager';
 
 interface TabPanelProps {
@@ -498,6 +498,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         if (selectedCrew.reasoning_llm) {
           store.setReasoningLLM(selectedCrew.reasoning_llm);
         }
+        if (selectedCrew.reasoning_config) {
+          store.setReasoningConfig(selectedCrew.reasoning_config as Partial<ReasoningConfig>);
+        }
 
         // Determine final manager LLM
         let finalManagerLLM: string | undefined;
@@ -523,6 +526,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             planningLLM: selectedCrew.planning_llm,
             reasoningEnabled: selectedCrew.reasoning,
             reasoningLLM: selectedCrew.reasoning_llm,
+            reasoningConfig: selectedCrew.reasoning_config,
             managerLLM: finalManagerLLM
           };
           console.log('[CrewFlowDialog] Saving execution config to tab:', activeTabId, tabConfig);

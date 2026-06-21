@@ -684,6 +684,30 @@ async def _ensure_chat_sessions_columns(conn) -> None:
         logger.warning(f"Could not ensure chat_sessions columns: {e}")
 
 
+async def _ensure_crew_columns(conn) -> None:
+    """Idempotently add reasoning_config to crews. create_all never ALTERs an
+    existing table, so DBs created before this column existed (e.g. deployed
+    customer instances) would silently drop the saved reasoning PlanningConfig
+    on save/reload. Safe to run every startup; column is nullable JSON/TEXT."""
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(crews)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (create_all handles fresh DBs)
+            if "reasoning_config" not in existing:
+                await conn.exec_driver_sql("ALTER TABLE crews ADD COLUMN reasoning_config TEXT")
+                logger.info("Added crews.reasoning_config column (SQLite self-heal)")
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE crews ADD COLUMN IF NOT EXISTS reasoning_config JSONB"
+            )
+            logger.info("Ensured crews.reasoning_config column")
+    except Exception as e:
+        logger.warning(f"Could not ensure crews.reasoning_config column: {e}")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -927,6 +951,7 @@ async def init_db() -> None:
                     await _ensure_chat_sessions_table(conn)
                     await _ensure_chat_sessions_columns(conn)
                     await _ensure_crew_feedback_table(conn)
+                    await _ensure_crew_columns(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

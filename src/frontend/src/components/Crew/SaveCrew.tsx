@@ -35,6 +35,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     planningLLM,
     reasoningEnabled,
     reasoningLLM,
+    reasoningConfig,
     managerLLM
   } = useCrewExecutionStore();
 
@@ -106,6 +107,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
+          reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
           manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
         };
 
@@ -231,6 +233,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
+          reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
           manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
         };
 
@@ -517,6 +520,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         planning_llm: planningEnabled && planningLLM ? planningLLM : undefined,
         reasoning: reasoningEnabled,
         reasoning_llm: reasoningEnabled && reasoningLLM ? reasoningLLM : undefined,
+        reasoning_config: reasoningEnabled ? reasoningConfig : undefined,
         manager_llm: processType === 'hierarchical' && managerLLM ? managerLLM : undefined
       };
 
