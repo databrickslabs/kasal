@@ -16,7 +16,11 @@ Test coverage:
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from src.engines.crewai.helpers.agent_helpers import create_agent, _build_security_preamble
+from src.engines.crewai.helpers.agent_adapter import (
+    create_agent,
+    _build_security_preamble,
+    inject_security_preamble,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +53,7 @@ def mock_tools():
 def _patch_create_agent_deps():
     """Return a context manager stack that mocks all external deps of create_agent."""
     return (
-        patch('src.engines.crewai.helpers.agent_helpers.Agent'),
+        patch('src.engines.crewai.common.agent_builder.Agent'),
         patch('src.core.llm_manager.LLMManager'),
         patch('src.db.session.request_scoped_session'),
         patch('src.services.mcp_service.MCPService'),
@@ -62,7 +66,7 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
     mock_llm = MagicMock()
     mock_llm.model = "gpt-4o"
 
-    with patch('src.engines.crewai.helpers.agent_helpers.Agent') as mock_agent_class, \
+    with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
          patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
          patch('src.db.session.request_scoped_session') as mock_session_factory, \
          patch('src.services.mcp_service.MCPService'), \
@@ -249,3 +253,37 @@ class TestCreateAgentSecurityPreamble:
         config = {**base_agent_config, "inject_date": True, "date_format": "%Y-%m-%d"}
         kwargs = await _run_create_agent(config, mock_config, mock_tools, None)
         assert "SECURITY INSTRUCTION" in kwargs["backstory"]
+
+
+class TestInjectSecurityPreambleShared:
+    """The shared injection helper used by BOTH the crew path (create_agent) and
+    the flow path (flow.modules.agent_adapter) — single source of truth."""
+
+    def test_injects_into_system_template_when_present(self):
+        kwargs = {"system_template": "MY TEMPLATE", "backstory": "bs"}
+        injected_into = inject_security_preamble(kwargs)
+        assert injected_into == "system_template"
+        assert kwargs["system_template"] == _build_security_preamble() + "\n\n" + "MY TEMPLATE"
+        assert kwargs["backstory"] == "bs"  # untouched
+
+    def test_injects_into_backstory_when_no_system_template(self):
+        kwargs = {"backstory": "original backstory"}
+        injected_into = inject_security_preamble(kwargs)
+        assert injected_into == "backstory"
+        assert kwargs["backstory"] == _build_security_preamble() + "\n\n" + "original backstory"
+
+    def test_backstory_none_is_handled(self):
+        kwargs = {}
+        injected_into = inject_security_preamble(kwargs)
+        assert injected_into == "backstory"
+        assert kwargs["backstory"] == _build_security_preamble() + "\n\n" + ""
+
+    def test_crew_and_flow_call_pattern_produce_identical_result(self):
+        # Same inputs through the same shared helper must yield byte-identical
+        # output regardless of which path calls it.
+        for src in ({"system_template": "T"}, {"backstory": "B"}, {}):
+            crew_kwargs = dict(src)
+            flow_kwargs = dict(src)
+            inject_security_preamble(crew_kwargs)
+            inject_security_preamble(flow_kwargs)
+            assert crew_kwargs == flow_kwargs

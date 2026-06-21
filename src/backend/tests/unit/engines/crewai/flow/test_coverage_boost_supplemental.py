@@ -553,7 +553,7 @@ class TestFlowMethodsSupplemental:
 # task_config.py supplemental tests
 # ---------------------------------------------------------------------------
 
-from src.engines.crewai.flow.modules.task_config import TaskConfig
+from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 from types import SimpleNamespace
 
 
@@ -589,7 +589,7 @@ class TestTaskConfigSupplemental:
 
         mock_agent = MagicMock()
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, flow_data, {"agent": agent_repo}

@@ -25,8 +25,8 @@ from pydantic import BaseModel
 
 from src.core.logger import LoggerManager
 from src.utils.safe_eval import safe_eval
-from src.engines.crewai.flow.modules.agent_config import AgentConfig
-from src.engines.crewai.flow.modules.task_config import TaskConfig
+from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks
 
 # Import new modular components

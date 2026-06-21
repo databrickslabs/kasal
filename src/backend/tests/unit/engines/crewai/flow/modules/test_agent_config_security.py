@@ -1,15 +1,29 @@
 """Flow agents must get the same security hardening + template handling as crew
-agents (agent_helpers.py). Regression tests for the flow/crew alignment fix."""
+agents — both now go through the shared common builders (build_agent_kwargs +
+inject_security_preamble). Regression tests for the flow/crew alignment."""
 from types import SimpleNamespace
 
-from src.engines.crewai.flow.modules.agent_config import AgentConfig
-from src.engines.crewai.helpers.agent_helpers import _build_security_preamble
+from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.common.agent_builder import build_agent_kwargs
+from src.engines.crewai.common.agent_security import (
+    _build_security_preamble,
+    inject_security_preamble,
+)
+
+
+def _flow_agent_kwargs(agent_data):
+    """Reproduce what configure_agent_and_tools feeds the shared builder:
+    ORM object → spec → build_agent_kwargs → inject_security_preamble."""
+    spec = AgentConfig._agent_data_to_spec(agent_data)
+    kwargs = build_agent_kwargs(spec, [], None, label=getattr(agent_data, "name", "?"))
+    inject_security_preamble(kwargs)
+    return kwargs
 
 
 class TestFlowAgentSecurityPreamble:
     def test_preamble_prepended_to_backstory_when_no_system_template(self):
         agent_data = SimpleNamespace(role="R", goal="G", backstory="original backstory", name="A")
-        kwargs = AgentConfig._prepare_agent_kwargs(agent_data, tools=[], llm=None)
+        kwargs = _flow_agent_kwargs(agent_data)
 
         assert kwargs["backstory"].startswith(_build_security_preamble())
         assert "original backstory" in kwargs["backstory"]
@@ -20,7 +34,7 @@ class TestFlowAgentSecurityPreamble:
         agent_data = SimpleNamespace(
             role="R", goal="G", backstory="bs", name="A", system_template="CUSTOM SYS"
         )
-        kwargs = AgentConfig._prepare_agent_kwargs(agent_data, tools=[], llm=None)
+        kwargs = _flow_agent_kwargs(agent_data)
 
         # Uses CrewAI's real field name, NOT the dropped 'system_prompt'.
         assert "system_prompt" not in kwargs
@@ -33,7 +47,7 @@ class TestFlowAgentSecurityPreamble:
         agent_data = SimpleNamespace(
             role="R", goal="G", backstory="bs", name="A", response_template="FMT"
         )
-        kwargs = AgentConfig._prepare_agent_kwargs(agent_data, tools=[], llm=None)
+        kwargs = _flow_agent_kwargs(agent_data)
 
         assert kwargs.get("response_template") == "FMT"
         assert "format_prompt" not in kwargs  # the old dropped name

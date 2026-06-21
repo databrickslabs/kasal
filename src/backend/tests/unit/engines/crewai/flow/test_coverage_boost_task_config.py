@@ -12,7 +12,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch, Mock
 
-from src.engines.crewai.flow.modules.task_config import TaskConfig, _resolve_tool_override
+from src.engines.crewai.flow.modules.task_adapter import TaskConfig, _resolve_tool_override
 
 
 # ---------------------------------------------------------------------------
@@ -210,29 +210,42 @@ class TestConfigureTask:
              patch("crewai.Task", side_effect=mock_task_ctor):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
-        assert "Markdown" in captured_kwargs.get("description", "")
+        # Unified to the crew path's wording ("markdown syntax").
+        assert "markdown" in captured_kwargs.get("description", "").lower()
 
     @pytest.mark.asyncio
     async def test_configure_task_async_execution_set(self):
         task_data = _make_task_data(async_execution=True)
         task, agent = _make_real_task_with_mock_agent()
 
+        captured_kwargs = {}
+
+        def mock_task_ctor(**kwargs):
+            captured_kwargs.update(kwargs)
+            return task
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("crewai.Task", return_value=task):
+             patch("crewai.Task", side_effect=mock_task_ctor):
             await TaskConfig.configure_task(task_data, agent=agent)
 
-        assert task.async_execution is True
+        assert captured_kwargs.get("async_execution") is True
 
     @pytest.mark.asyncio
     async def test_configure_task_human_input_set(self):
         task_data = _make_task_data(human_input=True)
         task, agent = _make_real_task_with_mock_agent()
 
+        captured_kwargs = {}
+
+        def mock_task_ctor(**kwargs):
+            captured_kwargs.update(kwargs)
+            return task
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("crewai.Task", return_value=task):
+             patch("crewai.Task", side_effect=mock_task_ctor):
             await TaskConfig.configure_task(task_data, agent=agent)
 
-        assert task.human_input is True
+        assert captured_kwargs.get("human_input") is True
 
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_dict_config(self):
@@ -240,20 +253,22 @@ class TestConfigureTask:
         task_data = _make_task_data(guardrail={"type": "company_count", "max": 5})
         task, agent = _make_real_task_with_mock_agent()
 
+        captured_kwargs = {}
+
+        def mock_task_ctor(**kwargs):
+            captured_kwargs.update(kwargs)
+            return task
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("crewai.Task", return_value=task), \
-             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
-             patch("src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper") as MockGW:
-            mock_guardrail = MagicMock()
-            MockGF.create_guardrail.return_value = mock_guardrail
-            mock_wrapper = MagicMock()
-            MockGW.return_value = mock_wrapper
+             patch("crewai.Task", side_effect=mock_task_ctor), \
+             patch("src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
+            MockGF.create_guardrail.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
 
         MockGF.create_guardrail.assert_called_once()
-        assert task.guardrail == mock_wrapper
-        assert task.retry_on_fail is True
+        assert "guardrail" in captured_kwargs
+        assert captured_kwargs.get("retry_on_fail") is True
 
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_self_reflection_stamps_run_model(self):
@@ -348,18 +363,24 @@ class TestConfigureTask:
         mock_gc = MagicMock()
         mock_gc.primary_group_id = "test-group"
 
+        captured_kwargs = {}
+
+        def mock_task_ctor(**kwargs):
+            captured_kwargs.update(kwargs)
+            return task
+
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("crewai.Task", return_value=task), \
+             patch("crewai.Task", side_effect=mock_task_ctor), \
              patch("crewai.tasks.llm_guardrail.LLMGuardrail") as MockLLMG, \
              patch("src.core.llm_manager.LLMManager.configure_crewai_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
-            mock_llm_guardrail = MagicMock()
-            MockLLMG.return_value = mock_llm_guardrail
+            MockLLMG.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
 
-        # LLM guardrail should be applied
-        assert task.retry_on_fail is True
+        # LLM guardrail should be applied (as a Task kwarg, with retry enabled)
+        assert "guardrail" in captured_kwargs
+        assert captured_kwargs.get("retry_on_fail") is True
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_object_config(self):
@@ -512,7 +533,7 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}
@@ -530,7 +551,7 @@ class TestResolveAgentForTask:
         agent_repo.get = AsyncMock(return_value=None)
 
         with patch("src.db.session.request_scoped_session") as MockSession, \
-             patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+             patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
@@ -556,7 +577,7 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.engines.crewai.flow.modules.agent_config.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=None)):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}

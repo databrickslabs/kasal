@@ -55,8 +55,8 @@ def _load_modules_isolated():
         "crewai.tasks", "crewai.tasks.llm_guardrail",
     ]
     loaded_modules = [
-        "src.engines.crewai.flow.modules.task_config",
-        "src.engines.crewai.flow.modules.agent_config",
+        "src.engines.crewai.flow.modules.task_adapter",
+        "src.engines.crewai.flow.modules.agent_adapter",
     ]
 
     # 1. Snapshot existing entries
@@ -105,12 +105,12 @@ def _load_modules_isolated():
         return mod
 
     task_mod = _load(
-        "src.engines.crewai.flow.modules.task_config",
-        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "task_config.py"),
+        "src.engines.crewai.flow.modules.task_adapter",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "task_adapter.py"),
     )
     agent_mod = _load(
-        "src.engines.crewai.flow.modules.agent_config",
-        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "agent_config.py"),
+        "src.engines.crewai.flow.modules.agent_adapter",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "agent_adapter.py"),
     )
 
     # 5. Extract the symbols we need
@@ -348,84 +348,3 @@ class TestTaskConfigToolOverride:
         tool_factory.create_tool.assert_called_once_with(
             "35", tool_config_override={"spaceId": "node-space"}
         )
-
-
-# ---------------------------------------------------------------------------
-# AgentConfig._create_tools_from_ids tests
-# ---------------------------------------------------------------------------
-class TestAgentConfigToolOverride:
-    """Test that _create_tools_from_ids passes tool_config_override to create_tool."""
-
-    @pytest.mark.asyncio
-    async def test_create_tools_from_ids_with_tool_configs(self):
-        """When tool_configs is provided, create_tool gets the matching override."""
-        fake_tool = MagicMock(name="fake_genie_tool")
-
-        tool_factory = MagicMock()
-        tool_factory.create_tool.return_value = fake_tool
-
-        tool_info = MagicMock()
-        tool_info.title = "GenieTool"
-        tool_factory.get_tool_info.return_value = tool_info
-
-        tools = await AgentConfig._create_tools_from_ids(
-            ["35"], tool_factory, "agent TestAgent",
-            tool_configs={"GenieTool": {"spaceId": "agent-space"}}
-        )
-
-        assert tools == [fake_tool]
-        tool_factory.create_tool.assert_called_once_with(
-            "35", tool_config_override={"spaceId": "agent-space"}
-        )
-
-    @pytest.mark.asyncio
-    async def test_create_tools_from_ids_without_tool_configs(self):
-        """When tool_configs is None, create_tool gets override=None."""
-        fake_tool = MagicMock(name="fake_tool")
-
-        tool_factory = MagicMock()
-        tool_factory.create_tool.return_value = fake_tool
-        tool_factory.get_tool_info.return_value = None
-
-        tools = await AgentConfig._create_tools_from_ids(
-            ["10"], tool_factory, "agent TestAgent",
-            tool_configs=None
-        )
-
-        assert tools == [fake_tool]
-        tool_factory.create_tool.assert_called_once_with(
-            "10", tool_config_override=None
-        )
-
-    @pytest.mark.asyncio
-    async def test_create_tools_from_ids_multiple_tools(self):
-        """Multiple tools get their own individual overrides."""
-        genie_tool = MagicMock(name="genie")
-        other_tool = MagicMock(name="other")
-
-        tool_factory = MagicMock()
-        tool_factory.create_tool.side_effect = [genie_tool, other_tool]
-
-        genie_info = MagicMock()
-        genie_info.title = "GenieTool"
-        other_info = MagicMock()
-        other_info.title = "WebSearch"
-
-        tool_factory.get_tool_info.side_effect = [genie_info, other_info]
-
-        tool_configs = {
-            "GenieTool": {"spaceId": "my-space"},
-            # WebSearch has no config override
-        }
-
-        tools = await AgentConfig._create_tools_from_ids(
-            ["35", "12"], tool_factory, "agent Multi",
-            tool_configs=tool_configs
-        )
-
-        assert tools == [genie_tool, other_tool]
-        calls = tool_factory.create_tool.call_args_list
-        assert calls[0].args == ("35",)
-        assert calls[0].kwargs == {"tool_config_override": {"spaceId": "my-space"}}
-        assert calls[1].args == ("12",)
-        assert calls[1].kwargs == {"tool_config_override": None}

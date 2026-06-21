@@ -194,8 +194,8 @@ class FlowProcessorManager:
                         continue
 
                     # Import necessary classes for building CrewAI objects
-                    from src.engines.crewai.flow.modules.task_config import TaskConfig
-                    from src.engines.crewai.flow.modules.agent_config import AgentConfig
+                    from src.engines.crewai.flow.modules.task_adapter import TaskConfig
+                    from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
 
                     # Build the CrewAI Task object with agent
                     agent_repo = repositories.get('agent') if repositories else None
@@ -544,8 +544,8 @@ class FlowProcessorManager:
                         continue
 
                     # Build CrewAI Task and Agent objects
-                    from src.engines.crewai.flow.modules.task_config import TaskConfig
-                    from src.engines.crewai.flow.modules.agent_config import AgentConfig
+                    from src.engines.crewai.flow.modules.task_adapter import TaskConfig
+                    from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
 
                     agent_repo = repositories.get('agent') if repositories else None
                     agent_data = await agent_repo.get(agent_id) if agent_repo else None
@@ -825,8 +825,8 @@ class FlowProcessorManager:
                             continue
 
                         # Build CrewAI Task and Agent objects
-                        from src.engines.crewai.flow.modules.task_config import TaskConfig
-                        from src.engines.crewai.flow.modules.agent_config import AgentConfig
+                        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
+                        from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
 
                         agent_repo = repositories.get('agent') if repositories else None
                         agent_data = await agent_repo.get(agent_id) if agent_repo else None

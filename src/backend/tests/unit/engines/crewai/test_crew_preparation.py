@@ -227,7 +227,7 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = True  # Match config (write_task has async=True)
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             # Only 1 async task, so no completion task added
@@ -248,7 +248,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = True  # Match config (write_task has async=True)
         mock_task2.context = None  # Initialize context
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -275,7 +275,7 @@ class TestCrewPreparation:
         
         mock_task = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', return_value=mock_task):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', return_value=mock_task):
             result = await crew_preparation._create_tasks()
             assert result is True
     
@@ -331,7 +331,7 @@ class TestCrewPreparation:
         mock_task2.description = "Second task"
         mock_task2.agent = MagicMock()
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
             # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
             with patch('crewai.Task') as mock_task_class:
                 mock_completion_task = MagicMock()
@@ -398,7 +398,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -434,7 +434,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -470,7 +470,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False
         mock_task2.context = None
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -504,7 +504,7 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = False
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()
@@ -562,7 +562,7 @@ class TestCrewPreparation:
         mock_task3.async_execution = False
         mock_task3.context = None
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()
@@ -604,7 +604,7 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
 
-        with patch('src.engines.crewai.helpers.task_helpers.create_task', side_effect=[mock_task1, mock_task2]), \
+        with patch('src.engines.crewai.helpers.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
              patch('src.engines.crewai.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()

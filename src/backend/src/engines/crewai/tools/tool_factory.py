@@ -1725,8 +1725,8 @@ class ToolFactory:
             elif tool_name == "MCPTool":
                 # MCPTool is a marker that signals MCP integration should be used.
                 # Actual MCP tools are created by MCPIntegration.create_mcp_tools_for_task
-                # in task_helpers.py using tool_configs.MCP_SERVERS — before this code runs.
-                # Return (True, []) so task_helpers treats this as an MCP marker (no-op).
+                # in task_adapter.py using tool_configs.MCP_SERVERS — before this code runs.
+                # Return (True, []) so task_adapter treats this as an MCP marker (no-op).
                 logger.info("MCPTool selected - MCP tools are managed by MCPIntegration via tool_configs.MCP_SERVERS")
                 return (True, [])
 

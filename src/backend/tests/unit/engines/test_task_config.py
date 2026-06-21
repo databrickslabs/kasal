@@ -826,6 +826,10 @@ class TestTaskConfigGuardrails:
         task.human_input = False
         task.tools = None
         task.guardrail = None
+        # Realistic ORM nullable columns (a bare Mock would auto-return Mocks).
+        task.retry_on_fail = None
+        task.max_retries = None
+        task.output_pydantic = None
         # LLM guardrail is read from config (user's explicit choice via toggle)
         task.config = {
             "llm_guardrail": {
@@ -906,52 +910,59 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_with_code_guardrail(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test configuring task with code-based guardrail."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         mock_guardrail = Mock()
         mock_guardrail.validate.return_value = {"valid": True, "feedback": ""}
 
-        with patch('crewai.Task') as mock_task_class, \
+        mock_task = Mock()
+        captured = {}
+
+        def _ctor(**kwargs):
+            captured.update(kwargs)
+            return mock_task
+
+        with patch('crewai.Task', side_effect=_ctor), \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper') as mock_wrapper_class, \
+             patch('src.engines.crewai.common.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
 
-            mock_task = Mock()
-            mock_task_class.return_value = mock_task
             mock_factory.create_guardrail.return_value = mock_guardrail
-            mock_wrapper = Mock()
-            mock_wrapper_class.return_value = mock_wrapper
+            mock_wrapper_class.return_value = Mock()
 
             result = await TaskConfig.configure_task(
                 mock_task_data_with_code_guardrail,
                 agent=mock_agent
             )
 
-            # Verify guardrail factory was called
+            # Factory + wrapper used, and the guardrail is passed to Task as a kwarg
+            # (build_task_args sets task_args['guardrail']).
             mock_factory.create_guardrail.assert_called_once()
-            # Verify wrapper was created
             mock_wrapper_class.assert_called_once_with(mock_guardrail, "Guardrail Task")
-            # Verify guardrail was set on task
-            assert mock_task.guardrail == mock_wrapper
+            assert "guardrail" in captured
 
     @pytest.mark.asyncio
     async def test_configure_task_with_llm_guardrail(self, mock_task_data_with_llm_guardrail, mock_agent):
         """Test configuring task with LLM guardrail."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch('crewai.Task') as mock_task_class, \
+        mock_task = Mock()
+        mock_task.description = "Test description"
+        captured = {}
+
+        def _ctor(**kwargs):
+            captured.update(kwargs)
+            return mock_task
+
+        with patch('crewai.Task', side_effect=_ctor), \
              patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()) as mock_configure_llm, \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
-            mock_task = Mock()
-            # Set description as a real string to avoid Mock + str concatenation issues
-            mock_task.description = "Test description"
-            mock_task_class.return_value = mock_task
             mock_llm_guardrail = Mock()
             mock_llm_guardrail_class.return_value = mock_llm_guardrail
 
@@ -960,40 +971,40 @@ class TestTaskConfigGuardrails:
                 agent=mock_agent
             )
 
-            # Verify LLM was configured via LLMManager
+            # LLM configured + guardrail created, and passed to Task as a kwarg.
             mock_configure_llm.assert_called_once()
-            # Verify LLM guardrail was created
             mock_llm_guardrail_class.assert_called_once()
-            # Verify guardrail was set on task
-            assert mock_task.guardrail == mock_llm_guardrail
-            # Verify retry_on_fail was set
-            assert mock_task.retry_on_fail is True
+            assert captured.get("guardrail") == mock_llm_guardrail
+            assert captured.get("retry_on_fail") is True
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_takes_priority(self, mock_task_data_with_both_guardrails, mock_agent):
         """Test that LLM guardrail takes priority over code guardrail."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         mock_code_guardrail = Mock()
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch('crewai.Task') as mock_task_class, \
+        mock_task = Mock()
+        mock_task.description = "Test description"
+        captured = {}
+
+        def _ctor(**kwargs):
+            captured.update(kwargs)
+            return mock_task
+
+        with patch('crewai.Task', side_effect=_ctor), \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.crewai.guardrails.guardrail_wrapper.GuardrailWrapper') as mock_wrapper_class, \
+             patch('src.engines.crewai.common.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc), \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
 
-            mock_task = Mock()
-            # Set description as a real string to avoid Mock + str concatenation issues
-            mock_task.description = "Test description"
-            mock_task_class.return_value = mock_task
             mock_factory.create_guardrail.return_value = mock_code_guardrail
-            mock_wrapper = Mock()
-            mock_wrapper_class.return_value = mock_wrapper
+            mock_wrapper_class.return_value = Mock()
             mock_llm_guardrail = Mock()
             mock_llm_guardrail_class.return_value = mock_llm_guardrail
 
@@ -1002,13 +1013,13 @@ class TestTaskConfigGuardrails:
                 agent=mock_agent
             )
 
-            # LLM guardrail should be set (overriding code guardrail)
-            assert mock_task.guardrail == mock_llm_guardrail
+            # LLM guardrail overrides the code guardrail (set as the Task kwarg).
+            assert captured.get("guardrail") == mock_llm_guardrail
 
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_creation_fails(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test task creation continues when guardrail creation fails."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         with patch('crewai.Task') as mock_task_class, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
@@ -1029,7 +1040,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_setup_exception(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test task creation continues when guardrail setup raises exception."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         with patch('crewai.Task') as mock_task_class, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
@@ -1050,7 +1061,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_augments_description(self, mock_task_data_with_llm_guardrail, mock_agent):
         """Test that LLM guardrail augments task description with validation requirements."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
@@ -1078,7 +1089,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_no_guardrail(self, mock_agent):
         """Test configuring task without any guardrail."""
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         mock_task_data = Mock()
         mock_task_data.name = "No Guardrail Task"
@@ -1116,7 +1127,7 @@ class TestTaskConfigGuardrails:
         database column but NOT in config. The execution should respect the
         config (user's explicit choice) and NOT apply the guardrail.
         """
-        from src.engines.crewai.flow.modules.task_config import TaskConfig
+        from src.engines.crewai.flow.modules.task_adapter import TaskConfig
 
         with patch('crewai.Task') as mock_task_class:
             mock_task = Mock()

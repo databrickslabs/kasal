@@ -6,7 +6,7 @@ Targets uncovered lines (52% → 85%+).
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.engines.crewai.helpers.agent_helpers import (
+from src.engines.crewai.helpers.agent_adapter import (
     create_agent,
     _build_security_preamble,
     _SECURITY_PREAMBLE,
@@ -53,7 +53,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
          patch("src.db.session.request_scoped_session") as mock_sess, \
          patch("src.services.mcp_service.MCPService") as mock_mcp_svc, \
          patch("src.core.unit_of_work.UnitOfWork") as mock_uow, \
-         patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+         patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
         mock_llm_instance = MagicMock()
         mock_llm_instance.model = agent_config.get("llm", "gpt-4o")
@@ -157,7 +157,7 @@ class TestCreateAgentBasic:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -202,7 +202,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
              patch("crewai.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -236,7 +236,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
              patch("src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksRetryLLM") as mock_retry:
 
             mock_configured = MagicMock()
@@ -270,7 +270,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -306,7 +306,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_crewai_llm = AsyncMock(side_effect=Exception("LLM config error"))
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -349,8 +349,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -393,8 +393,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -433,8 +433,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -472,8 +472,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -509,8 +509,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -613,8 +613,8 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -649,7 +649,7 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(side_effect=Exception("MCP error"))
@@ -678,8 +678,8 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -713,7 +713,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
              patch("crewai.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -750,7 +750,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
              patch("crewai.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -793,8 +793,8 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
-             patch("src.engines.crewai.helpers.agent_helpers.resolve_tool_ids_to_names",
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
@@ -825,7 +825,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls:
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama"
@@ -858,7 +858,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.crewai.helpers.agent_helpers.Agent") as mock_agent_cls, \
+             patch("src.engines.crewai.common.agent_builder.Agent") as mock_agent_cls, \
              patch("crewai.LLM") as mock_llm_cls:
 
             # Return a configured_llm without 'model' attribute
@@ -884,7 +884,7 @@ class TestRedactLlmRepr:
     """api_key must never reach the (user-downloadable) execution logs."""
 
     def test_redacts_api_key_and_keeps_the_rest(self):
-        from src.engines.crewai.helpers.agent_helpers import redact_llm_repr
+        from src.engines.crewai.helpers.agent_adapter import redact_llm_repr
 
         class FakeLLM:
             def __repr__(self):
@@ -899,6 +899,6 @@ class TestRedactLlmRepr:
         assert "model='databricks/claude'" in redacted
 
     def test_tolerates_reprs_without_an_api_key(self):
-        from src.engines.crewai.helpers.agent_helpers import redact_llm_repr
+        from src.engines.crewai.helpers.agent_adapter import redact_llm_repr
 
         assert redact_llm_repr("plain-model-string") == "'plain-model-string'"
