@@ -197,32 +197,6 @@ class TestCrewPreparationExecute:
 
 
 # ---------------------------------------------------------------------------
-# CrewPreparation._needs_entity_extraction_fallback
-# ---------------------------------------------------------------------------
-
-class TestNeedsEntityExtractionFallback:
-    def test_databricks_claude_needs_fallback(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._needs_entity_extraction_fallback("databricks-claude-3-5-sonnet") is True
-
-    def test_gpt_oss_needs_fallback(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._needs_entity_extraction_fallback("databricks-gpt-oss") is True
-
-    def test_gpt4o_does_not_need_fallback(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._needs_entity_extraction_fallback("gpt-4o") is False
-
-    def test_empty_model_does_not_need_fallback(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._needs_entity_extraction_fallback("") is False
-
-    def test_none_model_does_not_need_fallback(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._needs_entity_extraction_fallback(None) is False
-
-
-# ---------------------------------------------------------------------------
 # CrewPreparation._should_disable_memory_for_agent
 # ---------------------------------------------------------------------------
 
@@ -902,70 +876,6 @@ class TestCreateTasks:
         assert result is True
         # A completion task should have been appended
         assert len(cp.tasks) == 3
-
-
-class TestApplyEntityExtractionFallbackPatch:
-    """Tests for _apply_entity_extraction_fallback_patch."""
-
-    @pytest.mark.asyncio
-    async def test_applies_patches_successfully(self):
-        config = {"agents": [], "tasks": [], "group_id": "grp-1"}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
-             patch("crewai.utilities.converter.Converter") as mock_conv, \
-             patch("crewai.utilities.evaluators.task_evaluator.TaskEvaluator") as mock_te, \
-             patch("crewai.llm.LLM"):
-
-            mock_fallback_llm = MagicMock()
-            mock_lm.configure_crewai_llm = AsyncMock(return_value=mock_fallback_llm)
-            # Ensure it doesn't have function_calling_llm initially
-            del mock_fallback_llm.function_calling_llm
-
-            await cp._apply_entity_extraction_fallback_patch()
-
-        # Should not raise
-        assert True
-
-    @pytest.mark.asyncio
-    async def test_applies_patches_with_function_calling_llm(self):
-        config = {"agents": [], "tasks": [], "group_id": "grp-1"}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
-             patch("crewai.utilities.converter.Converter") as mock_conv, \
-             patch("crewai.utilities.evaluators.task_evaluator.TaskEvaluator") as mock_te, \
-             patch("crewai.llm.LLM"):
-
-            mock_fallback_llm = MagicMock()
-            mock_fallback_llm.function_calling_llm = MagicMock()  # already has it
-            mock_lm.configure_crewai_llm = AsyncMock(return_value=mock_fallback_llm)
-
-            await cp._apply_entity_extraction_fallback_patch()
-
-        assert True
-
-    @pytest.mark.asyncio
-    async def test_no_group_id_raises_handled(self):
-        config = {"agents": [], "tasks": []}  # No group_id
-        cp = CrewPreparation(config=config)
-
-        with patch("src.core.llm_manager.LLMManager") as mock_lm:
-            mock_lm.configure_crewai_llm = AsyncMock(return_value=MagicMock())
-
-            # Should not raise - exception is caught internally
-            await cp._apply_entity_extraction_fallback_patch()
-
-    @pytest.mark.asyncio
-    async def test_llm_manager_exception_handled(self):
-        config = {"agents": [], "tasks": [], "group_id": "grp-1"}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.core.llm_manager.LLMManager") as mock_lm:
-            mock_lm.configure_crewai_llm = AsyncMock(side_effect=Exception("LLM config failed"))
-
-            # Should not raise - exception is caught
-            await cp._apply_entity_extraction_fallback_patch()
 
 
 class TestCreateTasksKnowledgeToolInjection:
