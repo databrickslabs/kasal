@@ -349,17 +349,37 @@ class AgentConfig:
                 agent_kwargs[prop] = getattr(agent_data, prop)
                 logger.info(f"Setting agent parameter '{prop}' to {getattr(agent_data, prop)} for agent {agent_data.name}")
 
-        # Handle prompt templates (matching crew execution in agent_helpers.py)
-        # These templates can hint at expected output format and length
+        # Handle prompt templates. CrewAI's Agent field names are
+        # system_template / prompt_template / response_template — the old
+        # system_prompt / task_prompt / format_prompt names are NOT Agent fields
+        # and were silently dropped by Pydantic (so custom templates AND the
+        # security preamble never reached the LLM). Mirror agent_helpers.py.
         if hasattr(agent_data, 'system_template') and agent_data.system_template:
-            agent_kwargs['system_prompt'] = agent_data.system_template
-            logger.info(f"Setting system_prompt from system_template for agent {agent_data.name}")
+            agent_kwargs['system_template'] = agent_data.system_template
         if hasattr(agent_data, 'prompt_template') and agent_data.prompt_template:
-            agent_kwargs['task_prompt'] = agent_data.prompt_template
-            logger.info(f"Setting task_prompt from prompt_template for agent {agent_data.name}")
+            agent_kwargs['prompt_template'] = agent_data.prompt_template
         if hasattr(agent_data, 'response_template') and agent_data.response_template:
-            agent_kwargs['format_prompt'] = agent_data.response_template
-            logger.info(f"Setting format_prompt from response_template for agent {agent_data.name}")
+            agent_kwargs['response_template'] = agent_data.response_template
+        # CrewAI only honors custom templates when BOTH system_template and
+        # prompt_template are present — supply a passthrough user template when
+        # only the system one was configured.
+        if agent_kwargs.get('system_template') and not agent_kwargs.get('prompt_template'):
+            agent_kwargs['prompt_template'] = "{{ .Prompt }}"
+
+        # SECURITY: inject the SAME prompt-injection hardening preamble the crew
+        # path adds (agent_helpers._build_security_preamble) — flow agents were
+        # running with no hardening. Prepend to system_template when present, else
+        # to the backstory (CrewAI's default system prompt embeds {backstory}).
+        from src.engines.crewai.helpers.agent_helpers import _build_security_preamble
+        _preamble = _build_security_preamble()
+        if agent_kwargs.get('system_template'):
+            agent_kwargs['system_template'] = _preamble + "\n\n" + agent_kwargs['system_template']
+        else:
+            agent_kwargs['backstory'] = _preamble + "\n\n" + (agent_kwargs.get('backstory') or "")
+        logger.info(
+            f"[SECURITY] preamble injected for flow agent "
+            f"'{getattr(agent_data, 'role', getattr(agent_data, 'name', '?'))}'"
+        )
 
         # Handle config as the last step to avoid validation issues
         if hasattr(agent_data, 'config') and agent_data.config is not None:

@@ -20,9 +20,13 @@ def _agent(role="Researcher", model="databricks-gpt-5"):
 
 
 @pytest.mark.asyncio
-async def test_no_backend_config_skips_unified_wiring():
-    """With no memory backend configured, only the embedder is set (CrewAI
-    default storage) — no unified storage / Memory wiring."""
+async def test_no_active_config_falls_back_to_default_and_wires_memory():
+    """No ACTIVE backend config (e.g. the "Disabled Configuration" row →
+    get_active_config returns None) must FALL BACK to the DEFAULT local backend
+    and STILL wire unified Memory — same as the crew path. Bailing here would
+    leave crew_kwargs["memory"]=True, so CrewAI builds its own ChromaDB+OpenAI
+    Memory and the memory tools fail with "CHROMA_OPENAI_API_KEY is not set"."""
+    configured = {"memory": MagicMock(name="Memory")}
     with patch(
         "src.engines.crewai.services.crew_memory_service.CrewMemoryService"
     ) as MockSvc, patch(
@@ -30,18 +34,27 @@ async def test_no_backend_config_skips_unified_wiring():
     ) as MockEmb:
         svc = MockSvc.return_value
         svc.fetch_memory_backend_config = AsyncMock(return_value=None)
-        svc.create_unified_storage = AsyncMock()
-        svc.configure_crew_memory_components = MagicMock()
+        svc.generate_crew_id = MagicMock(return_value="g_crew_x")
+        svc.setup_storage_directory = MagicMock()
+        svc.create_unified_storage = AsyncMock(return_value=None)  # DEFAULT → no custom storage
+        svc.resolve_memory_llm_override = AsyncMock(return_value=None)
+        svc.configure_crew_memory_components = MagicMock(return_value=configured)
         emb = MockEmb.return_value
-        emb.configure_embedder = AsyncMock(return_value=({"memory": True}, None, None))
+        emb.configure_embedder = AsyncMock(
+            return_value=({"memory": True}, MagicMock(name="embedder"), None)
+        )
 
         result = await configure_flow_crew_memory(
             {"memory": True}, [_agent()], [MagicMock(description="t")], "crew", "g", None
         )
 
-        assert result == {"memory": True}
-        svc.create_unified_storage.assert_not_called()
-        svc.configure_crew_memory_components.assert_not_called()
+        # Memory is wired (not left as bare True) via the DEFAULT fallback.
+        svc.setup_storage_directory.assert_called_once()
+        svc.configure_crew_memory_components.assert_called_once()
+        assert result is configured
+        # The fallback config is the DEFAULT backend.
+        memcfg = svc.configure_crew_memory_components.call_args.args[1]
+        assert str(getattr(memcfg.backend_type, "value", memcfg.backend_type)) == "default"
 
 
 @pytest.mark.asyncio
@@ -103,8 +116,9 @@ async def test_backend_config_error_falls_back_gracefully():
         emb = MockEmb.return_value
         emb.configure_embedder = AsyncMock(return_value=({"memory": True}, lambda t: [[0.1]], None))
 
-        # Should not raise.
+        # Should not raise, and must DISABLE memory (not leave the bare True that
+        # makes CrewAI build its own ChromaDB+OpenAI Memory and fail).
         result = await configure_flow_crew_memory(
             {"memory": True}, [_agent()], [MagicMock(description="t")], "crew", "g", None
         )
-        assert "memory" in result
+        assert result["memory"] is False
