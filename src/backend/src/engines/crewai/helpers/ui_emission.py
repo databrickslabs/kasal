@@ -257,7 +257,7 @@ _DEFAULT_DIRECTIVES = {
     "album": 'show one image per screen that scrolls left→right — set the Album component\'s "layout" to "carousel"; give every image a short caption; include at most 12 images.',
     "presentation": "aim for about 8 slides; at most 4 bullet points per slide; open with a dedicated title slide; end with a summary / takeaways slide.",
     "dashboard": "lay out KPI Stat tiles 3 per row; pick the chart type that best fits each metric; show a delta/trend on each Stat tile.",
-    "quiz": "write exactly 5 questions; mix easy, medium and hard questions; give each question 4 answer options.",
+    "quiz": "write as many questions as the request asks for — use the exact count from the request (e.g. 50 or 100) and never cap it; only when no count is given, default to about 10; mix easy, medium and hard questions; give each question 4 answer options.",
     "mindmap": "nest the tree up to 3 levels deep; give the central topic about 5 main branches; keep node labels plain text.",
     "report": "keep the report standard in length; write in a neutral tone; lead with an executive summary card; list sources / citations at the end.",
     "genie": "pick the chart type that best fits each metric; show at most 20 rows in the Table; do not surface the SQL query.",
