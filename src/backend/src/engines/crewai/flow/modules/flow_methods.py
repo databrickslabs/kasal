@@ -208,9 +208,16 @@ async def configure_flow_crew_memory(
         logger.warning(f"[FLOW MEMORY] Embedder configuration failed: {e}")
 
     if not memory_backend_config:
-        # No unified backend configured → leave whatever embedder was set
-        # (CrewAI default LanceDB storage).
-        return crew_kwargs
+        # Mirror the crew path (crew_preparation step 8): when no ACTIVE backend
+        # config exists (e.g. the "Disabled Configuration" row → get_active_config
+        # returns None), fall back to the DEFAULT local backend and STILL run the
+        # memory wiring below — so the Databricks embedder is attached to the crew
+        # + agents. Returning here would leave crew_kwargs["memory"]=True, so
+        # CrewAI builds its OWN default Memory (ChromaDB + OpenAI embedder) and the
+        # save_to_memory / search_memory tools fail with
+        # "CHROMA_OPENAI_API_KEY is not set". (If no embedder can be built,
+        # configure_crew_memory_components disables memory gracefully.)
+        memory_backend_config = {"backend_type": "default"}
 
     try:
         crew_id = memory_service.generate_crew_id()
@@ -247,6 +254,10 @@ async def configure_flow_crew_memory(
         )
     except Exception as e:
         logger.warning(f"[FLOW MEMORY] Failed to configure unified memory backend: {e}")
+        # Disable memory rather than leave crew_kwargs["memory"]=True — a bare
+        # True makes CrewAI build its own ChromaDB+OpenAI Memory and fail with
+        # "CHROMA_OPENAI_API_KEY is not set". Graceful degradation = no memory.
+        crew_kwargs["memory"] = False
 
     return crew_kwargs
 

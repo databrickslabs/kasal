@@ -205,8 +205,11 @@ class TestStartingPointMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        # crew_memory_from_config=True with at least one enabled agent → True
-        assert crew_kwargs_captured.get("memory") is True
+        # crew_memory_from_config=True with one enabled agent → memory wiring runs.
+        # configure_flow_crew_memory now PROCESSES memory into a configured Memory
+        # (or a graceful False) instead of leaving the bare True that made CrewAI
+        # build its own ChromaDB+OpenAI Memory and fail with CHROMA_OPENAI_API_KEY.
+        assert crew_kwargs_captured.get("memory") is not True
 
     @pytest.mark.asyncio
     async def test_crew_hierarchical_process(self):
