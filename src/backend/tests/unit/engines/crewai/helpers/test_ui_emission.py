@@ -458,7 +458,10 @@ class TestCatalogSlicing:
     def test_flashcards_slice_describes_flip_card(self):
         s = build_ui_instruction(deliverable="flashcards")
         assert "BUILD FLASHCARDS" in s
-        assert "Flashcards (title?, cards:[{ front, back }])" in s
+        # The Flashcards component signature is described; assert the stable
+        # parts (the option list may grow, e.g. layout?: grid|carousel).
+        assert "Flashcards (title?" in s
+        assert "cards:[{ front, back }]" in s
         assert "FLIPS to reveal" in s
         # not conflated with the quiz slice
         assert "ONE Quiz component" not in s
