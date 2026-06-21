@@ -159,6 +159,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             data={message.resultData as GenerationCompleteData}
             messageId={message.id}
             onSaveCrew={onSaveCrew}
+            executionId={message.executionId}
           />
         );
       }

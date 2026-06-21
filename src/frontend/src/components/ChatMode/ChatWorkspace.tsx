@@ -694,12 +694,19 @@ const ChatWorkspace: React.FC = () => {
   // until that crew's run finishes — feedback only makes sense once the
   // result is visible. Cleared on post; a refine run never sets it.
   const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null } | null>(null);
-  const postPendingActionsRow = useCallback(() => {
+  const postPendingActionsRow = useCallback((jobId?: string) => {
     const pending = pendingActionsRef.current;
     if (!pending) return;
     pendingActionsRef.current = null;
     const sessionStore = useSessionStore.getState();
-    const extra = { id: generateId(), resultType: 'crew_actions', resultData: pending.data };
+    // Anchor the row to this run's execution id so the actions bar can offer a
+    // "Memory graph" link scoped to exactly this run's cognitive memory.
+    const extra = {
+      id: generateId(),
+      resultType: 'crew_actions',
+      resultData: pending.data,
+      executionId: jobId,
+    };
     if (pending.ownerSession) sessionStore.addMessageToTargetSession(pending.ownerSession, 'assistant', '', extra);
     else sessionStore.addMessage('assistant', '', extra);
   }, []);
@@ -708,7 +715,7 @@ const ChatWorkspace: React.FC = () => {
     finishOnce(jobId, () => {
       useExecutionStore.getState().completeExecution(resultText, jobId);
       // Result is in — now surface the bookmark/feedback row beneath it.
-      postPendingActionsRow();
+      postPendingActionsRow(jobId);
     });
   }, [finishOnce, postPendingActionsRow]);
   const failExecutionOnce = useCallback((jobId: string | undefined, error: string) => {

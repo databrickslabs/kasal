@@ -7,7 +7,7 @@ including validation, testing connections, and retrieving available indexes.
 
 import os
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,13 @@ from src.utils.memory_paths import local_memory_store_dir
 logger = LoggerManager.get_instance().api
 
 router = APIRouter(prefix="/memory-backend", tags=["memory-backend"])
+
+# The local (LanceDB) storage layer limits the table SCAN before sorting by
+# created_at, so a small limit yields an arbitrary slice rather than the newest
+# records. When browsing we scan the whole store (up to this cap) and sort +
+# paginate ourselves so the returned page is truly the newest. Matches the
+# storage layer's own scan cap.
+_BROWSE_FULL_SCAN_LIMIT = 50_000
 
 
 # Dependency to get MemoryBackendService with injected session
@@ -1366,8 +1373,12 @@ async def list_memory_records(
         description="Optional hierarchical scope prefix to filter records.",
     ),
     limit: int = Query(
-        50, ge=1, le=500,
-        description="Maximum number of records to return.",
+        50, ge=1, le=5000,
+        description=(
+            "Maximum number of records to return. The browser pages with a "
+            "small limit for the card list, but the concept/graph views fetch "
+            "the whole store in one request, so the ceiling is high."
+        ),
     ),
     offset: int = Query(
         0, ge=0,
@@ -1399,11 +1410,13 @@ async def list_memory_records(
         offset,
     )
 
+    total = 0
     if backend_type == "databricks":
         databricks_cfg = active.databricks_config if active else None
         if not databricks_cfg or not databricks_cfg.memory_index:
-            return {"backend": backend_type, "records": [], "total": 0}
-        records = await _browse_databricks_records(
+            return {"backend": backend_type, "records": [], "count": 0, "total": 0,
+                    "offset": offset, "limit": limit}
+        records, total = await _browse_databricks_records(
             databricks_cfg,
             group_id=group_id,
             scope=scope,
@@ -1414,8 +1427,9 @@ async def list_memory_records(
     elif backend_type == "lakebase":
         lakebase_cfg = active.lakebase_config if active else None
         if not lakebase_cfg or not lakebase_cfg.memory_table:
-            return {"backend": backend_type, "records": [], "total": 0}
-        records = await _browse_lakebase_records(
+            return {"backend": backend_type, "records": [], "count": 0, "total": 0,
+                    "offset": offset, "limit": limit}
+        records, total = await _browse_lakebase_records(
             lakebase_cfg,
             group_id=group_id,
             scope=scope,
@@ -1423,7 +1437,7 @@ async def list_memory_records(
             offset=offset,
         )
     else:
-        records = _browse_default_records(
+        records, total = _browse_default_records(
             group_id=group_id,
             scope=scope,
             limit=limit,
@@ -1434,6 +1448,11 @@ async def list_memory_records(
         "backend": backend_type,
         "records": records,
         "count": len(records),
+        # Total records available in the store for this scope, so the client
+        # can paginate (fetch with a larger offset) until count == total.
+        "total": total,
+        "offset": offset,
+        "limit": limit,
     }
 
 
@@ -1506,8 +1525,13 @@ async def _browse_databricks_records(
     limit: int,
     offset: int,
     user_token: Optional[str],
-) -> List[Dict[str, Any]]:
-    """Read records from a Databricks Vector Search unified-memory index."""
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Read records from a Databricks Vector Search unified-memory index.
+
+    Returns ``(records, total)`` where ``total`` is the number of records the
+    group has in the index (used by the client for pagination). The total is a
+    group-level count; when a ``scope`` filter is applied it is an upper bound.
+    """
     from src.repositories.databricks_vector_index_repository import (
         DatabricksVectorIndexRepository,
     )
@@ -1541,7 +1565,20 @@ async def _browse_databricks_records(
         records.append(record)
         if len(records) >= limit:
             break
-    return records
+
+    total = offset + len(records)
+    try:
+        total = await repo.count_documents(
+            index_name=databricks_cfg.memory_index,
+            endpoint_name=databricks_cfg.endpoint_name,
+            filters=filters,
+            user_token=user_token,
+        )
+    except Exception as exc:  # pragma: no cover - best-effort count
+        logger.warning(
+            "Databricks memory count failed, using page-based total: %s", exc
+        )
+    return records, total
 
 
 async def _browse_lakebase_records(
@@ -1551,8 +1588,12 @@ async def _browse_lakebase_records(
     scope: Optional[str],
     limit: int,
     offset: int,
-) -> List[Dict[str, Any]]:
-    """Read records from the unified Lakebase memory table."""
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Read records from the unified Lakebase memory table.
+
+    Returns ``(records, total)`` where ``total`` is the count of records
+    matching the group (and optional scope) filter, for client pagination.
+    """
     from sqlalchemy import text
 
     from src.db.lakebase_session import get_lakebase_session
@@ -1569,13 +1610,18 @@ async def _browse_lakebase_records(
         where.append("metadata->>'scope' LIKE :scope_prefix")
         params["scope_prefix"] = f"{scope}%"
 
+    where_clause = " AND ".join(where)
     async with get_lakebase_session(
         instance_name=instance_name, group_id=group_id
     ) as session:
+        count_sql = text(f"SELECT COUNT(*) FROM {table_name} WHERE {where_clause}")
+        total = int(
+            (await session.execute(count_sql, params)).scalar() or 0
+        )
         sql = text(
             f"SELECT id, content, metadata, created_at, updated_at, agent, score "
             f"FROM {table_name} "
-            f"WHERE {' AND '.join(where)} "
+            f"WHERE {where_clause} "
             f"ORDER BY created_at DESC "
             f"LIMIT :limit OFFSET :offset"
         )
@@ -1601,7 +1647,7 @@ async def _browse_lakebase_records(
                     "last_accessed": str(row[4]) if row[4] else None,
                 }
             )
-        return records
+        return records, total
 
 
 def _browse_default_records(
@@ -1610,13 +1656,16 @@ def _browse_default_records(
     scope: Optional[str],
     limit: int,
     offset: int,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], int]:
     """Read records from the LOCAL LanceDB memory store for the group.
 
     Kasal's DEFAULT backend sets ``CREWAI_STORAGE_DIR`` to
     ``kasal_default_{group_id}`` — one workspace-scoped store — which CrewAI
     resolves as a relative name (under the backend CWD or the platform data
     dir). This helper finds that store and reads its LanceDB records.
+
+    Returns ``(records, total)`` where ``total`` is the full record count in
+    the store for this scope, so the client can paginate beyond one page.
     """
     import os
     from pathlib import Path
@@ -1625,7 +1674,7 @@ def _browse_default_records(
         from crewai.memory import Memory  # type: ignore
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Default memory browse failed (crewai.memory missing): %s", exc)
-        return []
+        return [], 0
 
     # ONE deterministic store per group at the known memory root
     # (KASAL_MEMORY_DIR) — the exact path the runtime writes to, so the browser
@@ -1638,10 +1687,11 @@ def _browse_default_records(
             group_id,
             store_dir,
         )
-        return []
+        return [], 0
     storage_dirs: List[Path] = [store_dir]
 
     aggregated: List[Dict[str, Any]] = []
+    total = 0
     original_storage = os.environ.get("CREWAI_STORAGE_DIR")
     try:
         for storage_dir in storage_dirs:
@@ -1658,10 +1708,22 @@ def _browse_default_records(
                 )
                 if storage is None or not hasattr(storage, "list_records"):
                     continue
+                # True store count for this scope, so the client knows whether
+                # more pages exist beyond the one being returned.
+                if hasattr(storage, "count"):
+                    try:
+                        total += int(storage.count(scope_prefix=scope))
+                    except Exception:  # pragma: no cover - best-effort
+                        logger.debug("Local memory count failed", exc_info=True)
+                # IMPORTANT: the storage layer's list_records limits the SCAN
+                # before sorting by created_at, so a small limit returns an
+                # arbitrary slice (storage order), NOT the newest records. To
+                # return the true newest page we scan the whole store here and
+                # sort + paginate after merging below. (Capped to avoid
+                # unbounded reads; matches the storage scan cap.)
                 fetched = storage.list_records(
                     scope_prefix=scope,
-                    # Oversample per-store; we sort + paginate after merging.
-                    limit=limit + offset,
+                    limit=_BROWSE_FULL_SCAN_LIMIT,
                     offset=0,
                 )
                 crew_id = storage_dir.name.removeprefix("kasal_default_")
@@ -1682,7 +1744,7 @@ def _browse_default_records(
             os.environ["CREWAI_STORAGE_DIR"] = original_storage
 
     aggregated.sort(key=lambda r: r.get("created_at") or "", reverse=True)
-    return aggregated[offset : offset + limit]
+    return aggregated[offset : offset + limit], total
 
 
 def _row_to_record_dict(

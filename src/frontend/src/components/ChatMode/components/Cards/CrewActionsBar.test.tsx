@@ -17,6 +17,21 @@ vi.mock('../../api/crews', async (importOriginal) => {
   return { ...mod, postCrewFeedback: (...a: unknown[]) => postCrewFeedback(...a) };
 });
 
+// Memory-enabled toggle drives whether the run's memory-graph button shows.
+let memoryEnabledMock = true;
+vi.mock('../../store/executionStore', () => ({
+  useExecutionStore: (sel: (s: { memoryEnabled: boolean }) => unknown) =>
+    sel({ memoryEnabled: memoryEnabledMock }),
+}));
+
+// Stub the heavy browser; assert it opens scoped to the run + graph view.
+vi.mock('../../../MemoryBackend/MemoryRecordsBrowser', () => ({
+  MemoryRecordsBrowser: (props: { open: boolean; initialRunId?: string; initialView?: string }) =>
+    props.open ? (
+      <div data-testid="memory-graph" data-run={props.initialRunId} data-view={props.initialView} />
+    ) : null,
+}));
+
 import CrewActionsBar from './CrewActionsBar';
 import { CrewNameConflictError } from '../../api/crews';
 
@@ -25,6 +40,7 @@ const DATA = { agents: [{ name: 'A' }], tasks: [{ name: 'T' }] } as never;
 beforeEach(() => {
   updateMessage.mockClear();
   postCrewFeedback.mockClear();
+  memoryEnabledMock = true;
 });
 
 describe('CrewActionsBar', () => {
@@ -147,5 +163,50 @@ describe('CrewActionsBar', () => {
     await waitFor(() =>
       expect(screen.getByText('Could not record the feedback')).toBeInTheDocument(),
     );
+  });
+
+  it('shows the memory-graph button only when memory is enabled and a run id is present', () => {
+    render(
+      <CrewActionsBar
+        data={DATA}
+        messageId={`a-${Math.random()}`}
+        onSaveCrew={vi.fn()}
+        executionId="job-9"
+      />,
+    );
+    expect(screen.getByLabelText('View memory graph')).toBeInTheDocument();
+  });
+
+  it('opens the run-scoped memory graph (graph view) on click', () => {
+    render(
+      <CrewActionsBar
+        data={DATA}
+        messageId={`a-${Math.random()}`}
+        onSaveCrew={vi.fn()}
+        executionId="job-9"
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('View memory graph'));
+    const graph = screen.getByTestId('memory-graph');
+    expect(graph).toHaveAttribute('data-run', 'job-9');
+    expect(graph).toHaveAttribute('data-view', 'graph');
+  });
+
+  it('hides the memory-graph button when there is no run id', () => {
+    render(<CrewActionsBar data={DATA} messageId={`a-${Math.random()}`} onSaveCrew={vi.fn()} />);
+    expect(screen.queryByLabelText('View memory graph')).toBeNull();
+  });
+
+  it('hides the memory-graph button when memory is disabled', () => {
+    memoryEnabledMock = false;
+    render(
+      <CrewActionsBar
+        data={DATA}
+        messageId={`a-${Math.random()}`}
+        onSaveCrew={vi.fn()}
+        executionId="job-9"
+      />,
+    );
+    expect(screen.queryByLabelText('View memory graph')).toBeNull();
   });
 });

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
+import { useExecutionStore } from '../../store/executionStore';
+import { MemoryRecordsBrowser } from '../../../MemoryBackend/MemoryRecordsBrowser';
 
 /**
  * Slim post-generation actions row (no crew card): bookmark the crew into the
@@ -23,12 +25,14 @@ interface CrewActionsBarProps {
     data: GenerationCompleteData,
     opts?: { overwrite?: boolean },
   ) => Promise<{ id: string; name: string }>;
+  /** Execution (job) id of the run this message anchors — scopes the memory graph. */
+  executionId?: string;
 }
 
 const ICON_BTN =
   'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed';
 
-const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSaveCrew }) => {
+const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSaveCrew, executionId }) => {
   const persisted = data as GenerationCompleteData & PersistedActions;
   const [savedId, setSavedId] = useState<string | undefined>(persisted.savedCrewId);
   const [savedName, setSavedName] = useState<string | undefined>(persisted.savedName);
@@ -37,6 +41,11 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
   const [showDownForm, setShowDownForm] = useState(false);
   const [downComment, setDownComment] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [graphOpen, setGraphOpen] = useState(false);
+
+  // The memory graph is only meaningful when this run actually wrote memory.
+  const memoryEnabled = useExecutionStore((s) => s.memoryEnabled);
+  const canShowGraph = memoryEnabled && Boolean(executionId);
 
   const persist = (patch: PersistedActions) => {
     try {
@@ -164,6 +173,30 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
           </svg>
         </button>
 
+        {/* Memory graph — concept graph of what this run wrote to memory */}
+        {canShowGraph && (
+          <button
+            type="button"
+            onClick={() => setGraphOpen(true)}
+            title="View this run's memory graph"
+            aria-label="View memory graph"
+            className={ICON_BTN}
+            style={{
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <circle cx="6" cy="6" r="2.5" />
+              <circle cx="18" cy="7" r="2.5" />
+              <circle cx="12" cy="17" r="2.5" />
+              <path strokeLinecap="round" d="M7.8 7.4l2.6 7.4M16.6 8.7l-3 6.4M8.3 6.4l7.2.4" />
+            </svg>
+            Memory graph
+          </button>
+        )}
+
         {voted === 'down' && (
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
             Feedback recorded — thank you
@@ -203,6 +236,15 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
             Submit feedback
           </button>
         </div>
+      )}
+
+      {canShowGraph && graphOpen && (
+        <MemoryRecordsBrowser
+          open={graphOpen}
+          onClose={() => setGraphOpen(false)}
+          initialRunId={executionId}
+          initialView="graph"
+        />
       )}
     </div>
   );
