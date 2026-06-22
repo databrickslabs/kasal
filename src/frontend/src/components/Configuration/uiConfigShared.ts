@@ -94,7 +94,7 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
     { kind: 'switch', key: 'deltas', label: 'Show deltas / trends on tiles', default: true, phrase: (v) => (v ? 'show a delta/trend on each Stat tile' : 'omit deltas on Stat tiles') },
   ],
   presentation: [
-    { kind: 'number', key: 'slides', label: 'Target slide count', min: 3, max: 20, default: 8, phrase: (v) => `aim for about ${v} slides` },
+    { kind: 'number', key: 'slides', label: 'Target slide count', min: 3, max: 20, default: 20, phrase: (v) => `aim for about ${v} slides` },
     { kind: 'number', key: 'bullets', label: 'Max bullets per slide', min: 2, max: 6, default: 4, phrase: (v) => `at most ${v} bullet points per slide` },
     { kind: 'switch', key: 'titleSlide', label: 'Open with a title slide', default: true, phrase: (v) => (v ? 'open with a dedicated title slide' : 'skip the title slide') },
     { kind: 'switch', key: 'summarySlide', label: 'End with a summary slide', default: true, phrase: (v) => (v ? 'end with a summary / takeaways slide' : 'do not add a summary slide') },
