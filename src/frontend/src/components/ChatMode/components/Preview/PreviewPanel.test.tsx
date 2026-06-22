@@ -89,6 +89,14 @@ describe('parsePreviewContent — A2UI only', () => {
     expect(parsePreviewContent(embedded)).toBeNull();
   });
 
+  it('finds an A2UI doc WRAPPED in a result envelope (so it never leaks to chat)', () => {
+    // The backend often hands the surface inside {result:{…}} / {output:"<json>"};
+    // a top-level-only parse missed these and dumped raw JSON into the chat.
+    expect(parsePreviewContent(JSON.stringify({ result: JSON.parse(uiDoc) }))?.type).toBe('ui');
+    expect(parsePreviewContent(JSON.stringify({ output: uiDoc }))?.type).toBe('ui');
+    expect(parsePreviewContent(JSON.stringify({ data: { result: JSON.parse(uiDoc) } }))?.type).toBe('ui');
+  });
+
   it('does NOT preview generic JSON, markdown, or plain text', () => {
     expect(parsePreviewContent('{"a":1,"b":2}')).toBeNull();
     expect(parsePreviewContent('[{"a":1},{"a":2}]')).toBeNull();

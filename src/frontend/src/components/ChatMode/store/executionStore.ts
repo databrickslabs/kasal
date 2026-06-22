@@ -14,6 +14,33 @@ import {
 } from './activeExecutionMarker';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
+/**
+ * A single intermediate "answer" surfaced LIVE in the preview pane while a run
+ * is still building its deliverable (a tool result / finding). Purely in-memory
+ * decoration — NEVER persisted to previewHistory or IndexedDB; it exists only
+ * for the duration of the run and is replaced by the real deliverable.
+ */
+export interface TransientPreviewItem {
+  id: string;
+  label: string;
+  sublabel?: string;
+  detail?: string;
+  durationMs?: number;
+  timestamp: number;
+}
+
+/** Append `item` to the live feed, de-duping a re-emitted result (same
+ *  label+sublabel) and capping to the most recent `max`. Pure for testability. */
+export function pushTransientItem(
+  list: TransientPreviewItem[],
+  item: TransientPreviewItem,
+  max = 8,
+): TransientPreviewItem[] {
+  const filtered = list.filter((i) => !(i.label === item.label && i.sublabel === item.sublabel));
+  const next = [...filtered, item];
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
 interface SessionExecSnapshot {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
   isExecuting: boolean;
@@ -88,6 +115,20 @@ interface ExecutionState {
    * persistence reason as ``selectedMcpServers``.
    */
   selectedAgentBricksEndpoints: string[];
+  /**
+   * Live, NON-PERSISTED feed of intermediate answers shown in the preview pane
+   * while a run is building its deliverable. Replaced by the real deliverable
+   * on completion; never written to previewHistory or IndexedDB.
+   */
+  transientPreview: TransientPreviewItem[];
+  /** The session the live feed belongs to (render only when it's on screen). */
+  transientPreviewOwnerSessionId: string | null;
+  /**
+   * Whether the preview pane shows the live "retrieved context / working
+   * results" feed during a run. Opt-in via a checkbox (default false); off keeps
+   * the pane a plain skeleton. Persisted in the store like the memory toggles.
+   */
+  showRetrievedContext: boolean;
 }
 
 interface ExecutionActions {
@@ -108,6 +149,12 @@ interface ExecutionActions {
   setSelectedMcpServers: (names: string[]) => void;
   toggleAgentBricksEndpoint: (name: string) => void;
   setSelectedAgentBricksEndpoints: (names: string[]) => void;
+  /** Push an intermediate answer onto the live (transient) preview feed. No-op
+   *  unless `sessionId` is the session currently on screen. */
+  pushTransientPreview: (sessionId: string | null, item: TransientPreviewItem) => void;
+  /** Drop the live feed (e.g. when the deliverable lands or a new run starts). */
+  clearTransientPreview: () => void;
+  setShowRetrievedContext: (value: boolean) => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -222,6 +269,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   memoryEnabled: true,
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
+  transientPreview: [],
+  transientPreviewOwnerSessionId: null,
+  showRetrievedContext: false,
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -299,6 +349,21 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         : [...s.selectedAgentBricksEndpoints, name],
     })),
   setSelectedAgentBricksEndpoints: (names) => set({ selectedAgentBricksEndpoints: names }),
+  // Accumulate intermediate answers for the FOREGROUND run only — the live feed
+  // is decoration for the run you're watching, never persisted and never shown
+  // for a backgrounded run. Owner-stamped so a stale slot can't leak across a
+  // session switch (the render gates on owner === current too).
+  pushTransientPreview: (sessionId, item) =>
+    set((s) => {
+      if (!sessionId || sessionId !== useSessionStore.getState().currentSessionId) return {};
+      const base = s.transientPreviewOwnerSessionId === sessionId ? s.transientPreview : [];
+      return {
+        transientPreview: pushTransientItem(base, item),
+        transientPreviewOwnerSessionId: sessionId,
+      };
+    }),
+  clearTransientPreview: () => set({ transientPreview: [], transientPreviewOwnerSessionId: null }),
+  setShowRetrievedContext: (value) => set({ showRetrievedContext: value }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
@@ -349,6 +414,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
         previewHistory: preserve ? s.previewHistory : [],
         previewIndex: preserve ? s.previewIndex : 0,
+        // The live feed is per-run — a new run always starts with an empty one.
+        transientPreview: [],
+        transientPreviewOwnerSessionId: null,
         executionLog: [],
       });
     } else {
@@ -460,6 +528,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         executionContext: null,
         isLoading: false,
         executionOwnerSessionId: null,
+        // Run is over — drop the live feed; the deliverable (if any) now shows.
+        transientPreview: [],
+        transientPreviewOwnerSessionId: null,
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {
@@ -528,6 +599,8 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         executionContext: null,
         isLoading: false,
         executionOwnerSessionId: null,
+        transientPreview: [],
+        transientPreviewOwnerSessionId: null,
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {

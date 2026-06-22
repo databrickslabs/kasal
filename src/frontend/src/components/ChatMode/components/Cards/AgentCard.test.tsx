@@ -11,45 +11,29 @@ describe('AgentCard', () => {
     backstory: 'An experienced analyst.',
   };
 
-  it('renders full agent props including tools', () => {
-    const agent: GeneratedAgent = {
-      ...baseAgent,
-      id: 'agent-1',
-      llm: 'gpt-4',
-      tools: ['SerperDevTool', 'FileReadTool'],
-    };
+  // The card renders the agent-builder one-line format: **Name** — Role <goal>.
+  // No field labels, and backstory/tools are intentionally NOT shown.
+  it('renders name, role and goal as one clean line', () => {
+    const { container } = render(<AgentCard agent={{ ...baseAgent, tools: ['SerperDevTool'] }} />);
 
-    render(<AgentCard agent={agent} />);
-
-    expect(screen.getByText('Researcher')).toBeInTheDocument();
-    expect(screen.getByText('Senior Research Analyst')).toBeInTheDocument();
-    expect(screen.getByText('Goal:')).toBeInTheDocument();
-    expect(screen.getByText(/Find the best information/)).toBeInTheDocument();
-    expect(screen.getByText('Backstory:')).toBeInTheDocument();
-    expect(screen.getByText(/An experienced analyst\./)).toBeInTheDocument();
-
-    // Tools section rendered
-    expect(screen.getByText('Tools:')).toBeInTheDocument();
-    expect(screen.getByText('SerperDevTool')).toBeInTheDocument();
-    expect(screen.getByText('FileReadTool')).toBeInTheDocument();
+    expect(screen.getByText('Researcher')).toBeInTheDocument(); // name (bold span)
+    expect(container.textContent).toContain('Senior Research Analyst');
+    expect(container.textContent).toContain('Find the best information');
   });
 
-  it('renders minimal agent props with tools undefined', () => {
-    render(<AgentCard agent={baseAgent} />);
+  it('does NOT show field labels, backstory, or tools', () => {
+    const { container } = render(<AgentCard agent={{ ...baseAgent, tools: ['SerperDevTool', 'FileReadTool'] }} />);
 
-    expect(screen.getByText('Researcher')).toBeInTheDocument();
-    // Tools section should NOT render when tools is undefined
+    expect(screen.queryByText('Goal:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Backstory:')).not.toBeInTheDocument();
     expect(screen.queryByText('Tools:')).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain('An experienced analyst');
+    expect(container.textContent).not.toContain('SerperDevTool');
   });
 
-  it('does not render tools section when tools array is empty', () => {
-    const agent: GeneratedAgent = {
-      ...baseAgent,
-      tools: [],
-    };
-
-    render(<AgentCard agent={agent} />);
-
-    expect(screen.queryByText('Tools:')).not.toBeInTheDocument();
+  it('renders just the name when role/goal are absent', () => {
+    const { container } = render(<AgentCard agent={{ name: 'Solo', role: '', goal: '', backstory: '' }} />);
+    expect(screen.getByText('Solo')).toBeInTheDocument();
+    expect(container.textContent?.trim()).toBe('Solo');
   });
 });

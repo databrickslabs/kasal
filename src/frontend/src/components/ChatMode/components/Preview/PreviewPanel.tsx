@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import {
   parseUiDocument,
+  findUiDocument,
   applyConfiguredTheme,
   inferSurfaceDeliverable,
   setSurfaceTheme,
@@ -83,8 +84,21 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   // Strip markdown code fences that often wrap the JSON document.
   const cleaned = stripCodeFences(body);
 
-  if (parseUiDocument(cleaned)) {
-    return { type: 'ui', data: cleaned };
+  // Search the text directly first (handles prose/fenced/bare/double-encoded and
+  // keeps the original string for a clean top-level doc). If that misses, parse
+  // to an object and search RECURSIVELY so a doc WRAPPED in a result envelope
+  // ({result:{…}}, {output:"<json>"}, nested) is still found — a top-level-only
+  // parse leaks it into the chat as raw JSON instead of rendering in the preview.
+  let doc = findUiDocument(cleaned);
+  if (!doc) {
+    try {
+      doc = findUiDocument(JSON.parse(cleaned));
+    } catch {
+      /* not a JSON wrapper */
+    }
+  }
+  if (doc) {
+    return { type: 'ui', data: typeof doc === 'string' ? doc : JSON.stringify(doc) };
   }
 
   return null;

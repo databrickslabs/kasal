@@ -10,43 +10,30 @@ describe('TaskCard', () => {
     expected_output: 'A summary report',
   };
 
-  it('renders the task name, description and expected output', () => {
-    render(<TaskCard task={baseTask} />);
+  // The card renders the agent-builder one-line format: **Task name** <description>.
+  // No field labels, and expected-output/tools are intentionally NOT shown.
+  it('renders the task name and description as one clean line', () => {
+    const { container } = render(<TaskCard task={baseTask} />);
 
-    expect(screen.getByText('Analyze Data')).toBeInTheDocument();
-    expect(screen.getByText('Description:')).toBeInTheDocument();
-    expect(screen.getByText(/Analyze the incoming dataset/)).toBeInTheDocument();
-    expect(screen.getByText('Expected Output:')).toBeInTheDocument();
-    expect(screen.getByText(/A summary report/)).toBeInTheDocument();
+    expect(screen.getByText('Analyze Data')).toBeInTheDocument(); // name (bold span)
+    expect(container.textContent).toContain('Analyze the incoming dataset');
   });
 
-  it('renders tools when tools array is present and non-empty', () => {
-    const task: GeneratedTask = {
-      ...baseTask,
-      tools: ['SerperDevTool', 'FileReadTool'],
-    };
+  it('does NOT show field labels, expected output, or tools', () => {
+    const { container } = render(
+      <TaskCard task={{ ...baseTask, tools: ['SerperDevTool', 'FileReadTool'] }} />,
+    );
 
-    render(<TaskCard task={task} />);
-
-    expect(screen.getByText('Tools:')).toBeInTheDocument();
-    expect(screen.getByText('SerperDevTool')).toBeInTheDocument();
-    expect(screen.getByText('FileReadTool')).toBeInTheDocument();
-  });
-
-  it('does not render the tools section when tools is undefined', () => {
-    render(<TaskCard task={baseTask} />);
-
+    expect(screen.queryByText('Description:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Expected Output:')).not.toBeInTheDocument();
     expect(screen.queryByText('Tools:')).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain('A summary report');
+    expect(container.textContent).not.toContain('SerperDevTool');
   });
 
-  it('does not render the tools section when tools is an empty array', () => {
-    const task: GeneratedTask = {
-      ...baseTask,
-      tools: [],
-    };
-
-    render(<TaskCard task={task} />);
-
-    expect(screen.queryByText('Tools:')).not.toBeInTheDocument();
+  it('renders just the name when description is absent', () => {
+    const { container } = render(<TaskCard task={{ name: 'Solo Task', description: '', expected_output: '' }} />);
+    expect(screen.getByText('Solo Task')).toBeInTheDocument();
+    expect(container.textContent?.trim()).toBe('Solo Task');
   });
 });
