@@ -1821,13 +1821,16 @@ class TestRunHousekeeping:
             'executionhistory': 10, 'taskstatus': 5, 'errortrace': 2,
         }
 
-        # Mock trace delete by ref (run_id subquery) + trace by date + llm delete + vacuum
+        # SQLite path issues PRAGMA defer_foreign_keys first, then trace deletes
+        # (by run_id ref, by job_id ref, by date), llm delete, and finally VACUUM.
+        mock_pragma = MagicMock()
         mock_trace_ref = MagicMock(rowcount=30)
+        mock_trace_jobid = MagicMock(rowcount=40)
         mock_trace_date = MagicMock(rowcount=5)
         mock_llm = MagicMock(rowcount=8)
 
         mock_session.execute = AsyncMock(
-            side_effect=[mock_trace_ref, mock_trace_date, mock_llm, None]
+            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date, mock_llm, None]
         )
 
         with _patch(
@@ -1838,6 +1841,14 @@ class TestRunHousekeeping:
             "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
             new_callable=AsyncMock,
             return_value=20,
+        ), _patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=7,
+        ), _patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=3,
         ), _patch(
             "src.services.database_management_service.DatabaseBackupRepository"
         ) as MockBackupRepo:
@@ -1850,10 +1861,12 @@ class TestRunHousekeeping:
         assert result["deleted"]["executionhistory"] == 10
         assert result["deleted"]["taskstatus"] == 5
         assert result["deleted"]["errortrace"] == 2
-        assert result["deleted"]["execution_trace"] == 35  # 30 + 5
+        assert result["deleted"]["execution_trace"] == 75  # 30 + 40 + 5
         assert result["deleted"]["execution_logs"] == 20
         assert result["deleted"]["llmlog"] == 8
-        assert result["total_deleted"] == 80
+        assert result["deleted"]["llm_usage_billing"] == 7
+        assert result["deleted"]["hitl_approvals"] == 3
+        assert result["total_deleted"] == 130
 
         mock_session.commit.assert_awaited_once()
 
@@ -1912,6 +1925,14 @@ class TestRunHousekeeping:
             new_callable=AsyncMock,
             return_value=0,
         ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
             "src.services.database_management_service.DatabaseBackupRepository"
         ) as MockBackupRepo:
             MockBackupRepo.get_database_type.return_value = "postgres"
@@ -1928,13 +1949,15 @@ class TestRunHousekeeping:
             'executionhistory': 1, 'taskstatus': 0, 'errortrace': 0,
         }
 
+        mock_pragma = MagicMock()
         mock_trace_ref = MagicMock(rowcount=0)
+        mock_trace_jobid = MagicMock(rowcount=0)
         mock_trace_date = MagicMock(rowcount=0)
         mock_llm = MagicMock(rowcount=0)
 
-        # 4th call is the VACUUM which raises
+        # SQLite: PRAGMA first, then trace/llm deletes; last call is VACUUM which raises
         mock_session.execute = AsyncMock(
-            side_effect=[mock_trace_ref, mock_trace_date, mock_llm, RuntimeError("VACUUM locked")]
+            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date, mock_llm, RuntimeError("VACUUM locked")]
         )
 
         with patch(
@@ -1946,6 +1969,14 @@ class TestRunHousekeeping:
             new_callable=AsyncMock,
             return_value=0,
         ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
             "src.services.database_management_service.DatabaseBackupRepository"
         ) as MockBackupRepo:
             MockBackupRepo.get_database_type.return_value = "sqlite"
@@ -1954,3 +1985,152 @@ class TestRunHousekeeping:
 
         assert result["success"] is True
         assert result["deleted"]["executionhistory"] == 1
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_deletes_fk_children_before_executionhistory(
+        self, service, mock_session
+    ):
+        """Regression: FK children (billing, HITL) must be deleted BEFORE the
+        parent executionhistory rows, otherwise SQLite raises
+        'FOREIGN KEY constraint failed' on the executionhistory delete because
+        llm_usage_billing.execution_id has no ON DELETE CASCADE.
+        """
+        call_order = []
+
+        async def _billing_delete(self, cutoff):
+            call_order.append("billing")
+            return 4
+
+        async def _hitl_delete(self, cutoff):
+            call_order.append("hitl")
+            return 2
+
+        async def _history_delete(self, cutoff):
+            call_order.append("history")
+            return {'executionhistory': 6, 'taskstatus': 1, 'errortrace': 1}
+
+        mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new=_history_delete,
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new=_billing_delete,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new=_hitl_delete,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "postgres"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        assert result["deleted"]["llm_usage_billing"] == 4
+        assert result["deleted"]["hitl_approvals"] == 2
+        # Both FK children must be cleared before the executionhistory delete
+        assert call_order.index("billing") < call_order.index("history")
+        assert call_order.index("hitl") < call_order.index("history")
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_deletes_traces_by_job_id(self, service, mock_session):
+        """Regression: execution_trace links to executionhistory by BOTH run_id
+        and job_id. Real data has run_id NULL with job_id set, so housekeeping
+        MUST issue a DELETE on execution_trace filtered by job_id — otherwise
+        those traces survive and the executionhistory delete fails the
+        execution_trace.job_id FK.
+        """
+        executed_sql = []
+
+        async def _capture(stmt, *args, **kwargs):
+            try:
+                executed_sql.append(str(stmt))
+            except Exception:
+                executed_sql.append("")
+            return MagicMock(rowcount=0)
+
+        mock_session.execute = AsyncMock(side_effect=_capture)
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "postgres"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        # A DELETE against execution_trace keyed on job_id must have been issued
+        trace_deletes = [s for s in executed_sql if "DELETE FROM execution_trace" in s]
+        assert any("job_id" in s for s in trace_deletes), (
+            f"expected an execution_trace delete filtered by job_id, got: {trace_deletes}"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("db_type,expect_pragma", [("sqlite", True), ("postgres", False)])
+    async def test_run_housekeeping_defers_foreign_keys_on_sqlite(
+        self, service, mock_session, db_type, expect_pragma
+    ):
+        """The shared single SQLite connection (StaticPool) plus a long, ~1M-row
+        purge lets a concurrent writer trip an immediate per-statement FK check.
+        Housekeeping must issue PRAGMA defer_foreign_keys=ON on SQLite so FK
+        constraints are validated once at commit, after children and parents are
+        consistently removed. Must NOT run on PostgreSQL.
+        """
+        executed_sql = []
+
+        async def _capture(stmt, *args, **kwargs):
+            executed_sql.append(str(stmt))
+            return MagicMock(rowcount=0)
+
+        mock_session.execute = AsyncMock(side_effect=_capture)
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = db_type
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        issued = any("defer_foreign_keys" in s.lower() for s in executed_sql)
+        assert issued is expect_pragma, (
+            f"db_type={db_type}: expected defer_foreign_keys={expect_pragma}, got {issued}"
+        )
