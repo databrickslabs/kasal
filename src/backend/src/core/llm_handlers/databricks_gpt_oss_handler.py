@@ -8,6 +8,8 @@ GPT-OSS models return content as a list with reasoning blocks and text blocks,
 rather than a simple string, which requires special handling for CrewAI integration.
 """
 
+import asyncio
+import concurrent.futures
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from crewai import LLM
@@ -335,6 +337,26 @@ def _append_placeholder_nudge(messages) -> None:
     messages.append({"role": "user", "content": _PLACEHOLDER_NUDGE})
 
 
+# Sentinel distinguishing "no fallback was taken" from a real (possibly falsy)
+# fallback result, used by DatabricksRetryLLM's model-fallback helpers.
+_NO_FALLBACK = object()
+
+
+def _run_coro_sync(coro):
+    """Run an async coroutine to completion from a synchronous context.
+
+    DatabricksRetryLLM.call() runs in a CrewAI worker thread (no running event
+    loop), so asyncio.run works directly; the ThreadPoolExecutor branch is a
+    safety net for the rare case a loop is already running on this thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(lambda: asyncio.run(coro)).result()
+
+
 class DatabricksRetryLLM(LLM):
     """
     Custom LLM wrapper for Databricks models that adds retry logic for empty responses.
@@ -395,9 +417,132 @@ class DatabricksRetryLLM(LLM):
         except Exception:
             pass
 
+        # Model-fallback state. When a call fails with a model-swappable error
+        # (context-window exceeded, fatal model 4xx, sustained rate limit) we
+        # rebuild another enabled model and delegate to it instead of failing.
+        # Candidates are loaded lazily on first need (keeps the happy path free
+        # of an extra DB query). _active_fallback, once set, short-circuits all
+        # later calls so we don't re-fail on the original model every turn.
+        self._fallback_candidates = None  # lazy: None=unloaded, []=none available
+        self._tried_models = {self._current_model_key()}
+        self._fallback_llm_cache: Dict[str, Any] = {}
+        self._active_fallback = None
+
         logger.info(
             f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name} (timeout: {timeout_val}s, litellm.request_timeout: {litellm.request_timeout}s)"
         )
+
+    def _current_model_key(self) -> str:
+        """The bare model key (no provider prefix) for the model in use."""
+        return str(getattr(self, "model", "") or self._original_model_name).split("/")[-1]
+
+    # ---- model fallback -------------------------------------------------
+
+    def _ensure_fallback_candidates(self):
+        """Lazily load the enabled-model candidate list (once)."""
+        if self._fallback_candidates is None:
+            try:
+                from src.core.llm_manager import LLMManager
+
+                self._fallback_candidates = _run_coro_sync(
+                    LLMManager.load_fallback_candidates(
+                        self._current_model_key(), self._group_id
+                    )
+                )
+            except Exception as e:
+                self._get_crew_logger().warning(
+                    f"[DatabricksRetryLLM] could not load fallback candidates: {e}"
+                )
+                self._fallback_candidates = []
+        return self._fallback_candidates
+
+    def _select_fallback(self, candidates, reason):
+        """Choose the next model for ``reason`` given what's already been tried."""
+        from src.core.llm_handlers.model_fallback import select_fallback
+
+        current_window = 0
+        try:
+            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+
+            current_window = LLM_CONTEXT_WINDOW_SIZES.get(getattr(self, "model", ""), 0) or 0
+        except Exception:
+            pass
+        return select_fallback(
+            candidates,
+            current_window,
+            reason,
+            self._tried_models,
+            current_model=self._current_model_key(),
+        )
+
+    def _emit_fallback_span(self, reason, candidate, method):
+        """Surface the model switch in the trace (mirrors _emit_retry_span)."""
+        try:
+            self._emit_retry_span(
+                attempt=len(self._tried_models),
+                max_retries=len(self._tried_models),
+                backoff=0.0,
+                error_type=f"model_fallback:{reason}",
+                error_message=f"Falling back to model '{candidate.name}' ({reason})",
+                is_rate_limit=(reason == "rate_limit"),
+                method=method,
+            )
+        except Exception:
+            pass
+
+    def _build_fallback_llm(self, candidate):
+        """Build (and cache) a fully-configured LLM for ``candidate`` via the
+        normal config path, so it reuses the correct per-model params/auth.
+        Returns None if it can't be built (e.g. no group_id)."""
+        if candidate.name in self._fallback_llm_cache:
+            return self._fallback_llm_cache[candidate.name]
+        if not self._group_id:
+            self._get_crew_logger().warning(
+                "[DatabricksRetryLLM] cannot build fallback LLM without group_id"
+            )
+            return None
+        try:
+            from src.core.llm_manager import LLMManager
+
+            llm = _run_coro_sync(
+                LLMManager.configure_crewai_llm(candidate.name, self._group_id)
+            )
+            self._disable_nested_fallback(llm)
+            self._fallback_llm_cache[candidate.name] = llm
+            return llm
+        except Exception as e:
+            self._get_crew_logger().error(
+                f"[DatabricksRetryLLM] failed to build fallback LLM '{candidate.name}': {e}"
+            )
+            return None
+
+    async def _abuild_fallback_llm(self, candidate):
+        """Async variant of _build_fallback_llm (no event-loop juggling)."""
+        if candidate.name in self._fallback_llm_cache:
+            return self._fallback_llm_cache[candidate.name]
+        if not self._group_id:
+            return None
+        try:
+            from src.core.llm_manager import LLMManager
+
+            llm = await LLMManager.configure_crewai_llm(candidate.name, self._group_id)
+            self._disable_nested_fallback(llm)
+            self._fallback_llm_cache[candidate.name] = llm
+            return llm
+        except Exception as e:
+            self._get_crew_logger().error(
+                f"[DatabricksRetryLLM] failed to build fallback LLM '{candidate.name}': {e}"
+            )
+            return None
+
+    @staticmethod
+    def _disable_nested_fallback(llm):
+        """Stop a fallback LLM from spawning its own fallbacks — the original
+        wrapper owns the chain and tracks what's been tried."""
+        try:
+            llm._fallback_candidates = []
+        except Exception:
+            pass
 
     def supports_function_calling(self) -> bool:
         """Check if this Databricks model supports native function calling (tool_calls).
@@ -830,6 +975,52 @@ class DatabricksRetryLLM(LLM):
 
         return messages
 
+    def _maybe_model_fallback(self, exc, method, call_kwargs):
+        """On a model-swappable failure, switch to another enabled model and
+        return its result; otherwise return the _NO_FALLBACK sentinel so the
+        caller preserves its existing error handling. Synchronous path."""
+        from src.core.llm_handlers.model_fallback import classify_llm_error
+
+        reason = classify_llm_error(exc)
+        if not reason:
+            return _NO_FALLBACK
+        candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+        if candidate is None:
+            return _NO_FALLBACK
+        fallback_llm = self._build_fallback_llm(candidate)
+        if fallback_llm is None:
+            return _NO_FALLBACK
+        self._tried_models.add(candidate.name)
+        self._active_fallback = fallback_llm
+        self._emit_fallback_span(reason, candidate, method)
+        self._get_crew_logger().warning(
+            f"[DatabricksRetryLLM] model fallback ({reason}): "
+            f"{self._current_model_key()} -> {candidate.name}"
+        )
+        return fallback_llm.call(**call_kwargs)
+
+    async def _amaybe_model_fallback(self, exc, method, call_kwargs):
+        """Async variant of _maybe_model_fallback."""
+        from src.core.llm_handlers.model_fallback import classify_llm_error
+
+        reason = classify_llm_error(exc)
+        if not reason:
+            return _NO_FALLBACK
+        candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+        if candidate is None:
+            return _NO_FALLBACK
+        fallback_llm = await self._abuild_fallback_llm(candidate)
+        if fallback_llm is None:
+            return _NO_FALLBACK
+        self._tried_models.add(candidate.name)
+        self._active_fallback = fallback_llm
+        self._emit_fallback_span(reason, candidate, method)
+        self._get_crew_logger().warning(
+            f"[DatabricksRetryLLM] model fallback ({reason}): "
+            f"{self._current_model_key()} -> {candidate.name}"
+        )
+        return await fallback_llm.acall(**call_kwargs)
+
     def call(
         self,
         messages,
@@ -856,6 +1047,18 @@ class DatabricksRetryLLM(LLM):
         Note: kwargs accepts additional parameters like response_model (CrewAI 1.9.x structured outputs)
         """
         crew_log = self._get_crew_logger()
+
+        # Already fell back to a working model on a previous turn — keep using it.
+        if self._active_fallback is not None:
+            return self._active_fallback.call(
+                messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                **kwargs,
+            )
 
         last_error = None
         is_rate_limit = False
@@ -998,6 +1201,26 @@ class DatabricksRetryLLM(LLM):
                         )
                         attempt += 1
                         continue
+                    # Model fallback: switch to another enabled model before
+                    # giving up (context-window exceeded, fatal model 4xx, or
+                    # rate-limit after same-model backoff). For a context-window
+                    # error with no larger model available, this returns the
+                    # sentinel and we fall through to CrewAI's summarization.
+                    fb = self._maybe_model_fallback(
+                        e,
+                        "call",
+                        {
+                            "messages": fixed_messages,
+                            "tools": tools,
+                            "callbacks": callbacks,
+                            "available_functions": available_functions,
+                            "from_task": from_task,
+                            "from_agent": from_agent,
+                            **kwargs,
+                        },
+                    )
+                    if fb is not _NO_FALLBACK:
+                        return fb
                     hint = self._context_length_hint(error_str)
                     if hint:
                         crew_log.error(
@@ -1019,6 +1242,69 @@ class DatabricksRetryLLM(LLM):
         if last_error:
             raise last_error
         return ""
+
+    async def acall(
+        self,
+        messages,
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        **kwargs,  # e.g. response_model (CrewAI structured outputs)
+    ):
+        """Async counterpart of call() with model fallback.
+
+        The base LLM.acall (used by CrewAI's context-window summarization,
+        among others) bypassed this wrapper entirely, so async failures — most
+        importantly a summarization prompt that itself blows the context window
+        — fell straight through with no fallback. This override closes that gap:
+        it applies the same message sanitization and, on a model-swappable
+        error, delegates to another enabled model.
+        """
+        crew_log = self._get_crew_logger()
+
+        if self._active_fallback is not None:
+            return await self._active_fallback.acall(
+                messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                **kwargs,
+            )
+
+        fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
+        fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
+
+        try:
+            return await super().acall(
+                fixed_messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                **kwargs,
+            )
+        except Exception as e:
+            fb = await self._amaybe_model_fallback(
+                e,
+                "acall",
+                {
+                    "messages": fixed_messages,
+                    "tools": tools,
+                    "callbacks": callbacks,
+                    "available_functions": available_functions,
+                    "from_task": from_task,
+                    "from_agent": from_agent,
+                    **kwargs,
+                },
+            )
+            if fb is not _NO_FALLBACK:
+                return fb
+            raise
 
     def _handle_non_streaming_response(
         self,
