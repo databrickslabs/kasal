@@ -325,8 +325,17 @@ class LakebaseStorageBackend:
                         "metadata": json.dumps(metadata),
                         "score": float(record.importance),
                         "embedding": embedding_str,
-                        "created_at": record.created_at,
-                        "updated_at": record.last_accessed,
+                        # MUST be offset-AWARE UTC. These bind to TIMESTAMPTZ
+                        # columns, and asyncpg's encoder does obj.astimezone(utc)
+                        # — which treats a NAIVE datetime as MACHINE-LOCAL time
+                        # and silently shifts it by the host's UTC offset. CrewAI
+                        # hands us naive datetime.utcnow() values, so without this
+                        # coercion every created_at lands hours off true UTC and
+                        # the Cognitive Memory Browser's per-run time window (built
+                        # from the run's correctly-stored completed_at) rejects all
+                        # of a run's records.
+                        "created_at": _to_aware_utc(record.created_at),
+                        "updated_at": _to_aware_utc(record.last_accessed),
                     },
                 )
 
@@ -585,6 +594,20 @@ def _to_naive_utc(dt: datetime) -> datetime:
     if dt.tzinfo is not None:
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
+
+
+def _to_aware_utc(dt: datetime) -> datetime:
+    """Coerce a datetime to offset-AWARE UTC for binding to TIMESTAMPTZ columns.
+
+    The inverse of :func:`_to_naive_utc`. asyncpg's timestamptz encoder runs
+    ``obj.astimezone(utc)``, and ``astimezone`` on a NAIVE datetime presumes the
+    host's LOCAL timezone — so a naive ``datetime.utcnow()`` gets shifted by the
+    machine's UTC offset before it is stored. Stamping UTC tzinfo up front makes
+    that encode a no-op and persists the true instant regardless of host tz.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _parse_datetime(value: Any) -> datetime:
