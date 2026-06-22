@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { ExecutionStatus } from '../types/execution';
 import { ExecutionContext } from '../components/Chat/ChatContainer';
 import { PreviewContent, parsePreviewContent } from '../components/Preview/PreviewPanel';
@@ -251,7 +252,9 @@ async function loadDerivedOrStoredPreview(
   }
 }
 
-export const useExecutionStore = create<ExecutionStore>((set, get) => ({
+export const useExecutionStore = create<ExecutionStore>()(
+  persist(
+    (set, get) => ({
   // --- State ---
   activeExecution: null,
   isExecuting: false,
@@ -844,4 +847,19 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       previewIndex: 0,
     });
   },
-}));
+    }),
+    {
+      name: 'kasal-chatmode-mcp-selection',
+      // Persist ONLY the chat "+" picker selections so a page refresh or a switch
+      // to a new chat keeps the connected MCP servers / Agent Bricks endpoints —
+      // users complained when these reset. Everything else here is volatile,
+      // per-run / per-session state (active execution, preview, transient feed)
+      // that MUST NOT survive a reload: persisting it would resurrect a stale
+      // "running" banner or a dead preview against a job that's long gone.
+      partialize: (s) => ({
+        selectedMcpServers: s.selectedMcpServers,
+        selectedAgentBricksEndpoints: s.selectedAgentBricksEndpoints,
+      }),
+    },
+  ),
+);

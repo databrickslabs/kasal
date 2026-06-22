@@ -161,6 +161,36 @@ describe('executionStore - basic setters & log', () => {
     expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([]);
   });
 
+  it('persists ONLY the "+" picker selections to localStorage so a refresh/new chat keeps the connected MCP', () => {
+    // The store is wrapped in zustand `persist`; selecting servers/endpoints must
+    // survive a page reload (users complained when the connection reset), while
+    // volatile per-run state must NOT be persisted (it would resurrect a stale
+    // "running" banner / dead preview on refresh).
+    useExecutionStore.getState().setSelectedMcpServers(['My MCP', 'Databricks Genie: Sales']);
+    useExecutionStore.getState().setSelectedAgentBricksEndpoints(['mas-1-endpoint']);
+    // Dirty some volatile state that must be excluded from the persisted blob.
+    useExecutionStore.setState({
+      activeExecution: { jobId: 'job-1', status: 'running' },
+      isExecuting: true,
+      previewContent: preview,
+    });
+
+    const raw = window.localStorage.getItem('kasal-chatmode-mcp-selection');
+    expect(raw).toBeTruthy();
+    const persisted = JSON.parse(raw as string).state;
+
+    // Selections are persisted...
+    expect(persisted.selectedMcpServers).toEqual(['My MCP', 'Databricks Genie: Sales']);
+    expect(persisted.selectedAgentBricksEndpoints).toEqual(['mas-1-endpoint']);
+    // ...and nothing volatile is.
+    expect(persisted).not.toHaveProperty('activeExecution');
+    expect(persisted).not.toHaveProperty('isExecuting');
+    expect(persisted).not.toHaveProperty('previewContent');
+
+    useExecutionStore.getState().setSelectedMcpServers([]);
+    useExecutionStore.getState().setSelectedAgentBricksEndpoints([]);
+  });
+
   it('setMemoryEnabled toggles whether crews run with memory (default enabled)', () => {
     // Defaults to enabled so crews keep memory unless the user picks "No memory".
     expect(useExecutionStore.getState().memoryEnabled).toBe(true);
