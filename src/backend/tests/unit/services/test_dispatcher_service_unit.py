@@ -1052,6 +1052,55 @@ class TestDispatch:
         mock_create_task.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_forwards_agentbricks_endpoints(self):
+        """A DispatcherRequest carrying agentbricks_endpoints must be forwarded
+        verbatim onto the CrewStreamingRequest dispatched to
+        crew_service.create_crew_progressive (ChatMode auto-execute path)."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        request = DispatcherRequest(
+            message="build a team",
+            model="test-model",
+            agentbricks_endpoints=["mas-1-endpoint"],
+        )
+        # create_crew_progressive(...) is evaluated (and its call args recorded)
+        # to build the coroutine handed to asyncio.create_task; the patched
+        # create_task just swallows it so nothing runs in the background.
+        mock_task = MagicMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            await svc.dispatch(request)
+
+        svc.crew_service.create_crew_progressive.assert_called_once()
+        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_request.agentbricks_endpoints == ["mas-1-endpoint"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_agentbricks_endpoints_defaults_to_empty(self):
+        """When the DispatcherRequest omits agentbricks_endpoints, the dispatched
+        CrewStreamingRequest gets an empty list (never None)."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        request = DispatcherRequest(message="build a team", model="test-model")
+        mock_task = MagicMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            await svc.dispatch(request)
+
+        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_request.agentbricks_endpoints == []
+
+    @pytest.mark.asyncio
     async def test_dispatch_execute_crew(self):
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)

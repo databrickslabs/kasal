@@ -307,6 +307,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           memory_workspace_scope: execState.workspaceMemory,
           disable_memory: !execState.memoryEnabled,
           mcp_servers: execState.selectedMcpServers,
+          // Agent Bricks endpoints picked in the chat "+" — the backend equips +
+          // configures the AgentBricksTool on the auto-executed crew with these.
+          agentbricks_endpoints: execState.selectedAgentBricksEndpoints,
         }, message);
 
         const content = getAssistantResponse(result);

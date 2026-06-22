@@ -16,6 +16,9 @@ from src.api.mcp_router import (
     enable_mcp_server_for_workspace,
     get_mcp_settings,
     update_mcp_settings,
+    get_databricks_mcp_options,
+    list_genie_mcp_spaces,
+    list_ai_search_mcp_indexes,
 )
 from src.schemas.mcp import MCPServerCreate, MCPServerUpdate, MCPSettingsUpdate, MCPTestConnectionRequest
 import importlib
@@ -44,6 +47,66 @@ async def test_mcp_list_endpoints():
     svc.get_global_servers = AsyncMock(return_value=SimpleNamespace(count=2, servers=[1, 2]))
     out3 = await get_global_mcp_servers(service=svc, group_context=ctx)
     assert out3.count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_servers_admin_sees_all_enabled_only_false():
+    """Regression: admins get enabled_only=False (full list incl. disabled)."""
+    from types import SimpleNamespace
+    svc = AsyncMock()
+    svc.get_all_servers_effective = AsyncMock(return_value=SimpleNamespace(count=3, servers=[1, 2, 3]))
+    ctx = Ctx(user_role="admin", primary_group_id="g1")
+
+    out = await get_mcp_servers(service=svc, group_context=ctx)
+
+    assert out.count == 3
+    svc.get_all_servers_effective.assert_awaited_once_with("g1", enabled_only=False)
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_servers_non_admin_enabled_only_true():
+    """Regression: non-admins get enabled_only=True (curated allow-list)."""
+    from types import SimpleNamespace
+    svc = AsyncMock()
+    svc.get_all_servers_effective = AsyncMock(return_value=SimpleNamespace(count=1, servers=[1]))
+    ctx = Ctx(user_role="user", primary_group_id="g1")
+
+    out = await get_mcp_servers(service=svc, group_context=ctx)
+
+    assert out.count == 1
+    svc.get_all_servers_effective.assert_awaited_once_with("g1", enabled_only=True)
+
+
+@pytest.mark.asyncio
+async def test_get_databricks_mcp_options_forbidden_for_non_admin():
+    """Regression: Databricks MCP catalog is admin-only."""
+    svc = AsyncMock()
+    with pytest.raises(ForbiddenError) as ei:
+        await get_databricks_mcp_options(
+            request=None, session=None, group_context=Ctx(user_role="user")
+        )
+    assert ei.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_genie_mcp_spaces_forbidden_for_non_admin():
+    """Regression: Genie MCP space picker is admin-only."""
+    with pytest.raises(ForbiddenError) as ei:
+        await list_genie_mcp_spaces(
+            request=None, search=None, page_token=None,
+            group_context=Ctx(user_role="user"),
+        )
+    assert ei.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_ai_search_mcp_indexes_forbidden_for_non_admin():
+    """Regression: AI Search MCP index picker is admin-only."""
+    with pytest.raises(ForbiddenError) as ei:
+        await list_ai_search_mcp_indexes(
+            request=None, group_context=Ctx(user_role="user")
+        )
+    assert ei.value.status_code == 403
 
 
 @pytest.mark.asyncio

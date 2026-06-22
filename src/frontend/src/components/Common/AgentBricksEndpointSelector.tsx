@@ -225,11 +225,16 @@ export const AgentBricksEndpointSelector: React.FC<AgentBricksEndpointSelectorPr
       <Box component="li" {...props} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Box sx={{ flex: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2">{option.name}</Typography>
+            <Typography variant="body2">{option.display_name || option.name}</Typography>
             {isReady && (
               <Chip label="Ready" size="small" color="success" sx={{ height: 20, fontSize: '0.7rem' }} />
             )}
           </Box>
+          {option.display_name && option.display_name !== option.name && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {option.name}
+            </Typography>
+          )}
           {option.creator && (
             <Typography variant="caption" color="text.secondary">
               Created by {option.creator}
@@ -270,7 +275,7 @@ export const AgentBricksEndpointSelector: React.FC<AgentBricksEndpointSelectorPr
         inputValue ? `No endpoints found matching "${inputValue}"` :
         "Start typing to search for endpoints"
       }
-      getOptionLabel={(option) => option.name}
+      getOptionLabel={(option) => option.display_name || option.name}
       isOptionEqualToValue={(option, value) => option.name === value.name}
       renderOption={renderOption}
       disabled={disabled}
@@ -337,7 +342,7 @@ export const AgentBricksEndpointSelector: React.FC<AgentBricksEndpointSelectorPr
           return (
             <Chip
               key={key || option.name}
-              label={option.name}
+              label={option.display_name || option.name}
               {...tagProps}
               size="small"
             />

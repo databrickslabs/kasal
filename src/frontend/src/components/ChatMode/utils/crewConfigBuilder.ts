@@ -81,7 +81,8 @@ export function buildCrewConfig(plan: {
   edges: unknown[];
   process?: string;
   planning?: boolean;
-}, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true): CrewExecutionConfig {
+}, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true,
+   agentBricksEndpoints: string[] = []): CrewExecutionConfig {
   const nodes = plan.nodes as FlowNode[];
   const edges = plan.edges as FlowEdge[];
 
@@ -193,6 +194,38 @@ export function buildCrewConfig(plan: {
     }
   });
 
+  // Agent Bricks endpoints picked in the chat "+" menu: equip + CONFIGURE the
+  // AgentBricksTool (catalog id 71) on every agent and task of this loaded/saved
+  // crew. Without this the saved crew may carry the tool but not the endpoint,
+  // so it fails at runtime with "AgentBricks endpoint name is not configured".
+  // When NO endpoint is picked, do the opposite: STRIP any AgentBricksTool the
+  // saved crew/LLM carries, since an unconfigured AgentBricksTool aborts the run.
+  {
+    const ABT = '71'; // AgentBricksTool seed id
+    const isABT = (t: unknown) => String(t) === ABT || String(t) === 'AgentBricksTool';
+    if (agentBricksEndpoints.length > 0) {
+      const config = { endpointName: agentBricksEndpoints };
+      const equip = (entry: Record<string, unknown>) => {
+        const tools = Array.isArray(entry.tools) ? (entry.tools as string[]) : [];
+        if (!tools.includes(ABT)) entry.tools = [...tools, ABT];
+        entry.tool_configs = {
+          ...(entry.tool_configs as Record<string, unknown> | undefined),
+          AgentBricksTool: config,
+        };
+      };
+      Object.values(agents_yaml).forEach(equip);
+      Object.values(tasks_yaml).forEach(equip);
+    } else {
+      const strip = (entry: Record<string, unknown>) => {
+        if (Array.isArray(entry.tools)) {
+          entry.tools = (entry.tools as unknown[]).filter((t) => !isABT(t));
+        }
+      };
+      Object.values(agents_yaml).forEach(strip);
+      Object.values(tasks_yaml).forEach(strip);
+    }
+  }
+
   return {
     agents_yaml,
     tasks_yaml,
@@ -222,9 +255,34 @@ export function buildCrewConfigFromGenerated(
   memoryEnabled: boolean = true,
   mcpServers: string[] = [],
   userRequest?: string,
+  agentBricksEndpoints: string[] = [],
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // Agent Bricks endpoints picked in the chat "+" menu equip the regular
+  // AgentBricksTool (catalog tool, seed id 71) configured for those endpoints.
+  // Unlike MCP_SERVERS (a special backend key), AgentBricksTool must appear in
+  // the agent/task `tools` list by ID, so resolve its id from the name map
+  // (falling back to the stable seed id).
+  const hasAgentBricks = agentBricksEndpoints.length > 0;
+  const agentBricksToolId =
+    Object.keys(toolNameMap).find((id) => toolNameMap[id] === 'AgentBricksTool') || '71';
+  const isAgentBricksTool = (t: string): boolean =>
+    String(t) === agentBricksToolId ||
+    String(t) === 'AgentBricksTool' ||
+    toolNameMap[String(t)] === 'AgentBricksTool';
+  // When the user picks an endpoint in the "+" menu, ensure the AgentBricksTool is
+  // equipped (and configured below). When the user did NOT pick one, STRIP any
+  // AgentBricksTool the generator/LLM added on its own: an unconfigured
+  // AgentBricksTool fails the whole run with "AgentBricks endpoint name is not
+  // configured", so it must never reach the crew without a selected endpoint.
+  const withAgentBricksTool = (toolIds: string[]): string[] => {
+    if (hasAgentBricks) {
+      return toolIds.includes(agentBricksToolId) ? toolIds : [...toolIds, agentBricksToolId];
+    }
+    return toolIds.filter((t) => !isAgentBricksTool(t));
+  };
 
   // toolConfigs are keyed by canonical tool NAME (e.g. "GenieTool"), but a
   // generated agent/task references tools by ID. Resolve each tool entry through
@@ -252,7 +310,8 @@ export function buildCrewConfigFromGenerated(
     const key = `agent_${id}`;
     agentIdToKey[id] = key;
 
-    const agentTools: string[] = Array.isArray(agent.tools) ? agent.tools as string[] : [];
+    const baseAgentTools: string[] = Array.isArray(agent.tools) ? agent.tools as string[] : [];
+    const agentTools = withAgentBricksTool(baseAgentTools);
     const agentConfig: Record<string, unknown> = {
       role: agent.role || '',
       goal: agent.goal || '',
@@ -268,6 +327,11 @@ export function buildCrewConfigFromGenerated(
     // equips the agent with their tools.
     if (mcpServers.length > 0) {
       agentApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    // Agent Bricks endpoints: configure the AgentBricksTool with the picked
+    // serving endpoint(s). The tool uses the first when given a list.
+    if (hasAgentBricks) {
+      agentApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
     }
     if (Object.keys(agentApplicable).length > 0) {
       agentConfig.tool_configs = agentApplicable;
@@ -314,7 +378,9 @@ export function buildCrewConfigFromGenerated(
       }).filter(Boolean);
     }
 
-    const taskTools: string[] = Array.isArray(task.tools) ? task.tools as string[] : [];
+    const taskTools: string[] = withAgentBricksTool(
+      Array.isArray(task.tools) ? task.tools as string[] : [],
+    );
     // Generated task descriptions are often generic mission statements
     // ("process diverse user inquiries…"). Ground the run with the chat prompt
     // that asked for it and the attached MCP data sources — without these,
@@ -327,6 +393,15 @@ export function buildCrewConfigFromGenerated(
     if (mcpServers.length > 0) {
       groundingParts.push(
         `MCP data sources attached — query them for data questions: ${mcpServers.join(', ')}`,
+      );
+    }
+    if (hasAgentBricks) {
+      // The user picked a Databricks Agent Bricks agent for this run: instruct the
+      // task's agent to delegate the work to it via the AgentBricksTool (configured
+      // above with the endpoint) and return its answer, rather than solving alone.
+      groundingParts.push(
+        `An Agent Bricks agent is assigned to this task — use the AgentBricksTool to ` +
+        `delegate the request to it and base your answer on its response: ${agentBricksEndpoints.join(', ')}`,
       );
     }
     const description = groundingParts.length > 0
@@ -352,6 +427,9 @@ export function buildCrewConfigFromGenerated(
     // task's tools, keeping the MCP tools visible alongside the task's own.
     if (mcpServers.length > 0) {
       taskApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    if (hasAgentBricks) {
+      taskApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
     }
     if (Object.keys(taskApplicable).length > 0) {
       taskEntry.tool_configs = taskApplicable;

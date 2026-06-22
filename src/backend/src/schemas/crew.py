@@ -307,6 +307,7 @@ class CrewStreamingRequest(BaseModel):
     memory_workspace_scope: Optional[bool] = Field(True, description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only")
     disable_memory: bool = Field(False, description="'No memory' mode — build agents without memory for the auto-executed run")
     mcp_servers: Optional[List[str]] = Field(default_factory=list, description="MCP server names to equip the auto-executed crew with")
+    agentbricks_endpoints: Optional[List[str]] = Field(default_factory=list, description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew")
 
 
 class CrewStreamingResponse(BaseModel):

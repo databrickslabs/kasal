@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { useDispatcher } from './useDispatcher';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
+import { useExecutionStore } from '../store/executionStore';
 import type { DispatchResult, GenerationCompleteData } from '../types/dispatcher';
 
 vi.mock('../api/dispatcher', () => ({
@@ -55,6 +56,7 @@ const RUN_SETTINGS = {
   memory_workspace_scope: true,
   disable_memory: false,
   mcp_servers: [],
+  agentbricks_endpoints: [],
 };
 
 beforeEach(() => {
@@ -226,6 +228,32 @@ describe('useDispatcher', () => {
         RUN_SETTINGS,
         'build me a crew',
       );
+    });
+
+    it('forwards the selected Agent Bricks endpoints in the run settings', async () => {
+      // The execution store's picked endpoints must ride along in the dispatch
+      // run settings as agentbricks_endpoints so the backend equips the tool.
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('conversation', null));
+      useExecutionStore.getState().setSelectedAgentBricksEndpoints(['ep-1']);
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      try {
+        await act(async () => {
+          await hook.current.sendMessage('do something cool');
+        });
+
+        expect(mockedDispatch).toHaveBeenCalledWith(
+          'create a crew plan with agents and tasks: do something cool',
+          undefined,
+          undefined,
+          { ...RUN_SETTINGS, agentbricks_endpoints: ['ep-1'] },
+          'do something cool',
+        );
+      } finally {
+        // Reset so the shared store doesn't leak into other tests.
+        useExecutionStore.getState().setSelectedAgentBricksEndpoints([]);
+      }
     });
 
     it('records attachment names on the displayed user message', async () => {

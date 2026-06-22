@@ -192,6 +192,31 @@ class AgentBricksRepository:
 
         return False
 
+    async def _get_tile_name_map(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+        """Map serving_endpoint_name -> friendly Agent Bricks tile name.
+
+        Serving endpoints are named like ``mas-<id>-endpoint``; the human-facing
+        agent name (e.g. ``supervisor-agent-2026-06-21-...``) lives on the Agent
+        Bricks "tile" (GET /api/2.0/tiles). We use it to show the real agent name
+        instead of the opaque endpoint name. Best-effort: returns {} on any error
+        (older workspaces may not expose /api/2.0/tiles).
+        """
+        try:
+            url = await self._make_url("/api/2.0/tiles")
+            resp = await self._client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return {}
+            mapping: Dict[str, str] = {}
+            for tile in resp.json().get("tiles", []):
+                ep = tile.get("serving_endpoint_name")
+                nm = tile.get("name")
+                if ep and nm:
+                    mapping[ep] = nm
+            return mapping
+        except Exception as e:  # noqa: BLE001 - enrichment is best-effort
+            logger.warning(f"Could not load Agent Bricks tile names: {e}")
+            return {}
+
     async def get_endpoints(
         self,
         request: AgentBricksEndpointsRequest
@@ -224,6 +249,9 @@ class AgentBricksRepository:
             response.raise_for_status()
             data = response.json()
 
+            # Friendly agent names (serving_endpoint_name -> tile name); best-effort.
+            tile_names = await self._get_tile_name_map(headers)
+
             # Parse endpoints
             all_endpoints = []
             endpoints_list = data.get("endpoints", [])
@@ -250,6 +278,7 @@ class AgentBricksRepository:
                 endpoint = AgentBricksEndpoint(
                     id=endpoint_id,
                     name=endpoint_name,
+                    display_name=tile_names.get(endpoint_name),
                     creator=endpoint_data.get("creator"),
                     creation_timestamp=endpoint_data.get("creation_timestamp"),
                     last_updated_timestamp=endpoint_data.get("last_updated_timestamp"),
@@ -287,6 +316,7 @@ class AgentBricksRepository:
                 filtered_endpoints = [
                     ep for ep in filtered_endpoints
                     if search_lower in ep.name.lower() or
+                       (ep.display_name and search_lower in ep.display_name.lower()) or
                        (ep.creator and search_lower in ep.creator.lower())
                 ]
                 filtered = True

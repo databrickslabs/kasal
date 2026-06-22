@@ -63,11 +63,17 @@ async def get_mcp_servers(
     """
     Get MCP servers effective for the current workspace (group).
     Deduplicated by name, preferring workspace overrides over base.
+
+    Only workspace admins see the full list (including disabled servers, which
+    they manage in Configuration → MCP). Everyone else sees only the servers an
+    admin has ENABLED — the curated allow-list — so regular users can't pick
+    servers the workspace hasn't sanctioned.
     """
     group_id = (
         getattr(group_context, "primary_group_id", None) if group_context else None
     )
-    return await service.get_all_servers_effective(group_id)
+    is_admin = check_role_in_context(group_context, ["admin"])
+    return await service.get_all_servers_effective(group_id, enabled_only=not is_admin)
 
 
 async def _list_external_mcp_options(
@@ -163,7 +169,13 @@ async def get_databricks_mcp_options(
 
     Selecting any leaf registers it as a Kasal MCP server with
     ``auth_type=databricks_spn`` and ``server_type=streamable``.
+
+    Browsing/registering Databricks MCP servers is a workspace-admin action, so
+    this catalog is admin-only (enforced here, not just hidden in the UI).
     """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
         get_auth_context,
@@ -280,7 +292,13 @@ async def list_genie_mcp_spaces(
     selectable MCP servers (``/api/2.0/mcp/genie/{space_id}``), searchable and
     paginated — workspaces can have thousands of spaces, so the first step
     never enumerates them.
+
+    Admin-only: registering a Genie space as an MCP server is a workspace-admin
+    action (enforced here, not just hidden in the UI).
     """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+
     from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
     from src.services.genie_service import GenieService
     from src.utils.databricks_auth import (
@@ -326,7 +344,13 @@ async def list_ai_search_mcp_indexes(
     search indexes as selectable MCP servers
     (``/api/2.0/mcp/ai-search/{catalog}/{schema}/{index}``), listed with the
     caller's credentials.
+
+    Admin-only: registering an AI Search index as an MCP server is a
+    workspace-admin action (enforced here, not just hidden in the UI).
     """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+
     import aiohttp
 
     from src.utils.databricks_auth import (

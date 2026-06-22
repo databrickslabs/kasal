@@ -856,6 +856,32 @@ class CrewGenerationService:
         mcp_servers = list(request.mcp_servers or [])
         user_request = request.original_prompt or request.prompt
 
+        # Agent Bricks endpoints picked in the chat "+" menu. This backend builder is
+        # the ONLY config path for ChatMode auto-execute (the Crew canvas / AgentBuilder
+        # build their run config from saved-node tool_configs instead, which already
+        # carry the endpoint — that's why those channels work and chat didn't).
+        # Mirror the MCP injection below: when an endpoint is picked, equip + configure
+        # the AgentBricksTool (catalog seed id 71) on each agent/task; when NONE is
+        # picked, STRIP any AgentBricksTool the generator/LLM equipped on its own, since
+        # an unconfigured AgentBricksTool aborts the task ("endpoint name is not configured").
+        agentbricks_endpoints = list(getattr(request, "agentbricks_endpoints", None) or [])
+        has_agentbricks = bool(agentbricks_endpoints)
+        ABT_ID = "71"  # AgentBricksTool seed id
+
+        def _is_agentbricks_tool(tool: Any) -> bool:
+            return str(tool) == ABT_ID or str(tool) == "AgentBricksTool"
+
+        def _apply_agentbricks_tools(tools: List[Any]) -> List[Any]:
+            # Only operate on real lists — leave any other value (None, or a loose
+            # test mock) untouched, so this never iterates a non-list tools value.
+            if not isinstance(tools, list):
+                return tools
+            if has_agentbricks:
+                if not any(_is_agentbricks_tool(t) for t in tools):
+                    return [*tools, ABT_ID]
+                return tools
+            return [t for t in tools if not _is_agentbricks_tool(t)]
+
         OPTIONAL_AGENT_FIELDS = (
             "llm", "function_calling_llm", "max_iter", "max_rpm",
             "max_execution_time", "memory", "verbose", "allow_delegation",
@@ -874,13 +900,15 @@ class CrewGenerationService:
                 "role": agent.get("role") or "",
                 "goal": agent.get("goal") or "",
                 "backstory": agent.get("backstory") or "",
-                "tools": agent.get("tools") or [],
+                "tools": _apply_agentbricks_tools(agent.get("tools") or []),
             }
             for field in OPTIONAL_AGENT_FIELDS:
                 if agent.get(field) is not None:
                     cfg[field] = agent[field]
             if mcp_servers:
                 cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            if has_agentbricks:
+                cfg.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             # "No memory" mode: force every agent to be created without memory so
             # the backend disables crew memory entirely (nothing recalled/persisted).
             if request.disable_memory:
@@ -910,12 +938,18 @@ class CrewGenerationService:
                 grounding.append(
                     f"MCP data sources attached — query them for data questions: {', '.join(mcp_servers)}"
                 )
+            if has_agentbricks:
+                grounding.append(
+                    "An Agent Bricks agent is assigned to this task — use the AgentBricksTool to "
+                    "delegate the request to it and base your answer on its response: "
+                    f"{', '.join(agentbricks_endpoints)}"
+                )
             description = f"{base_desc}\n\n" + "\n\n".join(grounding) if grounding else base_desc
             entry: Dict[str, Any] = {
                 "id": tid,
                 "description": description,
                 "expected_output": task.get("expected_output") or "",
-                "tools": task.get("tools") or [],
+                "tools": _apply_agentbricks_tools(task.get("tools") or []),
                 "context": context,
                 "agent": agent_key,
                 "async_execution": bool(task.get("async_execution")),
@@ -923,6 +957,8 @@ class CrewGenerationService:
             }
             if mcp_servers:
                 entry.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            if has_agentbricks:
+                entry.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             tasks_yaml[key] = entry
 
         return {
@@ -1497,6 +1533,62 @@ class CrewGenerationService:
                                 ))
                             global_task_index += 1
 
+                        # ── Fallback: synthesize tasks when generation produced none ──
+                        # Per-task LLM generation occasionally fails for EVERY task
+                        # (small models returning malformed JSON). Reaching save /
+                        # auto-execute with agents but ZERO tasks dies in crew
+                        # preparation ("Failed to prepare crew"). Synthesize a minimal
+                        # task per planned task — from the plan name + the user's
+                        # request — so the crew stays runnable.
+                        if not task_results and plan_tasks and agent_results:
+                            logger.warning(
+                                f"PROGRESSIVE [{generation_id}]: all task generation failed — "
+                                f"synthesizing {len(plan_tasks)} task(s) from the plan"
+                            )
+                            for task_plan in plan_tasks:
+                                task_name = task_plan.get("name", f"Task {global_task_index + 1}")
+                                try:
+                                    agent_id = self._resolve_agent_id(task_plan, agent_results)
+                                    task_data = {
+                                        "name": task_name,
+                                        "description": (
+                                            f"{task_name} — complete this task for a crew that: "
+                                            f"{request.prompt}"
+                                        ),
+                                        "expected_output": "A complete, well-structured result for this task.",
+                                        "tools": [],
+                                        "tool_configs": {},
+                                        "async_execution": False,
+                                        "human_input": False,
+                                        "llm_guardrail": None,
+                                    }
+                                    task_saved = await repo.create_single_task(
+                                        task_data, agent_id, group_context
+                                    )
+                                    await session.commit()
+                                    task_results.append({**task_saved, "_plan": task_plan})
+                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                        data={"type": "task_detail", "index": global_task_index, "task": task_saved},
+                                        event="task_detail",
+                                    ))
+                                    logger.info(
+                                        f"PROGRESSIVE [{generation_id}]: Synthesized fallback task — "
+                                        f"{task_saved.get('name')}"
+                                    )
+                                except Exception as e:
+                                    logger.error(
+                                        f"PROGRESSIVE [{generation_id}]: Fallback task '{task_name}' failed: {e}"
+                                    )
+                                    await session.rollback()
+                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+                                        data={
+                                            "type": "entity_error", "index": global_task_index,
+                                            "entity_type": "task", "name": task_name, "error": str(e),
+                                        },
+                                        event="entity_error",
+                                    ))
+                                global_task_index += 1
+
                         # ── Phase 4: Resolve task dependencies ────────────
                         await self._resolve_progressive_dependencies(
                             task_results, generation_id, repo
@@ -1541,7 +1633,19 @@ class CrewGenerationService:
                 # immediately — no open-window for SSE reconnect/replay to
                 # re-deliver and cross-route trace events. AgentBuilder leaves
                 # auto_execute False and only renders the plan as nodes.
-                if getattr(request, "auto_execute", False):
+                if getattr(request, "auto_execute", False) and not clean_tasks:
+                    # A crew with zero tasks cannot run — crew preparation requires
+                    # at least one task. Don't launch it (it would crash in
+                    # preparation); surface an actionable error on the
+                    # generation_complete event instead. This is the terminal guard
+                    # after the synthesize-tasks fallback also came up empty.
+                    msg = (
+                        "Auto-execute skipped: the crew has no runnable tasks "
+                        "(task generation and the fallback both produced none)."
+                    )
+                    logger.error(f"PROGRESSIVE [{generation_id}]: {msg}")
+                    gen_complete_data["execution_error"] = msg
+                elif getattr(request, "auto_execute", False):
                     try:
                         from src.schemas.execution import CrewConfig
                         from src.services.execution_service import ExecutionService

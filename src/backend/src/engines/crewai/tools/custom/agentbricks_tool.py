@@ -13,6 +13,50 @@ from src.utils.telemetry import get_user_agent_header, KasalProduct
 logger = logging.getLogger(__name__)
 
 
+def _extract_responses_output_text(output: List[Any]) -> str:
+    """Extract the assistant's final text answer from a Responses-API ``output`` array.
+
+    Mosaic AI Agent Bricks endpoints reply in the OpenAI **Responses API** shape::
+
+        {"object": "response",
+         "output": [
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "output_text", "text": "I'll search…"}]},
+            {"type": "function_call", ...},
+            {"type": "function_call_output", ...},
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "output_text", "text": "<final answer>"}]}]}
+
+    The earlier ``message`` items are intermediate commentary ("I'll search…");
+    the LAST assistant message holds the answer. Tool-call / tool-output items
+    are ignored. Returns "" when no assistant text is present (e.g. the response
+    carries only tool calls or stopped early), so the caller can fall back to a
+    concise note instead of dumping the raw ``{'object': 'response', …}`` repr.
+    """
+    message_texts: List[str] = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        # Some endpoints omit "role" on the final message; treat that as assistant.
+        if item.get("role") not in (None, "assistant"):
+            continue
+        content = item.get("content")
+        parts: List[str] = []
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in ("output_text", "text"):
+                    text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text)
+                elif isinstance(part, str) and part.strip():
+                    parts.append(part)
+        elif isinstance(content, str) and content.strip():
+            parts.append(content)
+        if parts:
+            message_texts.append("\n".join(parts))
+    return message_texts[-1] if message_texts else ""
+
+
 class AgentBricksInput(BaseModel):
     """Input schema for AgentBricks."""
     question: str = Field(..., description="The question to ask the AgentBricks agent.")
@@ -306,6 +350,26 @@ class AgentBricksTool(BaseTool):
                     if predictions and len(predictions) > 0:
                         response_text = predictions[0]
 
+                # Responses API format (Mosaic AI Agent Bricks agents): the payload is
+                # {"object":"response","output":[{"type":"message",...},{"type":"function_call",...}]}
+                # — none of the keys above exist on it. Without this branch the whole
+                # envelope was str()'d, so the raw {'object': 'response', …} repr leaked
+                # into the chat instead of the agent's final answer. Extract the last
+                # assistant message text; a top-level "output_text" aggregate is a fallback.
+                if not response_text and isinstance(result.get("output"), list):
+                    response_text = _extract_responses_output_text(result["output"])
+                    if not response_text and isinstance(result.get("output_text"), str):
+                        response_text = result["output_text"]
+                    if not response_text:
+                        # Recognized Responses envelope but no assistant text (only
+                        # tool calls / stopped early): surface a concise note, NEVER
+                        # the raw repr.
+                        status = result.get("status", "unknown")
+                        response_text = (
+                            "The Agent Bricks endpoint returned no text answer "
+                            f"(status: {status})."
+                        )
+
                 # Add trace information if requested and available
                 if self._return_trace and ("trace" in result or "metadata" in result):
                     trace_info = result.get("trace") or result.get("metadata")
@@ -315,8 +379,13 @@ class AgentBricksTool(BaseTool):
                 response_text = result
 
             if not response_text:
-                # If we couldn't extract text, return the full result as string
-                response_text = str(result)
+                # Last resort for a genuinely unrecognized shape. Keep it short —
+                # never dump a large raw object into the chat transcript.
+                logger.warning(
+                    "AgentBricks returned an unrecognized response shape: %s",
+                    type(result).__name__,
+                )
+                response_text = "The Agent Bricks endpoint returned an unrecognized response."
 
             logger.info(f"AgentBricks query completed successfully")
             return response_text

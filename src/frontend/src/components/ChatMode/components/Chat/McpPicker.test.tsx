@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import McpPicker from './McpPicker';
 import { useExecutionStore } from '../../store/executionStore';
+import { useAppStore } from '../../store/appStore';
 
 const listKasalMcpServers = vi.fn();
 const getDatabricksMcpCatalog = vi.fn();
@@ -17,6 +18,26 @@ vi.mock('../../api/mcp', async (importOriginal) => ({
   listAiSearchMcpIndexes: (...a: unknown[]) => listAiSearchMcpIndexes(...a),
   ensureDatabricksMcpServer: (...a: unknown[]) => ensureDatabricksMcpServer(...a),
 }));
+
+// Agent Bricks endpoints are fetched lazily when the popover opens.
+const getAgentBricksEndpoints = vi.fn();
+vi.mock('../../../../api/AgentBricksService', () => ({
+  AgentBricksService: {
+    getEndpoints: (...a: unknown[]) => getAgentBricksEndpoints(...a),
+  },
+}));
+
+// The Databricks catalog (browse/register) is admin-only; default the picker to
+// admin so existing catalog tests still see it. Non-admin tests flip this.
+let mockIsAdmin = true;
+vi.mock('../../../../hooks/usePermissions', () => ({
+  usePermissions: () => ({ isAdmin: mockIsAdmin }),
+}));
+
+const AGENT_BRICKS_ENDPOINTS = [
+  { id: 'ab1', name: 'agents_sales_bot', display_name: 'Sales Bot', state: 'READY' },
+  { id: 'ab2', name: 'agents_support_bot', state: 'READY' }, // no display_name → name shown
+];
 
 const KASAL_SERVERS = [
   { id: 1, name: 'My MCP', enabled: true, server_url: 'https://x/mcp' },
@@ -90,7 +111,13 @@ const AI_INDEX = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useExecutionStore.setState({ selectedMcpServers: [] });
+  mockIsAdmin = true;
+  useExecutionStore.setState({ selectedMcpServers: [], selectedAgentBricksEndpoints: [] });
+  // The "Agents" section is gated on AgentBricksTool being in the tool catalog —
+  // default it OFF so existing MCP-only tests never see the section, then opt
+  // specific tests in via useAppStore.setState below.
+  useAppStore.setState({ toolNameMap: {} });
+  getAgentBricksEndpoints.mockResolvedValue({ endpoints: AGENT_BRICKS_ENDPOINTS, total_count: 2, filtered: false });
   listKasalMcpServers.mockResolvedValue(KASAL_SERVERS);
   getDatabricksMcpCatalog.mockResolvedValue(CATALOG);
   listGenieMcpSpaces.mockResolvedValue({ options: [GENIE_SPACE], next_page_token: null });
@@ -581,5 +608,112 @@ describe('McpPicker', () => {
 
     await act(async () => release('jira'));
     await waitFor(() => expect(screen.queryByText('…')).toBeNull());
+  });
+
+  describe('Agent Bricks "Agents" section', () => {
+    // Opt the workspace into the Agent Bricks feature by registering the tool in
+    // the catalog (the only signal the picker uses to show the "Agents" section).
+    const enableAgentBricksTool = () =>
+      useAppStore.setState({ toolNameMap: { '42': 'AgentBricksTool', '7': 'SerperDevTool' } });
+
+    it('hides the Agents section when AgentBricksTool is not in the tool catalog', async () => {
+      // toolNameMap left empty by beforeEach → feature off.
+      render(<McpPicker />);
+      await openPicker();
+
+      // Give the (gated-off) endpoint effect a chance to run; it must not fire.
+      await waitFor(() => expect(screen.getByText('My MCP')).toBeInTheDocument());
+      expect(screen.queryByText('Agents')).toBeNull();
+      expect(screen.queryByText('Sales Bot')).toBeNull();
+      expect(getAgentBricksEndpoints).not.toHaveBeenCalled();
+    });
+
+    it('shows the Agents section when the tool is enabled and endpoints exist', async () => {
+      enableAgentBricksTool();
+      render(<McpPicker />);
+      await openPicker();
+
+      expect(await screen.findByText('Agents')).toBeInTheDocument();
+      // Endpoints are fetched ready-only when the popover opens.
+      expect(getAgentBricksEndpoints).toHaveBeenCalledWith(true);
+      // Row label = display_name when present, else the raw endpoint name.
+      expect(screen.getByText('Sales Bot')).toBeInTheDocument();
+      expect(screen.getByText('agents_support_bot')).toBeInTheDocument();
+      // Each row carries an "agent" tag.
+      expect(screen.getAllByText('agent')).toHaveLength(2);
+    });
+
+    it('stays hidden when the tool is enabled but the workspace has no endpoints', async () => {
+      enableAgentBricksTool();
+      getAgentBricksEndpoints.mockResolvedValue({ endpoints: [], total_count: 0, filtered: false });
+      render(<McpPicker />);
+      await openPicker();
+
+      await waitFor(() => expect(getAgentBricksEndpoints).toHaveBeenCalledWith(true));
+      expect(screen.queryByText('Agents')).toBeNull();
+    });
+
+    it('toggles an endpoint by its NAME (not display_name) and reflects selection', async () => {
+      enableAgentBricksTool();
+      render(<McpPicker />);
+      await openPicker();
+
+      const salesRow = await screen.findByRole('menuitemcheckbox', { name: /Sales Bot/ });
+      fireEvent.click(salesRow);
+      // The serving-endpoint name is what gets equipped, not the friendly label.
+      expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual(['agents_sales_bot']);
+      expect(screen.getByRole('menuitemcheckbox', { name: /Sales Bot/ })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+
+      // A second click deselects it.
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Sales Bot/ }));
+      expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([]);
+    });
+
+    it('counts MCP servers AND Agent Bricks endpoints in the + badge', async () => {
+      enableAgentBricksTool();
+      useExecutionStore.setState({
+        selectedMcpServers: ['My MCP'],
+        selectedAgentBricksEndpoints: ['agents_sales_bot'],
+      });
+      render(<McpPicker />);
+      // Badge reflects 1 MCP server + 1 Agent Bricks endpoint = 2, before opening.
+      expect(screen.getByText('2')).toBeInTheDocument();
+
+      await openPicker();
+      // Selecting another endpoint bumps the badge to 3.
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /agents_support_bot/ }));
+      expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([
+        'agents_sales_bot',
+        'agents_support_bot',
+      ]);
+      expect(screen.getByText('3')).toBeInTheDocument();
+    });
+
+    it('filters Agent Bricks rows by display_name or name from the top search box', async () => {
+      enableAgentBricksTool();
+      render(<McpPicker />);
+      await openPicker();
+      await screen.findByText('Sales Bot');
+
+      const search = screen.getByLabelText('Search MCP servers');
+
+      // Match on the friendly display_name.
+      fireEvent.change(search, { target: { value: 'sales' } });
+      expect(screen.getByText('Sales Bot')).toBeInTheDocument();
+      expect(screen.queryByText('agents_support_bot')).toBeNull();
+
+      // Match on the raw endpoint name when there is no display_name.
+      fireEvent.change(search, { target: { value: 'support' } });
+      expect(screen.getByText('agents_support_bot')).toBeInTheDocument();
+      expect(screen.queryByText('Sales Bot')).toBeNull();
+
+      // No matches → the section keeps its header but shows the empty state.
+      fireEvent.change(search, { target: { value: 'zzz-no-such-agent' } });
+      expect(screen.getByText('Agents')).toBeInTheDocument();
+      expect(screen.getByText('No matching agents')).toBeInTheDocument();
+    });
   });
 });

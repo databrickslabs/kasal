@@ -54,6 +54,27 @@ async def test_get_all_and_effective_and_enabled_and_global_lists(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_all_servers_effective_enabled_only_filter():
+    """Regression: enabled_only=True excludes disabled servers; default keeps them."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+
+    enabled = mk_server(id=1, name="on", group_id=None, enabled=True)
+    disabled = mk_server(id=2, name="off", group_id=None, enabled=False)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[enabled, disabled])
+
+    # Default (enabled_only=False): both enabled and disabled are returned
+    out_all = await svc.get_all_servers_effective(group_id=None)
+    assert out_all.count == 2
+    assert {s.name for s in out_all.servers} == {"on", "off"}
+
+    # enabled_only=True: disabled server is filtered out
+    out_enabled = await svc.get_all_servers_effective(group_id=None, enabled_only=True)
+    assert out_enabled.count == 1
+    assert [s.name for s in out_enabled.servers] == ["on"]
+
+
+@pytest.mark.asyncio
 async def test_get_servers_by_names_and_group_aware(monkeypatch):
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()

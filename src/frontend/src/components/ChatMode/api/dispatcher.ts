@@ -29,6 +29,8 @@ export async function dispatch(
       request.disable_memory = runSettings.disable_memory;
     if (runSettings.mcp_servers && runSettings.mcp_servers.length > 0)
       request.mcp_servers = runSettings.mcp_servers;
+    if (runSettings.agentbricks_endpoints && runSettings.agentbricks_endpoints.length > 0)
+      request.agentbricks_endpoints = runSettings.agentbricks_endpoints;
   }
 
   const response = await getClient().post<DispatchResult>(
