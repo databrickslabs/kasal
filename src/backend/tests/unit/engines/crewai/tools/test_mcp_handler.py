@@ -8,6 +8,7 @@ isolation logic.
 import asyncio
 import json
 import os
+from types import SimpleNamespace
 import pytest
 from unittest.mock import (
     AsyncMock,
@@ -425,10 +426,14 @@ class TestCreateCrewAIToolFromMCP:
             "input_schema": {"properties": {}, "required": []},
         }
 
-        mock_result = MagicMock()
-        content_item = MagicMock()
-        content_item.text = "hello"
-        mock_result.content = [content_item]
+        # A realistic CallToolResult: a single text block, no structured content
+        # or error. (MagicMock would auto-vivify structuredContent/isError, which
+        # the normalizer correctly prefers/flags — so use SimpleNamespace.)
+        mock_result = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="hello")],
+            structuredContent=None,
+            isError=False,
+        )
 
         with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
