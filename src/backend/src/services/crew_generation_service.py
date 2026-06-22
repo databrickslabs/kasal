@@ -994,7 +994,7 @@ class CrewGenerationService:
         so all database work uses an independent session created here.
         """
         from contextlib import nullcontext, asynccontextmanager
-        from src.db.session import async_session_factory, detach_request_session
+        from src.db.session import async_session_factory, detach_request_session, get_isolated_db_session
         from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
 
@@ -1222,6 +1222,15 @@ class CrewGenerationService:
                 # so we create a standalone session for all database operations.
                 # IMPORTANT: Route to Lakebase when enabled, matching
                 # get_smart_db_session() so reads/writes hit the same DB.
+                #
+                # On SQLite, use a PRIVATE connection (get_isolated_db_session)
+                # rather than the shared StaticPool one. This flow commits an agent,
+                # then makes a seconds-long LLM call, then inserts a task referencing
+                # it — and on the shared connection a concurrent request's
+                # commit/rollback in that window can silently discard the committed
+                # agent, making the task's agent_id FK fail. A private connection is
+                # immune to that interference. (Lakebase/Postgres pooled checkouts
+                # are already per-connection, so the helper falls through to them.)
                 if await is_lakebase_enabled():
                     lb_config = await get_lakebase_config_from_db()
                     lb_instance = (
@@ -1230,7 +1239,7 @@ class CrewGenerationService:
                     )
                     _session_ctx = get_lakebase_session(lb_instance)
                 else:
-                    _session_ctx = async_session_factory()
+                    _session_ctx = get_isolated_db_session()
 
                 async with _session_ctx as session:
                     try:

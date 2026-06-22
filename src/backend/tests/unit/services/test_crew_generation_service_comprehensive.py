@@ -2045,9 +2045,11 @@ class TestProgressiveGeneration:
             def __enter__(self):
                 # Patch sse_manager.broadcast_to_job
                 p_sse = patch("src.services.crew_generation_service.sse_manager")
-                # Patch async_session_factory at its source (the function
-                # uses a local import: ``from src.db.session import async_session_factory``)
-                p_session = patch("src.db.session.async_session_factory")
+                # Patch the isolated DB session used by the local-DB (SQLite) path.
+                # The function does a local import
+                # ``from src.db.session import ... get_isolated_db_session`` and uses
+                # that private connection instead of the shared async_session_factory.
+                p_session = patch("src.db.session.get_isolated_db_session")
                 # Patch is_lakebase_enabled so the code takes the local-DB path
                 # (the function does: ``from src.db.database_router import is_lakebase_enabled``)
                 p_lakebase = patch(
@@ -2160,6 +2162,24 @@ class TestProgressiveGeneration:
             assert event_types.index("plan_ready") < event_types.index("agent_detail")
             assert event_types.index("agent_detail") < event_types.index("task_detail")
             assert event_types.index("task_detail") < event_types.index("generation_complete")
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_persists_via_isolated_session(self):
+        """Regression: on SQLite the generation flow must run on a PRIVATE
+        connection (get_isolated_db_session), never the shared StaticPool
+        async_session_factory. Sharing the one connection let a concurrent
+        request's commit/rollback discard a committed agent mid-generation,
+        breaking the next task's agent_id foreign key."""
+        request = self._make_progressive_request()
+
+        with self._progressive_patches() as m:
+            # The shared StaticPool factory must NOT back the generation session.
+            with patch("src.db.session.async_session_factory") as shared_factory:
+                await self.service.create_crew_progressive(request, None, "gen-iso")
+                shared_factory.assert_not_called()
+
+            # The isolated (private-connection) session WAS used.
+            m["session_factory"].assert_called()
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_auto_executes_when_requested(self):
