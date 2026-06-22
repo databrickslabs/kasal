@@ -856,7 +856,19 @@ def run_crew_in_process(
                     crew_config, tool_service, tool_factory, user_token_for_crew
                 )
                 if not await crew_preparation.prepare():
-                    raise RuntimeError(f"Failed to prepare crew for {execution_id}")
+                    # prepare() logs the precise reason (e.g. "Missing or empty
+                    # required section: tasks") but only returns a bool. Surface the
+                    # most common, actionable cause in the error itself so it isn't an
+                    # opaque "Failed to prepare crew" in the UI and execution record.
+                    if not crew_config.get("tasks"):
+                        reason = " — crew has no tasks"
+                    elif not crew_config.get("agents"):
+                        reason = " — crew has no agents"
+                    else:
+                        reason = ""
+                    raise RuntimeError(
+                        f"Failed to prepare crew for {execution_id}{reason}"
+                    )
 
                 # Get the prepared crew
                 crew = crew_preparation.crew

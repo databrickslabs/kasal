@@ -12,7 +12,8 @@ import { apiClient } from '../config/api/ApiConfig';
  */
 export interface AgentBricksEndpoint {
   id: string;
-  name: string;
+  name: string;            // serving endpoint name (execution identifier)
+  display_name?: string;   // friendly Agent Bricks tile name for display
   creator?: string;
   creation_timestamp?: number;
   last_updated_timestamp?: number;
@@ -146,10 +147,11 @@ export class AgentBricksService {
    * @returns Formatted display name
    */
   static formatEndpointName(endpoint: AgentBricksEndpoint): string {
+    const base = endpoint.display_name || endpoint.name;
     if (endpoint.creator) {
-      return `${endpoint.name} (by ${endpoint.creator})`;
+      return `${base} (by ${endpoint.creator})`;
     }
-    return endpoint.name;
+    return base;
   }
 
   /**

@@ -31,7 +31,8 @@ class AgentBricksQueryStatus(str, Enum):
 class AgentBricksEndpoint(BaseModel):
     """Schema for an AgentBricks serving endpoint."""
     id: str = Field(..., description="Unique identifier for the endpoint")
-    name: str = Field(..., description="Name of the endpoint")
+    name: str = Field(..., description="Serving endpoint name (execution identifier, e.g. mas-<id>-endpoint)")
+    display_name: Optional[str] = Field(None, description="Friendly Agent Bricks tile name for display (e.g. supervisor-agent-...); falls back to name")
     creator: Optional[str] = Field(None, description="Creator of the endpoint")
     creation_timestamp: Optional[int] = Field(None, description="Creation timestamp (epoch milliseconds)")
     last_updated_timestamp: Optional[int] = Field(None, description="Last update timestamp (epoch milliseconds)")

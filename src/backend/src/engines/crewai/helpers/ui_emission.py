@@ -332,6 +332,7 @@ _DELIVERABLE_KEYWORDS = [
     ("data answer", "genie"),
     ("report", "report"),
     ("briefing", "report"),
+    ("digest", "report"),
 ]
 
 

@@ -77,6 +77,10 @@ class DispatcherRequest(BaseModel):
         default_factory=list,
         description="MCP servers (e.g. Genie spaces) to attach to the generated crew's run",
     )
+    agentbricks_endpoints: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the generated crew's run",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

@@ -144,6 +144,50 @@ describe('dispatcher api', () => {
         disable_memory: false,
       });
     });
+
+    it('includes agentbricks_endpoints when run settings carry a non-empty list', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      await dispatch('hi', undefined, undefined, {
+        memory_workspace_scope: true,
+        disable_memory: false,
+        agentbricks_endpoints: ['ep-1', 'ep-2'],
+      });
+
+      expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        memory_workspace_scope: true,
+        disable_memory: false,
+        agentbricks_endpoints: ['ep-1', 'ep-2'],
+      });
+    });
+
+    it('omits agentbricks_endpoints when the list is empty or undefined', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      // empty array → field omitted
+      await dispatch('hi', undefined, undefined, {
+        memory_workspace_scope: true,
+        disable_memory: false,
+        agentbricks_endpoints: [],
+      });
+      expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        memory_workspace_scope: true,
+        disable_memory: false,
+      });
+
+      // undefined → field omitted
+      await dispatch('hi', undefined, undefined, {
+        memory_workspace_scope: true,
+        disable_memory: false,
+      });
+      expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        memory_workspace_scope: true,
+        disable_memory: false,
+      });
+    });
   });
 
   describe('detectIntent', () => {

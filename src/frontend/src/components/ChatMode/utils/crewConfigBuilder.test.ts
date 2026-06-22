@@ -7,6 +7,52 @@ import {
 
 describe('crewConfigBuilder', () => {
   describe('buildCrewConfig', () => {
+    it('equips + CONFIGURES AgentBricksTool (id 71 + endpointName) on a loaded crew when endpoints are picked', () => {
+      const config = buildCrewConfig(
+        {
+          name: 'saved',
+          nodes: [
+            { id: 'a1', type: 'agentNode', data: { role: 'R', tools: ['5'] } },
+            { id: 'task-1', type: 'taskNode', data: { description: 'd', tools: [] } },
+          ],
+          edges: [],
+        },
+        undefined,
+        undefined,
+        true,
+        ['mas-81a3c6bb-endpoint'], // agentBricksEndpoints
+      );
+      // Both agent and task carry the tool (id 71) AND the endpoint config — so the
+      // loaded crew won't fail with "AgentBricks endpoint name is not configured".
+      expect(config.agents_yaml.agent_a1.tools).toContain('71');
+      expect((config.agents_yaml.agent_a1.tool_configs as Record<string, unknown>).AgentBricksTool)
+        .toEqual({ endpointName: ['mas-81a3c6bb-endpoint'] });
+      const task = config.tasks_yaml[Object.keys(config.tasks_yaml)[0]];
+      expect(task.tools).toContain('71');
+      expect((task.tool_configs as Record<string, unknown>).AgentBricksTool)
+        .toEqual({ endpointName: ['mas-81a3c6bb-endpoint'] });
+    });
+
+    it('STRIPS a saved/LLM AgentBricksTool from a loaded crew when no endpoint is picked', () => {
+      const config = buildCrewConfig(
+        {
+          name: 'saved',
+          nodes: [
+            { id: 'a1', type: 'agentNode', data: { role: 'R', tools: ['5', '71'] } },
+            { id: 'task-1', type: 'taskNode', data: { description: 'd', tools: ['AgentBricksTool'] } },
+          ],
+          edges: [],
+        },
+        undefined,
+        undefined,
+        true,
+        [], // no endpoints picked
+      );
+      expect(config.agents_yaml.agent_a1.tools).toEqual(['5']);
+      const task = config.tasks_yaml[Object.keys(config.tasks_yaml)[0]];
+      expect(task.tools).toEqual([]);
+    });
+
     it('builds agent nodes with required and optional fields, ignoring null/undefined optionals', () => {
       const config = buildCrewConfig({
         name: 'plan',
@@ -477,6 +523,58 @@ describe('crewConfigBuilder', () => {
       });
     });
 
+    it('equips AgentBricksTool (by catalog id) + endpoint config on every agent AND task when endpoints are picked', () => {
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1', role: 'R1', tools: ['5'] }],
+        [{ id: 't1', tools: ['31'], agent_id: 'a1' }],
+        undefined,
+        undefined,
+        undefined,
+        { '71': 'AgentBricksTool', '5': 'SomeTool' }, // toolNameMap: id -> name
+        null,
+        true,
+        true,
+        [],              // no MCP
+        undefined,       // userRequest
+        ['mas-81a3c6bb-endpoint'], // agentBricksEndpoints
+      );
+
+      // AgentBricksTool (id 71) added to the agent's tools, configured for the endpoint.
+      expect(config.agents_yaml.agent_a1.tools).toContain('71');
+      expect((config.agents_yaml.agent_a1.tool_configs as Record<string, unknown>).AgentBricksTool)
+        .toEqual({ endpointName: ['mas-81a3c6bb-endpoint'] });
+      // Tasks (which override agent tools in CrewAI) get it too.
+      expect(config.tasks_yaml.task_t1.tools).toContain('71');
+      expect((config.tasks_yaml.task_t1.tool_configs as Record<string, unknown>).AgentBricksTool)
+        .toEqual({ endpointName: ['mas-81a3c6bb-endpoint'] });
+    });
+
+    it('does NOT add AgentBricksTool when no endpoints are picked', () => {
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1', role: 'R1', tools: ['5'] }],
+        [{ id: 't1', agent_id: 'a1' }],
+        undefined, undefined, undefined, { '71': 'AgentBricksTool' }, null, true, true,
+        [], undefined, [], // no endpoints
+      );
+      expect(config.agents_yaml.agent_a1.tools).not.toContain('71');
+      expect(config.agents_yaml.agent_a1).not.toHaveProperty('tool_configs');
+    });
+
+    it('STRIPS an LLM/generator-added AgentBricksTool when no endpoint is picked (avoids "not configured" abort)', () => {
+      // The generator/LLM may add AgentBricksTool on its own because it is an
+      // enabled workspace tool. Without a selected endpoint it would abort the
+      // run, so it must be removed (by id AND by name) from agents and tasks.
+      const config = buildCrewConfigFromGenerated(
+        [{ id: 'a1', role: 'R1', tools: ['5', '71'] }],
+        [{ id: 't1', agent_id: 'a1', tools: ['AgentBricksTool'] }],
+        undefined, undefined, undefined, { '71': 'AgentBricksTool', '5': 'SomeTool' },
+        null, true, true,
+        [], undefined, [], // no endpoints picked
+      );
+      expect(config.agents_yaml.agent_a1.tools).toEqual(['5']);
+      expect(config.tasks_yaml.task_t1.tools).toEqual([]);
+    });
+
     it('appends the originating user request to every task description', () => {
       const config = buildCrewConfigFromGenerated(
         [{ id: 'a1' }],
@@ -521,6 +619,44 @@ describe('crewConfigBuilder', () => {
         'USER REQUEST — this run exists to answer it:\ntop customers?\n\n' +
         'MCP data sources attached — query them for data questions: Databricks Genie: Sales',
       );
+    });
+
+    it('appends the Agent Bricks grounding instruction to the task description when an endpoint is picked', () => {
+      const withEndpoint = buildCrewConfigFromGenerated(
+        [{ id: 'a1' }],
+        [{ id: 't1', description: 'Generic mission', agent_id: 'a1' }],
+        undefined,
+        undefined,
+        undefined,
+        { '71': 'AgentBricksTool' },
+        null,
+        true,
+        true,
+        [], // no MCP
+        'top customers?',
+        ['mas-81a3c6bb-endpoint'], // agentBricksEndpoints
+      );
+      const groundedDesc = withEndpoint.tasks_yaml.task_t1.description as string;
+      expect(groundedDesc).toContain('An Agent Bricks agent is assigned');
+      expect(groundedDesc).toContain('mas-81a3c6bb-endpoint');
+
+      // With no endpoint picked, the grounding text is absent.
+      const noEndpoint = buildCrewConfigFromGenerated(
+        [{ id: 'a1' }],
+        [{ id: 't1', description: 'Generic mission', agent_id: 'a1' }],
+        undefined,
+        undefined,
+        undefined,
+        { '71': 'AgentBricksTool' },
+        null,
+        true,
+        true,
+        [],
+        'top customers?',
+        [], // no endpoints
+      );
+      expect(noEndpoint.tasks_yaml.task_t1.description as string)
+        .not.toContain('An Agent Bricks agent is assigned');
     });
 
     it('adds no MCP_SERVERS when nothing is selected (default)', () => {

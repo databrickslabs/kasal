@@ -12,6 +12,9 @@ import {
   listKasalMcpServers,
 } from '../../api/mcp';
 import { useExecutionStore } from '../../store/executionStore';
+import { useAppStore } from '../../store/appStore';
+import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBricksService';
+import { usePermissions } from '../../../../hooks/usePermissions';
 
 /**
  * The chat input's "+" control (left of Send): pick the MCP servers the next
@@ -66,6 +69,20 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
 
   const selected = useExecutionStore((s) => s.selectedMcpServers);
   const toggle = useExecutionStore((s) => s.toggleMcpServer);
+  // Default to [] so a persisted store snapshot predating this field (or a
+  // partial test store) never crashes the picker on `.length`/`.includes`.
+  const selectedAgentBricks = useExecutionStore((s) => s.selectedAgentBricksEndpoints) ?? [];
+  const toggleAgentBricks = useExecutionStore((s) => s.toggleAgentBricksEndpoint);
+  const [agentBricks, setAgentBricks] = useState<AgentBricksEndpoint[] | null>(null);
+  // The "Agents" section only appears when the AgentBricksTool is enabled in the
+  // workspace's tool catalog — without that tool, picking an endpoint can't equip it.
+  const toolNameMap = useAppStore((s) => s.toolNameMap);
+  const agentBricksToolEnabled = Object.values(toolNameMap).includes('AgentBricksTool');
+  // Browsing/registering Databricks MCP servers (the catalog: external UC
+  // connections, managed types, Genie, AI Search) is a workspace-admin action,
+  // enforced server-side. Non-admins only see the servers an admin enabled, so
+  // the catalog sections are hidden for them (and their endpoints would 403).
+  const { isAdmin } = usePermissions();
 
   // Close on outside click.
   useEffect(() => {
@@ -100,8 +117,9 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
   }, [open]);
 
   // Load the Databricks catalog when the popover opens (cached afterwards).
+  // Admin-only: the catalog is the register-a-Databricks-MCP surface.
   useEffect(() => {
-    if (!open || catalog !== null) return;
+    if (!open || !isAdmin || catalog !== null) return;
     let cancelled = false;
     getDatabricksMcpCatalog()
       .then((c) => {
@@ -116,11 +134,28 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
     return () => {
       cancelled = true;
     };
-  }, [open, catalog]);
+  }, [open, isAdmin, catalog]);
+
+  // Agent Bricks endpoints (loaded once when the popover opens; the section is
+  // hidden entirely when the workspace has none — i.e. the feature isn't in use).
+  useEffect(() => {
+    if (!open || agentBricks !== null || !agentBricksToolEnabled) return;
+    let cancelled = false;
+    AgentBricksService.getEndpoints(true)
+      .then((res) => {
+        if (!cancelled) setAgentBricks(res?.endpoints ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentBricks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, agentBricks, agentBricksToolEnabled]);
 
   // Step two: Genie spaces (searchable, paginated; debounced on the search box).
   useEffect(() => {
-    if (!open || expandedType !== 'genie') return;
+    if (!open || !isAdmin || expandedType !== 'genie') return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       listGenieMcpSpaces(genieSearch || undefined)
@@ -147,7 +182,7 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
 
   // Step two: AI Search indexes.
   useEffect(() => {
-    if (!open || expandedType !== 'ai-search' || aiSearchLoaded) return;
+    if (!open || !isAdmin || expandedType !== 'ai-search' || aiSearchLoaded) return;
     let cancelled = false;
     listAiSearchMcpIndexes()
       .then((options) => {
@@ -265,10 +300,12 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
   const nameMatches = (name: string) => !query || name.toLowerCase().includes(query);
   const kasalList = kasalServers ?? [];
   const visibleKasal = kasalList.filter((s) => nameMatches(s.name));
-  const visibleExternal = (catalog?.external ?? []).filter(
+  // The Databricks catalog (browse + register) is admin-only — non-admins only
+  // get the servers an admin has already enabled (returned by listKasalMcpServers).
+  const visibleExternal = !isAdmin ? [] : (catalog?.external ?? []).filter(
     (o) => !isRegisteredInKasal(o, kasalList) && nameMatches(o.name),
   );
-  const visibleManaged = (catalog?.managed ?? []).filter((t) => nameMatches(t.name));
+  const visibleManaged = !isAdmin ? [] : (catalog?.managed ?? []).filter((t) => nameMatches(t.name));
 
   const drillRow = (kind: 'genie' | 'ai-search', label: string) => (
     <button
@@ -283,6 +320,11 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
     </button>
   );
 
+  // Agent Bricks rows (filtered by the same top search box as MCP, matched on
+  // the friendly agent name).
+  const visibleAgentBricks = (agentBricks ?? []).filter((e) => nameMatches(e.display_name || e.name));
+  const totalSelected = selected.length + selectedAgentBricks.length;
+
   return (
     <div ref={rootRef} className="relative flex-shrink-0">
       <button
@@ -291,7 +333,7 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
         disabled={disabled}
         className="relative w-8 h-8 rounded-xl flex items-center justify-center transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
         style={{
-          color: open || selected.length > 0 ? 'var(--accent)' : 'var(--text-secondary)',
+          color: open || totalSelected > 0 ? 'var(--accent)' : 'var(--text-secondary)',
           backgroundColor: 'var(--bg-secondary)',
           border: '1px solid var(--border-color)',
         }}
@@ -302,12 +344,12 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
         </svg>
-        {selected.length > 0 && (
+        {totalSelected > 0 && (
           <span
             className="absolute -top-1 -right-1 text-[9px] tabular-nums rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5"
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
           >
-            {selected.length}
+            {totalSelected}
           </span>
         )}
       </button>
@@ -455,6 +497,49 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
               </>
             )}
           </div>
+
+          {/* Agent Bricks section — pick a Databricks Agent Bricks agent to equip
+              the crew with (via AgentBricksTool). Hidden entirely when the
+              workspace has no Agent Bricks agents (i.e. the feature isn't in use). */}
+          {agentBricksToolEnabled && agentBricks && agentBricks.length > 0 && (
+            <>
+              <div
+                className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+                style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)' }}
+              >
+                Agents
+              </div>
+              <div className="max-h-48 overflow-y-auto pb-1">
+                {visibleAgentBricks.length === 0 ? (
+                  <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    No matching agents
+                  </div>
+                ) : (
+                  visibleAgentBricks.map((ep) => {
+                    const isSelected = selectedAgentBricks.includes(ep.name);
+                    return (
+                      <button
+                        key={ep.id || ep.name}
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={isSelected}
+                        onClick={() => toggleAgentBricks(ep.name)}
+                        title={ep.name}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:opacity-80"
+                        style={{ color: 'var(--text-primary)' }}
+                      >
+                        {check(isSelected)}
+                        <span className="truncate flex-1">{ep.display_name || ep.name}</span>
+                        <span className="text-[10px] uppercase flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+                          agent
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          )}
 
           {/* The managed SQL MCP executes arbitrary statements with the
               caller's warehouse permissions — selecting it deserves an

@@ -347,6 +347,85 @@ class TestAgentBricksToolQueryEndpoint:
         assert result == "Prediction result"
 
     @pytest.mark.asyncio
+    async def test_query_endpoint_responses_api_format(self, tool_with_endpoint):
+        """Mosaic AI Agent Bricks agents reply in the Responses API shape
+        ({"object":"response","output":[...]}). The tool must extract the LAST
+        assistant message text — NOT str() the whole envelope (which leaked the
+        raw {'object': 'response', ...} repr into the chat)."""
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "object": "response",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I'll search your inbox."}],
+                },
+                {"type": "function_call", "call_id": "c1", "name": "gmail_search", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "c1", "output": "{...}"},
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "# Email Digest\n2 emails today."}],
+                },
+            ],
+        })
+
+        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
+            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
+                with patch('aiohttp.ClientSession') as mock_session_class:
+                    mock_session = MagicMock()
+                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                    mock_post_context = MagicMock()
+                    mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
+                    mock_post_context.__aexit__ = AsyncMock(return_value=None)
+                    mock_session.post.return_value = mock_post_context
+
+                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+
+        # The final assistant message wins; commentary + tool items are dropped.
+        assert result == "# Email Digest\n2 emails today."
+        # And the raw envelope never leaks into the answer.
+        assert "'object'" not in result
+        assert "function_call" not in result
+
+    @pytest.mark.asyncio
+    async def test_query_endpoint_responses_api_no_text(self, tool_with_endpoint):
+        """A Responses envelope with only tool calls (no assistant text) returns a
+        concise note, never the raw repr."""
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "object": "response",
+            "status": "incomplete",
+            "output": [
+                {"type": "function_call", "call_id": "c1", "name": "gmail_search", "arguments": "{}"},
+            ],
+        })
+
+        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
+            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
+                with patch('aiohttp.ClientSession') as mock_session_class:
+                    mock_session = MagicMock()
+                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                    mock_post_context = MagicMock()
+                    mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
+                    mock_post_context.__aexit__ = AsyncMock(return_value=None)
+                    mock_session.post.return_value = mock_post_context
+
+                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+
+        assert "no text answer" in result
+        assert "incomplete" in result
+        assert "'object'" not in result
+
+    @pytest.mark.asyncio
     async def test_query_endpoint_timeout(self, tool_with_endpoint):
         """Test query handles timeout error."""
         with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):

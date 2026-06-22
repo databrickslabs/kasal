@@ -1036,6 +1036,9 @@ const ChatWorkspace: React.FC = () => {
           selectedModel || undefined,
           inputs,
           useExecutionStore.getState().memoryEnabled,
+          // Agent Bricks endpoints picked in the "+" menu — equip + configure the
+          // tool on this loaded crew so it has the endpoint (else "not configured").
+          useExecutionStore.getState().selectedAgentBricksEndpoints,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1104,9 +1107,20 @@ const ChatWorkspace: React.FC = () => {
         // (the selector only shows when GenieTool is already in the crew's tools)
         const agents = data.agents;
         const taskList = data.tasks;
-        const toolConfigs = spaceId
-          ? { GenieTool: { spaceId } }
-          : undefined;
+        // Agent Bricks mirrors the Genie mechanism EXACTLY: configure the tool by
+        // NAME in tool_configs, and buildCrewConfigFromGenerated → applicableToolConfigs
+        // attaches it to whichever agent/task already lists the tool (the generator
+        // equips AgentBricksTool, just like GenieTool). The backend skips the tool if
+        // no endpoint resolves, so an unselected/empty pick never aborts the run.
+        const selectedAgentBricks =
+          useExecutionStore.getState().selectedAgentBricksEndpoints || [];
+        const toolConfigs: Record<string, Record<string, unknown>> = {};
+        if (spaceId) toolConfigs.GenieTool = { spaceId };
+        if (selectedAgentBricks.length > 0) {
+          toolConfigs.AgentBricksTool = { endpointName: selectedAgentBricks };
+        }
+        const toolConfigsArg =
+          Object.keys(toolConfigs).length > 0 ? toolConfigs : undefined;
 
         // NOTE: "Predefined UI" emission is enforced in the BACKEND
         // (crew_preparation → ui_emission) so every channel — chat, Crew mode,
@@ -1115,7 +1129,7 @@ const ChatWorkspace: React.FC = () => {
           agents,
           taskList,
           selectedModel || undefined,
-          toolConfigs,
+          toolConfigsArg,
           inputs,
           useAppStore.getState().toolNameMap,
           originSessionId,
@@ -1130,6 +1144,8 @@ const ChatWorkspace: React.FC = () => {
           // descriptions so the run answers it (instead of running a generic
           // mission with no actual question).
           data.user_request,
+          // Agent Bricks endpoints picked via the chat input's "+" menu.
+          useExecutionStore.getState().selectedAgentBricksEndpoints,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1276,6 +1292,9 @@ const ChatWorkspace: React.FC = () => {
         memoryEnabled: useExecutionStore.getState().memoryEnabled,
         // Persist the MCP servers selected for the run so the saved crew keeps them.
         mcpServers: useExecutionStore.getState().selectedMcpServers,
+        // Persist the Agent Bricks endpoint picked in the "+" so the saved crew
+        // reloads with the agent assigned and runs against it.
+        agentBricksEndpoints: useExecutionStore.getState().selectedAgentBricksEndpoints,
       }).then((r) => {
         // Surface the freshly saved crew in the rail library.
         void refreshLibrary();
@@ -1457,7 +1476,8 @@ const ChatWorkspace: React.FC = () => {
         const memoryEnabled = useExecutionStore.getState().memoryEnabled;
         const mcpServers = useExecutionStore.getState().selectedMcpServers;
         try {
-          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled, mcpServers });
+          const agentBricksEndpoints = useExecutionStore.getState().selectedAgentBricksEndpoints;
+          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled, mcpServers, agentBricksEndpoints });
           void refreshLibrary();
           addMessage(
             'assistant',

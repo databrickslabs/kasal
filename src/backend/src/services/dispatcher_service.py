@@ -1249,6 +1249,7 @@ Please analyze this message and provide your intent classification."""
                         memory_workspace_scope=request.memory_workspace_scope,
                         disable_memory=request.disable_memory,
                         mcp_servers=request.mcp_servers or [],
+                        agentbricks_endpoints=request.agentbricks_endpoints or [],
                     )
                     # Spawn progressive generation in background
                     asyncio.create_task(

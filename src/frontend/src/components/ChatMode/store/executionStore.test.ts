@@ -140,6 +140,27 @@ describe('executionStore - basic setters & log', () => {
     useExecutionStore.getState().setSelectedMcpServers([]);
   });
 
+  it('toggleAgentBricksEndpoint adds and removes selections; setSelectedAgentBricksEndpoints replaces them', () => {
+    // Mirrors the MCP server selection behaviour for Agent Bricks endpoints.
+    useExecutionStore.setState({ selectedAgentBricksEndpoints: [] });
+    useExecutionStore.getState().toggleAgentBricksEndpoint('mas-81a3c6bb-endpoint');
+    useExecutionStore.getState().toggleAgentBricksEndpoint('ka-9f2-endpoint');
+    expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([
+      'mas-81a3c6bb-endpoint',
+      'ka-9f2-endpoint',
+    ]);
+    // Toggling a present one removes it.
+    useExecutionStore.getState().toggleAgentBricksEndpoint('mas-81a3c6bb-endpoint');
+    expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([
+      'ka-9f2-endpoint',
+    ]);
+    // setSelectedAgentBricksEndpoints replaces the whole list.
+    useExecutionStore.getState().setSelectedAgentBricksEndpoints(['only-this']);
+    expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual(['only-this']);
+    useExecutionStore.getState().setSelectedAgentBricksEndpoints([]);
+    expect(useExecutionStore.getState().selectedAgentBricksEndpoints).toEqual([]);
+  });
+
   it('setMemoryEnabled toggles whether crews run with memory (default enabled)', () => {
     // Defaults to enabled so crews keep memory unless the user picks "No memory".
     expect(useExecutionStore.getState().memoryEnabled).toBe(true);
@@ -1010,6 +1031,8 @@ describe('executionStore - initial state', () => {
     expect(initialState.activeExecution).toBeNull();
     expect(initialState.executionLog).toEqual([]);
     expect(initialState.chatCollapsed).toBe(false);
+    // Agent Bricks endpoints start empty until the user picks one in the "+" menu.
+    expect(initialState.selectedAgentBricksEndpoints).toEqual([]);
   });
 });
 

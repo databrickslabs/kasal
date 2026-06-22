@@ -81,6 +81,13 @@ interface ExecutionState {
    * store for the same persistence reason as ``workspaceMemory``.
    */
   selectedMcpServers: string[];
+  /**
+   * Agent Bricks serving-endpoint names picked in the chat "+" menu. Each
+   * equips the generated agents with the AgentBricksTool configured for that
+   * endpoint (tool_configs.AgentBricksTool.endpointName). Stored for the same
+   * persistence reason as ``selectedMcpServers``.
+   */
+  selectedAgentBricksEndpoints: string[];
 }
 
 interface ExecutionActions {
@@ -99,6 +106,8 @@ interface ExecutionActions {
   setMemoryEnabled: (value: boolean) => void;
   toggleMcpServer: (name: string) => void;
   setSelectedMcpServers: (names: string[]) => void;
+  toggleAgentBricksEndpoint: (name: string) => void;
+  setSelectedAgentBricksEndpoints: (names: string[]) => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -212,6 +221,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   workspaceMemory: true,
   memoryEnabled: true,
   selectedMcpServers: [],
+  selectedAgentBricksEndpoints: [],
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -282,6 +292,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         : [...s.selectedMcpServers, name],
     })),
   setSelectedMcpServers: (names) => set({ selectedMcpServers: names }),
+  toggleAgentBricksEndpoint: (name) =>
+    set((s) => ({
+      selectedAgentBricksEndpoints: s.selectedAgentBricksEndpoints.includes(name)
+        ? s.selectedAgentBricksEndpoints.filter((n) => n !== name)
+        : [...s.selectedAgentBricksEndpoints, name],
+    })),
+  setSelectedAgentBricksEndpoints: (names) => set({ selectedAgentBricksEndpoints: names }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });

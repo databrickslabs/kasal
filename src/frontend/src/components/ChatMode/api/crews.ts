@@ -180,6 +180,7 @@ export async function saveGeneratedCrew(
     memoryEnabled?: boolean;
     spaceId?: string;
     mcpServers?: string[];
+    agentBricksEndpoints?: string[];
   },
 ): Promise<SavedCrew> {
   // When a Genie space was picked in chat, persist it as a GenieTool override on
@@ -187,6 +188,21 @@ export async function saveGeneratedCrew(
   const genieToolConfig = opts?.spaceId ? { GenieTool: { spaceId: opts.spaceId } } : undefined;
   const usesGenie = (tools: unknown): boolean =>
     Array.isArray(tools) && tools.some((t) => isGenieToolRef(t));
+
+  // Agent Bricks: the user picked an endpoint in the chat "+" — persist it so the
+  // saved crew reloads WITH the agent assigned (the editor's AgentBricks selector
+  // shows it populated) and runs against it. Mirrors the Genie/MCP persistence:
+  // equip AgentBricksTool (catalog id 71) and store its endpointName on each node.
+  const ABT = '71';
+  const agentBricksEndpoints = opts?.agentBricksEndpoints ?? [];
+  const agentBricksPicked = agentBricksEndpoints.length > 0;
+  const equipAgentBricks = (tools: unknown): string[] => {
+    const arr = Array.isArray(tools) ? [...(tools as unknown[])].map(String) : [];
+    if (agentBricksPicked && !arr.some((t) => t === ABT || t === 'AgentBricksTool')) {
+      arr.push(ABT);
+    }
+    return arr;
+  };
 
   // Persist the MCP servers selected for the run onto EVERY agent and task
   // (mirrors execution's buildCrewConfigFromGenerated injection), so the saved
@@ -196,6 +212,7 @@ export async function saveGeneratedCrew(
     const cfg: Record<string, unknown> = {};
     if (genieToolConfig && usesGenie(tools)) Object.assign(cfg, genieToolConfig);
     if (mcpServers.length > 0) cfg.MCP_SERVERS = { servers: mcpServers };
+    if (agentBricksPicked) cfg.AgentBricksTool = { endpointName: agentBricksEndpoints };
     return Object.keys(cfg).length > 0 ? cfg : undefined;
   };
 
@@ -226,10 +243,10 @@ export async function saveGeneratedCrew(
         role: a.role || '',
         goal: a.goal || '',
         backstory: a.backstory || '',
-        tools: Array.isArray(a.tools) ? a.tools : [],
+        tools: equipAgentBricks(a.tools),
         // Honour the chat's memory choice when provided, else keep the agent's own.
         ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
-        // Persist the Genie space and/or selected MCP servers.
+        // Persist the Genie space, selected MCP servers, and/or Agent Bricks endpoint.
         ...(toolConfigsFor(a.tools) ? { tool_configs: toolConfigsFor(a.tools) } : {}),
       },
     });
@@ -245,8 +262,8 @@ export async function saveGeneratedCrew(
         taskId: String(t.id),
         description: t.description || '',
         expected_output: t.expected_output || '',
-        tools: Array.isArray(t.tools) ? t.tools : [],
-        // Persist the Genie space and/or selected MCP servers.
+        tools: equipAgentBricks(t.tools),
+        // Persist the Genie space, selected MCP servers, and/or Agent Bricks endpoint.
         ...(toolConfigsFor(t.tools) ? { tool_configs: toolConfigsFor(t.tools) } : {}),
       },
     });

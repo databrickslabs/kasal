@@ -490,6 +490,62 @@ class TestGetEndpoints:
                     assert isinstance(result, AgentBricksEndpointsResponse)
 
     @pytest.mark.asyncio
+    async def test_get_endpoints_enriches_display_name_from_tiles(self, repo):
+        """Regression: the opaque serving-endpoint name (mas-<id>-endpoint) must be
+        enriched with the friendly Agent Bricks tile name for display, while name
+        stays the execution identifier."""
+        serving_resp = MagicMock()
+        serving_resp.status_code = 200
+        serving_resp.raise_for_status = MagicMock()
+        serving_resp.json.return_value = {
+            "endpoints": [
+                {"id": "e1", "name": "mas-81a3c6bb-endpoint", "state": {"ready": "READY"}, "config": {}}
+            ]
+        }
+        tiles_resp = MagicMock()
+        tiles_resp.status_code = 200
+        tiles_resp.json.return_value = {
+            "tiles": [
+                {"serving_endpoint_name": "mas-81a3c6bb-endpoint",
+                 "name": "supervisor-agent-2026-06-21-21-25-55"}
+            ]
+        }
+
+        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock,
+                          return_value=({"Authorization": "Bearer t"}, None)), \
+             patch.object(repo, '_get_host', new_callable=AsyncMock, return_value="ws.databricks.com"), \
+             patch.object(repo._client, 'get', new_callable=AsyncMock,
+                          side_effect=[serving_resp, tiles_resp]):
+            result = await repo.get_endpoints(AgentBricksEndpointsRequest(ready_only=False))
+
+        assert len(result.endpoints) == 1
+        ep = result.endpoints[0]
+        assert ep.name == "mas-81a3c6bb-endpoint"            # execution identifier unchanged
+        assert ep.display_name == "supervisor-agent-2026-06-21-21-25-55"  # friendly name for UI
+
+    @pytest.mark.asyncio
+    async def test_get_endpoints_display_name_none_when_no_matching_tile(self, repo):
+        """No matching tile (or /api/2.0/tiles unavailable) -> display_name stays None."""
+        serving_resp = MagicMock()
+        serving_resp.status_code = 200
+        serving_resp.raise_for_status = MagicMock()
+        serving_resp.json.return_value = {
+            "endpoints": [{"id": "e1", "name": "mas-zzz-endpoint", "state": {"ready": "READY"}, "config": {}}]
+        }
+        tiles_resp = MagicMock()
+        tiles_resp.status_code = 404  # older workspace without the tiles API
+        tiles_resp.json.return_value = {}
+
+        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock,
+                          return_value=({"Authorization": "Bearer t"}, None)), \
+             patch.object(repo, '_get_host', new_callable=AsyncMock, return_value="ws.databricks.com"), \
+             patch.object(repo._client, 'get', new_callable=AsyncMock,
+                          side_effect=[serving_resp, tiles_resp]):
+            result = await repo.get_endpoints(AgentBricksEndpointsRequest(ready_only=False))
+
+        assert result.endpoints[0].display_name is None
+
+    @pytest.mark.asyncio
     async def test_get_endpoints_auth_failure(self, repo):
         """Test handling auth failure."""
         with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:

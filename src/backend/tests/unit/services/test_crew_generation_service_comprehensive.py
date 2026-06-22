@@ -1976,14 +1976,14 @@ class TestProgressiveGeneration:
     def _make_progressive_request(self, prompt="build a crew", model="test-model", tools=None,
                                   auto_execute=False, session_id=None,
                                   memory_workspace_scope=True, disable_memory=False,
-                                  mcp_servers=None):
+                                  mcp_servers=None, agentbricks_endpoints=None):
         """Create a mock CrewStreamingRequest.
 
         auto_execute defaults to False (AgentBuilder: generate-only) so the
         backend run branch is skipped; ChatMode tests pass auto_execute=True.
         The run-setting attrs are set explicitly because a bare Mock would make
         ``getattr(req, "auto_execute", False)`` truthy and ``request.mcp_servers``
-        a non-iterable Mock.
+        (or ``request.agentbricks_endpoints``) a non-iterable Mock.
         """
         req = Mock()
         req.prompt = prompt
@@ -1995,6 +1995,7 @@ class TestProgressiveGeneration:
         req.memory_workspace_scope = memory_workspace_scope
         req.disable_memory = disable_memory
         req.mcp_servers = mcp_servers or []
+        req.agentbricks_endpoints = agentbricks_endpoints or []
         return req
 
     def _make_plan(self, agents=None, tasks=None, process_type="sequential", complexity="standard"):
@@ -2377,6 +2378,85 @@ class TestProgressiveGeneration:
 
             error_event = next(c for c in calls if c.args[1].data["type"] == "entity_error")
             assert error_event.args[1].data["entity_type"] == "task"
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_synthesizes_tasks_when_all_task_gen_fails(self):
+        """Regression: when EVERY per-task LLM generation fails (common with small
+        models that occasionally return malformed JSON), the crew would otherwise
+        reach auto-execute with agents but ZERO tasks and die in crew preparation
+        ('Failed to prepare crew'). The fallback must synthesize minimal tasks from
+        the plan so the crew stays runnable."""
+        plan = self._make_plan(
+            agents=[{"name": "Agent1", "role": "R1"}],
+            tasks=[{"name": "Task1", "assigned_agent": "Agent1"}],
+        )
+        agent_saved = {"id": "agent-id-1", "name": "Agent1", "role": "R1"}
+        # The fallback persists the synthesized task via create_single_task.
+        task_saved = {"id": "task-fallback-1", "name": "Task1", "description": "synth"}
+
+        request = self._make_progressive_request()
+        gen_id = "gen-task-synth"
+
+        with self._progressive_patches(
+            plan=plan, agent_saved=agent_saved, task_saved=task_saved,
+        ) as m:
+            # EVERY task generation fails — the normal path produces no tasks.
+            m["task_gen"].generate_task = AsyncMock(
+                side_effect=RuntimeError("task generation failed")
+            )
+
+            await self.service.create_crew_progressive(request, None, gen_id)
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            event_types = [c.args[1].data["type"] for c in calls]
+            # The failed normal generation still reports an entity_error...
+            assert "entity_error" in event_types
+            # ...but the fallback synthesizes a task so the crew isn't empty.
+            assert "task_detail" in event_types
+            complete = next(
+                c for c in calls if c.args[1].data["type"] == "generation_complete"
+            )
+            assert len(complete.args[1].data["tasks"]) >= 1
+            # The fallback used create_single_task even though generate_task failed.
+            m["repo"].create_single_task.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_create_crew_progressive_skips_auto_execute_when_no_tasks(self):
+        """Regression: if task generation AND the fallback both yield nothing, the
+        backend must NOT launch a taskless crew (which crashes in crew preparation).
+        It reports a clear, actionable execution_error instead."""
+        plan = self._make_plan(
+            agents=[{"name": "Agent1", "role": "R1"}],
+            tasks=[{"name": "Task1", "assigned_agent": "Agent1"}],
+        )
+        agent_saved = {"id": "agent-id-1", "name": "Agent1", "role": "R1"}
+
+        request = self._make_progressive_request(auto_execute=True, session_id="chat-x")
+        gen_id = "gen-no-tasks-autoexec"
+
+        with self._progressive_patches(plan=plan, agent_saved=agent_saved) as m:
+            # Normal task generation fails for every task...
+            m["task_gen"].generate_task = AsyncMock(
+                side_effect=RuntimeError("task generation failed")
+            )
+            # ...and the fallback's persistence also fails, leaving zero tasks.
+            m["repo"].create_single_task = AsyncMock(
+                side_effect=RuntimeError("db write failed")
+            )
+
+            with patch(
+                "src.services.execution_service.ExecutionService"
+            ) as mock_exec_cls:
+                await self.service.create_crew_progressive(request, None, gen_id)
+                # A taskless crew must never be launched.
+                mock_exec_cls.assert_not_called()
+
+            calls = m["sse"].broadcast_to_job.call_args_list
+            complete = next(
+                c for c in calls if c.args[1].data["type"] == "generation_complete"
+            )
+            assert "execution_id" not in complete.args[1].data
+            assert "runnable tasks" in complete.args[1].data["execution_error"]
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_interleaved_order(self):
@@ -3448,3 +3528,61 @@ class TestBuildCrewConfigFromGenerated:
         desc = cfg["tasks_yaml"]["task_t1"]["description"]
         assert desc.startswith("d") and "USER REQUEST" in desc
         assert "MCP data sources" not in desc
+
+    def test_agentbricks_endpoint_injected_into_agents_and_tasks(self):
+        # Endpoint picked in the chat "+" — equip + configure the AgentBricksTool
+        # (seed id 71) on every agent and task so the auto-executed ChatMode run
+        # reaches the endpoint (regression: this path injected MCP but not AgentBricks,
+        # so the tool ran unconfigured → "endpoint name is not configured").
+        req = self._req(agentbricks_endpoints=["mas-9f2-endpoint"])
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": []}],
+            [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["71"]}],
+        )
+        endpoint_cfg = {"endpointName": ["mas-9f2-endpoint"]}
+        agent = cfg["agents_yaml"]["agent_a1"]
+        task = cfg["tasks_yaml"]["task_t1"]
+        # Tool equipped on both (agent had none → appended; task already listed it → kept once)
+        assert "71" in agent["tools"]
+        assert task["tools"].count("71") == 1
+        assert agent["tool_configs"]["AgentBricksTool"] == endpoint_cfg
+        assert task["tool_configs"]["AgentBricksTool"] == endpoint_cfg
+        assert "Agent Bricks agent is assigned" in task["description"]
+
+    def test_agentbricks_tool_stripped_when_no_endpoint(self):
+        # The generator/LLM may equip AgentBricksTool (71 / "AgentBricksTool") on its
+        # own when the prompt mentions agentbricks. With NO endpoint picked, strip it
+        # so an unconfigured tool never reaches — and aborts — the run.
+        req = self._req()
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": ["71"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["71", "AgentBricksTool"]}],
+        )
+        assert cfg["agents_yaml"]["agent_a1"]["tools"] == []
+        assert cfg["tasks_yaml"]["task_t1"]["tools"] == []
+        assert "tool_configs" not in cfg["tasks_yaml"]["task_t1"]
+        assert "Agent Bricks agent is assigned" not in cfg["tasks_yaml"]["task_t1"]["description"]
+
+    def test_agentbricks_filter_preserves_other_tools(self):
+        # The equip/strip helper must touch ONLY the AgentBricksTool reference
+        # (id 71 / "AgentBricksTool") — every other tool passes through untouched,
+        # whether an endpoint is picked or not.
+        with_ep = CrewGenerationService.build_crew_config_from_generated(
+            self._req(agentbricks_endpoints=["mas-1"]),
+            [{"id": "a1", "role": "r", "tools": ["35", "SerperDevTool"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["35"]}],
+        )
+        # Other tools kept; AgentBricksTool appended.
+        assert with_ep["agents_yaml"]["agent_a1"]["tools"] == ["35", "SerperDevTool", "71"]
+        assert with_ep["tasks_yaml"]["task_t1"]["tools"] == ["35", "71"]
+
+        without_ep = CrewGenerationService.build_crew_config_from_generated(
+            self._req(),
+            [{"id": "a1", "role": "r", "tools": ["35", "SerperDevTool"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["35", "71"]}],
+        )
+        # Other tools kept; only AgentBricksTool (71) stripped.
+        assert without_ep["agents_yaml"]["agent_a1"]["tools"] == ["35", "SerperDevTool"]
+        assert without_ep["tasks_yaml"]["task_t1"]["tools"] == ["35"]

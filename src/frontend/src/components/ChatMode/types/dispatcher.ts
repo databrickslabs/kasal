@@ -38,6 +38,7 @@ export interface DispatcherRequest {
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;
   mcp_servers?: string[];
+  agentbricks_endpoints?: string[];
 }
 
 /** ChatMode run settings gathered from the execution store at dispatch time. */
@@ -47,6 +48,7 @@ export interface DispatchRunSettings {
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;
   mcp_servers?: string[];
+  agentbricks_endpoints?: string[];
 }
 
 export interface DispatcherResponse {

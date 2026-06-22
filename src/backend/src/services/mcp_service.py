@@ -58,11 +58,17 @@ class MCPService:
             count=len(servers)
         )
 
-    async def get_all_servers_effective(self, group_id: Optional[str]) -> MCPServerListResponse:
+    async def get_all_servers_effective(
+        self, group_id: Optional[str], enabled_only: bool = False
+    ) -> MCPServerListResponse:
         """
         Get MCP servers effective for a workspace (group): prefer group-specific
         entries over base entries for the same name. Return both enabled and
         disabled so admins can manage state.
+
+        ``enabled_only`` restricts the result to enabled servers — used for
+        non-admin callers, who must only see the servers a workspace admin has
+        enabled (the curated allow-list), never the disabled ones.
         """
         servers = await self.server_repository.list_for_group_scope(group_id)
         # Deduplicate by name, preferring group-specific
@@ -77,6 +83,8 @@ class MCPService:
                     dedup[key] = s
         server_responses: List[MCPServerResponse] = []
         for server in dedup.values():
+            if enabled_only and not getattr(server, "enabled", False):
+                continue
             resp = MCPServerResponse.model_validate(server)
             resp.api_key = ""  # do not include in list
             server_responses.append(resp)
