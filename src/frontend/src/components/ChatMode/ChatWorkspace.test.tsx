@@ -73,6 +73,12 @@ const h = vi.hoisted(() => {
       reopenPreview: vi.fn(),
       clearPreview: vi.fn(),
       toggleChatCollapsed: vi.fn(),
+      transientPreview: [] as unknown[],
+      transientPreviewOwnerSessionId: null as unknown,
+      pushTransientPreview: vi.fn(),
+      clearTransientPreview: vi.fn(),
+      showRetrievedContext: false,
+      setShowRetrievedContext: vi.fn(),
     },
     app: {
       models: [{ key: 'm1', name: 'Model 1' }],
@@ -438,6 +444,15 @@ describe('summarizeTaskOutput', () => {
   });
   it('returns normal short text unchanged', () => {
     expect(summarizeTaskOutput('a normal result', null)).toBe('a normal result');
+  });
+  it('never dumps raw A2UI JSON into the chat, even when no preview was extracted', () => {
+    const uiJson = JSON.stringify({
+      messages: [{ updateComponents: { components: [{ id: 'root', component: 'Text', text: 'hi' }] } }],
+    });
+    const out = summarizeTaskOutput(uiJson, null);
+    expect(out).not.toBeNull();
+    expect(out).not.toContain('createSurface');
+    expect(out).not.toContain('updateComponents');
   });
 });
 
@@ -1531,6 +1546,19 @@ describe('ChatWorkspace component', () => {
       h.genOpts.onTaskDetail();
     });
     expect(h.genOpts.onPlanReady).toBeTypeOf('function');
+  });
+
+  it('posts agent/task detail cards (full descriptions) into the chat as a crew generates', () => {
+    render(<ChatWorkspace />);
+    act(() => { h.dispatcherOpts.onStartGenerationStream('gen-c', 's1'); });
+    h.session.addMessageToTargetSession.mockClear();
+    act(() => {
+      h.genOpts.onAgentDetail('gen-c', { name: 'Researcher', role: 'Analyst', goal: 'Find news', backstory: 'Seasoned' });
+      h.genOpts.onTaskDetail('gen-c', { name: 'Collect', description: 'Gather news', expected_output: 'A brief' });
+    });
+    const extras = h.session.addMessageToTargetSession.mock.calls.map((c) => c[3] as { resultType?: string });
+    expect(extras.some((e) => e?.resultType === 'agent')).toBe(true);
+    expect(extras.some((e) => e?.resultType === 'task')).toBe(true);
   });
 
   it('starts generation/execution streams with an undefined origin when there is no session at all', () => {

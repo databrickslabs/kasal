@@ -16,6 +16,8 @@ import { detectVariablesFromNodes, detectVariablesFromGenerated } from './utils/
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
+import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
+import PreviewActivity from './components/Preview/PreviewActivity';
 import { parseUiDocument } from './utils/uiDocument';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
@@ -240,6 +242,18 @@ export function summarizeTaskOutput(
     return 'Generated an app. View it in the preview pane.';
   }
 
+  // Belt-and-suspenders: even if the surface wasn't extracted as a preview,
+  // NEVER dump raw A2UI JSON into the chat. Strip any embedded UI document and
+  // keep only the surrounding prose; if the doc markers still remain (it didn't
+  // parse cleanly), collapse to the friendly line instead of the JSON blob.
+  if (trimmed.includes('createSurface') || trimmed.includes('updateComponents')) {
+    const prose = stripEmbeddedUiDocument(trimmed);
+    if (prose.includes('createSurface') || prose.includes('updateComponents')) {
+      return 'Generated an app. View it in the preview pane.';
+    }
+    return prose.length > 400 ? `${prose.slice(0, 300).trim()}…` : prose;
+  }
+
   // Long plain-text outputs get collapsed too, otherwise they take over the chat.
   if (trimmed.length > 400) {
     return `${trimmed.slice(0, 300).trim()}…`;
@@ -365,6 +379,9 @@ const ChatWorkspace: React.FC = () => {
   const previewOwnerSessionId = useExecutionStore((s) => s.previewOwnerSessionId);
   const previewHistory = useExecutionStore((s) => s.previewHistory);
   const previewIndex = useExecutionStore((s) => s.previewIndex);
+  const transientPreview = useExecutionStore((s) => s.transientPreview);
+  const transientPreviewOwnerSessionId = useExecutionStore((s) => s.transientPreviewOwnerSessionId);
+  const showRetrievedContext = useExecutionStore((s) => s.showRetrievedContext);
   const navigatePreview = useExecutionStore((s) => s.navigatePreview);
   const chatCollapsed = useExecutionStore((s) => s.chatCollapsed);
   // "Workspace memory" recall scope, owned by the store so it persists across
@@ -394,6 +411,27 @@ const ChatWorkspace: React.FC = () => {
   const viewIsGenerating = isGenerating && ownsExecution;
   const viewIsLoading = isLoading && ownsExecution;
   const viewExecutionContext = ownsExecution ? executionContext : null;
+
+  // While the viewed session's run is producing its deliverable, show an
+  // in-progress skeleton in the preview pane so it appears immediately instead
+  // of staying blank (chat full-width) until the final task emits its A2UI
+  // document. The real PreviewPanel takes over the moment the first deliverable
+  // renders (hasPreview flips true). `previewPaneVisible` drives the split
+  // layout so the chat shares the width during the run, exactly as it does once
+  // the preview exists.
+  // Only show the "Running agent…" preview once the job is EXECUTING — not
+  // during the generation phase (when the agent/task cards are still streaming
+  // into the chat). previewContent (a finished deliverable) always shows.
+  const showPreviewSkeleton = shouldShowPreviewSkeleton({
+    runActive: viewIsExecuting,
+    hasPreview: !!previewContent,
+  });
+  const previewPaneVisible = !!previewContent || showPreviewSkeleton;
+  // Live (transient, non-persisted) answers for the run on screen. While the
+  // skeleton is up, these elegant cards replace the blank shimmer; they're
+  // never written to previewHistory/IndexedDB and clear when the run ends.
+  const transientItems =
+    transientPreviewOwnerSessionId === currentSessionId ? transientPreview : [];
 
   const models = useAppStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
@@ -624,6 +662,19 @@ const ChatWorkspace: React.FC = () => {
 
     const trace = buildTraceEntry(message, data);
     if (trace) {
+      // Surface the answer LIVE in the preview pane (transient, non-persisted):
+      // tool_result events carry the actual findings. No-op unless this run's
+      // session is the one on screen (gated inside the store action).
+      if (trace.kind === 'tool_result') {
+        useExecutionStore.getState().pushTransientPreview(ownerSession || null, {
+          id: generateId(),
+          label: trace.label,
+          sublabel: trace.sublabel,
+          detail: trace.detail,
+          durationMs: trace.durationMs,
+          timestamp: trace.timestamp,
+        });
+      }
       const sessionStore = useSessionStore.getState();
       let handled = false;
 
@@ -811,6 +862,22 @@ const ChatWorkspace: React.FC = () => {
     else sessionStore.addMessage('assistant', '', extra);
   }, []);
 
+  // Post a rich crew-detail card into the chat as each agent/task is generated,
+  // so the chatbox shows the FULL details (agent goal + backstory, task
+  // description + expected output) — not just a terse "ready" tick. ChatMessage
+  // renders resultType 'agent'/'task' as AgentCard/TaskCard. Routes to the
+  // generating session like addGenerationTrace.
+  const addGenerationCard = useCallback(
+    (ownerSession: string | undefined, resultType: 'agent' | 'task', resultData: unknown) => {
+      if (!resultData) return;
+      const sessionStore = useSessionStore.getState();
+      const extra = { resultType, resultData };
+      if (ownerSession) sessionStore.addMessageToTargetSession(ownerSession, 'assistant', '', extra);
+      else sessionStore.addMessage('assistant', '', extra);
+    },
+    [],
+  );
+
   // The origin session of a generation. handleStartGenerationStream always
   // registers it before any event arrives, so the map is the source of truth;
   // the global-owner fallback is a safety net only (it never fires in the real
@@ -876,10 +943,12 @@ const ChatWorkspace: React.FC = () => {
           addGenerationTrace(owner, 'Crew planned', `${agents} agent${agents === 1 ? '' : 's'} · ${tasks} task${tasks === 1 ? '' : 's'}`);
         },
         onAgentDetail: (genId, agent) => {
-          addGenerationTrace(ownerForGen(genId), 'Agent ready', String(agent?.name || agent?.role || ''));
+          // Render the full agent card (role · goal · backstory · tools) in chat.
+          addGenerationCard(ownerForGen(genId), 'agent', agent);
         },
         onTaskDetail: (genId, task) => {
-          addGenerationTrace(ownerForGen(genId), 'Task ready', String(task?.name || ''));
+          // Render the full task card (description · expected output · tools) in chat.
+          addGenerationCard(ownerForGen(genId), 'task', task);
         },
         onComplete: (genId, raw: GenerationCompleteData) => {
           // Route by THIS generation's own origin — never a global owner, which a
@@ -933,7 +1002,7 @@ const ChatWorkspace: React.FC = () => {
     // declaration cycle. Its methods (setLastGenerated) are stable useCallbacks,
     // and this runs only after dispatcher is initialized.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ownerForGen, addGenerationTrace, handleStartExecutionStream],
+    [ownerForGen, addGenerationTrace, addGenerationCard, handleStartExecutionStream],
   );
 
   // Close any open generation streams when ChatMode is fully torn down. It's kept
@@ -1758,8 +1827,10 @@ const ChatWorkspace: React.FC = () => {
       )}
 
       {/* Main content — chat panel */}
+      {/* Chat hides full-screen ONLY for a real deliverable the user collapsed to;
+          the build skeleton never hides chat — the activity must stay visible. */}
       {!(chatCollapsed && previewContent) && (
-        <main className="flex-1 flex flex-col overflow-hidden relative" style={{ flex: previewContent ? '1 1 50%' : '1 1 100%' }}>
+        <main className="flex-1 flex flex-col overflow-hidden relative" style={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%' }}>
           {/* The sidebar toggle + Databricks wordmark now live in the app top bar
               (ChatModeHeaderSlot), so the main area no longer renders its own
               header — this keeps it vertically stable when the sidebar toggles. */}
@@ -1838,6 +1909,14 @@ const ChatWorkspace: React.FC = () => {
           onNavigate={navigatePreview}
         />
       )}
+
+      {/* Preview skeleton — shown WHILE the viewed session's run builds its
+          deliverable (no preview yet). Mutually exclusive with PreviewPanel:
+          showPreviewSkeleton already implies !previewContent. */}
+      {showPreviewSkeleton &&
+        (showRetrievedContext && transientItems.length > 0
+          ? <PreviewActivity items={transientItems} />
+          : <PreviewSkeleton />)}
 
     </div>
   );

@@ -511,3 +511,240 @@ export function resolveValue(value: unknown, data: Record<string, unknown>): unk
   }
   return value;
 }
+
+/** Strip the markdown emphasis markers the A2UI Text renderer shows verbatim. */
+function stripEmphasis(text: string): string {
+  return text.replace(/\*\*/g, '').replace(/__/g, '').replace(/`/g, '').trim();
+}
+
+/** A short line that reads as a section header (an `=== … ===` banner, an
+ *  ALL-CAPS banner, or a brief "Label:" lead-in) — returns the cleaned heading
+ *  text, or null for ordinary prose. */
+function headingText(line: string): string | null {
+  const banner = line.match(/^=+\s*(.+?)\s*=+$/);
+  if (banner) return banner[1].trim();
+  const hasLetters = /[A-Za-z]/.test(line);
+  if (hasLetters && line.length <= 70 && line === line.toUpperCase()) {
+    return line.replace(/[:：]\s*$/, '').trim();
+  }
+  if (line.length <= 48 && /[:：]$/.test(line) && !/[.!?]/.test(line)) {
+    return line.replace(/[:：]\s*$/, '').trim();
+  }
+  return null;
+}
+
+/**
+ * Turn a free-text body — which may be a structured outline (headings, bullet
+ * lists, key/value lines) — into a sequence of A2UI components: headings become
+ * Text h4, runs of bullet/numbered lines become a List, everything else a body
+ * paragraph. This is what makes verbose tool/memory output read as a clean
+ * document instead of a wall of "===" banners and "•"/"-" markers. Returns the
+ * new components plus the child ids to attach, all keyed under `prefix`.
+ */
+// Compact, elegant type scale for the preview's result cards — smaller than the
+// renderer's deck-grade defaults. fontSize / lineHeight / fontWeight /
+// letterSpacing all pass through extractNodeStyle's whitelist, so these refine
+// the look without touching the shared renderer.
+const TITLE_STYLE = { fontSize: '1.05rem', fontWeight: 700, letterSpacing: '0.01em' };
+const HEAD_STYLE = { fontSize: '0.9rem', fontWeight: 600, letterSpacing: '0.03em' };
+const BODY_STYLE = { fontSize: '0.85rem', lineHeight: 1.5 };
+
+/** Drop a metadata line whose value is explicitly empty — "entities: []",
+ *  "dates: {}", "result: none". A bare "Label:" is NOT noise (it's a section
+ *  heading like "Suggested questions:" / "TITLE BLOCK:"), so the empty-value
+ *  marker is required, not optional. */
+function isNoiseLine(line: string): boolean {
+  return /^[A-Za-z][\w &/()'-]*:\s*(\[\s*\]|\{\s*\}|none|n\/?a|null)\s*$/i.test(line);
+}
+
+// Provenance / framing the user does NOT want in the preview — only the
+// retrieved CONTEXT itself. Drops "categories:/entities:/dates:/topics:/tags:/
+// source(s):/score:" metadata lines and "Relevant/Found memories", "Search
+// memory" framing headers.
+const DROP_LABEL = /^(categories|category|entities|entity|dates|date|topics|topic|tags|tag|source|sources|score)\s*:/i;
+const DROP_HEADER = /^(relevant memories|found memories|search memory|no memories|memories found)\b/i;
+
+/** A "Label: • a • b • c" (or bare "• a • b • c") inline run → label + items. */
+function splitInlineBullets(line: string): { label: string; items: string[] } | null {
+  if (!line.includes('•')) return null;
+  const idx = line.indexOf('•');
+  const label = line.slice(0, idx).trim().replace(/[:：]\s*$/, '');
+  const items = line.slice(idx).split('•').map((s) => s.trim()).filter(Boolean);
+  if (items.length < 2) return null;
+  return { label, items };
+}
+
+function bodyToComponents(
+  body: string,
+  prefix: string,
+): { components: Record<string, UiComponent>; childIds: string[] } {
+  const components: Record<string, UiComponent> = {};
+  const childIds: string[] = [];
+  let n = 0;
+  let bullets: string[] = [];
+
+  const pushText = (text: string, variant: string, style: Record<string, unknown>) => {
+    const id = `${prefix}_${n++}`;
+    components[id] = { id, component: 'Text', text, variant, style };
+    childIds.push(id);
+  };
+
+  const flushBullets = () => {
+    if (bullets.length === 0) return;
+    const listId = `${prefix}_l${n++}`;
+    const itemIds = bullets.map((t, k) => {
+      const id = `${listId}_i${k}`;
+      components[id] = { id, component: 'Text', text: t, variant: 'body', style: BODY_STYLE };
+      return id;
+    });
+    components[listId] = { id: listId, component: 'List', children: itemIds };
+    childIds.push(listId);
+    bullets = [];
+  };
+
+  for (const raw of stripEmphasis(body).split('\n')) {
+    let line = raw.trim();
+    // Show ONLY the retrieved context — strip empty noise, provenance metadata
+    // and the memory framing headers.
+    if (!line || isNoiseLine(line) || DROP_LABEL.test(line) || DROP_HEADER.test(line)) {
+      flushBullets();
+      continue;
+    }
+
+    // A new memory/result starts with a "(score=…)" marker — drop the marker and
+    // separate consecutive entries with a hairline divider for an elegant feed.
+    const isEntryStart = /^\(score=[\d.]+\)/i.test(line);
+    line = line.replace(/^\(score=[\d.]+\)\s*/i, '').trim();
+    if (isEntryStart && childIds.length > 0) {
+      flushBullets();
+      const did = `${prefix}_d${n++}`;
+      components[did] = { id: did, component: 'Divider' };
+      childIds.push(did);
+    }
+    if (!line) continue;
+
+    // "Label: • a • b • c" → a labelled bullet list. This is the big readability
+    // win: dense outline lines become a heading over clean list items.
+    const inline = splitInlineBullets(line);
+    if (inline) {
+      flushBullets();
+      if (inline.label) pushText(inline.label, 'h4', HEAD_STYLE);
+      bullets.push(...inline.items);
+      flushBullets();
+      continue;
+    }
+
+    // A leading bullet / number marker → list item.
+    const bullet = line.match(/^[-•*]\s+(.*)$/) || line.match(/^\d+[.)]\s+(.*)$/);
+    if (bullet) {
+      bullets.push(bullet[1].trim());
+      continue;
+    }
+
+    flushBullets();
+    const heading = headingText(line);
+    if (heading) pushText(heading, 'h4', HEAD_STYLE);
+    else pushText(line, 'body', BODY_STYLE);
+  }
+  flushBullets();
+  return { components, childIds };
+}
+
+/** Title-case a JSON key: "suggestedQuestions" / "text_attachments" → "Suggested questions". */
+function humanizeKey(k: string): string {
+  const s = k.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : k;
+}
+
+// JSON keys that are plumbing, not content — dropped from a humanized tool result.
+const JSON_DROP_KEYS = new Set([
+  'conversationid', 'messageid', 'conversation_id', 'message_id', 'id', 'ids',
+  'status', 'queryattachments', 'query_attachments', 'metadata', 'usage', 'role',
+]);
+
+/**
+ * Humanize a JSON tool result (e.g. a Genie response envelope) into readable
+ * text: pull out the prose attachments and suggested questions, render
+ * string-array fields as labelled bullet lists, and drop ids / status / empty
+ * arrays. Returns null when `raw` isn't a JSON object/array, so prose bodies
+ * pass straight through. The text it returns is then formatted by
+ * {@link bodyToComponents} (headings / lists / paragraphs) like any other body.
+ */
+function humanizeToolJson(raw: string): string | null {
+  const t = raw.trim();
+  if (!(t.startsWith('{') || t.startsWith('['))) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(t);
+  } catch {
+    return null;
+  }
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { /* keep as-is */ }
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+
+  const out: string[] = [];
+  const collect = (o: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (JSON_DROP_KEYS.has(k.toLowerCase())) continue;
+      if (typeof v === 'string') {
+        if (v.trim()) out.push(v.trim());
+      } else if (Array.isArray(v)) {
+        const strs = v.filter((x) => typeof x === 'string' && String(x).trim()).map((x) => String(x).trim());
+        if (strs.length === 0) continue;
+        if (/attachment|answer|result|content|text/i.test(k)) {
+          strs.forEach((s) => out.push(s)); // prose → paragraphs (keeps own newlines/bullets)
+        } else {
+          out.push(`${/question/i.test(k) ? 'Suggested questions' : humanizeKey(k)}:`);
+          strs.forEach((s) => out.push(`- ${s}`)); // → labelled bullet list
+        }
+      } else if (v && typeof v === 'object') {
+        collect(v as Record<string, unknown>);
+      }
+    }
+  };
+
+  if (Array.isArray(parsed)) {
+    parsed.forEach((el) => { if (el && typeof el === 'object') collect(el as Record<string, unknown>); });
+  } else {
+    collect(parsed as Record<string, unknown>);
+  }
+  return out.length ? out.join('\n') : null;
+}
+
+/**
+ * Compose a list of `{ title, body }` results into an A2UI surface — a Column of
+ * Cards, each a heading (Text h3) over the structured body (headings / lists /
+ * paragraphs via {@link bodyToComponents}) — so transient / intermediate results
+ * render through the SAME renderer pipeline as final deliverables, instead of
+ * ad-hoc markup. Pure; built on demand, nothing here is persisted. Used by
+ * ChatMode's live preview feed.
+ */
+export function buildResultsSurface(items: { title: string; body?: string }[]): UiSurface {
+  const components: Record<string, UiComponent> = {};
+  const cardIds: string[] = [];
+
+  items.forEach((it, i) => {
+    const childIds: string[] = [];
+    const titleId = `r_title_${i}`;
+    components[titleId] = { id: titleId, component: 'Text', text: stripEmphasis(it.title), variant: 'h3', style: TITLE_STYLE };
+    childIds.push(titleId);
+
+    // A JSON tool envelope (e.g. a Genie response) is humanized into readable
+    // text first; prose bodies pass through untouched.
+    const bodyText = humanizeToolJson(it.body || '') ?? (it.body || '');
+    const blocks = bodyToComponents(bodyText, `r_b${i}`);
+    Object.assign(components, blocks.components);
+    childIds.push(...blocks.childIds);
+
+    const colId = `r_col_${i}`;
+    components[colId] = { id: colId, component: 'Column', children: childIds };
+    const cardId = `r_card_${i}`;
+    components[cardId] = { id: cardId, component: 'Card', children: [colId] };
+    cardIds.push(cardId);
+  });
+
+  components.root = { id: 'root', component: 'Column', children: cardIds };
+  return { rootId: 'root', components, data: {} };
+}
