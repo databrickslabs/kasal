@@ -15,7 +15,10 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.engines.crewai.common.genie_formatting import append_genie_mcp_formatting
+from src.engines.crewai.common.genie_formatting import (
+    append_genie_mcp_formatting,
+    apply_genie_mcp_space_id,
+)
 from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew
@@ -64,6 +67,16 @@ async def build_task_args(
     task_args['expected_output'] = append_genie_mcp_formatting(
         task_args['expected_output'], task_config.get('tool_configs', {}) or {}
     )
+
+    # If a managed-Genie MCP server was selected AND the generator also assigned
+    # the custom GenieTool, hand the MCP server's space id to that GenieTool so
+    # it doesn't error "Genie space ID is not configured". Common to both paths.
+    applied_space = apply_genie_mcp_space_id(task_args['tools'], agent)
+    if applied_space:
+        logger.info(
+            f"Task {task_key}: configured GenieTool spaceId '{applied_space}' "
+            "from the selected Genie MCP server"
+        )
 
     # Code-based guardrail (may re-route to llm_guardrail when it is actually an
     # LLM guardrail stored under the 'guardrail' key).

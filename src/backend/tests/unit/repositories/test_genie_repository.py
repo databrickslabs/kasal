@@ -699,6 +699,20 @@ class TestGetHost:
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
+    async def test_get_host_with_no_auth_config_does_not_raise(self, mock_get_auth):
+        """Regression: GenieRepository() with auth_config=None must not raise
+        "'NoneType' object has no attribute 'host'" in _get_host — the config
+        branch was previously unguarded and crashed Genie space listing."""
+        mock_auth = Mock()
+        mock_auth.workspace_url = "https://auth-host.databricks.com/"
+        mock_get_auth.return_value = mock_auth
+
+        repo = GenieRepository()  # auth_config is None
+        result = await repo._get_host()
+        assert result == "auth-host.databricks.com"
+
+    @patch(AUTH_PATCH)
+    @pytest.mark.asyncio
     async def test_get_host_auth_context_none_falls_to_sdk(self, mock_get_auth, repo_no_host_config):
         """Test _get_host falls to SDK Config when auth context has no workspace_url (covers lines 108-116)."""
         mock_auth = Mock()

@@ -97,8 +97,9 @@ class GenieRepository:
         if self._host:
             return self._host
         
-        # Check from config
-        if self.auth_config.host:
+        # Check from config (auth_config is optional — may be None when the
+        # repository relies on get_auth_context() for auth/host instead).
+        if self.auth_config and self.auth_config.host:
             host = self.auth_config.host
             if host.startswith('https://'):
                 host = host[8:]
