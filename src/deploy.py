@@ -21,10 +21,16 @@ import argparse
 import json
 import tempfile
 import time
+import datetime
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.apps import AppDeploymentMode, App, AppDeployment
+from databricks.sdk.service.apps import (
+    AppDeploymentMode,
+    App,
+    AppDeployment,
+    AppDeploymentState,
+)
 from databricks.sdk.service.workspace import ImportFormat
 
 # Configure logging
@@ -213,6 +219,49 @@ def configure_oauth_scopes(app_name, exclude_dataplane=True):
     except Exception as e:
         logger.error(f"Unexpected error configuring OAuth scopes: {e}")
         return False
+
+
+def wait_for_deployment(client, app_name, deployment_id,
+                        timeout_seconds=3600, interval_seconds=30):
+    """Poll an app deployment until it reaches a terminal state.
+
+    The SDK waiter (``waiter.result()``) gives up after 20 minutes, but a large
+    source tree can take longer than that to download/build server-side — the
+    deployment keeps running and usually still succeeds. This polls the
+    deployment status directly so a slow-but-successful deploy isn't reported as
+    a failure. Returns True only if the deployment ends in the SUCCEEDED state.
+    """
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            dep = client.apps.get_deployment(
+                app_name=app_name, deployment_id=deployment_id
+            )
+        except Exception as e:
+            logger.warning(f"Error polling deployment {deployment_id}: {e}")
+            time.sleep(interval_seconds)
+            continue
+
+        status = getattr(dep, "status", None)
+        state = getattr(status, "state", None)
+        message = getattr(status, "message", "") or ""
+        logger.info(f"Deployment {deployment_id} state: {state} {message}".rstrip())
+
+        if state == AppDeploymentState.SUCCEEDED:
+            return True
+        if state in (AppDeploymentState.FAILED, AppDeploymentState.CANCELLED):
+            logger.error(
+                f"Deployment {deployment_id} ended in state {state}: {message}"
+            )
+            return False
+        time.sleep(interval_seconds)
+
+    logger.error(
+        f"Deployment {deployment_id} did not reach a terminal state within "
+        f"{timeout_seconds}s"
+    )
+    return False
+
 
 def deploy_source_to_databricks(
     app_name="kasal",
@@ -578,6 +627,10 @@ def deploy_source_to_databricks(
             # Deploy the app. If another deployment is already in progress
             # (e.g. a previous run still building), wait for it and retry.
             deadline = time.time() + 1800  # give an in-flight deployment up to 30 min
+            # The SDK waiter defaults to a 20-minute timeout; a large source tree
+            # can take longer than that to download/build, so give it a generous
+            # window before falling back to polling the deployment status.
+            result_timeout = datetime.timedelta(minutes=45)
             while True:
                 try:
                     logger.info("Deploying application")
@@ -585,9 +638,33 @@ def deploy_source_to_databricks(
                         app_name=app_name,
                         app_deployment=app_deployment
                     )
-                    result = waiter.result()
-                    deployment_id = result.deployment_id
-                    logger.info(f"Deployment created with ID: {deployment_id}")
+                    # Capture the deployment id from the initial response so we
+                    # can poll for the outcome if the waiter times out below.
+                    deployment_id = getattr(
+                        getattr(waiter, "bind", None), "deployment_id", None
+                    )
+                    try:
+                        result = waiter.result(timeout=result_timeout)
+                        deployment_id = result.deployment_id
+                        logger.info(f"Deployment created with ID: {deployment_id}")
+                    except TimeoutError as te:
+                        # The deploy is still running server-side — don't report
+                        # a false failure. Poll the deployment status ourselves
+                        # until it reaches a terminal state.
+                        logger.warning(
+                            f"Waiter timed out after {result_timeout}: {te}. "
+                            f"Falling back to polling deployment status..."
+                        )
+                        if not deployment_id:
+                            logger.error(
+                                "No deployment_id available to poll; treating as failure"
+                            )
+                            return False
+                        if not wait_for_deployment(client, app_name, deployment_id):
+                            return False
+                        logger.info(
+                            f"Deployment {deployment_id} succeeded (confirmed via polling)"
+                        )
                     break
                 except Exception as e1:
                     if "active deployment in progress" in str(e1) and time.time() < deadline:
