@@ -5,6 +5,7 @@ import json
 import sys
 import subprocess
 import concurrent.futures
+import time
 import traceback
 import aiohttp
 from typing import Optional
@@ -100,6 +101,127 @@ def _format_mcp_tool_result(result) -> str:
         return _flag("\n".join(parts) if parts else str(result))
 
     return _flag(str(result))
+
+
+# --- Managed Databricks Genie MCP auto-poll --------------------------------
+# The Databricks-managed Genie MCP server (URL .../api/2.0/mcp/genie/<space>)
+# splits a question into TWO tools: "query_space_<space>" returns immediately
+# with an in-progress status envelope, and "poll_response_<space>" fetches the
+# latest status. That leaves the LLM agent to drive the poll loop — and in
+# practice agents give up after a poll or two (while the query is still
+# ASKING_AI / PENDING_WAREHOUSE / EXECUTING_QUERY) and fabricate a "placeholder"
+# answer, and sometimes pass the wrong id (conversation_id as message_id),
+# crashing the poll. To match the blocking behaviour of the built-in GenieTool,
+# we poll internally until the message reaches a terminal status, so the agent
+# gets the finished result from a single query_space call and never has to
+# manage (or bail out of) the loop itself.
+_GENIE_TERMINAL_STATUSES = {"COMPLETED", "FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"}
+_GENIE_POLL_TIMEOUT_SECONDS = 300
+_GENIE_POLL_INTERVAL_SECONDS = 3
+
+
+def _is_managed_genie_adapter(adapter) -> bool:
+    """True for the Databricks-managed Genie MCP server (one space per server)."""
+    return "/mcp/genie/" in str(getattr(adapter, "server_url", "") or "")
+
+
+def _genie_poll_tool_name(query_tool_name: str) -> Optional[str]:
+    """Derive the 'poll_response_<space>' tool name from 'query_space_<space>'."""
+    if "query_space" in query_tool_name:
+        return query_tool_name.replace("query_space", "poll_response", 1)
+    return None
+
+
+def _genie_status_envelope(result) -> Optional[dict]:
+    """Extract a Genie status envelope ({status, conversationId, messageId, ...})
+    from an MCP result, or None if it isn't one (e.g. an error or unknown shape).
+
+    Managed Genie returns the envelope as structuredContent, but fall back to a
+    JSON text content block in case a transport delivers it that way."""
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict) and "status" in structured:
+        return structured
+    for block in (getattr(result, "content", None) or []):
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            try:
+                data = json.loads(text)
+            except Exception:
+                continue
+            if isinstance(data, dict) and "status" in data:
+                return data
+    return None
+
+
+async def _genie_autopoll(wrapper, params):
+    """Execute an MCP tool; for a managed-Genie 'query_space' call, keep polling
+    'poll_response' internally until the Genie message reaches a terminal status,
+    so the agent never sees (and bails on) an in-progress snapshot.
+
+    Returns the final MCP result object, or — on internal-poll timeout — a short
+    directive string telling the agent the query timed out so it does not
+    fabricate results. Any non-Genie tool just executes once, unchanged."""
+    result = await wrapper.execute(params)
+
+    adapter = getattr(wrapper, "adapter", None)
+    if adapter is None or not _is_managed_genie_adapter(adapter):
+        return result
+
+    poll_tool = _genie_poll_tool_name(getattr(wrapper, "name", "") or "")
+    # Only poll if the sibling poll tool actually exists on this server.
+    if not poll_tool or not any(
+        (t.get("name") if isinstance(t, dict) else getattr(t, "name", None)) == poll_tool
+        for t in (getattr(adapter, "tools", None) or [])
+    ):
+        return result
+
+    envelope = _genie_status_envelope(result)
+    if envelope is None:
+        return result  # not a status envelope — already-final answer or unknown shape
+
+    deadline = time.monotonic() + _GENIE_POLL_TIMEOUT_SECONDS
+    polls = 0
+    while True:
+        status = str(envelope.get("status") or "").upper()
+        if not status or status in _GENIE_TERMINAL_STATUSES:
+            return result
+
+        # Pull the ids straight from the envelope so the agent never has to —
+        # this is also what eliminates the conversation_id/message_id mix-up.
+        conversation_id = envelope.get("conversationId") or envelope.get("conversation_id")
+        message_id = envelope.get("messageId") or envelope.get("message_id")
+        if not conversation_id or not message_id:
+            return result  # can't poll without both ids
+
+        if time.monotonic() >= deadline:
+            logger.warning(
+                f"Genie auto-poll timed out after {_GENIE_POLL_TIMEOUT_SECONDS}s "
+                f"(last status={status}) via {poll_tool}"
+            )
+            return (
+                f"The Genie query did not finish within {_GENIE_POLL_TIMEOUT_SECONDS} seconds "
+                f"(last status: {status}). The results are NOT available. Do not fabricate or "
+                f"estimate values — report that the Genie query timed out."
+            )
+
+        await asyncio.sleep(_GENIE_POLL_INTERVAL_SECONDS)
+        polls += 1
+        logger.info(f"Genie auto-poll #{polls} (status={status}) via {poll_tool}")
+        try:
+            result = await adapter.execute_tool(
+                poll_tool,
+                {"conversation_id": conversation_id, "message_id": message_id},
+            )
+        except Exception as e:
+            logger.warning(
+                f"Genie auto-poll request failed, returning last snapshot: {e}"
+            )
+            return result  # hand back the last good snapshot rather than a hard error
+
+        next_envelope = _genie_status_envelope(result)
+        if next_envelope is None:
+            return result  # poll returned an error/unknown shape — surface it as-is
+        envelope = next_envelope
 
 
 # Dictionary to track all active MCP adapters
@@ -384,7 +506,12 @@ def create_crewai_tool_from_mcp(mcp_tool_dict):
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     try:
-                        return new_loop.run_until_complete(self._mcp_tool_wrapper.execute(params))
+                        # _genie_autopoll executes the tool and, for managed-Genie
+                        # query_space calls, blocks until the query completes —
+                        # for every other tool it's a single execute(), unchanged.
+                        return new_loop.run_until_complete(
+                            _genie_autopoll(self._mcp_tool_wrapper, params)
+                        )
                     except Exception as e:
                         logger.error(f"Error in async execution for {self._mcp_tool_wrapper.name}: {e}")
                         logger.error(traceback.format_exc())
