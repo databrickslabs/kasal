@@ -595,10 +595,15 @@ class DatabaseManagementService:
     
     async def run_housekeeping(self, cutoff_date: str) -> Dict[str, Any]:
         """
-        Delete old execution data (history, traces, logs, LLM logs) older than cutoff_date.
+        Delete old execution data (history, traces, logs, LLM logs, billing,
+        HITL approvals) older than cutoff_date.
 
-        Order matters: execution_trace has FK references to executionhistory,
-        so traces must be deleted before the parent execution history rows.
+        Order matters: every table that has a FK to executionhistory must be
+        cleared before the parent execution history rows, otherwise the DELETE
+        on executionhistory raises a FOREIGN KEY constraint failure. The FK
+        children are: execution_trace, llm_usage_billing (no ON DELETE CASCADE),
+        hitl_approvals (CASCADE on fresh DBs only), plus taskstatus + errortrace
+        which the history repo deletes explicitly.
 
         Args:
             cutoff_date: ISO format date string (e.g. "2025-01-01")
@@ -613,20 +618,44 @@ class DatabaseManagementService:
             from src.repositories.execution_history_repository import ExecutionHistoryRepository
             from src.repositories.execution_logs_repository import ExecutionLogsRepository
             from src.repositories.execution_trace_repository import ExecutionTraceRepository
+            from src.repositories.billing_repository import BillingRepository
+            from src.repositories.hitl_repository import HITLApprovalRepository
             from src.models.execution_trace import ExecutionTrace
             from src.models.execution_history import ExecutionHistory
             from src.models.log import LLMLog
 
             cutoff = dt.fromisoformat(cutoff_date)
 
+            # On SQLite, defer foreign-key enforcement to COMMIT time for this
+            # transaction. The deletes below clear every FK child of
+            # executionhistory before the parent, but this purge can touch ~1M
+            # rows and the app shares ONE SQLite connection (StaticPool), so a
+            # concurrent writer can interleave on the shared connection during
+            # the long transaction and trip an immediate per-statement FK check.
+            # Deferring means FKs are validated once, atomically, at commit —
+            # after children and parents are consistently removed. The pragma is
+            # transaction-scoped and resets automatically. No-op on PostgreSQL.
+            from sqlalchemy import text as _sql_text
+            if DatabaseBackupRepository.get_database_type() == 'sqlite':
+                await self.session.execute(_sql_text("PRAGMA defer_foreign_keys=ON"))
+
             # Instantiate repositories with the current session
             history_repo = ExecutionHistoryRepository(session=self.session)
             logs_repo = ExecutionLogsRepository(session=self.session)
+            billing_repo = BillingRepository(session=self.session)
+            hitl_repo = HITLApprovalRepository(session=self.session)
 
-            # 1. Delete execution_trace rows that reference executions older than cutoff
-            #    (FK: execution_trace.run_id -> executionhistory.id)
-            #    Also delete any traces older than cutoff by their own created_at
+            # 1. Delete execution_trace rows that reference executions older than
+            #    cutoff. execution_trace has TWO FKs to executionhistory
+            #    (run_id -> .id AND job_id -> .job_id), and in practice rows link
+            #    via job_id while run_id is NULL — so we MUST delete by both
+            #    references (not just run_id) or the executionhistory delete fails
+            #    on the job_id FK. We also delete by the trace's own created_at as
+            #    a backstop for orphaned/legacy rows.
             old_exec_ids_stmt = select(ExecutionHistory.id).where(
+                ExecutionHistory.created_at < cutoff
+            )
+            old_exec_jobids_stmt = select(ExecutionHistory.job_id).where(
                 ExecutionHistory.created_at < cutoff
             )
             trace_by_ref_stmt = delete(ExecutionTrace).where(
@@ -634,6 +663,13 @@ class DatabaseManagementService:
             )
             trace_ref_result = await self.session.execute(trace_by_ref_stmt)
             trace_count = trace_ref_result.rowcount
+
+            # Delete traces linked to old executions by job_id (run_id often NULL)
+            trace_by_jobid_stmt = delete(ExecutionTrace).where(
+                ExecutionTrace.job_id.in_(old_exec_jobids_stmt)
+            )
+            trace_jobid_result = await self.session.execute(trace_by_jobid_stmt)
+            trace_count += trace_jobid_result.rowcount
 
             # Also delete any orphaned traces older than cutoff by date
             trace_by_date_stmt = delete(ExecutionTrace).where(
@@ -653,13 +689,23 @@ class DatabaseManagementService:
             llm_count = llm_result.rowcount
             await self.session.flush()
 
-            # 4. Delete execution history last (cascades to taskstatus + errortrace)
-            #    Now safe because execution_trace FK references are already gone
+            # 4. Delete billing usage rows that reference old executions.
+            #    (FK: llm_usage_billing.execution_id -> executionhistory.job_id,
+            #    NO ON DELETE CASCADE) — must go before the executionhistory delete.
+            billing_count = await billing_repo.delete_older_than(cutoff)
+
+            # 5. Delete HITL approvals that reference old executions.
+            #    (FK: hitl_approvals.execution_id -> executionhistory.job_id;
+            #    CASCADE on fresh DBs, but older DBs may lack it — delete explicitly.)
+            hitl_count = await hitl_repo.delete_older_than(cutoff)
+
+            # 6. Delete execution history last (cascades to taskstatus + errortrace)
+            #    Now safe because all FK references to it are already gone
             history_result = await history_repo.delete_older_than(cutoff)
 
             await self.session.commit()
 
-            # 5. VACUUM SQLite to reclaim disk space after bulk deletes
+            # 7. VACUUM SQLite to reclaim disk space after bulk deletes
             from sqlalchemy import text
             db_type = DatabaseBackupRepository.get_database_type()
             space_reclaimed = False
@@ -678,6 +724,8 @@ class DatabaseManagementService:
                 'execution_trace': trace_count,
                 'execution_logs': logs_count,
                 'llmlog': llm_count,
+                'llm_usage_billing': billing_count,
+                'hitl_approvals': hitl_count,
             }
             total = sum(deleted.values())
 

@@ -1,10 +1,11 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from sqlalchemy import and_, func, desc, asc
+from sqlalchemy import and_, func, desc, asc, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
+from src.models.execution_history import ExecutionHistory
 
 
 class BillingRepository(BaseRepository[LLMUsageBilling]):
@@ -19,7 +20,36 @@ class BillingRepository(BaseRepository[LLMUsageBilling]):
         self.session.add(usage_record)
         await self.session.flush()
         return usage_record
-    
+
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        """
+        Delete billing usage records that reference executions older than the cutoff.
+
+        LLMUsageBilling.execution_id is a FK to executionhistory.job_id WITHOUT
+        ON DELETE CASCADE, so these rows must be removed before the parent
+        execution history rows during housekeeping, otherwise the DELETE on
+        executionhistory raises a FOREIGN KEY constraint failure.
+
+        Deletion is scoped by the parent execution's created_at (not the billing
+        row's own timestamp) so it stays in lock-step with the execution rows
+        being removed and never leaves orphaned references.
+
+        Args:
+            cutoff: Delete records whose execution's created_at is before this datetime
+
+        Returns:
+            Number of deleted records
+        """
+        old_job_ids = select(ExecutionHistory.job_id).where(
+            ExecutionHistory.created_at < cutoff
+        )
+        stmt = delete(LLMUsageBilling).where(
+            LLMUsageBilling.execution_id.in_(old_job_ids)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
     async def get_usage_by_execution(self, execution_id: str, group_id: Optional[str] = None) -> List[LLMUsageBilling]:
         """Get all usage records for a specific execution"""
         query = self.session.query(LLMUsageBilling).filter(

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func, and_, or_
+from sqlalchemy import desc, func, and_, or_, delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.hitl_approval import (
@@ -18,6 +18,7 @@ from src.models.hitl_approval import (
     HITLApprovalStatus,
     HITLTimeoutAction
 )
+from src.models.execution_history import ExecutionHistory
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,36 @@ class HITLApprovalRepository:
     def __init__(self, session: AsyncSession):
         """Initialize with required session."""
         self.session = session
+
+    async def delete_older_than(self, cutoff: datetime) -> int:
+        """
+        Delete HITL approvals that reference executions older than the cutoff.
+
+        HITLApproval.execution_id is a FK to executionhistory.job_id declared with
+        ON DELETE CASCADE, so on fresh databases the cascade removes these rows
+        automatically when the parent execution is deleted. Older deployed
+        databases whose FK was created before the cascade was added do NOT
+        cascade, so housekeeping deletes these rows explicitly first to avoid a
+        FOREIGN KEY constraint failure on the executionhistory delete.
+
+        Args:
+            cutoff: Delete approvals whose execution's created_at is before this datetime
+
+        Returns:
+            Number of deleted records
+        """
+        if not self.session:
+            raise RuntimeError("HITLApprovalRepository requires a session")
+
+        old_job_ids = select(ExecutionHistory.job_id).where(
+            ExecutionHistory.created_at < cutoff
+        )
+        stmt = delete(HITLApproval).where(
+            HITLApproval.execution_id.in_(old_job_ids)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
 
     async def create(self, approval: HITLApproval) -> HITLApproval:
         """
