@@ -12,6 +12,96 @@ from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_
 
 logger = logging.getLogger(__name__)
 
+
+def _is_image_mime(mime: Optional[str]) -> bool:
+    return bool(mime) and str(mime).lower().startswith("image/")
+
+
+def _format_resource_link(uri: str, name: Optional[str], mime: Optional[str]) -> str:
+    """A markdown image line for image resources, else a plain link line, so the
+    agent can carry it into the final deliverable (A2UI image/album components or
+    inline links) instead of losing it."""
+    label = name or uri
+    return f"![{label}]({uri})" if _is_image_mime(mime) else f"[{label}]({uri})"
+
+
+def _format_content_block(block) -> Optional[str]:
+    """Render a single MCP content block as agent-friendly text.
+
+    Duck-typed (the exact classes vary by MCP SDK version):
+    - text                                  -> the text
+    - embedded resource with text           -> the text
+    - resource link / resource with a uri   -> markdown image line (images) or link
+    - inline image / audio / blob (no uri)  -> a compact placeholder; NEVER the
+      base64 payload, which would flood the LLM context window
+    """
+    text = getattr(block, "text", None)
+    if isinstance(text, str):
+        return text
+
+    btype = str(getattr(block, "type", "") or "").lower()
+
+    # Embedded resource: may carry inline text, a uri, or an inline blob.
+    resource = getattr(block, "resource", None)
+    if resource is not None:
+        rtext = getattr(resource, "text", None)
+        if isinstance(rtext, str):
+            return rtext
+        ruri = getattr(resource, "uri", None)
+        rmime = getattr(resource, "mimeType", None)
+        if ruri:
+            return _format_resource_link(str(ruri), getattr(block, "name", None), rmime)
+        if getattr(resource, "blob", None) is not None:
+            return f"[resource: {rmime or 'application/octet-stream'}]"
+
+    # Resource link (newer MCP) — carries a uri directly.
+    uri = getattr(block, "uri", None)
+    if uri:
+        return _format_resource_link(
+            str(uri), getattr(block, "name", None), getattr(block, "mimeType", None)
+        )
+
+    # Inline binary (image/audio) — placeholder only, never the base64 data.
+    if btype in ("image", "audio") or getattr(block, "data", None) is not None:
+        mime = getattr(block, "mimeType", None) or btype or "binary"
+        return f"[{btype or 'binary'}: {mime}]"
+
+    return None
+
+
+def _format_mcp_tool_result(result) -> str:
+    """Normalize an MCP CallToolResult into agent-friendly text.
+
+    Prefers structured JSON output, surfaces tool errors (``isError``), preserves
+    resource links/images as markdown image lines, and replaces inline binary
+    payloads with compact placeholders — so nothing is silently dropped and the
+    LLM context is never flooded with base64. Falls back to ``str(result)`` for
+    unknown shapes.
+    """
+    if result is None:
+        return ""
+
+    is_error = bool(getattr(result, "isError", False))
+
+    def _flag(body: str) -> str:
+        return f"Tool error: {body}" if is_error else body
+
+    # Modern MCP servers can return structured JSON alongside/instead of content.
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        try:
+            return _flag(json.dumps(structured, default=str))
+        except Exception:
+            return _flag(str(structured))
+
+    content = getattr(result, "content", None)
+    if content:
+        parts = [r for block in content if (r := _format_content_block(block))]
+        return _flag("\n".join(parts) if parts else str(result))
+
+    return _flag(str(result))
+
+
 # Dictionary to track all active MCP adapters
 _active_mcp_adapters = {}
 
@@ -314,13 +404,12 @@ def create_crewai_tool_from_mcp(mcp_tool_dict):
                     logger.debug(f"No running event loop, executing directly for {self._mcp_tool_wrapper.name}")
                     result = run_async_in_new_loop(kwargs)
 
-                # Extract text content if it's an MCP result object
-                if hasattr(result, 'content') and result.content:
-                    text_contents = []
-                    for content in result.content:
-                        if hasattr(content, 'text'):
-                            text_contents.append(content.text)
-                    return ' '.join(text_contents) if text_contents else str(result)
+                # Normalize the MCP result into agent-friendly text: prefer
+                # structured JSON, surface errors, keep resource/image links as
+                # markdown image lines, and replace inline binary with compact
+                # placeholders (never raw base64).
+                if hasattr(result, "content") or hasattr(result, "structuredContent"):
+                    return _format_mcp_tool_result(result)
                 return str(result)
             except Exception as e:
                 logger.error(f"Error executing MCP tool {self._mcp_tool_wrapper.name}: {e}")
