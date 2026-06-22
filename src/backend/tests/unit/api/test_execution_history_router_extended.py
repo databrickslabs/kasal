@@ -259,6 +259,16 @@ class TestCheckExecutionExists:
         )
         assert response.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_forwards_group_ids_to_service(self):
+        """Existence check is scoped to the caller's groups (tenant isolation)."""
+        service = AsyncMock()
+        service.check_execution_exists = AsyncMock(return_value=True)
+        ctx = make_gc()
+
+        await check_execution_exists(execution_id=7, group_context=ctx, service=service)
+        service.check_execution_exists.assert_called_once_with(7, group_ids=ctx.group_ids)
+
 
 class TestGetExecutionById:
     @pytest.mark.asyncio
@@ -412,6 +422,17 @@ class TestDeleteExecution:
         result = await delete_execution(execution_id=1, group_context=ctx, service=service)
         assert result == expected
 
+    @pytest.mark.asyncio
+    async def test_forwards_group_ids_to_service(self):
+        """Delete-by-id is scoped to the caller's groups (no cross-tenant delete)."""
+        expected = DeleteResponse(success=True, message="deleted")
+        service = AsyncMock()
+        service.delete_execution = AsyncMock(return_value=expected)
+        ctx = make_gc()
+
+        await delete_execution(execution_id=5, group_context=ctx, service=service)
+        service.delete_execution.assert_called_once_with(5, group_ids=ctx.group_ids)
+
 
 class TestDeleteExecutionByJobId:
     @pytest.mark.asyncio
@@ -438,3 +459,14 @@ class TestDeleteExecutionByJobId:
             job_id="job-uuid-123", group_context=ctx, service=service
         )
         assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_forwards_group_ids_to_service(self):
+        """Delete-by-job_id is scoped to the caller's groups (no cross-tenant delete)."""
+        expected = DeleteResponse(success=True, message="deleted")
+        service = AsyncMock()
+        service.delete_execution_by_job_id = AsyncMock(return_value=expected)
+        ctx = make_gc()
+
+        await delete_execution_by_job_id(job_id="job-9", group_context=ctx, service=service)
+        service.delete_execution_by_job_id.assert_called_once_with("job-9", group_ids=ctx.group_ids)

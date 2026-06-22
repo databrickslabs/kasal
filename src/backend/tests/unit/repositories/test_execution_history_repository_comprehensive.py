@@ -313,6 +313,32 @@ class TestCheckExecutionExists:
 
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_check_execution_exists_applies_group_filter(self, repository, mock_session):
+        """With group_ids the existence query filters by group_id (tenant isolation)."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.check_execution_exists(1, group_ids=["group-1"])
+
+        assert result is False
+        stmt = mock_session.execute.call_args.args[0]
+        assert "group_id" in str(stmt), "existence check must be scoped by group_id"
+
+    @pytest.mark.asyncio
+    async def test_check_execution_exists_no_group_filter_when_none(self, repository, mock_session):
+        """Without group_ids the query is unfiltered (system/back-compat path)."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 1
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.check_execution_exists(1)
+
+        assert result is True
+        stmt = mock_session.execute.call_args.args[0]
+        assert "group_id" not in str(stmt)
+
 
 class TestDeleteExecution:
     """Tests for delete_execution method."""

@@ -401,8 +401,10 @@ class TestConfigureCrewaiLlm:
             assert call_kwargs["timeout"] == 300
 
     @pytest.mark.asyncio
-    async def test_databricks_no_auth_available(self):
-        """When auth returns None, api_key should be None."""
+    async def test_databricks_no_auth_available_fails_closed(self):
+        """When no Databricks credential resolves for the workspace, fail closed with
+        a clear error instead of silently proceeding with no key (which surfaces as a
+        confusing 'OPENAI_API_KEY is required' downstream)."""
         config = _make_model_config("databricks-llama-4-maverick", "databricks")
         p_session, p_service = _patch_session_and_config(config)
 
@@ -411,11 +413,9 @@ class TestConfigureCrewaiLlm:
             p_service,
             patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None),
             patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
-            patch("src.core.llm_manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", None)
-            call_kwargs = MockRetryLLM.call_args[1]
-            assert "api_key" not in call_kwargs
+            with pytest.raises(ValueError, match="No Databricks credentials available for workspace 'group-1'"):
+                await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", None)
 
     @pytest.mark.asyncio
     async def test_databricks_import_error_raises(self):

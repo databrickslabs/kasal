@@ -191,20 +191,23 @@ class ExecutionHistoryService:
             logger.error(f"Error retrieving execution {execution_id}: {str(e)}", exc_info=True)
             raise
     
-    async def check_execution_exists(self, execution_id: int) -> bool:
+    async def check_execution_exists(self, execution_id: int, group_ids: List[str] = None) -> bool:
         """
-        Check if an execution exists.
-        
+        Check if an execution exists within the caller's groups.
+
         Args:
             execution_id: ID of the execution to check
-            
+            group_ids: List of group IDs for tenant filtering. Scopes the check
+                to the caller's groups so existence of another tenant's execution
+                cannot be probed.
+
         Returns:
-            True if the execution exists, False otherwise
+            True if the execution exists (within the given groups), False otherwise
         """
         try:
-            # Use the repository to check existence
-            exists = await self.history_repo.check_execution_exists(execution_id)
-                
+            # Use the repository to check existence (group-scoped)
+            exists = await self.history_repo.check_execution_exists(execution_id, group_ids=group_ids)
+
             return exists
             
         except SQLAlchemyError as e:
@@ -433,21 +436,25 @@ class ExecutionHistoryService:
             logger.error(f"Error deleting all executions: {str(e)}")
             raise
     
-    async def delete_execution(self, execution_id: int) -> DeleteResponse:
+    async def delete_execution(self, execution_id: int, group_ids: List[str] = None) -> DeleteResponse:
         """
         Delete a specific execution and its associated data.
-        
+
         Args:
             execution_id: ID of the execution to delete
-            
+            group_ids: List of group IDs for tenant filtering. The execution is
+                only deleted if it belongs to one of these groups; otherwise the
+                lookup returns None and the caller gets a 404 (cross-tenant
+                deletes are denied).
+
         Returns:
             DeleteResponse with information about the deleted data
         """
         try:
             logger.info(f"Attempting to delete execution {execution_id} and its associated data")
-            
-            # First get the job_id
-            run = await self.history_repo.get_execution_by_id(execution_id)
+
+            # First get the job_id (group-scoped: returns None if not in the caller's groups)
+            run = await self.history_repo.get_execution_by_id(execution_id, group_ids=group_ids)
             if not run:
                 return None
                 
@@ -501,21 +508,25 @@ class ExecutionHistoryService:
             logger.error(f"Error deleting execution {execution_id}: {str(e)}")
             raise
     
-    async def delete_execution_by_job_id(self, job_id: str) -> DeleteResponse:
+    async def delete_execution_by_job_id(self, job_id: str, group_ids: List[str] = None) -> DeleteResponse:
         """
         Delete a specific execution and its associated data by job_id (UUID).
-        
+
         Args:
             job_id: The job_id (UUID) of the execution
-            
+            group_ids: List of group IDs for tenant filtering. The execution is
+                only deleted if it belongs to one of these groups; otherwise the
+                lookup returns None and the caller gets a 404 (cross-tenant
+                deletes are denied).
+
         Returns:
             DeleteResponse with information about the deleted data
         """
         try:
             logger.info(f"Attempting to delete execution with job_id {job_id} and its associated data")
-            
-            # Check if the execution exists
-            run = await self.history_repo.get_execution_by_job_id(job_id)
+
+            # Check if the execution exists (group-scoped: None if not in the caller's groups)
+            run = await self.history_repo.get_execution_by_job_id(job_id, group_ids=group_ids)
             if not run:
                 return None
                 

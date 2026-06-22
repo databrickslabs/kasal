@@ -518,9 +518,18 @@ async def extract_group_context_from_request(request: Request) -> Optional[Group
         
         # Extract access token
         access_token = extract_user_token_from_request(request)
-        
-        # Create group context from email
-        group_context = await GroupContext.from_email(email, access_token)
+
+        # Honor the explicitly selected workspace from the `group_id` header.
+        # WITHOUT this, from_email() ignores the selection and returns the UNION of
+        # all the user's groups, so primary_group_id resolves to their PERSONAL
+        # workspace — and credential/LLM resolution (which keys off primary_group_id)
+        # would silently use the personal workspace's PAT even when a different
+        # workspace is selected (cross-tenant credential bleed). The dependency
+        # get_group_context() already passes this header; the middleware must match.
+        group_id = request.headers.get('group_id')
+
+        # Create group context from email, scoped to the selected workspace
+        group_context = await GroupContext.from_email(email, access_token, group_id=group_id)
         
         if group_context.is_valid():
             logger.debug(f"Extracted group context: {group_context.primary_group_id}, groups: {group_context.group_ids}")
