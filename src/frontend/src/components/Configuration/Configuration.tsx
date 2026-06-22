@@ -205,6 +205,13 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         index: currentIndex++,
         group: 'system'
       });
+      // MCP (Global) - system-wide MCP servers available to all workspaces
+      baseNavItems.push({
+        label: t('configuration.mcp.global', { defaultValue: 'MCP (Global)' }),
+        icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'system'
+      });
       baseNavItems.push({
         label: t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' }),
         icon: <SettingsIcon fontSize="small" />,
@@ -241,12 +248,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         index: currentIndex++,
         group: 'workspace'
       });
-      baseNavItems.push({
-        label: t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' }),
-        icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
       // Models (Workspace) - workspace models management
       baseNavItems.push({
         label: t('configuration.models.workspace', { defaultValue: 'Models (Workspace)' }),
@@ -258,6 +259,14 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' }),
         icon: <BuildIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // MCP (Workspace) - workspace MCP servers. Ordered after Models/Tools to
+      // match the System Administration section (Models → Tools → MCP).
+      baseNavItems.push({
+        label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Workspace)' }),
+        icon: <CloudIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -733,11 +742,20 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               );
             }
 
-            // MCP Servers
-            if (item.label === t('configuration.mcpServers.tab', { defaultValue: 'MCP Servers' })) {
+            // MCP (Workspace) - Workspace Settings
+            if (item.label === t('configuration.mcp.workspace', { defaultValue: 'MCP (Workspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <MCPConfiguration />
+                  <MCPConfiguration mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // MCP (Global) - System Administration
+            if (item.label === t('configuration.mcp.global', { defaultValue: 'MCP (Global)' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <MCPConfiguration mode="system" />
                 </ContentPanel>
               );
             }

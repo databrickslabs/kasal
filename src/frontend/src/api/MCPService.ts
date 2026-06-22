@@ -14,6 +14,52 @@ interface MCPServerListResponse {
 }
 
 /**
+ * A directly-selectable Databricks MCP server (an external UC-connection MCP, a
+ * managed leaf like Databricks SQL, a Genie space, or an AI Search index).
+ */
+export interface DatabricksMcpOption {
+  id: string;
+  kind: string;
+  name: string;
+  description?: string | null;
+  server_url: string;
+}
+
+/** A managed MCP TYPE: leaves carry a server_url; expandable types drill into a
+ *  second step (Genie spaces / AI Search indexes). */
+export interface DatabricksManagedMcpType {
+  id: string;
+  kind: string;
+  name: string;
+  description?: string | null;
+  server_url?: string;
+  expandable: boolean;
+}
+
+/** The workspace's Databricks MCP catalog, grouped for the two-step picker. */
+export interface DatabricksMcpCatalog {
+  workspace_url: string;
+  external: DatabricksMcpOption[];
+  managed: DatabricksManagedMcpType[];
+}
+
+/**
+ * The Kasal MCP server name a Databricks option registers under.
+ * Always LOWERCASE: server resolution matches by exact name, so one canonical
+ * casing prevents duplicate registrations of the same server. This is the
+ * single source of truth for that mapping — both registration
+ * (MCPService.ensureDatabricksServer) and "is it already enabled?" matching
+ * must agree, or the catalog toggles desync from the registered servers.
+ */
+export function databricksMcpServerName(
+  option: Pick<DatabricksMcpOption, 'kind' | 'name'>,
+): string {
+  if (option.kind === 'genie') return `databricks genie: ${option.name}`.toLowerCase();
+  if (option.kind === 'ai-search') return `databricks ai search: ${option.name}`.toLowerCase();
+  return option.name.toLowerCase();
+}
+
+/**
  * Service for managing MCP (Model Context Protocol) server configurations
  */
 export class MCPService {
@@ -218,6 +264,180 @@ export class MCPService {
       const axiosError = error as AxiosError<ErrorResponse>;
       throw new Error(axiosError.response?.data?.detail || `Error enabling server ${id} for workspace`);
     }
+  }
+
+  /**
+   * The workspace's Databricks MCP catalog (admin-only on the backend): external
+   * UC-connection MCPs and managed types (Databricks SQL, Unity Catalog
+   * Functions, plus expandable Genie / AI Search). Drives the Configuration → MCP
+   * "Databricks MCP Catalog" section where admins enable/disable them.
+   */
+  async getDatabricksCatalog(): Promise<DatabricksMcpCatalog> {
+    try {
+      const response = await apiClient.get<Partial<DatabricksMcpCatalog>>('/mcp/databricks/available');
+      return {
+        workspace_url: response.data.workspace_url ?? '',
+        external: response.data.external ?? [],
+        managed: response.data.managed ?? [],
+      };
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching Databricks MCP catalog');
+    }
+  }
+
+  /** Second step of the Genie picker: searchable, paginated spaces. */
+  async listGenieSpaces(
+    search?: string,
+    pageToken?: string,
+  ): Promise<{ options: DatabricksMcpOption[]; next_page_token: string | null }> {
+    try {
+      const response = await apiClient.get<{
+        options?: DatabricksMcpOption[];
+        next_page_token?: string | null;
+      }>('/mcp/databricks/genie-spaces', {
+        params: {
+          ...(search ? { search } : {}),
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+      });
+      return {
+        options: response.data.options ?? [],
+        next_page_token: response.data.next_page_token ?? null,
+      };
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching Genie spaces');
+    }
+  }
+
+  /** Second step of the AI Search picker: the workspace's vector search indexes. */
+  async listAiSearchIndexes(): Promise<DatabricksMcpOption[]> {
+    try {
+      const response = await apiClient.get<{ options?: DatabricksMcpOption[] }>(
+        '/mcp/databricks/ai-search-indexes',
+      );
+      return response.data.options ?? [];
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching AI Search indexes');
+    }
+  }
+
+  /**
+   * Get the base/global MCP servers (group_id IS NULL) — the system-admin
+   * catalog. A base server is "available to all workspaces" when enabled.
+   */
+  async getBaseServers(): Promise<MCPServerListResponse> {
+    try {
+      const response = await apiClient.get<MCPServerListResponse>('/mcp/servers/base');
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching global MCP servers');
+    }
+  }
+
+  /** Create a base/global MCP server (available to all workspaces). System admin only. */
+  async createGlobalServer(server: Omit<MCPServerConfig, 'id'>): Promise<MCPServerConfig> {
+    try {
+      const response = await apiClient.post<MCPServerConfig>('/mcp/servers/global', server);
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error creating global MCP server');
+    }
+  }
+
+  /** System admin: set whether a base/global server is available to all workspaces. */
+  async setGlobalAvailability(id: string, enabled: boolean): Promise<MCPServerConfig> {
+    try {
+      const response = await apiClient.patch<MCPServerConfig>(
+        `/mcp/servers/${id}/global-availability`,
+        { enabled },
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error setting global availability');
+    }
+  }
+
+  /**
+   * Workspace admin: enable/disable a server for THIS workspace only. Disabling a
+   * globally-available (base) server creates a workspace-scoped override; toggling
+   * the workspace's own row flips it in place.
+   */
+  async setWorkspaceEnabled(id: string, enabled: boolean): Promise<MCPServerConfig> {
+    try {
+      const response = await apiClient.patch<MCPServerConfig>(
+        `/mcp/servers/${id}/workspace-enabled`,
+        { enabled },
+      );
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error updating MCP server for workspace');
+    }
+  }
+
+  /**
+   * Idempotently register a Databricks MCP option as a Kasal MCP server and
+   * return the registered name. Reuses an existing registration when the
+   * canonical name or URL already exists, re-enabling it if disabled and
+   * normalizing legacy mixed-case names. Registration requires admin (403
+   * otherwise). Used by the Configuration → MCP catalog toggle.
+   *
+   * ``scope`` controls whether the server is registered as a base/global server
+   * ('global', system admin — available to all workspaces) or a workspace-scoped
+   * one ('workspace', the default).
+   */
+  async ensureDatabricksServer(
+    option: DatabricksMcpOption,
+    scope: 'workspace' | 'global' = 'workspace',
+  ): Promise<string> {
+    const name = databricksMcpServerName(option);
+    const { servers } =
+      scope === 'global' ? await this.getBaseServers() : await this.getMcpServers();
+    // Match case-insensitively so legacy mixed-case registrations are reused
+    // instead of duplicated.
+    const match = servers.find(
+      (s) =>
+        s.name.toLowerCase() === name ||
+        (!!s.server_url && s.server_url === option.server_url),
+    );
+    if (match) {
+      if (!match.enabled) {
+        if (scope === 'global') await this.setGlobalAvailability(match.id, true);
+        else await this.setWorkspaceEnabled(match.id, true);
+      }
+      // Normalize legacy mixed-case names to the lowercase canonical name. If the
+      // rename is not permitted, keep the stored name — crews resolve by it.
+      if (match.name !== name) {
+        try {
+          await this.updateMcpServer(match.id, { name });
+          return name;
+        } catch {
+          return match.name;
+        }
+      }
+      return match.name;
+    }
+    const payload: Omit<MCPServerConfig, 'id'> = {
+      name,
+      server_url: option.server_url,
+      server_type: 'streamable',
+      auth_type: 'databricks_spn',
+      enabled: true,
+      global_enabled: false,
+      api_key: '',
+      timeout_seconds: 30,
+      max_retries: 3,
+      rate_limit: 60,
+    };
+    if (scope === 'global') await this.createGlobalServer(payload);
+    else await this.createMcpServer(payload);
+    return name;
   }
 
 }

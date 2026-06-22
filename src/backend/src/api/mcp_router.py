@@ -56,6 +56,37 @@ async def get_mcp_service(session: SessionDep) -> MCPService:
 MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
 
 
+def _is_global_admin(group_context) -> bool:
+    """
+    Whether the caller may manage GLOBAL (base) MCP servers.
+
+    Mirrors models_router's global gate: an effective admin role OR a system
+    admin. Global MCP servers are available to all workspaces, so changing them
+    is a system-administration action.
+    """
+    try:
+        from src.core.permissions import get_effective_role
+
+        role = get_effective_role(group_context) if group_context else None
+        if role and role.lower() == "admin":
+            return True
+    except Exception:
+        pass
+    return bool(
+        group_context is not None
+        and getattr(
+            getattr(group_context, "current_user", None), "is_system_admin", False
+        )
+    )
+
+
+def _require_enabled_flag(payload: Dict[str, Any]) -> bool:
+    """Validate and extract a boolean ``enabled`` from a PATCH body."""
+    if "enabled" not in payload or not isinstance(payload["enabled"], bool):
+        raise BadRequestError("'enabled' boolean is required")
+    return bool(payload["enabled"])
+
+
 @router.get("/servers", response_model=MCPServerListResponse)
 async def get_mcp_servers(
     service: MCPServiceDep, group_context: GroupContextDep = None
@@ -173,8 +204,11 @@ async def get_databricks_mcp_options(
     Browsing/registering Databricks MCP servers is a workspace-admin action, so
     this catalog is admin-only (enforced here, not just hidden in the UI).
     """
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
@@ -296,8 +330,11 @@ async def list_genie_mcp_spaces(
     Admin-only: registering a Genie space as an MCP server is a workspace-admin
     action (enforced here, not just hidden in the UI).
     """
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
     from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
     from src.services.genie_service import GenieService
@@ -348,8 +385,11 @@ async def list_ai_search_mcp_indexes(
     Admin-only: registering an AI Search index as an MCP server is a
     workspace-admin action (enforced here, not just hidden in the UI).
     """
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only workspace admins can browse Databricks MCP servers")
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
     import aiohttp
 
@@ -447,6 +487,42 @@ async def get_global_mcp_servers(
     return servers_response
 
 
+@router.get("/servers/base", response_model=MCPServerListResponse)
+async def get_base_mcp_servers(
+    service: MCPServiceDep, group_context: GroupContextDep = None
+) -> MCPServerListResponse:
+    """
+    Get the base/global MCP servers (group_id IS NULL) — the system-admin
+    catalog. A base server is "available to all workspaces" when enabled.
+    Only system admins manage this list.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can view global MCP servers")
+    return await service.get_base_servers()
+
+
+@router.post(
+    "/servers/global",
+    response_model=MCPServerResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_global_mcp_server(
+    server_data: MCPServerCreate,
+    service: MCPServiceDep,
+    group_context: GroupContextDep = None,
+) -> MCPServerResponse:
+    """
+    Create a base/global MCP server (group_id IS NULL), available to all
+    workspaces. Only system admins can create global MCP servers.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can create global MCP servers")
+    logger.info(f"Creating global MCP server with name '{server_data.name}'")
+    server = await service.create_global_server(server_data)
+    logger.info(f"Created global MCP server with ID {server.id}")
+    return server
+
+
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
     server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
@@ -505,8 +581,11 @@ async def update_mcp_server(
     Update an existing MCP server.
     Only Admins can update MCP servers.
     """
-    # Check permissions - only admins can update MCP servers
-    if not check_role_in_context(group_context, ["admin"]):
+    # Check permissions - workspace admins (own rows) or system admins (base rows)
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
         raise ForbiddenError("Only admins can update MCP servers")
 
     logger.info(f"Updating MCP server with ID {server_id}")
@@ -523,8 +602,11 @@ async def delete_mcp_server(
     Delete an MCP server.
     Only Admins can delete MCP servers.
     """
-    # Check permissions - only admins can delete MCP servers
-    if not check_role_in_context(group_context, ["admin"]):
+    # Check permissions - workspace admins (own rows) or system admins (base rows)
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
         raise ForbiddenError("Only admins can delete MCP servers")
 
     logger.info(f"Deleting MCP server with ID {server_id}")
@@ -588,6 +670,55 @@ async def enable_mcp_server_for_workspace(
     if not group_id:
         raise BadRequestError("No workspace/group selected")
     return await service.enable_server_for_group(server_id, group_id)
+
+
+@router.patch(
+    "/servers/{server_id}/global-availability", response_model=MCPServerResponse
+)
+async def set_mcp_server_global_availability(
+    server_id: int,
+    payload: Dict[str, Any],
+    service: MCPServiceDep,
+    group_context: GroupContextDep = None,
+) -> MCPServerResponse:
+    """
+    System admin: set whether a base/global MCP server is available to all
+    workspaces (its ``enabled`` flag). Mirrors Tools' global-availability toggle.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can change global MCP availability")
+    enabled = _require_enabled_flag(payload)
+    logger.info(f"Setting global availability for MCP server {server_id} to {enabled}")
+    return await service.set_global_availability(server_id, enabled)
+
+
+@router.patch(
+    "/servers/{server_id}/workspace-enabled", response_model=MCPServerResponse
+)
+async def set_mcp_server_workspace_enabled(
+    server_id: int,
+    payload: Dict[str, Any],
+    service: MCPServiceDep,
+    group_context: GroupContextDep = None,
+) -> MCPServerResponse:
+    """
+    Workspace admin: enable/disable a server FOR THIS WORKSPACE only.
+
+    Disabling a globally-available (base) server creates a workspace-scoped
+    override (enabled=false) that hides it from this workspace's users without
+    affecting other workspaces. Toggling the workspace's own row flips it in place.
+    """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can change MCP server state for a workspace")
+    group_id = getattr(group_context, "primary_group_id", None)
+    if not group_id:
+        raise BadRequestError("No workspace/group selected")
+    enabled = _require_enabled_flag(payload)
+    logger.info(
+        f"Setting workspace-enabled for MCP server {server_id} to {enabled} "
+        f"(group={group_id})"
+    )
+    return await service.set_server_enabled_for_group(server_id, group_id, enabled)
 
 
 @router.post("/test-connection", response_model=MCPTestConnectionResponse)

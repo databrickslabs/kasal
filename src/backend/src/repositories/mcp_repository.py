@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,49 +98,82 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def find_all_base(self) -> List[MCPServer]:
+        """
+        List all base/global MCP servers (group_id IS NULL).
+
+        These are the system-admin catalog: a base server is "available to all
+        workspaces" when its ``enabled`` flag is True. Used by the global admin
+        view (Configuration → System Administration → MCP (Global)).
+        """
+        query = select(self.model).where(self.model.group_id.is_(None))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def list_for_group_scope(self, group_id: Optional[str]) -> List[MCPServer]:
         """
-        List servers visible to a given workspace, enforcing exclusivity:
-        - Always include servers scoped to the given group_id
-        - Include base (group_id IS NULL) servers ONLY when no group-specific override exists for the same name
-        This ensures that once a server is configured for any workspace, it is hidden from others.
+        List servers effective for a workspace under the GLOBAL + per-workspace
+        override model:
+        - A base server (group_id IS NULL) is visible to workspaces only when it
+          is GLOBALLY AVAILABLE (``enabled == True``) — i.e. published by a system
+          admin in MCP (Global). Globally-unavailable base servers are hidden.
+        - A group-specific row of the same name SHADOWS the base for THAT group
+          only (other workspaces keep seeing the base), carrying the workspace's
+          own enabled/disabled state.
+        With no group_id, return the globally-available set.
         """
-        # Subquery of names that have at least one group-specific override
-        override_names_subq = select(self.model.name).where(self.model.group_id.is_not(None)).distinct()
         if not group_id:
-            # No group provided: only show base servers that have no overrides anywhere
             query = select(self.model).where(
-                (self.model.group_id.is_(None)) & (~self.model.name.in_(override_names_subq))
+                (self.model.group_id.is_(None)) & (self.model.enabled == True)
             )
-        else:
-            # Show this group's servers, plus base servers that have no overrides anywhere
-            query = select(self.model).where(
-                (self.model.group_id == group_id) |
-                ((self.model.group_id.is_(None)) & (~self.model.name.in_(override_names_subq)))
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+        # Names THIS group has overridden (only its own group-specific rows).
+        group_override_names = (
+            select(self.model.name).where(self.model.group_id == group_id).distinct()
+        )
+        query = select(self.model).where(
+            (self.model.group_id == group_id)
+            | (
+                (self.model.group_id.is_(None))
+                & (self.model.enabled == True)
+                & (~self.model.name.in_(group_override_names))
             )
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def find_by_names_group_scope(self, names: List[str], group_id: Optional[str]) -> List[MCPServer]:
         """
-        Find servers by names visible to a given workspace and that are enabled, enforcing exclusivity.
-        - Include group-specific servers for the given workspace
-        - Include base servers ONLY when no group-specific override exists anywhere for that name
+        Find ENABLED servers by names effective for a workspace, honoring the
+        global + per-workspace override model (so a workspace's disabled override
+        also hides the base server at execution time):
+        - Include this workspace's group-specific rows.
+        - Include base servers ONLY when THIS group has not overridden the name.
         """
         if not names:
             return []
-        # Subquery of names that have at least one group-specific override
-        override_names_subq = select(self.model.name).where(self.model.group_id.is_not(None)).distinct()
         if not group_id:
             query = select(self.model).where(
-                (self.model.name.in_(names)) & (self.model.enabled == True) &
-                (self.model.group_id.is_(None)) & (~self.model.name.in_(override_names_subq))
+                (self.model.name.in_(names))
+                & (self.model.enabled == True)
+                & (self.model.group_id.is_(None))
             )
         else:
+            group_override_names = (
+                select(self.model.name)
+                .where(self.model.group_id == group_id)
+                .distinct()
+            )
             query = select(self.model).where(
-                (self.model.name.in_(names)) & (self.model.enabled == True) & (
-                    (self.model.group_id == group_id) |
-                    ((self.model.group_id.is_(None)) & (~self.model.name.in_(override_names_subq)))
+                (self.model.name.in_(names))
+                & (self.model.enabled == True)
+                & (
+                    (self.model.group_id == group_id)
+                    | (
+                        (self.model.group_id.is_(None))
+                        & (~self.model.name.in_(group_override_names))
+                    )
                 )
             )
         result = await self.session.execute(query)

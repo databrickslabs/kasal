@@ -1,70 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  DatabricksMcpCatalog,
-  DatabricksMcpOption,
-  DatabricksManagedMcpType,
-  KasalMcpServer,
-  databricksMcpServerName,
-  ensureDatabricksMcpServer,
-  getDatabricksMcpCatalog,
-  listAiSearchMcpIndexes,
-  listGenieMcpSpaces,
-  listKasalMcpServers,
-} from '../../api/mcp';
+import { KasalMcpServer, listKasalMcpServers } from '../../api/mcp';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
 import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBricksService';
-import { usePermissions } from '../../../../hooks/usePermissions';
 
 /**
- * The chat input's "+" control (left of Send): pick the MCP servers the next
- * crew should be equipped with. ONE flat list under a single "MCP" header —
- * Kasal-configured servers first, then the workspace's Databricks MCPs:
- * external (UC connection-based) ones, directly selectable managed leaves
- * (Databricks SQL, Unity Catalog Functions from the configured
- * catalog.schema), and two-step Genie / AI Search drill-downs (type first,
- * then a searchable space / index list — a workspace can have thousands of
- * Genie spaces, so they are never listed up front).
- * Selecting a Databricks entry registers it as a Kasal MCP server
- * (streamable + databricks_spn); entries already registered in Kasal are
- * hidden from the Databricks portion so each server appears exactly once.
- * Selections live in the execution store and are injected into every
- * generated agent's tool_configs.MCP_SERVERS.
+ * The chat input's "+" control (left of Send): pick the MCP servers (and Agent
+ * Bricks endpoints) the next crew should be equipped with.
+ *
+ * It lists ONLY the MCP servers configured for this workspace — the curated,
+ * group-scoped allow-list returned by /mcp/servers (admins additionally see
+ * any they've disabled, shown greyed out). Browsing and registering the full
+ * Databricks catalog (external connections, Databricks SQL, Unity Catalog
+ * Functions, Genie spaces, AI Search indexes) now lives in
+ * Configuration → MCP, so this picker never enumerates the whole workspace.
+ *
+ * Selections live in the execution store and are injected into every generated
+ * agent's tool_configs.MCP_SERVERS.
  */
-
-const isRegisteredInKasal = (
-  option: DatabricksMcpOption,
-  servers: KasalMcpServer[],
-): boolean =>
-  servers.some(
-    (s) =>
-      // Registered names are lowercase, but legacy rows may be mixed-case.
-      s.name.toLowerCase() === databricksMcpServerName(option) ||
-      Boolean(s.server_url && s.server_url === option.server_url),
-  );
-
-const managedLeafOption = (t: DatabricksManagedMcpType): DatabricksMcpOption => ({
-  id: t.id,
-  kind: t.kind,
-  name: t.name,
-  description: t.description,
-  server_url: t.server_url || '',
-});
-
 const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
   const [kasalServers, setKasalServers] = useState<KasalMcpServer[] | null>(null);
-  const [catalog, setCatalog] = useState<DatabricksMcpCatalog | null>(null);
-  const [expandedType, setExpandedType] = useState<'genie' | 'ai-search' | null>(null);
-  const [genieSearch, setGenieSearch] = useState('');
-  const [genieOptions, setGenieOptions] = useState<DatabricksMcpOption[]>([]);
-  const [genieLoaded, setGenieLoaded] = useState(false);
-  const [genieNextToken, setGenieNextToken] = useState<string | null>(null);
-  const [aiSearchOptions, setAiSearchOptions] = useState<DatabricksMcpOption[]>([]);
-  const [aiSearchLoaded, setAiSearchLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busyOption, setBusyOption] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const selected = useExecutionStore((s) => s.selectedMcpServers);
@@ -78,11 +36,6 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
   // workspace's tool catalog — without that tool, picking an endpoint can't equip it.
   const toolNameMap = useAppStore((s) => s.toolNameMap);
   const agentBricksToolEnabled = Object.values(toolNameMap).includes('AgentBricksTool');
-  // Browsing/registering Databricks MCP servers (the catalog: external UC
-  // connections, managed types, Genie, AI Search) is a workspace-admin action,
-  // enforced server-side. Non-admins only see the servers an admin enabled, so
-  // the catalog sections are hidden for them (and their endpoints would 403).
-  const { isAdmin } = usePermissions();
 
   // Close on outside click.
   useEffect(() => {
@@ -96,7 +49,7 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // Load the Kasal-configured servers when the popover opens.
+  // Load the workspace's configured MCP servers when the popover opens.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -116,26 +69,6 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
     };
   }, [open]);
 
-  // Load the Databricks catalog when the popover opens (cached afterwards).
-  // Admin-only: the catalog is the register-a-Databricks-MCP surface.
-  useEffect(() => {
-    if (!open || !isAdmin || catalog !== null) return;
-    let cancelled = false;
-    getDatabricksMcpCatalog()
-      .then((c) => {
-        if (!cancelled) setCatalog(c);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCatalog({ workspace_url: '', external: [], managed: [] });
-          setError('Could not load Databricks MCPs');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, isAdmin, catalog]);
-
   // Agent Bricks endpoints (loaded once when the popover opens; the section is
   // hidden entirely when the workspace has none — i.e. the feature isn't in use).
   useEffect(() => {
@@ -152,92 +85,6 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
       cancelled = true;
     };
   }, [open, agentBricks, agentBricksToolEnabled]);
-
-  // Step two: Genie spaces (searchable, paginated; debounced on the search box).
-  useEffect(() => {
-    if (!open || !isAdmin || expandedType !== 'genie') return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      listGenieMcpSpaces(genieSearch || undefined)
-        .then(({ options, next_page_token }) => {
-          if (cancelled) return;
-          setGenieOptions(options);
-          setGenieNextToken(next_page_token);
-          setGenieLoaded(true);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setGenieOptions([]);
-          setGenieNextToken(null);
-          setGenieLoaded(true);
-          setError('Could not load Genie spaces');
-        });
-    }, genieLoaded ? 250 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, expandedType, genieSearch]);
-
-  // Step two: AI Search indexes.
-  useEffect(() => {
-    if (!open || !isAdmin || expandedType !== 'ai-search' || aiSearchLoaded) return;
-    let cancelled = false;
-    listAiSearchMcpIndexes()
-      .then((options) => {
-        if (cancelled) return;
-        setAiSearchOptions(options);
-        setAiSearchLoaded(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAiSearchOptions([]);
-        setAiSearchLoaded(true);
-        setError('Could not load AI Search indexes');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, expandedType, aiSearchLoaded]);
-
-  const loadMoreGenie = async (token: string) => {
-    try {
-      const { options, next_page_token } = await listGenieMcpSpaces(
-        genieSearch || undefined,
-        token,
-      );
-      setGenieOptions((prev) => [...prev, ...options]);
-      setGenieNextToken(next_page_token);
-    } catch {
-      setError('Could not load more Genie spaces');
-    }
-  };
-
-  const selectDatabricksOption = async (option: DatabricksMcpOption) => {
-    const name = databricksMcpServerName(option);
-    if (selected.includes(name)) {
-      toggle(name); // deselect — no registration round-trip needed
-      return;
-    }
-    setBusyOption(option.id);
-    setError(null);
-    try {
-      const serverName = await ensureDatabricksMcpServer(option);
-      toggle(serverName);
-      // The registration may have created a new Kasal server — refresh the list.
-      setKasalServers(await listKasalMcpServers());
-    } catch (e) {
-      const response = (e as { response?: { status?: number } }).response;
-      setError(
-        response && response.status === 403
-          ? 'Only admins can register Databricks MCP servers'
-          : 'Could not register the Databricks MCP server',
-      );
-    } finally {
-      setBusyOption(null);
-    }
-  };
 
   const check = (isSelected: boolean) => (
     <span
@@ -256,69 +103,11 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
     </span>
   );
 
-  const chevron = (expanded: boolean) => (
-    <svg
-      className={`w-3 h-3 flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-    </svg>
-  );
-
-  const optionRow = (option: DatabricksMcpOption, indent = false) => {
-    const name = databricksMcpServerName(option);
-    const isSelected = selected.includes(name);
-    const busy = busyOption === option.id;
-    return (
-      <button
-        key={option.id}
-        type="button"
-        role="menuitemcheckbox"
-        aria-checked={isSelected}
-        disabled={busy}
-        onClick={() => void selectDatabricksOption(option)}
-        title={option.description || option.server_url}
-        className={`w-full flex items-center gap-2 ${indent ? 'pl-9' : 'pl-3'} pr-3 py-1.5 text-left text-xs transition-colors hover:opacity-80 disabled:opacity-60`}
-        style={{ color: 'var(--text-primary)' }}
-      >
-        {check(isSelected)}
-        <span className="truncate flex-1">{option.name}</span>
-        <span className="text-[10px] uppercase flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
-          {busy ? '…' : option.kind}
-        </span>
-      </button>
-    );
-  };
-
-  // Top-level filter: the combined list (Kasal + external + managed types) can
-  // be long, so it's searchable by name. Genie spaces / AI Search indexes keep
-  // their own (server-side) search inside the drill-down.
+  // The configured-server list can be long, so it's searchable by name.
   const query = filter.trim().toLowerCase();
   const nameMatches = (name: string) => !query || name.toLowerCase().includes(query);
   const kasalList = kasalServers ?? [];
   const visibleKasal = kasalList.filter((s) => nameMatches(s.name));
-  // The Databricks catalog (browse + register) is admin-only — non-admins only
-  // get the servers an admin has already enabled (returned by listKasalMcpServers).
-  const visibleExternal = !isAdmin ? [] : (catalog?.external ?? []).filter(
-    (o) => !isRegisteredInKasal(o, kasalList) && nameMatches(o.name),
-  );
-  const visibleManaged = !isAdmin ? [] : (catalog?.managed ?? []).filter((t) => nameMatches(t.name));
-
-  const drillRow = (kind: 'genie' | 'ai-search', label: string) => (
-    <button
-      type="button"
-      onClick={() => setExpandedType((t) => (t === kind ? null : kind))}
-      aria-expanded={expandedType === kind}
-      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:opacity-80"
-      style={{ color: 'var(--text-secondary)' }}
-    >
-      {chevron(expandedType === kind)}
-      {label}
-    </button>
-  );
 
   // Agent Bricks rows (filtered by the same top search box as MCP, matched on
   // the friendly agent name).
@@ -388,113 +177,39 @@ const McpPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
           </div>
 
           <div className="max-h-80 overflow-y-auto pb-1">
-            {kasalServers === null || catalog === null ? (
+            {kasalServers === null ? (
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
-            ) : kasalServers.length === 0 &&
-              catalog.external.length === 0 &&
-              catalog.managed.length === 0 ? (
+            ) : kasalList.length === 0 ? (
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                 No MCP servers available
               </div>
-            ) : visibleKasal.length === 0 &&
-              visibleExternal.length === 0 &&
-              visibleManaged.length === 0 ? (
+            ) : visibleKasal.length === 0 ? (
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                 No matching MCP servers
               </div>
             ) : (
-              <>
-                {/* Kasal-configured servers */}
-                {visibleKasal.map((server) => {
-                  const isSelected = selected.includes(server.name);
-                  return (
-                    <button
-                      key={String(server.id)}
-                      type="button"
-                      role="menuitemcheckbox"
-                      aria-checked={isSelected}
-                      disabled={!server.enabled && !isSelected}
-                      onClick={() => toggle(server.name)}
-                      title={!server.enabled ? 'Disabled — enable it in Configuration → MCP' : server.server_url}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{ color: 'var(--text-primary)' }}
-                    >
-                      {check(isSelected)}
-                      <span className="truncate flex-1">{server.name}</span>
-                      {!server.enabled && (
-                        <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>disabled</span>
-                      )}
-                    </button>
-                  );
-                })}
-
-                {/* Databricks external (UC connection) servers, minus the ones
-                    already registered in Kasal above. */}
-                {visibleExternal.map((option) => optionRow(option))}
-
-                {/* Databricks managed types: leaves select directly, Genie and
-                    AI Search drill into their instances. */}
-                {visibleManaged.map((managedType) =>
-                  managedType.expandable ? (
-                    <React.Fragment key={managedType.id}>
-                      {drillRow(
-                        managedType.kind as 'genie' | 'ai-search',
-                        managedType.name,
-                      )}
-                      {expandedType === managedType.kind && managedType.kind === 'genie' && (
-                        <>
-                          <div className="pl-9 pr-3 py-1">
-                            <input
-                              value={genieSearch}
-                              onChange={(e) => setGenieSearch(e.target.value)}
-                              placeholder="Search Genie spaces…"
-                              aria-label="Search Genie spaces"
-                              className="w-full rounded-md px-2 py-1 text-xs outline-none"
-                              style={{
-                                backgroundColor: 'var(--bg-input)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border-color)',
-                              }}
-                            />
-                          </div>
-                          {!genieLoaded ? (
-                            <div className="pl-9 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
-                          ) : genieOptions.length === 0 ? (
-                            <div className="pl-9 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>No spaces found</div>
-                          ) : (
-                            <>
-                              {genieOptions.map((option) => optionRow(option, true))}
-                              {genieNextToken && (
-                                <button
-                                  type="button"
-                                  onClick={() => void loadMoreGenie(genieNextToken)}
-                                  className="w-full pl-9 pr-3 py-1.5 text-left text-xs font-medium transition-colors hover:opacity-80"
-                                  style={{ color: 'var(--accent)' }}
-                                >
-                                  Load more…
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </>
-                      )}
-                      {expandedType === managedType.kind && managedType.kind === 'ai-search' && (
-                        !aiSearchLoaded ? (
-                          <div className="pl-9 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
-                        ) : aiSearchOptions.length === 0 ? (
-                          <div className="pl-9 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>No indexes found</div>
-                        ) : (
-                          aiSearchOptions.map((option) => optionRow(option, true))
-                        )
-                      )}
-                    </React.Fragment>
-                  ) : (
-                    [managedLeafOption(managedType)]
-                      .filter((option) => !isRegisteredInKasal(option, kasalServers))
-                      .map((option) => optionRow(option))
-                  ),
-                )}
-              </>
+              visibleKasal.map((server) => {
+                const isSelected = selected.includes(server.name);
+                return (
+                  <button
+                    key={String(server.id)}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={isSelected}
+                    disabled={!server.enabled && !isSelected}
+                    onClick={() => toggle(server.name)}
+                    title={!server.enabled ? 'Disabled — enable it in Configuration → MCP' : server.server_url}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    {check(isSelected)}
+                    <span className="truncate flex-1">{server.name}</span>
+                    {!server.enabled && (
+                      <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>disabled</span>
+                    )}
+                  </button>
+                );
+              })
             )}
           </div>
 

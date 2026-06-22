@@ -1,14 +1,11 @@
 /**
- * MCP servers for the chat's "+" picker. Two sources:
- *  - Kasal: the MCP servers configured in Kasal itself.
- *  - Databricks: the workspace's MCP servers — EXTERNAL ones registered as UC
- *    connections, and MANAGED types (Databricks SQL, Unity Catalog Functions
- *    from the configured catalog.schema, plus two-step Genie / AI Search
- *    pickers, since spaces and indexes can number in the thousands).
+ * MCP servers for the chat's "+" picker.
  *
- * Selecting a Databricks entry registers it as a Kasal MCP server (streamable
- * transport, databricks_spn auth on the workspace host) so crews can resolve
- * it by name at execution time.
+ * The picker lists ONLY the MCP servers configured for the current workspace —
+ * the curated, group-scoped allow-list returned by GET /mcp/servers. Browsing
+ * and registering the full Databricks catalog (external connections, Databricks
+ * SQL, Unity Catalog Functions, Genie spaces, AI Search indexes) lives in
+ * Configuration → MCP and is served by MCPService (src/api/MCPService.ts).
  */
 import { getClient } from './client';
 
@@ -19,128 +16,7 @@ export interface KasalMcpServer {
   server_url?: string;
 }
 
-export interface DatabricksMcpOption {
-  id: string;
-  kind: string;
-  name: string;
-  description?: string | null;
-  server_url: string;
-}
-
-/** A managed MCP TYPE: leaves carry a server_url; expandable types drill into
- *  a second step (Genie spaces / AI Search indexes). */
-export interface DatabricksManagedMcpType {
-  id: string;
-  kind: string;
-  name: string;
-  description?: string | null;
-  server_url?: string;
-  expandable: boolean;
-}
-
-export interface DatabricksMcpCatalog {
-  workspace_url: string;
-  external: DatabricksMcpOption[];
-  managed: DatabricksManagedMcpType[];
-}
-
 export async function listKasalMcpServers(): Promise<KasalMcpServer[]> {
   const res = await getClient().get<{ servers?: KasalMcpServer[] }>('/mcp/servers');
   return res.data.servers ?? [];
-}
-
-export async function getDatabricksMcpCatalog(): Promise<DatabricksMcpCatalog> {
-  const res = await getClient().get<Partial<DatabricksMcpCatalog>>(
-    '/mcp/databricks/available',
-  );
-  return {
-    workspace_url: res.data.workspace_url ?? '',
-    external: res.data.external ?? [],
-    managed: res.data.managed ?? [],
-  };
-}
-
-/** Second step of the Genie picker: searchable, paginated spaces. */
-export async function listGenieMcpSpaces(
-  search?: string,
-  pageToken?: string,
-): Promise<{ options: DatabricksMcpOption[]; next_page_token: string | null }> {
-  const res = await getClient().get<{
-    options?: DatabricksMcpOption[];
-    next_page_token?: string | null;
-  }>('/mcp/databricks/genie-spaces', {
-    params: {
-      ...(search ? { search } : {}),
-      ...(pageToken ? { page_token: pageToken } : {}),
-    },
-  });
-  return {
-    options: res.data.options ?? [],
-    next_page_token: res.data.next_page_token ?? null,
-  };
-}
-
-/** Second step of the AI Search picker: the workspace's indexes. */
-export async function listAiSearchMcpIndexes(): Promise<DatabricksMcpOption[]> {
-  const res = await getClient().get<{ options?: DatabricksMcpOption[] }>(
-    '/mcp/databricks/ai-search-indexes',
-  );
-  return res.data.options ?? [];
-}
-
-/** The Kasal MCP server name a Databricks option registers under.
- *  Always LOWERCASE: server resolution matches by exact name, so one
- *  canonical casing prevents duplicate registrations of the same server. */
-export function databricksMcpServerName(
-  option: Pick<DatabricksMcpOption, 'kind' | 'name'>,
-): string {
-  if (option.kind === 'genie') return `databricks genie: ${option.name}`.toLowerCase();
-  if (option.kind === 'ai-search') return `databricks ai search: ${option.name}`.toLowerCase();
-  return option.name.toLowerCase();
-}
-
-/**
- * Idempotently register a Databricks MCP server as a Kasal MCP server and
- * return the (Kasal) server name crews reference in tool_configs.MCP_SERVERS.
- * Reuses an existing registration when the name or URL already exists,
- * re-enabling it if needed. Registration requires the admin role — a 403
- * surfaces to the caller.
- */
-export async function ensureDatabricksMcpServer(
-  option: DatabricksMcpOption,
-): Promise<string> {
-  const name = databricksMcpServerName(option);
-  const existing = await listKasalMcpServers();
-  // Match case-insensitively so legacy mixed-case registrations
-  // ("Databricks SQL") are reused instead of duplicated.
-  const match = existing.find(
-    (s) =>
-      s.name.toLowerCase() === name ||
-      (s.server_url && s.server_url === option.server_url),
-  );
-  if (match) {
-    if (!match.enabled) {
-      await getClient().patch(`/mcp/servers/${match.id}/toggle-enabled`);
-    }
-    // Normalize legacy mixed-case registrations ("Databricks SQL") to the
-    // lowercase canonical name. If the rename is not permitted, fall back to
-    // the stored name — crews resolve servers by their registered name.
-    if (match.name !== name) {
-      try {
-        await getClient().put(`/mcp/servers/${match.id}`, { name });
-        return name;
-      } catch {
-        return match.name;
-      }
-    }
-    return match.name;
-  }
-  await getClient().post('/mcp/servers', {
-    name,
-    server_url: option.server_url,
-    server_type: 'streamable',
-    auth_type: 'databricks_spn',
-    enabled: true,
-  });
-  return name;
 }

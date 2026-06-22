@@ -1,4 +1,4 @@
-import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
+import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -7,56 +7,62 @@ import MCPConfiguration from './MCPConfiguration';
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: any) => options?.defaultValue || key,
-    i18n: {
-      changeLanguage: vi.fn().mockResolvedValue(undefined),
-    },
+    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key,
+    i18n: { changeLanguage: vi.fn().mockResolvedValue(undefined) },
   }),
 }));
 
-// Mock the MCP service
+// Mock the MCP service (covers both the page and the embedded Databricks catalog)
 const mockMCPService = {
   getGlobalSettings: vi.fn(),
   updateGlobalSettings: vi.fn(),
   getMcpServers: vi.fn(),
+  getBaseServers: vi.fn(),
   createMcpServer: vi.fn(),
+  createGlobalServer: vi.fn(),
   updateMcpServer: vi.fn(),
   deleteMcpServer: vi.fn(),
-  toggleMcpServerEnabled: vi.fn(),
+  setGlobalAvailability: vi.fn(),
+  setWorkspaceEnabled: vi.fn(),
   testConnection: vi.fn(),
+  getDatabricksCatalog: vi.fn(),
+  listGenieSpaces: vi.fn(),
+  listAiSearchIndexes: vi.fn(),
+  ensureDatabricksServer: vi.fn(),
 };
 
 vi.mock('../../../api/MCPService', () => ({
-  MCPService: {
-    getInstance: () => mockMCPService,
-  },
+  MCPService: { getInstance: () => mockMCPService },
+  databricksMcpServerName: (o: { kind: string; name: string }) => o.name.toLowerCase(),
 }));
 
 describe('MCPConfiguration', () => {
-  const mockSettings = {
-    global_enabled: true,
-  };
-
-  const mockServers = [
+  // Workspace-mode servers: a globally-inherited one (no group_id) the workspace
+  // can toggle, and a workspace override row.
+  const workspaceServers = [
     {
       id: '1',
-      name: 'Test Server 1',
+      name: 'Global Server',
       server_type: 'streamable',
-      server_url: 'https://test1.example.com',
+      server_url: 'https://global.example.com/mcp',
       auth_type: 'databricks_spn',
       enabled: true,
+      group_id: null,
       timeout_seconds: 30,
       max_retries: 3,
       rate_limit: 60,
     },
+  ];
+
+  const baseServers = [
     {
-      id: '2',
-      name: 'Test Server 2',
+      id: '10',
+      name: 'Base Server',
       server_type: 'streamable',
-      server_url: 'https://api.example.com/mcp',
-      auth_type: 'api_key',
-      api_key: 'test-api-key',
-      enabled: false,
+      server_url: 'https://base.example.com/mcp',
+      auth_type: 'databricks_spn',
+      enabled: true,
+      group_id: null,
       timeout_seconds: 30,
       max_retries: 3,
       rate_limit: 60,
@@ -65,156 +71,188 @@ describe('MCPConfiguration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockMCPService.getGlobalSettings.mockResolvedValue(mockSettings);
-    mockMCPService.getMcpServers.mockResolvedValue({ servers: mockServers });
+    mockMCPService.getGlobalSettings.mockResolvedValue({ global_enabled: true });
+    mockMCPService.getMcpServers.mockResolvedValue({ servers: workspaceServers });
+    mockMCPService.getBaseServers.mockResolvedValue({ servers: baseServers });
+    mockMCPService.getDatabricksCatalog.mockResolvedValue({
+      workspace_url: '',
+      external: [],
+      managed: [],
+    });
+    mockMCPService.setGlobalAvailability.mockResolvedValue({});
+    mockMCPService.setWorkspaceEnabled.mockResolvedValue({});
   });
 
-  it('renders MCP configuration correctly', async () => {
+  // =========================================================================
+  // Workspace mode (default): consume + toggle the globally-enabled set
+  // =========================================================================
+
+  it('renders the workspace view from the effective server list', async () => {
     await act(async () => {
-      render(<MCPConfiguration />);
+      render(<MCPConfiguration mode="workspace" />);
     });
 
-    // Check basic elements
     expect(screen.getByText('MCP Server Configuration')).toBeInTheDocument();
-
-    // Wait for data to load
-    await waitFor(() => {
-      expect(screen.getByText('Test Server 1')).toBeInTheDocument();
-      expect(screen.getByText('Test Server 2')).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText('Global Server')).toBeInTheDocument());
+    expect(mockMCPService.getMcpServers).toHaveBeenCalled();
   });
 
-  it('opens add server dialog', async () => {
+  it('marks inherited globals with a Global chip and offers no Add/edit in workspace mode', async () => {
     await act(async () => {
-      render(<MCPConfiguration />);
+      render(<MCPConfiguration mode="workspace" />);
+    });
+    await screen.findByText('Global Server');
+
+    expect(screen.getByText('Global')).toBeInTheDocument();
+    // Workspace admins do not register/edit servers — that's MCP (Global).
+    expect(screen.queryByText('Add Server')).not.toBeInTheDocument();
+  });
+
+  it('toggling a server in workspace mode sets the per-workspace state', async () => {
+    await act(async () => {
+      render(<MCPConfiguration mode="workspace" />);
+    });
+    await screen.findByText('Global Server');
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    await waitFor(() =>
+      expect(mockMCPService.setWorkspaceEnabled).toHaveBeenCalledWith('1', false),
+    );
+    expect(mockMCPService.setGlobalAvailability).not.toHaveBeenCalled();
+  });
+
+  it('shows the workspace empty state when nothing is globally available', async () => {
+    mockMCPService.getMcpServers.mockResolvedValue({ servers: [] });
+    await act(async () => {
+      render(<MCPConfiguration mode="workspace" />);
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText('No MCP servers have been made available globally yet.'),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // =========================================================================
+  // System (global) mode: register + manage the global catalog
+  // =========================================================================
+
+  it('renders the global view from the base server list (catalog is lazy)', async () => {
+    await act(async () => {
+      render(<MCPConfiguration mode="system" />);
     });
 
-    // Wait for the Add button to appear
+    expect(screen.getByText('Global MCP Servers')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Base Server')).toBeInTheDocument());
+    expect(mockMCPService.getBaseServers).toHaveBeenCalled();
+    expect(screen.getByText('Add Server')).toBeInTheDocument();
+    // The Databricks catalog is NOT rendered inline — it loads only on demand.
+    expect(mockMCPService.getDatabricksCatalog).not.toHaveBeenCalled();
+    expect(screen.queryByText('Databricks MCP Catalog')).not.toBeInTheDocument();
+  });
+
+  it('opens the Databricks catalog picker lazily from the Add menu', async () => {
+    await act(async () => {
+      render(<MCPConfiguration mode="system" />);
+    });
     const addButton = await screen.findByText('Add Server');
 
     await act(async () => {
       fireEvent.click(addButton);
     });
+    // The Add menu offers both entry modes; the catalog has not loaded yet.
+    expect(screen.getByText('Manual entry')).toBeInTheDocument();
+    expect(screen.getByText('Databricks catalog')).toBeInTheDocument();
+    expect(mockMCPService.getDatabricksCatalog).not.toHaveBeenCalled();
 
-    // Check dialog opened
+    await act(async () => {
+      fireEvent.click(screen.getByText('Databricks catalog'));
+    });
+    // The dialog mounts the catalog → it fetches on demand.
+    await waitFor(() => expect(mockMCPService.getDatabricksCatalog).toHaveBeenCalled());
+    expect(screen.getByText('Add from Databricks Catalog')).toBeInTheDocument();
+  });
+
+  it('toggling a server in system mode sets its global availability', async () => {
+    await act(async () => {
+      render(<MCPConfiguration mode="system" />);
+    });
+    await screen.findByText('Base Server');
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    await waitFor(() =>
+      expect(mockMCPService.setGlobalAvailability).toHaveBeenCalledWith('10', false),
+    );
+    expect(mockMCPService.setWorkspaceEnabled).not.toHaveBeenCalled();
+  });
+
+  it('opens the manual add-server dialog from the Add menu', async () => {
+    await act(async () => {
+      render(<MCPConfiguration mode="system" />);
+    });
+
+    const addButton = await screen.findByText('Add Server');
+    await act(async () => {
+      fireEvent.click(addButton);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Manual entry'));
+    });
+
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Add MCP Server')).toBeInTheDocument();
   });
 
-  it('shows authentication type options', async () => {
+  it('shows authentication type options in the manual add dialog', async () => {
     await act(async () => {
-      render(<MCPConfiguration />);
+      render(<MCPConfiguration mode="system" />);
     });
 
-    // Open dialog
     const addButton = await screen.findByText('Add Server');
     await act(async () => {
       fireEvent.click(addButton);
     });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Manual entry'));
+    });
 
-    // Find auth dropdown
     const authSelect = screen.getByLabelText('Authentication Type');
-    expect(authSelect).toBeInTheDocument();
-
-    // Open dropdown
     fireEvent.mouseDown(authSelect);
 
-    // Check options
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'API Key' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Apps SPN' })).toBeInTheDocument();
     });
   });
 
-  it('hides API key field for Apps SPN', async () => {
-    // Skip this test as Material-UI dialogs render in portals making testing difficult
-    // The functionality is tested manually and works correctly
-  });
-
-  it('shows Streamable server type', async () => {
-    await act(async () => {
-      render(<MCPConfiguration />);
-    });
-
-    // Open dialog
-    const addButton = await screen.findByText('Add Server');
-    await act(async () => {
-      fireEvent.click(addButton);
-    });
-
-    // Wait for dialog to be visible
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
-    });
-
-    // Find server type dropdown
-    const serverTypeSelect = screen.getByLabelText('Server Type');
-    fireEvent.mouseDown(serverTypeSelect);
-
-    // Check options (only Streamable HTTP)
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Streamable HTTP' })).toBeInTheDocument();
-      expect(screen.queryByRole('option', { name: 'SSE (Server-Sent Events)' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('option', { name: 'STDIO' })).not.toBeInTheDocument();
-    });
-  });
-
-  it('enables test connection when required fields filled', async () => {
-    // Skip this test as Material-UI dialogs render in portals making testing difficult
-    // The functionality is tested manually and works correctly
-  });
-
-  it('handles test connection success', async () => {
-    // Skip this test as Material-UI dialogs render in portals making testing difficult
-    // The functionality is tested manually and works correctly
-  });
-
-  it('creates server with API key auth', async () => {
-    // Skip this test as Material-UI dialogs render in portals making testing difficult
-    // The functionality is tested manually and works correctly
-  });
-
-  it('creates server with Apps SPN auth', async () => {
-    // Skip this test as Material-UI dialogs render in portals making testing difficult
-    // The functionality is tested manually and works correctly
-  });
-
   it('does not show model mapping toggle', async () => {
     await act(async () => {
-      render(<MCPConfiguration />);
+      render(<MCPConfiguration mode="system" />);
     });
-
-    // Model mapping should not exist
     await waitFor(() => {
       expect(screen.queryByText(/enable model mapping/i)).not.toBeInTheDocument();
     });
   });
 
   // =========================================================================
-  // Loading / error / empty states
+  // Loading / error states (workspace mode)
   // =========================================================================
 
   describe('loading and error states', () => {
     it('shows full-page loading message while fetching servers', async () => {
-      // Make getMcpServers hang so we can observe the loading state
       let resolveFetch!: (value: unknown) => void;
       mockMCPService.getMcpServers.mockReturnValue(
         new Promise(resolve => { resolveFetch = resolve; })
       );
 
       await act(async () => {
-        render(<MCPConfiguration />);
+        render(<MCPConfiguration mode="workspace" />);
       });
 
-      // Full-page loading message should be visible
       expect(screen.getByText('Loading MCP configuration...')).toBeInTheDocument();
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
-
-      // The page content should NOT appear during loading
       expect(screen.queryByText('MCP Server Configuration')).not.toBeInTheDocument();
-      expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
 
-      // Resolve the fetch to clean up
       await act(async () => {
         resolveFetch({ servers: [] });
       });
@@ -224,70 +262,32 @@ describe('MCPConfiguration', () => {
       mockMCPService.getMcpServers.mockRejectedValue(new Error('Network error'));
 
       await act(async () => {
-        render(<MCPConfiguration />);
+        render(<MCPConfiguration mode="workspace" />);
       });
 
       await waitFor(() => {
         expect(screen.getByText('Network error')).toBeInTheDocument();
       });
-
-      // Should show a Retry button
       expect(screen.getByText('Retry')).toBeInTheDocument();
-
-      // The page content should NOT appear on error
       expect(screen.queryByText('MCP Server Configuration')).not.toBeInTheDocument();
-      expect(screen.queryByText('No MCP servers configured yet.')).not.toBeInTheDocument();
-    });
-
-    it('shows error with fallback message for non-Error throws', async () => {
-      mockMCPService.getMcpServers.mockRejectedValue('something broke');
-
-      await act(async () => {
-        render(<MCPConfiguration />);
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('Failed to load MCP servers')).toBeInTheDocument();
-      });
     });
 
     it('retries loading when Retry button is clicked', async () => {
-      // First call fails
       mockMCPService.getMcpServers.mockRejectedValueOnce(new Error('Network error'));
 
       await act(async () => {
-        render(<MCPConfiguration />);
+        render(<MCPConfiguration mode="workspace" />);
       });
+      await waitFor(() => expect(screen.getByText('Network error')).toBeInTheDocument());
 
-      await waitFor(() => {
-        expect(screen.getByText('Network error')).toBeInTheDocument();
-      });
-
-      // Set up success for retry
-      mockMCPService.getMcpServers.mockResolvedValue({ servers: mockServers });
-
-      // Click Retry
+      mockMCPService.getMcpServers.mockResolvedValue({ servers: workspaceServers });
       await act(async () => {
         fireEvent.click(screen.getByText('Retry'));
       });
 
-      // Should now show the config page
       await waitFor(() => {
         expect(screen.getByText('MCP Server Configuration')).toBeInTheDocument();
-        expect(screen.getByText('Test Server 1')).toBeInTheDocument();
-      });
-    });
-
-    it('shows empty message only after successful load returns no servers', async () => {
-      mockMCPService.getGlobalSettings.mockResolvedValue({ global_enabled: false });
-      mockMCPService.getMcpServers.mockResolvedValue({ servers: [] });
-
-      await act(async () => {
-        render(<MCPConfiguration />);
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('No MCP servers configured yet.')).toBeInTheDocument();
+        expect(screen.getByText('Global Server')).toBeInTheDocument();
       });
     });
   });

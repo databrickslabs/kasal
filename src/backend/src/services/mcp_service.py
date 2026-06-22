@@ -2,7 +2,12 @@ from typing import List, Optional, Dict, Any
 import logging
 import asyncio
 
-from src.core.exceptions import KasalError, NotFoundError, ConflictError
+from src.core.exceptions import (
+    KasalError,
+    NotFoundError,
+    ConflictError,
+    BadRequestError,
+)
 
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.schemas.mcp import (
@@ -186,32 +191,26 @@ class MCPService:
             responses.append(resp)
         return responses
 
-    async def enable_server_for_group(self, server_id: int, group_id: str) -> MCPServerResponse:
-        """
-        Create or update a workspace-specific override for a server by cloning base config
-        into the given group_id scope, and enabling it.
-        """
-        base = await self.server_repository.get(server_id)
-        if not base:
-            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
-        # If the provided server is already group-scoped and matches, just enable and return
-        if getattr(base, 'group_id', None) == group_id:
-            updated = await self.server_repository.update(server_id, {"enabled": True})
-            resp = MCPServerResponse.model_validate(updated)
-            try:
-                if updated.encrypted_api_key:
-                    resp.api_key = EncryptionUtils.decrypt_value(updated.encrypted_api_key)
-            except Exception:
-                resp.api_key = ""
-            return resp
-        # Check for existing group-specific by name
-        existing = await self.server_repository.find_by_name_and_group(base.name, group_id)
-        server_payload = {
+    def _response_with_key(self, server) -> MCPServerResponse:
+        """Build a response, decrypting the API key (best-effort)."""
+        resp = MCPServerResponse.model_validate(server)
+        try:
+            if server.encrypted_api_key:
+                resp.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
+        except Exception:
+            resp.api_key = ""
+        return resp
+
+    def _group_override_payload(
+        self, base, group_id: str, enabled: bool
+    ) -> Dict[str, Any]:
+        """Clone a base server's config into a workspace-scoped override row."""
+        return {
             "name": base.name,
             "server_url": base.server_url,
             "server_type": base.server_type,
             "auth_type": base.auth_type,
-            "enabled": True,
+            "enabled": enabled,
             "global_enabled": False,
             "timeout_seconds": base.timeout_seconds,
             "max_retries": base.max_retries,
@@ -221,36 +220,93 @@ class MCPService:
             "encrypted_api_key": base.encrypted_api_key,
             "group_id": group_id,
         }
+
+    async def set_server_enabled_for_group(
+        self, server_id: int, group_id: str, enabled: bool
+    ) -> MCPServerResponse:
+        """
+        Set the enabled state of a server FOR A SPECIFIC WORKSPACE (group),
+        mirroring how Models are toggled per workspace.
+
+        - If the target is this group's own row → just flip its ``enabled``.
+        - If the target is a base/global row → create or update a workspace-scoped
+          override clone with the requested ``enabled`` (this is how a workspace
+          admin disables a globally-available MCP for their workspace). The base
+          row is NEVER mutated, so other workspaces are unaffected.
+        - If the target is another group's row → not found for this caller.
+        """
+        if not group_id:
+            raise BadRequestError(detail="No workspace/group selected")
+        target = await self.server_repository.get(server_id)
+        if not target:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+
+        target_group = getattr(target, "group_id", None)
+        # This group's own row → flip directly.
+        if target_group == group_id:
+            updated = await self.server_repository.update(
+                server_id, {"enabled": enabled}
+            )
+            return self._response_with_key(updated)
+        # Another group's row → not visible to this caller.
+        if target_group is not None:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        # Base/global row → create/update this group's override (never touch base).
+        existing = await self.server_repository.find_by_name_and_group(
+            target.name, group_id
+        )
+        payload = self._group_override_payload(target, group_id, enabled)
         if existing:
-            updated = await self.server_repository.update(existing.id, server_payload)
-            # Make this server exclusive to this workspace by disabling the base entry
-            try:
-                if getattr(base, 'group_id', None) is None:
-                    await self.server_repository.update(base.id, {"enabled": False, "global_enabled": False})
-            except Exception:
-                logger.warning("Failed to disable base MCP server while creating group override", exc_info=True)
-            resp = MCPServerResponse.model_validate(updated)
-            try:
-                if updated.encrypted_api_key:
-                    resp.api_key = EncryptionUtils.decrypt_value(updated.encrypted_api_key)
-            except Exception:
-                resp.api_key = ""
-            return resp
-        else:
-            created = await self.server_repository.create(server_payload)
-            # Make this server exclusive to this workspace by disabling the base entry
-            try:
-                if getattr(base, 'group_id', None) is None:
-                    await self.server_repository.update(base.id, {"enabled": False, "global_enabled": False})
-            except Exception:
-                logger.warning("Failed to disable base MCP server while creating group override", exc_info=True)
-            resp = MCPServerResponse.model_validate(created)
-            try:
-                if created.encrypted_api_key:
-                    resp.api_key = EncryptionUtils.decrypt_value(created.encrypted_api_key)
-            except Exception:
-                resp.api_key = ""
-            return resp
+            updated = await self.server_repository.update(existing.id, payload)
+            return self._response_with_key(updated)
+        created = await self.server_repository.create(payload)
+        return self._response_with_key(created)
+
+    async def enable_server_for_group(self, server_id: int, group_id: str) -> MCPServerResponse:
+        """
+        Enable a server for a workspace (opt-in / re-enable an override).
+        Thin wrapper over set_server_enabled_for_group; never disables the base.
+        """
+        return await self.set_server_enabled_for_group(server_id, group_id, True)
+
+    async def get_base_servers(self) -> MCPServerListResponse:
+        """
+        List base/global MCP servers (group_id IS NULL) — the system-admin
+        catalog. A base server is "available to all workspaces" when enabled.
+        """
+        servers = await self.server_repository.find_all_base()
+        server_responses: List[MCPServerResponse] = []
+        for server in servers:
+            resp = MCPServerResponse.model_validate(server)
+            resp.api_key = ""  # never include in list responses
+            server_responses.append(resp)
+        return MCPServerListResponse(
+            servers=server_responses, count=len(server_responses)
+        )
+
+    async def create_global_server(
+        self, server_data: MCPServerCreate
+    ) -> MCPServerResponse:
+        """
+        Create a base/global MCP server (group_id IS NULL) — available to all
+        workspaces. System-admin only (enforced at the router).
+        """
+        return await self.create_server(server_data, group_id=None)
+
+    async def set_global_availability(
+        self, server_id: int, enabled: bool
+    ) -> MCPServerResponse:
+        """
+        System admin: set whether a base/global server is available to all
+        workspaces (its ``enabled`` flag). Validates the target IS a base row.
+        """
+        server = await self.server_repository.get(server_id)
+        if not server:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        if getattr(server, "group_id", None) is not None:
+            raise BadRequestError(detail="Not a global MCP server")
+        updated = await self.server_repository.update(server_id, {"enabled": enabled})
+        return self._response_with_key(updated)
 
     async def get_effective_servers(self, explicit_servers: List[str]) -> List[MCPServerResponse]:
         """
