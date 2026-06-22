@@ -36,7 +36,11 @@ describe('buildPartialDirective — only phrases changed keys', () => {
 describe('buildDirective — phrases every spec with defaults (workspace config)', () => {
   it('fills defaults for all specs of a type', () => {
     const out = buildDirective('quiz', {});
-    expect(out.startsWith('Write exactly 5 questions')).toBe(true);
+    // The quiz count defers to the request (never a hard cap); the configured
+    // number is only the no-count fallback (default 20).
+    expect(out.startsWith('Use the exact number of questions the request asks for')).toBe(true);
+    expect(out).toContain('if it names none, write about 20');
+    expect(out).not.toContain('exactly 5 questions');
     expect(out.endsWith('.')).toBe(true);
   });
 });
