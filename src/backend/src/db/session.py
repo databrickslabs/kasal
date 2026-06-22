@@ -541,6 +541,79 @@ async def safe_async_session():
             pass
 
 
+# ── Isolated DB session on a PRIVATE connection ───────────────────────────
+# SQLite runs on a SINGLE shared connection (StaticPool — see
+# get_sqlite_poolclass). SQLite transactions are per-connection, but every
+# AsyncSession in the process checks out that one connection, so concurrent
+# sessions corrupt each other's transaction boundaries: a concurrent
+# rollback/close can silently discard another session's just-committed (or
+# pending) writes. That bit progressive crew generation — across the
+# seconds-long per-task LLM calls, a concurrent request's session on the shared
+# connection clobbered a committed agent row, so the next task INSERT failed the
+# agent_id foreign key ("FOREIGN KEY constraint failed"). A session on its OWN
+# connection (its own aiosqlite queue) is immune to that interference.
+# PostgreSQL/Lakebase already give each pooled checkout a private connection, so
+# this only needs special handling for SQLite.
+_isolated_sqlite_engine = None
+_isolated_sqlite_session_factory = None
+
+
+def _get_isolated_sqlite_session_factory():
+    """Lazily build a NullPool engine + sessionmaker on a private connection.
+
+    NullPool hands out a FRESH aiosqlite connection per checkout (closed on
+    return), so the caller's whole unit of work runs on a connection no other
+    session touches. Only one such connection is added per crew-generation run
+    (not the per-query NullPool storm that the 205b5f57 StaticPool switch was
+    reverting), and it sits idle/lock-free between the per-entity commits, so
+    WAL + busy_timeout absorb the brief write-lock overlap with the shared
+    connection.
+    """
+    global _isolated_sqlite_engine, _isolated_sqlite_session_factory
+    if _isolated_sqlite_session_factory is None:
+        _isolated_sqlite_engine = create_async_engine(
+            str(settings.DATABASE_URI),
+            echo=SQL_DEBUG,
+            future=True,
+            poolclass=NullPool,
+            connect_args={**connect_args, "check_same_thread": False},
+        )
+        # Apply the same PRAGMAs (foreign_keys=ON, WAL, busy_timeout) as the main engine.
+        event.listen(_isolated_sqlite_engine.sync_engine, "connect", configure_sqlite)
+        _isolated_sqlite_session_factory = async_sessionmaker(
+            _isolated_sqlite_engine,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+    return _isolated_sqlite_session_factory
+
+
+@asynccontextmanager
+async def get_isolated_db_session():
+    """Yield a session whose connection is NOT shared with any other session.
+
+    Use for a multi-step unit of work that interleaves DB writes with long
+    awaits (e.g. progressive crew generation: commit an agent, then make a
+    seconds-long LLM call, then insert a task referencing it). On the shared
+    SQLite connection a concurrent session's commit/rollback in that window can
+    silently discard the committed agent and break the task's foreign key; a
+    private connection removes that hazard. For SQLite this uses a dedicated
+    NullPool engine (private connection); for PostgreSQL/Lakebase, where each
+    pooled checkout is already private, it falls through to the normal (possibly
+    Lakebase-swapped) factory.
+    """
+    if str(settings.DATABASE_URI).startswith("sqlite") and not async_session_factory.is_lakebase:
+        factory = _get_isolated_sqlite_session_factory()
+        async with factory() as session:
+            yield session
+    else:
+        # PostgreSQL or a Lakebase-swapped factory: pooled connections are
+        # already per-checkout, so there is no shared-connection hazard.
+        async with async_session_factory() as session:
+            yield session
+
+
 # Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
 # Uses the sync_engine underlying the async engine.
 from sqlalchemy.orm import sessionmaker as sync_sessionmaker
@@ -1184,6 +1257,11 @@ async def dispose_engines() -> None:
         try:
             if "nullpool_engine" in globals():
                 engines.append(nullpool_engine)
+        except Exception:
+            pass
+        try:
+            if _isolated_sqlite_engine is not None:
+                engines.append(_isolated_sqlite_engine)
         except Exception:
             pass
 
