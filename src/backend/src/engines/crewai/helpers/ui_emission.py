@@ -207,6 +207,9 @@ _DELIVERABLE_GUIDANCE: Dict[str, List[str]] = {
         "  answer: <0-based index of the correct option> }]). The renderer handles",
         "  selection, scoring and navigation — supply ONLY the data. Do NOT hand-build a",
         "  quiz from Cards/HTML and do NOT use Slides.",
+        "- QUESTION COUNT: if the request names a number of questions, produce EXACTLY",
+        "  that many (e.g. 50, 100). This OVERRIDES any configured default count, which",
+        "  applies only when the request gives no number. Never cap the requested count.",
     ],
     "flashcards": [
         "BUILD FLASHCARDS / an Anki deck (spaced-repetition study cards):",

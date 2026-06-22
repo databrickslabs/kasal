@@ -534,3 +534,50 @@ async def test_apply_ui_emission_quiz_directive_not_capped_at_five():
     desc = tasks[0]["description"]
     assert "exactly 5 questions" not in desc
     assert "as many questions as the request asks for" in desc
+
+
+def test_quiz_guidance_makes_request_count_authoritative():
+    """The always-on quiz guidance states the request's question count overrides
+    any configured default — so even a workspace whose saved directive says
+    'write exactly 5 questions' still honors a chat request for 50 / 100."""
+    s = build_ui_instruction(deliverable="quiz")
+    assert "QUESTION COUNT" in s
+    assert "OVERRIDES any configured default" in s
+    assert "Never cap the requested count" in s
+
+
+@pytest.mark.asyncio
+async def test_apply_ui_emission_quiz_request_count_overrides_configured_directive():
+    """A workspace whose saved UI config baked 'write exactly 5 questions' still
+    gets the count-authority guidance, so a chat request for 50 questions wins
+    WITHOUT the user having to re-save their UI configuration."""
+    tasks = [
+        {
+            "description": "Build an interactive quiz with 50 questions about Rome",
+            "expected_output": "an interactive quiz",
+        }
+    ]
+    rss, svc_patch = _patch_config(None)
+    with rss, svc_patch as Svc:
+        inst = MagicMock()
+        inst.get_config = AsyncMock(
+            return_value=MagicMock(
+                enabled=True,
+                style_json=json.dumps(
+                    {
+                        "directives": {
+                            "quiz": "write exactly 5 questions; give each question 4 answer options."
+                        }
+                    }
+                ),
+            )
+        )
+        Svc.return_value = inst
+        await apply_ui_emission(tasks, "g1")
+
+    desc = tasks[0]["description"]
+    # The workspace's configured directive is still present…
+    assert "write exactly 5 questions" in desc
+    # …but the always-on guidance makes the request's count authoritative over it.
+    assert "OVERRIDES any configured default" in desc
+    assert "produce EXACTLY" in desc

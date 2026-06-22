@@ -115,7 +115,7 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
     { kind: 'number', key: 'maxImages', label: 'Max images', min: 4, max: 30, step: 2, default: 12, phrase: (v) => `include at most ${v} images` },
   ],
   quiz: [
-    { kind: 'number', key: 'questions', label: 'Number of questions', min: 3, max: 20, default: 5, phrase: (v) => `write exactly ${v} questions` },
+    { kind: 'number', key: 'questions', label: 'Number of questions', min: 3, max: 100, default: 20, phrase: (v) => `use the exact number of questions the request asks for and never cap it; if it names none, write about ${v}` },
     { kind: 'select', key: 'difficulty', label: 'Difficulty', default: 'mixed', choices: [{ value: 'easy', label: 'Easy' }, { value: 'medium', label: 'Medium' }, { value: 'hard', label: 'Hard' }, { value: 'mixed', label: 'Mixed' }], phrase: (v) => (v === 'mixed' ? 'mix easy, medium and hard questions' : `pitch questions at a ${v} difficulty`) },
     { kind: 'number', key: 'choices', label: 'Options per question', min: 2, max: 5, default: 4, phrase: (v) => `give each question ${v} answer options` },
   ],
