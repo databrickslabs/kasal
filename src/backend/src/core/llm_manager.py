@@ -928,6 +928,29 @@ class LLMManager:
         return await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
 
     @staticmethod
+    async def load_fallback_candidates(current_model_key: str, group_id: Optional[str]):
+        """Enabled models usable as fallback targets for ``DatabricksRetryLLM``.
+
+        Returns ModelCandidate(name, context_window) for every enabled model
+        other than the current one, restricted to Databricks-served, non-codex
+        models — those can be rebuilt and swapped through
+        ``configure_crewai_llm`` with the same auth/endpoint. gpt-5-3-codex is
+        excluded because it needs the Responses API (different base path).
+        """
+        from src.core.llm_handlers.model_fallback import candidates_from_model_configs
+        from src.db.session import request_scoped_session
+        from src.services.model_config_service import ModelConfigService
+
+        try:
+            async with request_scoped_session() as session:
+                service = ModelConfigService(session, group_id=group_id)
+                models = await service.find_enabled_models()
+                return candidates_from_model_configs(models, current_model_key)
+        except Exception as e:
+            logger.warning(f"Could not load fallback model candidates: {e}")
+            return []
+
+    @staticmethod
     async def get_embeddings(
         texts: List[str],
         model: str = "databricks-gte-large-en",
