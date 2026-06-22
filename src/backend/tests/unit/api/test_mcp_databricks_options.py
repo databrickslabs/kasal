@@ -12,12 +12,30 @@ from src.api.mcp_router import (
     list_ai_search_mcp_indexes,
     list_genie_mcp_spaces,
 )
+from src.core.exceptions import ForbiddenError
 
 
 def _request():
     req = MagicMock()
     req.headers = {}
     return req
+
+
+def _admin_ctx():
+    """A group context that resolves to the 'admin' role.
+
+    Browsing the Databricks catalog is an admin action (workspace or system
+    admin), enforced in the endpoints. With current_user falsy, get_effective_role
+    falls through to user_role, so role='admin' satisfies the gate.
+    """
+    return SimpleNamespace(user_role="admin", current_user=None, primary_group_id=None)
+
+
+def _non_admin_ctx():
+    """A group context with a non-admin role (gate must reject)."""
+    return SimpleNamespace(
+        user_role="operator", current_user=None, primary_group_id=None
+    )
 
 
 def _auth(url="https://ws.example.com"):
@@ -82,7 +100,7 @@ async def test_catalog_groups_external_and_managed_types():
         ),
     ):
         result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=None
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     assert result["workspace_url"] == "https://ws.example.com"
@@ -125,7 +143,7 @@ async def test_catalog_omits_functions_leaf_without_configured_catalog_schema():
         ),
     ):
         result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=None
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     ids = [o["id"] for o in result["managed"]]
@@ -149,7 +167,7 @@ async def test_catalog_does_not_duplicate_functions_leaf_when_config_is_system_a
         ),
     ):
         result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=None
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     ids = [o["id"] for o in result["managed"]]
@@ -163,7 +181,7 @@ async def test_catalog_empty_without_workspace_url():
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value=None),
     ):
         result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=None
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     assert result == {"workspace_url": "", "external": [], "managed": []}
@@ -187,7 +205,7 @@ async def test_catalog_survives_external_and_config_failures():
         ),
     ):
         result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=None
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     assert result["external"] == []
@@ -197,6 +215,15 @@ async def test_catalog_survives_external_and_config_failures():
         "genie",
         "ai-search",
     ]
+
+
+@pytest.mark.asyncio
+async def test_catalog_forbidden_for_non_admin():
+    """Browsing the Databricks catalog is admin-only (workspace or system)."""
+    with pytest.raises(ForbiddenError):
+        await get_databricks_mcp_options(
+            _request(), session=AsyncMock(), group_context=_non_admin_ctx()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +247,7 @@ async def test_genie_spaces_step_returns_mcp_urls_and_page_token():
         patch("src.services.genie_service.GenieService", MagicMock(return_value=genie_service)),
     ):
         result = await list_genie_mcp_spaces(
-            _request(), search="sales", page_token=None, group_context=None
+            _request(), search="sales", page_token=None, group_context=_admin_ctx()
         )
 
     assert result["next_page_token"] == "tok-2"
@@ -245,7 +272,7 @@ async def test_genie_spaces_step_empty_without_workspace():
         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)),
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value=None),
     ):
-        result = await list_genie_mcp_spaces(_request(), group_context=None)
+        result = await list_genie_mcp_spaces(_request(), group_context=_admin_ctx())
     assert result == {"options": [], "next_page_token": None}
 
 
@@ -267,7 +294,7 @@ async def test_ai_search_step_lists_indexes_across_endpoints():
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"),
         patch("aiohttp.ClientSession", MagicMock(return_value=session_cm)),
     ):
-        result = await list_ai_search_mcp_indexes(_request(), group_context=None)
+        result = await list_ai_search_mcp_indexes(_request(), group_context=_admin_ctx())
 
     assert result["options"] == [
         {
@@ -289,7 +316,7 @@ async def test_ai_search_step_empty_on_endpoint_listing_error():
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"),
         patch("aiohttp.ClientSession", MagicMock(return_value=session_cm)),
     ):
-        result = await list_ai_search_mcp_indexes(_request(), group_context=None)
+        result = await list_ai_search_mcp_indexes(_request(), group_context=_admin_ctx())
     assert result == {"options": []}
 
 
@@ -299,7 +326,7 @@ async def test_ai_search_step_empty_without_workspace():
         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)),
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value=None),
     ):
-        result = await list_ai_search_mcp_indexes(_request(), group_context=None)
+        result = await list_ai_search_mcp_indexes(_request(), group_context=_admin_ctx())
     assert result == {"options": []}
 
 
