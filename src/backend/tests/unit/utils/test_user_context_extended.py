@@ -198,6 +198,25 @@ class TestGroupContextFromEmail:
         assert ctx.group_ids[0] == "g2"
 
     @pytest.mark.asyncio
+    async def test_explicit_group_id_scopes_strictly_no_union(self):
+        """An explicit group_id scopes to ONLY that workspace — no union, no personal.
+
+        Credential/LLM resolution keys off primary_group_id (group_ids[0]); if this
+        returned the union, a different workspace's PAT could be used for the
+        selected workspace (cross-workspace credential bleed)."""
+        mock_user = SimpleNamespace(id="u1", email="member@corp.com",
+                                    is_system_admin=False, is_personal_workspace_manager=False)
+        g1 = SimpleNamespace(id="g1", name="Group 1")
+        g2 = SimpleNamespace(id="g2", name="Group 2")
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [(g1, "editor"), (g2, "admin")]))
+        ):
+            ctx = await GroupContext.from_email("member@corp.com", group_id="g2")
+        assert ctx.group_ids == ["g2"], "selected workspace must be the ONLY group (no union/personal)"
+        assert ctx.primary_group_id == "g2"
+
+    @pytest.mark.asyncio
     async def test_unauthorized_group_raises(self):
         """Accessing a group user doesn't belong to raises ValueError."""
         mock_user = SimpleNamespace(id="u1", email="member@corp.com",
@@ -364,6 +383,33 @@ class TestExtractGroupContextFromRequest:
         with patch.object(GroupContext, "from_email", AsyncMock(return_value=invalid_ctx)):
             result = await extract_group_context_from_request(mock_req)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_forwards_group_id_header_to_from_email(self):
+        """The middleware MUST forward the `group_id` header to from_email so the
+        selected workspace is honored. Without it, from_email returns the UNION of
+        the user's groups and primary_group_id resolves to their personal workspace,
+        so credential/LLM resolution silently uses the personal workspace's PAT."""
+        mock_req = MagicMock()
+        mock_req.headers.get = MagicMock(
+            side_effect=lambda key, default=None: {
+                "X-Forwarded-Email": "user@test.com",
+                "group_id": "bi-specialist",
+            }.get(key, default)
+        )
+        mock_req.headers.items = MagicMock(return_value=[])
+        captured = {}
+
+        async def _from_email(email, access_token=None, group_id=None):
+            captured["email"] = email
+            captured["group_id"] = group_id
+            return GroupContext(group_ids=["bi-specialist"], email_domain="test.com")
+
+        with patch.object(GroupContext, "from_email", AsyncMock(side_effect=_from_email)):
+            result = await extract_group_context_from_request(mock_req)
+
+        assert captured["group_id"] == "bi-specialist", "group_id header must be forwarded to from_email"
+        assert result.group_ids == ["bi-specialist"]
 
 
 class TestUserContextMiddleware:

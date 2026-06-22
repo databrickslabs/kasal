@@ -748,8 +748,17 @@ class LLMManager:
                     api_base = DatabricksURLUtils.construct_llm_base_url(auth.workspace_url)
                     logger.info(f"Using Databricks {auth.auth_method} authentication for CrewAI LLM")
                 else:
-                    logger.warning("No Databricks authentication available for CrewAI LLM")
-                    api_key = None
+                    # FAIL CLOSED: no usable Databricks credential resolved for the
+                    # SELECTED workspace (OBO -> PAT -> SPN all unavailable for this
+                    # group_id). Do NOT proceed with api_key=None — that silently
+                    # falls through to litellm's OpenAI placeholder ("OPENAI_API_KEY
+                    # is required"), which is a confusing error for a Databricks model.
+                    # A workspace with no credentials must fail loudly and clearly.
+                    raise ValueError(
+                        f"No Databricks credentials available for workspace '{group_id}'. "
+                        f"Add a Databricks API key (PAT) for this workspace under "
+                        f"Configuration -> API Keys, or run with OBO / Service Principal auth."
+                    )
 
             except ImportError:
                 # SECURITY: databricks_auth module is required - no fallback allowed

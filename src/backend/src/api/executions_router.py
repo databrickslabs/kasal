@@ -9,9 +9,9 @@ import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 
 from src.config.settings import settings
 
@@ -235,42 +235,63 @@ async def get_execution_status(
 async def list_executions(
     group_context: GroupContextDep,
     db: SessionDep,
+    # The workspace explicitly selected by the client (frontend sends the
+    # active workspace in the `group_id` header). get_group_context has
+    # already validated that the caller is authorized for this value.
+    x_group_id: Annotated[Optional[str], Header(alias="group_id")] = None,
     # Bounded: an unbounded limit let any client pull the entire table
     # (megabytes of result JSON) in one request on the most-polled endpoint.
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
     """
-    List executions with group filtering.
+    List executions for the explicitly selected workspace only.
+
+    Tenant isolation here is authoritative on the backend and must not rely on
+    client-side filtering. group_context.group_ids can be the UNION of every
+    workspace the user belongs to (when no workspace is selected, or when the
+    personal workspace is selected, see GroupContext.from_email). Filtering on
+    that union would leak runs across the user's other workspaces. Instead we
+    scope strictly to the single selected workspace (the validated `group_id`
+    header) and fail closed (empty result) when no workspace is selected.
 
     Args:
-        group_context: Group context for filtering
+        group_context: Group context (carries the authorized group_ids)
+        x_group_id: The selected workspace from the `group_id` header
         limit: Maximum number of executions to return (default: 50)
         offset: Number of executions to skip (default: 0)
 
     Returns:
         List of ExecutionResponse objects
     """
-    # Log the group context for debugging
-    logger.info(
-        f"list_executions called with group_ids: {group_context.group_ids}, email: {group_context.group_email}"
-    )
-
-    # Additional debug logging
-    if not group_context.group_ids:
-        logger.warning("No group_ids in context - this will return no results")
+    # Scope strictly to the selected workspace. get_group_context raises 403
+    # for an unauthorized group_id, so any value present here is authorized;
+    # the membership check is defensive. No selection -> fail closed.
+    authorized_group_ids = group_context.group_ids or []
+    if x_group_id and x_group_id in authorized_group_ids:
+        effective_group_ids = [x_group_id]
+    else:
+        effective_group_ids = []
+        if x_group_id:
+            logger.warning(
+                f"list_executions: selected group_id '{x_group_id}' not in authorized "
+                f"groups {authorized_group_ids} - returning no results"
+            )
+        else:
+            logger.info("list_executions: no workspace selected - returning no results")
 
     # Create service instance and use the list_executions method with group filtering only
     service = ExecutionService(session=db)
     executions_list = await service.list_executions(
-        group_ids=group_context.group_ids,
-        user_email=None,  # Don't filter by user - show all executions in user's groups
+        group_ids=effective_group_ids,
+        user_email=None,  # Don't filter by user - show all executions in the selected workspace
         limit=limit,
         offset=offset,
     )
 
     logger.info(
-        f"ExecutionService returned {len(executions_list)} executions for user {group_context.group_email}"
+        f"ExecutionService returned {len(executions_list)} executions for user "
+        f"{group_context.group_email} in workspace {x_group_id}"
     )
 
     # Process results before converting to response models

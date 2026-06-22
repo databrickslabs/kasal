@@ -273,6 +273,60 @@ async def test_list_executions_various_result_types(MockExecSvc):
     assert out[5].result is None
 
 
+@pytest.mark.asyncio
+@patch("src.api.executions_router.ExecutionService")
+async def test_list_executions_scopes_to_selected_workspace(MockExecSvc):
+    """Only the explicitly selected workspace is queried, never the UNION of all
+    the user's groups. group_context.group_ids can be a union (e.g. when the
+    personal workspace is selected it is personal + every group), so the endpoint
+    must scope strictly to the selected `group_id` header for tenant isolation."""
+    svc = AsyncMock()
+    svc.list_executions = AsyncMock(return_value=[])
+    MockExecSvc.return_value = svc
+
+    # Union as produced by GroupContext.from_email for the personal workspace case.
+    ctx = Ctx(group_ids=["user_alice_x", "g1", "g2"])
+    out = await list_executions(group_context=ctx, db=MagicMock(), x_group_id="g1")
+
+    assert isinstance(out, list)
+    _, kwargs = svc.list_executions.call_args
+    assert kwargs["group_ids"] == ["g1"], "must scope to the selected workspace, not the union"
+
+
+@pytest.mark.asyncio
+@patch("src.api.executions_router.ExecutionService")
+async def test_list_executions_no_workspace_selected_fails_closed(MockExecSvc):
+    """With no selected workspace (no group_id header) the endpoint fails closed
+    (empty group filter) rather than returning the union of the user's groups."""
+    svc = AsyncMock()
+    svc.list_executions = AsyncMock(return_value=[])
+    MockExecSvc.return_value = svc
+
+    ctx = Ctx(group_ids=["g1", "g2"])
+    out = await list_executions(group_context=ctx, db=MagicMock(), x_group_id=None)
+
+    assert out == []
+    _, kwargs = svc.list_executions.call_args
+    assert kwargs["group_ids"] == []
+
+
+@pytest.mark.asyncio
+@patch("src.api.executions_router.ExecutionService")
+async def test_list_executions_unauthorized_group_fails_closed(MockExecSvc):
+    """Defensive: a selected group_id not present in the authorized context is
+    rejected (fail closed) even though get_group_context normally 403s first."""
+    svc = AsyncMock()
+    svc.list_executions = AsyncMock(return_value=[])
+    MockExecSvc.return_value = svc
+
+    ctx = Ctx(group_ids=["g1"])
+    out = await list_executions(group_context=ctx, db=MagicMock(), x_group_id="g_other")
+
+    assert out == []
+    _, kwargs = svc.list_executions.call_args
+    assert kwargs["group_ids"] == []
+
+
 # ── stop_execution: non-running state ─────────────────────────────────────────
 
 @pytest.mark.asyncio

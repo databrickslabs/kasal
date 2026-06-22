@@ -202,7 +202,9 @@ async def check_execution_exists(
     Returns:
         HTTP 200 OK if the execution exists, HTTP 404 Not Found otherwise
     """
-    exists = await service.check_execution_exists(execution_id)
+    exists = await service.check_execution_exists(
+        execution_id, group_ids=group_context.group_ids
+    )
     if not exists:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
     # Just return an empty response with 200 status
@@ -349,7 +351,9 @@ async def delete_execution(
     Returns:
         DeleteResponse with information about the deleted data
     """
-    result = await service.delete_execution(execution_id)
+    result = await service.delete_execution(
+        execution_id, group_ids=group_context.group_ids
+    )
     if not result:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
     return result
@@ -371,7 +375,9 @@ async def delete_execution_by_job_id(
     Returns:
         DeleteResponse with information about the deleted data
     """
-    result = await service.delete_execution_by_job_id(job_id)
+    result = await service.delete_execution_by_job_id(
+        job_id, group_ids=group_context.group_ids
+    )
     if not result:
         raise NotFoundError(f"Execution with job_id {job_id} not found")
     return result

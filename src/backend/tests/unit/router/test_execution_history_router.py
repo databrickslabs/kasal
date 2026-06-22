@@ -303,7 +303,9 @@ class TestCheckExecutionExists:
         
         assert response.status_code == 200
         assert response.content == b""  # HEAD request should have empty body
-        mock_execution_history_service.check_execution_exists.assert_called_once_with(1)
+        mock_execution_history_service.check_execution_exists.assert_called_once_with(
+            1, group_ids=mock_group_context.group_ids
+        )
     
     def test_check_execution_exists_not_found(self, client, mock_execution_history_service, mock_group_context):
         """Test execution existence check for non-existent execution."""
@@ -529,7 +531,9 @@ class TestDeleteExecution:
         assert data["deleted_run_id"] == 1
         assert data["deleted_outputs"] == 3
         assert "Execution deleted" in data["message"]
-        mock_execution_history_service.delete_execution.assert_called_once_with(1)
+        mock_execution_history_service.delete_execution.assert_called_once_with(
+            1, group_ids=mock_group_context.group_ids
+        )
     
     def test_delete_execution_not_found(self, client, mock_execution_history_service, mock_group_context):
         """Test deleting non-existent execution."""
@@ -574,7 +578,9 @@ class TestDeleteExecutionByJobId:
         assert data["deleted_job_id"] == "job-uuid-123"
         assert data["deleted_outputs"] == 2
         assert "Execution deleted by job_id" in data["message"]
-        mock_execution_history_service.delete_execution_by_job_id.assert_called_once_with("job-uuid-123")
+        mock_execution_history_service.delete_execution_by_job_id.assert_called_once_with(
+            "job-uuid-123", group_ids=mock_group_context.group_ids
+        )
     
     def test_delete_execution_by_job_id_not_found(self, client, mock_execution_history_service, mock_group_context):
         """Test deleting execution by non-existent job ID."""

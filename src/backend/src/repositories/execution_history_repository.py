@@ -135,19 +135,25 @@ class ExecutionHistoryRepository:
         # Use existing session
         return await self._get_execution_by_id_internal(self.session, execution_id)
     
-    async def check_execution_exists(self, execution_id: int) -> bool:
+    async def check_execution_exists(self, execution_id: int, group_ids: List[str] = None) -> bool:
         """
-        Check if an execution exists.
+        Check if an execution exists, scoped to the given groups.
 
         Args:
             execution_id: ID of the execution
+            group_ids: List of group IDs for tenant filtering. When provided,
+                the execution only "exists" if it belongs to one of these groups,
+                preventing cross-tenant existence probing.
 
         Returns:
-            True if exists, False otherwise
+            True if exists (within the given groups), False otherwise
         """
         if not self.session:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
-        stmt = select(func.count()).select_from(ExecutionHistory).where(ExecutionHistory.id == execution_id)
+        filters = [ExecutionHistory.id == execution_id]
+        if group_ids and len(group_ids) > 0:
+            filters.append(ExecutionHistory.group_id.in_(group_ids))
+        stmt = select(func.count()).select_from(ExecutionHistory).where(*filters)
         result = await self.session.execute(stmt)
         count = result.scalar() or 0
         return count > 0
