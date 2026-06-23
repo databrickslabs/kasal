@@ -17,7 +17,7 @@ import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
-import { parseUiDocument } from './utils/uiDocument';
+import { parseUiDocument, extractDocSummary } from './utils/uiDocument';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
 import './chat.css';
@@ -303,7 +303,9 @@ export function summarizeTaskOutput(
   }
 
   if (preview) {
-    return 'Generated an app. View it in the preview pane.';
+    // Prefer the model's own one-liner (top-level "summary" in the A2UI doc);
+    // fall back to the generic line when it didn't supply one.
+    return extractDocSummary(trimmed) || 'Generated an app. View it in the preview pane.';
   }
 
   // Belt-and-suspenders: even if the surface wasn't extracted as a preview,
@@ -336,6 +338,20 @@ export function stripEmbeddedUiDocument(text: string): string {
   if (!text || (!text.includes('createSurface') && !text.includes('updateComponents'))) {
     return text;
   }
+  // The model's own chat one-liner (top-level "summary" in the doc), if present;
+  // else the generic line. Used for both the whole-doc and embedded-doc cases.
+  const friendly = extractDocSummary(text) || 'Generated an app. View it in the preview pane.';
+  // The common case: the WHOLE payload IS the UI document (no surrounding prose).
+  // The preview pane renders it, so collapse the chat to the friendly line rather
+  // than surgically excising brackets — brittle for a weak model's slightly
+  // malformed JSON. parseUiDocument is repair-tolerant (coerceJson rebalances
+  // mismatched brackets), so e.g. gpt-5-nano's invalid A2UI is recognised here
+  // too. Gated on the text STARTING with the document so a genuine prose answer
+  // that merely embeds a doc keeps its prose (handled by the per-block logic below).
+  const whole = text.trim();
+  if ((whole.startsWith('{') || whole.startsWith('[')) && parseUiDocument(whole)) {
+    return friendly;
+  }
   let cleaned = text;
   // 1. Remove fenced ```json blocks that parse as a UI document.
   cleaned = cleaned.replace(/```(?:json)?\s*([\s\S]*?)```/g, (match, inner) =>
@@ -364,7 +380,7 @@ export function stripEmbeddedUiDocument(text: string): string {
   }
   // Drop a now-orphaned "json" fence label and tidy whitespace.
   cleaned = cleaned.replace(/(^|\n)\s*json\s*(\n|$)/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
-  return cleaned || 'Generated an app. View it in the preview pane.';
+  return cleaned || friendly;
 }
 
 /**

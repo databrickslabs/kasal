@@ -523,6 +523,15 @@ describe('summarizeTaskOutput', () => {
     expect(out).not.toContain('createSurface');
     expect(out).not.toContain('updateComponents');
   });
+  it('uses the model-authored summary as the chat line when present', () => {
+    const uiJson = JSON.stringify({
+      summary: 'Built a 3-section discovery plan.',
+      messages: [{ updateComponents: { components: [{ id: 'root', component: 'Text', text: 'x' }] } }],
+    });
+    expect(summarizeTaskOutput(uiJson, { type: 'ui', data: uiJson })).toBe(
+      'Built a 3-section discovery plan.',
+    );
+  });
 });
 
 describe('extractResultText / stripEmbeddedUiDocument', () => {
@@ -562,6 +571,17 @@ describe('extractResultText / stripEmbeddedUiDocument', () => {
     expect(stripEmbeddedUiDocument(uiDoc)).toBe(
       'Generated an app. View it in the preview pane.',
     );
+  });
+
+  it('returns the document\'s own summary line for the chat when present', () => {
+    const withSummary = JSON.stringify({
+      summary: 'Delivered the Kasal schema overview.',
+      messages: [
+        { createSurface: { surfaceId: 's1', catalogId: 'basic' } },
+        { updateComponents: { components: [{ id: 'root', component: 'Text', text: 'Hello' }] } },
+      ],
+    });
+    expect(stripEmbeddedUiDocument(withSummary)).toBe('Delivered the Kasal schema overview.');
   });
 
   it('leaves text without UI documents untouched', () => {

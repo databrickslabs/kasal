@@ -42,6 +42,14 @@ def test_build_ui_instruction_without_accent():
     assert "accent color" not in s
 
 
+def test_build_ui_instruction_asks_for_chat_summary():
+    """The instruction must request a top-level "summary" one-liner for the chat,
+    alongside the rendered document (not instead of it)."""
+    s = build_ui_instruction()
+    assert "CHAT SUMMARY" in s
+    assert '"summary"' in s
+
+
 def test_build_ui_instruction_with_accent():
     s = build_ui_instruction("#5aa2ff")
     assert "#5aa2ff" in s
@@ -167,8 +175,9 @@ async def test_apply_ui_emission_appends_themes_and_directives():
     assert "DELIVERABLE SETTINGS" in desc
     assert "#38BDF8" in desc
     assert "at most 20 rows" in desc
-    # expected_output overwritten to the single-UI-document target.
+    # expected_output overwritten to the single-UI-document target, incl. summary.
     assert tasks[0]["expected_output"].startswith("A single JSON")
+    assert '"summary"' in tasks[0]["expected_output"]
 
 
 @pytest.mark.asyncio
