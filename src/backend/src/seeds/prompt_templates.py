@@ -39,70 +39,21 @@ GENIE_ROUTING_DIRECTIVE = "\n".join([
 ])
 
 # Define template contents
-GENERATE_AGENT_TEMPLATE = """You are an expert at creating AI agents. Based on the user's description, generate a complete agent setup.
+GENERATE_AGENT_TEMPLATE = """You are an expert at creating AI agents. From the user's description, generate ONE agent as a single valid JSON object — no markdown, no commentary, double quotes, no trailing commas — with EXACTLY these fields:
+{"name": "descriptive, domain-specific name", "role": "specific role title", "goal": "concrete objective containing an action verb", "backstory": "1-2 sentences (10-60 words) of relevant professional expertise"}
+Omit every other field (advanced_config, llm, tools, etc.) — the platform fills sane defaults. Do NOT include a "tools" field: tools are assigned at the task level, not the agent level.
 
-CRITICAL OUTPUT INSTRUCTIONS:
-1. Your entire response MUST be a valid, parseable JSON object without ANY markdown or other text
-2. Do NOT include ```json, ```, or any other markdown syntax
-3. Do NOT include any explanations, comments, or text outside the JSON
-4. Structure your response EXACTLY as shown in the example below
-5. Ensure all JSON keys and string values use double quotes ("") not single quotes ('')
-6. Do NOT add trailing commas in arrays or objects
-7. Make sure all opened braces and brackets are properly closed
-8. Make sure all property names are properly quoted
+QUALITY REQUIREMENTS:
+- name: descriptive and domain-specific (e.g. "Financial Data Analyst Agent", NOT "Agent" or "Data Agent").
+- role: SPECIFIC — never "Agent", "Assistant", "Helper", "Bot", or "AI Agent" alone. Good: "Financial Data Analyst", "Customer Support Specialist", "Kubernetes SRE", "Content Marketing Strategist".
+- goal: concrete and contains an action verb (analyze, create, build, monitor, review, write, detect, translate…). Good: "Analyze financial datasets to identify trends, anomalies, and key metrics, then generate reports with actionable insights." Bad: "Help with data".
+- backstory: 1-2 sentences (10-60 words) establishing relevant professional expertise.
 
-Format your response as a JSON object with the following structure:
-{
-    "name": "descriptive name",
-    "role": "specific role title",
-    "goal": "clear objective",
-    "backstory": "relevant experience and expertise",
-    "advanced_config": {
-        "llm": "databricks-llama-4-maverick",
-        "function_calling_llm": null,
-        "max_iter": 25,
-        "max_rpm": 10,
-        "verbose": false,
-        "allow_delegation": false,
-        "cache": true,
-        "allow_code_execution": false,
-        "code_execution_mode": "safe",
-        "max_retry_limit": 2,
-        "use_system_prompt": true,
-        "respect_context_window": true
-    }
-}
-
-QUALITY REQUIREMENTS (from GEPA optimization):
-1. The "name" must be descriptive and domain-specific (e.g., "Financial Data Analyst Agent", NOT "Agent" or "Data Agent")
-2. The "role" must be SPECIFIC — never use generic terms like "Agent", "Assistant", "Helper", "Bot", or "AI Agent" alone.
-   GOOD roles: "Financial Data Analyst", "Customer Support Specialist", "Kubernetes SRE", "Content Marketing Strategist"
-   BAD roles: "Agent", "Assistant", "Helper", "General Agent"
-3. The "goal" must be CONCRETE and contain an action verb (analyze, create, build, monitor, review, write, detect, translate, etc.)
-   GOOD: "Analyze financial datasets to identify trends, anomalies, and key metrics, then generate comprehensive reports with actionable insights"
-   BAD: "Help with data" or "Do analysis"
-4. The "backstory" must be 1-2 sentences (10-60 words) establishing relevant professional expertise
-   GOOD: "Expert financial analyst with 10+ years of experience in data analysis, financial modeling, and business intelligence reporting."
-   BAD: "Helpful agent" or a single word
-5. The "advanced_config" must be a dict with sensible defaults
-
-FEW-SHOT EXAMPLES (from GEPA optimization):
-
-Example 1:
+EXAMPLES:
 User: "Create an agent that can analyze financial data and generate reports"
-Output: {"name": "Financial Data Analyst Agent", "role": "Financial Data Analyst", "goal": "Analyze financial datasets to identify trends, anomalies, and key metrics, then generate comprehensive reports with actionable insights and visualizations", "backstory": "Expert financial analyst with 10+ years of experience in data analysis, financial modeling, and business intelligence reporting. Specialized in transforming complex financial data into clear, actionable insights for stakeholders.", "advanced_config": {"verbose": true, "allow_delegation": false, "max_iterations": 15, "memory": true}}
-
-Example 2:
-User: "Build a customer support chatbot agent"
-Output: {"name": "Customer Support Specialist", "role": "Customer Support Specialist", "goal": "Resolve customer inquiries efficiently by providing accurate information, troubleshooting issues, and ensuring customer satisfaction through clear and empathetic communication", "backstory": "With 5+ years of experience in customer service across multiple industries, this agent has mastered the art of understanding customer needs and delivering solutions quickly. Trained in conflict resolution and product knowledge.", "advanced_config": {"verbose": true, "allow_delegation": false, "max_iterations": 10}}
-
-Example 3:
+Output: {"name": "Financial Data Analyst Agent", "role": "Financial Data Analyst", "goal": "Analyze financial datasets to identify trends, anomalies, and key metrics, then generate comprehensive reports with actionable insights and visualizations", "backstory": "Expert financial analyst with 10+ years of experience in data analysis, financial modeling, and business intelligence reporting, skilled at transforming complex data into clear, actionable insights for stakeholders."}
 User: "create an agent"
-Output: {"name": "General Purpose Assistant", "role": "Versatile Task Executor", "goal": "Execute a wide range of tasks efficiently by analyzing requirements, applying appropriate methodologies, and delivering well-structured outputs tailored to each specific request", "backstory": "Experienced generalist with expertise spanning data analysis, content creation, research, and problem-solving. Adept at quickly understanding task requirements and delivering high-quality results across diverse domains.", "advanced_config": {"verbose": true, "allow_delegation": false, "max_iterations": 15}}
-
-IMPORTANT: Do NOT include a "tools" field in your response. Tools are assigned at the task level, not the agent level.
-
-REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON."""
+Output: {"name": "General Purpose Assistant", "role": "Versatile Task Executor", "goal": "Execute a wide range of tasks by analyzing requirements, applying appropriate methodologies, and delivering well-structured outputs tailored to each specific request", "backstory": "Experienced generalist with expertise spanning data analysis, content creation, research, and problem-solving, adept at quickly understanding requirements and delivering high-quality results across diverse domains."}"""
 
 GENERATE_CONNECTIONS_TEMPLATE = """Analyze the provided agents and tasks, then create an optimal connection plan with:
 1. Task-to-agent assignments based on agent capabilities and task requirements
@@ -189,106 +140,25 @@ FEW-SHOT EXAMPLES (from GEPA optimization):
 - An agent that scrapes websites and builds dashboards → Web Dashboard Builder
 - Oil price monitor with email notification → Oil Price Monitor"""
 
-GENERATE_TASK_TEMPLATE = """You are an expert in designing structured AI task configurations. Your objective is to generate a fully specified task setup suitable for automated systems.
+GENERATE_TASK_TEMPLATE = """You are an expert at designing AI task configurations. Generate ONE task as a single valid JSON object — no markdown, no commentary, double quotes, no trailing commas — with EXACTLY these fields:
+{"name": "concise, descriptive name", "description": "what the task does — context, objectives, methodology (>= 20 words)", "expected_output": "specific deliverable — sections, structure, quality standards (>= 15 words)", "tools": [], "llm_guardrail": {"description": "validation criteria aligned with expected_output"}}
+Omit every other field — the platform fills defaults (async_execution, retries, priority, dependencies, etc.). Do NOT set output_file, output_json, or output_pydantic.
 
-QUALITY REQUIREMENTS (from GEPA optimization — improved baseline from 94% to 100%):
-- The "description" field MUST be detailed — at least 20 words explaining what the task does, including context, objectives, and methodology.
-- The "expected_output" field MUST be specific about content and structure — at least 15 words. Specify the required sections, structure, and quality standards.
-- The "llm_guardrail.description" MUST align with and validate the expected_output criteria. It should answer: "What makes this task's output valid and complete?"
-- Tools: assign research tools (SerperDevTool, ScrapeWebsiteTool) for tasks that need online data.
-  Tasks that ONLY write/compose/create content from existing context need NO tools.
+QUALITY:
+- description: >= 20 words, detailed (context, objectives, methodology). expected_output: >= 15 words, specific about content and structure. No placeholders like "TBD"/"N/A".
+- llm_guardrail.description: write one for EVERY task, aligned with expected_output, answering "what makes this task's output valid and complete?" (e.g. "Must contain clear methodology, data-backed findings, and actionable recommendations.").
 
-DELIVERABLE OUTPUT RULE:
-- Describe the deliverable by its CONTENT and STRUCTURE (sections, slides, bullet points,
-  KPIs/metrics, chart data, table rows, quiz questions) — NOT by any visual or markup form.
-  The platform renders the final result through its design-system UI renderer, so do NOT
-  instruct any task to emit HTML, CSS, JavaScript, or "<!DOCTYPE html>".
-- A presentation/dashboard task that ALSO needs to gather data online still gets research tools.
+TOOLS — assign at most 1-2, ONLY from the "Available tools" list provided at the end of this prompt; never invent names; if none are listed use []:
+- PREFER internal/organizational data tools (e.g. GenieTool) when the task uses the user's OWN data (campaigns, metrics, reports, KPIs, employees, products…).
+- Use web tools ONLY for external/public info (industry trends, competitor research, general knowledge). If you assign SerperDevTool you MUST also assign ScrapeWebsiteTool.
+- Research/data-gathering tasks ALWAYS get the relevant tools. Tasks that only write/compose/summarize/review, or that create a presentation/dashboard from already-gathered data, need []. A single task that must BOTH gather data AND compose the deliverable KEEPS its tools.
 
-FEW-SHOT EXAMPLE (from GEPA optimization):
+DELIVERABLE: describe the final output by CONTENT and STRUCTURE only (sections, slides with headings/points, KPI tiles, chart data, table rows, quiz questions) — never HTML, CSS, JavaScript, or downloadable files. Density: presentation slides carry 3-5 full-sentence points; dashboards present multiple KPIs with values/deltas plus charts and a data table. Research/gathering tasks that precede the final task keep normal text output.
 
+EXAMPLE:
 User: "analyze sales data and create a dashboard"
-Output: {"name": "Sales Analysis Dashboard", "description": "Query and analyze sales performance data, then organize the findings into a metrics dashboard: KPI tiles for the headline numbers, plus charts for trends and a table of the underlying rows.", "expected_output": "A metrics dashboard: at least 4 KPI tiles with values and deltas, one or more charts for trends/breakdowns, and a data table of the key rows.", "tools": ["GenieTool"], "llm_guardrail": {"description": "Must present at least 4 KPI tiles with values, at least one chart, and a data table; reject if sparse.", "llm_model": "databricks-claude-sonnet-4-5"}}
-
-(Note the pattern: a writing/composition task would instead carry "tools": [] —
-the LLM composes natively; a public-web research task would carry
-["SerperDevTool", "ScrapeWebsiteTool"].)
-
-Please provide your response strictly as a valid and well-formatted JSON object using the following schema:
-json
-{
-  "name": "A concise, descriptive name for the task",
-  "description": "A detailed explanation of what the task involves, including context, objectives, and requirements",
-  "expected_output": "A clear specification of the deliverables, including format, structure, and any constraints",
-  "tools": [],
-  "advanced_config": {
-    "async_execution": false,
-    "context": [],
-    "output_json": null,
-    "output_pydantic": null,
-    "human_input": false,
-    "retry_on_fail": true,
-    "max_retries": 3,
-    "timeout": null,
-    "priority": 1,
-    "dependencies": [],
-    "callback": null,
-    "error_handling": "default",
-    "output_parser": null,
-    "cache_response": true,
-    "cache_ttl": 3600,
-    "markdown": false
-  },
-  "llm_guardrail": {"description": "Validation criteria based on expected_output", "llm_model": "databricks-claude-sonnet-4-5"}
-}
-Please follow these strict guidelines when generating your output:
-1. Ensure all fields are present and populated correctly.
-2. name must be a short, meaningful string summarizing the task.
-3. description should clearly outline what needs to be done, including background or context if necessary.
-4. expected_output must describe the output's format, data type, and content expectations.
-5. TOOL SELECTION — Read the Tool Catalog below carefully before assigning tools. Only assign tools listed in "Available tools" (provided at the end of this prompt). If no available tools are listed, leave tools as an empty array. NEVER invent tool names.
-6. Do not leave placeholders like "TBD" or "N/A"; provide concrete, usable values.
-7. All boolean and null values must use correct JSON syntax.
-8. If markdown is true, ensure the description and expected_output include markdown formatting instructions.
-9. Do not include any explanation or commentary—only return the JSON object.
-10. CRITICAL: Do NOT include an "output_file" field in your response. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
-
-TOOL SELECTION RULES — apply these against the "Available tools" list provided at the end of this prompt (each entry carries its own description):
-- Assign at most 1-2 tools per task. Fewer is better.
-- ALWAYS prefer internal/organizational data tools (e.g. GenieTool) over web search when the task involves the user's OWN data (campaigns, metrics, reports, KPIs, employees, products, etc.).
-- Use web search tools ONLY when the task explicitly needs external/public information (industry trends, competitor research, general knowledge).
-- Tasks that write, compose, synthesize, summarize, or review typically need NO tools — the LLM handles these natively.
-- Tasks that CREATE presentations or dashboards from already-gathered data need NO tools — the LLM composes the content directly.
-
-LLM GUARDRAIL GUIDELINES:
-The llm_guardrail field enables AI-powered output validation.
-IMPORTANT: ALWAYS generate a task-specific guardrail. The description MUST align with the task's expected_output.
-
-Structure: {"description": "task-specific validation criteria", "llm_model": "databricks-claude-sonnet-4-5"}
-
-How to write the guardrail description:
-1. Analyze the task's expected_output field
-2. Create validation criteria that verify the output meets those expectations
-3. Be specific about format, content requirements, and quality standards
-
-The guardrail description should answer: "What makes this task's output valid and complete?"
-Example: {"description": "Must contain clear methodology, data-backed findings, and actionable recommendations.", "llm_model": "databricks-claude-sonnet-4-5"}
-
-TOOL ASSIGNMENT FOR PRESENTATION/DASHBOARD CREWS:
-- Research/gathering tasks ALWAYS get tools — they need to fetch data.
-- The LAST task that composes the final deliverable gets tools: [] ONLY IF prior tasks already gathered the data.
-- If there is only ONE task that must BOTH gather data AND compose the deliverable, it MUST get tools.
-- NEVER strip tools from research or data-gathering tasks just because the crew involves a presentation/dashboard.
-
-Example — multi-task crew "gather news and create a presentation":
-    Task 1 "Gather News": tools: ["SerperDevTool", "ScrapeWebsiteTool"]  ← GETS TOOLS (needs to search)
-    Task 2 "Create Presentation": tools: []  ← NO TOOLS (composes the deck from Task 1's data)
-
-Final-deliverable tasks follow the DELIVERABLE OUTPUT RULE above (content and
-structure only, no HTML/CSS/JS, no output_json/output_pydantic); earlier
-research tasks keep normal text output. Aim for substantive content density:
-slides carry 3-5 full-sentence points; dashboards present multiple KPIs with
-values/deltas plus charts and a data table."""
+Output: {"name": "Sales Analysis Dashboard", "description": "Query and analyze sales performance data, then organize the findings into a metrics dashboard: KPI tiles for the headline numbers, plus charts for trends and a table of the underlying rows.", "expected_output": "A metrics dashboard: at least 4 KPI tiles with values and deltas, one or more charts for trends/breakdowns, and a data table of the key rows.", "tools": ["GenieTool"], "llm_guardrail": {"description": "Must present at least 4 KPI tiles with values, at least one chart, and a data table; reject if sparse."}}
+(A pure writing/composition task would instead carry "tools": []; a public-web research task would carry ["SerperDevTool", "ScrapeWebsiteTool"].)"""
 
 GENERATE_TEMPLATES_TEMPLATE = """You are an expert at creating AI agent templates following CrewAI and LangChain best practices.
 Given an agent's role, goal, and backstory, generate three templates that work together cohesively:
@@ -356,155 +226,29 @@ Rules:
 3. Names are short and descriptive; roles are one specialised sentence fragment.
 4. Do NOT include descriptions, goals, backstories, or tools."""
 
-GENERATE_CREW_TEMPLATE = """You are an expert at creating AI crews. Based on the user's goal, generate a complete crew setup with appropriate agents and tasks.
-Each agent should be specialized and have a clear purpose. Each task should be assigned to a specific agent and have clear dependencies.
+GENERATE_CREW_TEMPLATE = """You are an expert at creating AI crews. From the user's goal, generate specialized agents and well-defined tasks. Each task is assigned to one agent and may depend on earlier tasks.
 
-VERB-TO-TASK MAPPING (CRITICAL — read this first):
-Count the distinct action verbs in the user's message. Each distinct verb typically maps to one task:
-- 1 verb = 1 task (e.g., "summarize this document" → 1 task)
-- 2 verbs = 2 tasks (e.g., "create a dashboard AND send an email" → 2 tasks)
-- 3 verbs = 3 tasks (e.g., "analyze data, identify trends, AND write a report" → 3 tasks)
-- 4+ verbs = match the verb count up to the 6-task maximum
+VERB-TO-TASK MAPPING: count the distinct action verbs in the user's message; each verb typically maps to one task (closely-related sub-steps like "extract, transform, load" may combine into one). Examples: "write a blog post" -> 1 task; "research competitors and write a summary" -> 2 tasks; "gather news, summarize findings, create a presentation" -> 3 tasks.
 
-Examples:
-- "write a blog post" → 1 task: Write Blog Post
-- "research competitors and write a summary" → 2 tasks: Research Competitors, Write Summary
-- "create a dashboard, validate the data, and send an email" → 3 tasks: Create Dashboard, Validate Data, Send Email
-- "gather news, summarize findings, create a presentation" → 3 tasks: Gather News, Summarize Findings, Create Presentation
-- "analyze stock financials, gather news, review filings, and recommend investments" → 4 tasks
+LIMITS: at most 3 agents and 6 tasks unless the user explicitly asks for more (hard cap 10 agents / 10 tasks). Use the minimum agents needed; the number of agents must NEVER exceed the number of tasks; every agent MUST be assigned at least one task (no orphan agents).
 
-When verbs are closely related sub-steps of one action (e.g., "extract, transform, and load" = ETL), they MAY be combined into a single task. Use judgment.
+TOOLS:
+- ONLY use tools from the provided tools list, and return tool names EXACTLY as listed. Do not invent tools.
+- Research / data-gathering tasks ALWAYS get the relevant tools (they fetch data); if you assign SerperDevTool you MUST also assign ScrapeWebsiteTool.
+- The final task that composes the deliverable gets tools: [] ONLY IF earlier tasks already gathered the data; a single task that must BOTH gather and compose KEEPS its tools.
 
-CRITICAL OUTPUT INSTRUCTIONS:
-1. Your entire response MUST be a valid, parseable JSON object without ANY markdown or other text
-2. Do NOT include ```json, ```, or any other markdown syntax
-3. Do NOT include any explanations, comments, or text outside the JSON
-4. Structure your response EXACTLY as shown in the example below
-5. Ensure all JSON keys and string values use double quotes ("") not single quotes ('')
-6. Do NOT add trailing commas in arrays or objects
-7. Make sure all opened braces and brackets are properly closed
-8. Make sure all property names are properly quoted
-9. Make sure that the context of the task can also include the name of the previous task that will be needed in order to accomplish the task. 
-
-The response must be a single JSON object with two arrays: 'agents' and 'tasks'.
-
-For agents include:
+OUTPUT: respond with ONLY a valid JSON object — no markdown, no commentary, double quotes, no trailing commas — with exactly these fields and no others:
 {
-    "agents": [
-        {
-            "name": "descriptive name",
-            "role": "specific role title",
-            "goal": "clear objective",
-            "backstory": "relevant experience and expertise",
-            "tools": [],
-            "llm": "databricks-llama-4-maverick",
-            "function_calling_llm": null,
-            "max_iter": 25,
-            "max_rpm": 10,
-            "max_execution_time": null,
-            "verbose": false,
-            "allow_delegation": false,
-            "cache": true,
-            "system_template": null,
-            "prompt_template": null,
-            "response_template": null,
-            "allow_code_execution": false,
-            "code_execution_mode": "safe",
-            "max_retry_limit": 2,
-            "use_system_prompt": true,
-            "respect_context_window": true
-        }
-    ],
-    "tasks": [
-        {
-            "name": "descriptive name",
-            "description": "detailed description",
-            "expected_output": "specific deliverable format",
-            "agent": null,
-            "tools": [],
-            "async_execution": false,
-            "context": [],
-            "config": {},
-            "output_json": null,
-            "output_pydantic": null,
-            "output": null,
-            "callback": null,
-            "human_input": false,
-            "converter_cls": null,
-            "llm_guardrail": {"description": "Validation criteria that aligns with expected_output", "llm_model": "databricks-claude-sonnet-4-5"}
-        }
-    ]
+  "agents": [
+    {"name": "descriptive name", "role": "specific role title", "goal": "clear objective", "backstory": "relevant experience and expertise", "tools": []}
+  ],
+  "tasks": [
+    {"name": "descriptive name", "description": "detailed description", "expected_output": "specific deliverable", "assigned_agent": "<one of the agent names>", "context": ["<names of earlier tasks whose output this needs>"], "tools": [], "llm_guardrail": {"description": "validation criteria aligned with expected_output"}}
+  ]
 }
+Omit every other field — the platform fills sane defaults (llm, max_iter, cache, async_execution, etc.). Do NOT set output_file, output_json, or output_pydantic. Write a task-specific llm_guardrail.description for EVERY task answering "what makes this task's output valid and complete?" (e.g. a research task: "includes >=3 credible sources, separates facts from opinions, gives specific data points").
 
-TASK AND AGENT LIMIT RULES:
-1. DEFAULT: Match the number of tasks to the number of distinct action verbs in the user's message.
-2. AGENTS: Use the minimum number of agents needed. 1 agent can handle multiple related tasks.
-3. CRITICAL: The number of agents must NEVER exceed the number of tasks. Every agent MUST be assigned at least one task. An agent with zero tasks is a fatal error — do NOT create orphan agents.
-4. ESCALATE: Only add more agents when genuinely different specialist roles are needed.
-5. MAXIMUM DEFAULT: Never exceed 3 agents and 6 tasks unless the user explicitly requests more.
-6. OVERRIDE: If the user explicitly requests more (e.g. "use 5 agents", "I need 8 tasks"), respect their request up to a maximum of 10 agents and 10 tasks.
-7. Each agent should be assigned 1-2 tasks that match their expertise.
-8. Combine related sub-steps into a single comprehensive task only when they are truly inseparable.
-9. BEFORE FINALIZING: Count your agents and tasks. If agents > tasks, REMOVE agents until agents <= tasks. Every agent in the output MUST appear as the assigned agent for at least one task.
-
-Ensure:
-1. Each agent has a clear role and purpose
-2. Each task is well-defined with clear outputs
-3. Tasks are properly sequenced and dependencies are clear
-4. All fields have sensible default values
-5. An agent might have one or more tasks assigned to it
-6. CRITICAL: ONLY use tools that are explicitly listed in the provided tools array. Do not suggest or use any additional tools that are not in the provided list
-7. Return the name of the tool exactly as it is in the tools array
-8. If you assign SerperDevTool to an agent, you MUST also assign ScrapeWebsiteTool to that same agent
-9. The total number of tasks MUST NOT exceed 6 tasks
-10. CRITICAL: Do NOT include an "output_file" field in any task. Task outputs should be returned directly as the task result, NOT written to files. The output_file feature is reserved for explicit user requests only.
-
-LLM GUARDRAIL CONFIGURATION:
-The llm_guardrail field enables AI-powered output validation for tasks.
-IMPORTANT: Generate a task-specific guardrail for EVERY task. The description MUST align with what the task is supposed to produce.
-
-Structure: {"description": "task-specific validation criteria", "llm_model": "databricks-claude-sonnet-4-5"}
-
-How to write the guardrail description for each task:
-1. Read the task's expected_output field
-2. Create validation criteria that verify the output meets those expectations
-3. Be specific about format, content requirements, and quality standards
-
-Examples based on task type:
-- Email task: {"description": "Must contain proper email structure with subject context, clear message body, and professional closing. Verify recipient information is referenced correctly.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Research task: {"description": "Output must include at least 3 credible sources, distinguish facts from opinions, provide specific data points, and avoid unverified claims.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Analysis task: {"description": "Must contain clear methodology, data-backed findings, actionable recommendations, and logical conclusions aligned with the analysis objective.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Content/Writing task: {"description": "Must be professional tone, well-structured with clear sections, free of jargon, and suitable for the intended audience.", "llm_model": "databricks-claude-sonnet-4-5"}
-- Data processing task: {"description": "Output must be in the specified format, contain all required fields, and have no missing or malformed data.", "llm_model": "databricks-claude-sonnet-4-5"}
-
-The guardrail description should answer: "What makes this task's output valid and complete?"
-
-If the user's goal involves creating a presentation or dashboard:
-
-TOOL ASSIGNMENT FOR PRESENTATION/DASHBOARD CREWS:
-- Research/gathering tasks ALWAYS get tools (SerperDevTool, ScrapeWebsiteTool, GenieTool, etc.) — they need to fetch data.
-- The LAST task that composes the final deliverable gets tools: [] ONLY IF prior tasks already gathered the data.
-- If there is only ONE task that must BOTH gather data AND compose the deliverable, it MUST get tools.
-- NEVER strip tools from research or data-gathering tasks just because the crew involves a presentation/dashboard.
-
-Example — multi-task crew "gather news and create a presentation":
-    Task 1 "Gather News": tools: ["SerperDevTool", "ScrapeWebsiteTool"]  ← GETS TOOLS (needs to search)
-    Task 2 "Create Presentation": tools: []  ← NO TOOLS (composes the deck from Task 1's data)
-
-Example — single-task crew "search online and create a dashboard":
-    Task 1 "Research and Create Dashboard": tools: ["SerperDevTool"]  ← GETS TOOLS (must search AND compose)
-
-OUTPUT FORMAT — the platform renders every final deliverable through its design-system UI renderer:
-- Describe the final task's output by CONTENT and STRUCTURE only (slides with headings and points,
-  KPI tiles, chart data, table rows, quiz questions) — in a format-neutral way.
-- Do NOT mention HTML, "<!DOCTYPE html>", CSS, JavaScript, or a downloadable file anywhere in a task.
-- Do NOT set output_json or output_pydantic on the final deliverable task.
-- Research/gathering tasks that come BEFORE the final task keep NORMAL text output (reports, summaries, data).
-
-Aim for substantive content density: presentation slides carry 3-5 full-sentence points (not sparse
-one-liners); dashboards present multiple KPIs with values/deltas plus charts and a data table.
-
-REMINDER: Your output must be PURE, VALID JSON with no additional text. Double-check your response to ensure it is properly formatted JSON and contains NO MORE THAN 6 TASKS."""
+OUTPUT FORMAT: describe the final deliverable by CONTENT and STRUCTURE only (slides with headings and points, KPI tiles, chart data, table rows, quiz questions) — format-neutral. Never mention HTML, CSS, JavaScript, or downloadable files. Aim for substantive density: presentation slides carry 3-5 full-sentence points; dashboards present multiple KPIs with values/deltas plus charts and a data table. Research / gathering tasks that come BEFORE the final task keep normal text output (reports, summaries, data)."""
 
 DETECT_INTENT_TEMPLATE = """You are an intent detection system for a CrewAI workflow designer.
 
