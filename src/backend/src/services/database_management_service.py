@@ -596,14 +596,19 @@ class DatabaseManagementService:
     async def run_housekeeping(self, cutoff_date: str) -> Dict[str, Any]:
         """
         Delete old execution data (history, traces, logs, LLM logs, billing,
-        HITL approvals) older than cutoff_date.
+        HITL approvals) older than cutoff_date, plus chat history and uploaded
+        knowledge embeddings (both independent of executionhistory, purged by
+        their own age). documentation_embeddings is deliberately NOT purged — it
+        is seeded built-in reference docs, re-created on startup.
 
         Order matters: every table that has a FK to executionhistory must be
         cleared before the parent execution history rows, otherwise the DELETE
         on executionhistory raises a FOREIGN KEY constraint failure. The FK
         children are: execution_trace, llm_usage_billing (no ON DELETE CASCADE),
         hitl_approvals (CASCADE on fresh DBs only), plus taskstatus + errortrace
-        which the history repo deletes explicitly.
+        which the history repo deletes explicitly. chat_history and
+        knowledge_embeddings have no FK to executionhistory, so their delete
+        order is not constrained.
 
         Args:
             cutoff_date: ISO format date string (e.g. "2025-01-01")
@@ -623,6 +628,8 @@ class DatabaseManagementService:
             from src.models.execution_trace import ExecutionTrace
             from src.models.execution_history import ExecutionHistory
             from src.models.log import LLMLog
+            from src.models.chat_history import ChatHistory
+            from src.models.documentation_embedding import KnowledgeEmbedding
 
             cutoff = dt.fromisoformat(cutoff_date)
 
@@ -636,86 +643,116 @@ class DatabaseManagementService:
             # after children and parents are consistently removed. The pragma is
             # transaction-scoped and resets automatically. No-op on PostgreSQL.
             from sqlalchemy import text as _sql_text
-            if DatabaseBackupRepository.get_database_type() == 'sqlite':
-                await self.session.execute(_sql_text("PRAGMA defer_foreign_keys=ON"))
+            from src.db.session import get_isolated_db_session
 
-            # Instantiate repositories with the current session
-            history_repo = ExecutionHistoryRepository(session=self.session)
-            logs_repo = ExecutionLogsRepository(session=self.session)
-            billing_repo = BillingRepository(session=self.session)
-            hitl_repo = HITLApprovalRepository(session=self.session)
+            # Run the entire purge on a PRIVATE connection (get_isolated_db_session
+            # = a dedicated NullPool engine on SQLite), NOT self.session. The app
+            # shares ONE SQLite connection (StaticPool), so when housekeeping ran on
+            # it a concurrent crew write/commit interleaved into this long delete
+            # transaction and reset the connection-scoped `PRAGMA
+            # defer_foreign_keys=ON` — re-enabling per-statement FK checks, so the
+            # `DELETE FROM executionhistory` tripped a "FOREIGN KEY constraint
+            # failed" even though every child was already cleared. A private
+            # connection has no concurrent writer, so the deferred-FK transaction
+            # stays intact and the purge is atomic. (PostgreSQL/Lakebase: each
+            # checkout is already private, so this just uses the normal factory.)
+            async with get_isolated_db_session() as session:
+                if DatabaseBackupRepository.get_database_type() == 'sqlite':
+                    await session.execute(_sql_text("PRAGMA defer_foreign_keys=ON"))
 
-            # 1. Delete execution_trace rows that reference executions older than
-            #    cutoff. execution_trace has TWO FKs to executionhistory
-            #    (run_id -> .id AND job_id -> .job_id), and in practice rows link
-            #    via job_id while run_id is NULL — so we MUST delete by both
-            #    references (not just run_id) or the executionhistory delete fails
-            #    on the job_id FK. We also delete by the trace's own created_at as
-            #    a backstop for orphaned/legacy rows.
-            old_exec_ids_stmt = select(ExecutionHistory.id).where(
-                ExecutionHistory.created_at < cutoff
-            )
-            old_exec_jobids_stmt = select(ExecutionHistory.job_id).where(
-                ExecutionHistory.created_at < cutoff
-            )
-            trace_by_ref_stmt = delete(ExecutionTrace).where(
-                ExecutionTrace.run_id.in_(old_exec_ids_stmt)
-            )
-            trace_ref_result = await self.session.execute(trace_by_ref_stmt)
-            trace_count = trace_ref_result.rowcount
+                # Instantiate repositories with the isolated session
+                history_repo = ExecutionHistoryRepository(session=session)
+                logs_repo = ExecutionLogsRepository(session=session)
+                billing_repo = BillingRepository(session=session)
+                hitl_repo = HITLApprovalRepository(session=session)
 
-            # Delete traces linked to old executions by job_id (run_id often NULL)
-            trace_by_jobid_stmt = delete(ExecutionTrace).where(
-                ExecutionTrace.job_id.in_(old_exec_jobids_stmt)
-            )
-            trace_jobid_result = await self.session.execute(trace_by_jobid_stmt)
-            trace_count += trace_jobid_result.rowcount
+                # 1. Delete execution_trace rows that reference executions older than
+                #    cutoff. execution_trace has TWO FKs to executionhistory
+                #    (run_id -> .id AND job_id -> .job_id), and in practice rows link
+                #    via job_id while run_id is NULL — so we MUST delete by both
+                #    references (not just run_id) or the executionhistory delete fails
+                #    on the job_id FK. We also delete by the trace's own created_at as
+                #    a backstop for orphaned/legacy rows.
+                old_exec_ids_stmt = select(ExecutionHistory.id).where(
+                    ExecutionHistory.created_at < cutoff
+                )
+                old_exec_jobids_stmt = select(ExecutionHistory.job_id).where(
+                    ExecutionHistory.created_at < cutoff
+                )
+                trace_by_ref_stmt = delete(ExecutionTrace).where(
+                    ExecutionTrace.run_id.in_(old_exec_ids_stmt)
+                )
+                trace_ref_result = await session.execute(trace_by_ref_stmt)
+                trace_count = trace_ref_result.rowcount
 
-            # Also delete any orphaned traces older than cutoff by date
-            trace_by_date_stmt = delete(ExecutionTrace).where(
-                ExecutionTrace.created_at < cutoff
-            )
-            trace_date_result = await self.session.execute(trace_by_date_stmt)
-            trace_count += trace_date_result.rowcount
+                # Delete traces linked to old executions by job_id (run_id often NULL)
+                trace_by_jobid_stmt = delete(ExecutionTrace).where(
+                    ExecutionTrace.job_id.in_(old_exec_jobids_stmt)
+                )
+                trace_jobid_result = await session.execute(trace_by_jobid_stmt)
+                trace_count += trace_jobid_result.rowcount
 
-            await self.session.flush()
+                # Also delete any orphaned traces older than cutoff by date
+                trace_by_date_stmt = delete(ExecutionTrace).where(
+                    ExecutionTrace.created_at < cutoff
+                )
+                trace_date_result = await session.execute(trace_by_date_stmt)
+                trace_count += trace_date_result.rowcount
 
-            # 2. Delete execution logs older than cutoff
-            logs_count = await logs_repo.delete_older_than(cutoff)
+                await session.flush()
 
-            # 3. Delete LLM logs inline (no dedicated repo needed)
-            llm_stmt = delete(LLMLog).where(LLMLog.created_at < cutoff)
-            llm_result = await self.session.execute(llm_stmt)
-            llm_count = llm_result.rowcount
-            await self.session.flush()
+                # 2. Delete execution logs older than cutoff
+                logs_count = await logs_repo.delete_older_than(cutoff)
 
-            # 4. Delete billing usage rows that reference old executions.
-            #    (FK: llm_usage_billing.execution_id -> executionhistory.job_id,
-            #    NO ON DELETE CASCADE) — must go before the executionhistory delete.
-            billing_count = await billing_repo.delete_older_than(cutoff)
+                # 3. Delete LLM logs inline (no dedicated repo needed)
+                llm_stmt = delete(LLMLog).where(LLMLog.created_at < cutoff)
+                llm_result = await session.execute(llm_stmt)
+                llm_count = llm_result.rowcount
 
-            # 5. Delete HITL approvals that reference old executions.
-            #    (FK: hitl_approvals.execution_id -> executionhistory.job_id;
-            #    CASCADE on fresh DBs, but older DBs may lack it — delete explicitly.)
-            hitl_count = await hitl_repo.delete_older_than(cutoff)
+                # 3b. Delete old ChatMode conversation history (no FK to
+                #     executionhistory; purged by its own timestamp).
+                chat_stmt = delete(ChatHistory).where(ChatHistory.timestamp < cutoff)
+                chat_result = await session.execute(chat_stmt)
+                chat_count = chat_result.rowcount
 
-            # 6. Delete execution history last (cascades to taskstatus + errortrace)
-            #    Now safe because all FK references to it are already gone
-            history_result = await history_repo.delete_older_than(cutoff)
+                # 3c. Delete old uploaded knowledge embeddings (no FK; purged by
+                #     created_at). NOTE: documentation_embeddings is intentionally
+                #     left alone — it is seeded built-in reference content.
+                knowledge_stmt = delete(KnowledgeEmbedding).where(
+                    KnowledgeEmbedding.created_at < cutoff
+                )
+                knowledge_result = await session.execute(knowledge_stmt)
+                knowledge_count = knowledge_result.rowcount
+                await session.flush()
 
-            await self.session.commit()
+                # 4. Delete billing usage rows that reference old executions.
+                #    (FK: llm_usage_billing.execution_id -> executionhistory.job_id,
+                #    NO ON DELETE CASCADE) — must go before the executionhistory delete.
+                billing_count = await billing_repo.delete_older_than(cutoff)
 
-            # 7. VACUUM SQLite to reclaim disk space after bulk deletes
-            from sqlalchemy import text
-            db_type = DatabaseBackupRepository.get_database_type()
-            space_reclaimed = False
-            if db_type == 'sqlite':
-                try:
-                    await self.session.execute(text("VACUUM"))
-                    space_reclaimed = True
-                    logger.info("SQLite VACUUM completed — disk space reclaimed")
-                except Exception as vacuum_err:
-                    logger.warning(f"SQLite VACUUM failed (non-fatal): {vacuum_err}")
+                # 5. Delete HITL approvals that reference old executions.
+                #    (FK: hitl_approvals.execution_id -> executionhistory.job_id;
+                #    CASCADE on fresh DBs, but older DBs may lack it — delete explicitly.)
+                hitl_count = await hitl_repo.delete_older_than(cutoff)
+
+                # 6. Delete execution history last (cascades to taskstatus + errortrace)
+                #    Now safe because all FK references to it are already gone
+                history_result = await history_repo.delete_older_than(cutoff)
+
+                await session.commit()
+
+                # 7. VACUUM SQLite to reclaim disk space after bulk deletes. VACUUM
+                #    cannot run inside a transaction, so issue it on an AUTOCOMMIT
+                #    connection after the purge has committed.
+                if DatabaseBackupRepository.get_database_type() == 'sqlite':
+                    try:
+                        raw_conn = await session.connection(
+                            execution_options={"isolation_level": "AUTOCOMMIT"}
+                        )
+                        await raw_conn.exec_driver_sql("VACUUM")
+                        logger.info("SQLite VACUUM completed — disk space reclaimed")
+                    except Exception as vacuum_err:
+                        logger.warning(f"SQLite VACUUM failed (non-fatal): {vacuum_err}")
 
             deleted = {
                 'executionhistory': history_result.get('executionhistory', 0),
@@ -726,6 +763,8 @@ class DatabaseManagementService:
                 'llmlog': llm_count,
                 'llm_usage_billing': billing_count,
                 'hitl_approvals': hitl_count,
+                'chat_history': chat_count,
+                'knowledge_embeddings': knowledge_count,
             }
             total = sum(deleted.values())
 
