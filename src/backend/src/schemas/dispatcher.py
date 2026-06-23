@@ -52,6 +52,13 @@ class DispatcherRequest(BaseModel):
         description="The user's clean message (message may carry an intent-steering "
         "prefix); used to ground the generated crew's run with the real request",
     )
+    chat_mode: bool = Field(
+        False,
+        description="True when sent from ChatMode. ChatMode always builds a crew — "
+        "'create a task'/'create an agent' entity creation is only available from the "
+        "AgentBuilder / crew canvas (which leaves this False), so on True the dispatcher "
+        "collapses task/agent intents to generate_crew.",
+    )
     # ── ChatMode run settings ─────────────────────────────────────────────
     # Carried through to the backend auto-execute so a generated crew runs with
     # the chat's own memory scope and attached data sources, without a frontend
