@@ -135,6 +135,34 @@ class TestGroupContextFromEmail:
         assert ctx.primary_group_id.startswith("user_")
 
     @pytest.mark.asyncio
+    async def test_no_groups_explicit_other_group_id_rejected(self):
+        """A user in no groups requesting a group that isn't their personal
+        workspace is REJECTED — not silently given the personal workspace (which
+        would run under personal credentials while the UI shows the other group)."""
+        mock_user = SimpleNamespace(id="u1", email="solo@example.com",
+                                    is_system_admin=False, is_personal_workspace_manager=False)
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, []))
+        ):
+            with pytest.raises(ValueError, match="Access denied"):
+                await GroupContext.from_email("solo@example.com", group_id="bi-specialist")
+
+    @pytest.mark.asyncio
+    async def test_no_groups_own_personal_workspace_id_allowed(self):
+        """A user in no groups may explicitly select their OWN personal workspace."""
+        mock_user = SimpleNamespace(id="u1", email="solo@example.com",
+                                    is_system_admin=False, is_personal_workspace_manager=False)
+        personal_id = GroupContext.generate_individual_group_id("solo@example.com")
+        with patch.object(
+            GroupContext, "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, []))
+        ):
+            ctx = await GroupContext.from_email("solo@example.com", group_id=personal_id)
+        assert ctx.group_ids == [personal_id]
+        assert ctx.primary_group_id == personal_id
+
+    @pytest.mark.asyncio
     async def test_user_in_groups_gets_group_ids(self):
         """User in groups gets those group IDs."""
         mock_user = SimpleNamespace(id="u1", email="member@corp.com",

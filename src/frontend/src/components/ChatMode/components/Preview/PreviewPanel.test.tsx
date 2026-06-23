@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
 import { UIConfigService } from '../../../../api/UIConfigService';
+import type { RunStep } from './RunTimeline';
 
 // The panel fetches the workspace UI-Configurator palettes on mount; stub the
 // service so tests control (or disable) the configured themes.
@@ -527,5 +528,38 @@ describe('PreviewPanel — Download as PDF', () => {
     expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1);
     act(() => release());
     await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+});
+
+describe('PreviewPanel run activity', () => {
+  const uiContent: PreviewContent = { type: 'ui', data: uiDoc };
+  const steps: RunStep[] = [
+    { id: '1', label: 'GenieTool', sublabel: 'sales by region', detail: 'Revenue rose 12% in EMEA.', timestamp: 1, durationMs: 2200 },
+  ];
+
+  it('lists plain-English steps and opens a step’s full context on its own page, with Back', async () => {
+    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={steps} />);
+    // The deliverable is visible to start.
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Activity'));
+    // List view: friendly headings + a short cleaned preview; deliverable hidden.
+    expect(screen.queryByText('Hello App')).not.toBeInTheDocument();
+    expect(screen.getByText('Querying your data')).toBeInTheDocument();
+    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument(); // preview
+    // The full-page context isn't open until a step is clicked.
+    expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
+    // Click the step → its context opens full-page with the readable content.
+    fireEvent.click(screen.getByText('Querying your data').closest('button')!);
+    await waitFor(() => expect(screen.getByTestId('run-step-context')).toBeInTheDocument());
+    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument();
+    // Back returns to the step list.
+    fireEvent.click(screen.getByLabelText('Back to the run activity'));
+    expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
+    expect(screen.getByText('Querying your data')).toBeInTheDocument();
+  });
+
+  it('shows no Run activity control when there are no steps', () => {
+    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={[]} />);
+    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 });

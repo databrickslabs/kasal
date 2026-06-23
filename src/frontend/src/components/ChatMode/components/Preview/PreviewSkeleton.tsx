@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useExecutionStore } from '../../store/executionStore';
-import { useSessionStore } from '../../store/sessionStore';
-import ShowContextToggle from './ShowContextToggle';
+import { friendlyStep, type RunStep } from './RunTimeline';
+import ThinkingStream from './ThinkingStream';
+import LogSurface from './LogSurface';
+
+export { friendlyStep };
 
 /**
  * Whether the preview pane should show the in-progress skeleton: the viewed
  * session has a run underway (`runActive`) and no deliverable has rendered yet
  * (`hasPreview` is false). Once the first A2UI document arrives, `hasPreview`
- * flips true and the real {@link PreviewPanel} takes over.
+ * flips true and the real {@link PreviewPanel} takes over (and shows the same
+ * timeline collapsed above the result).
  *
  * Extracted as a pure predicate so the visibility rule is unit-testable without
  * mounting the whole ChatWorkspace.
@@ -22,32 +26,46 @@ function mmss(seconds: number): string {
 }
 
 /**
- * Placeholder shown in the preview pane WHILE a run is executing and no
- * deliverable has rendered yet. For a long-running job a static shimmer reads as
- * "stalled", so this surfaces HONEST signs of life — the current activity, a
- * step count, and an elapsed timer — without revealing the (opt-in) retrieved
- * context. It mirrors PreviewPanel's `<aside>` shell + themed tokens so the
- * hand-off to the real renderer is seamless.
+ * In-progress preview shown while a run is EXECUTING and no deliverable has
+ * rendered yet. It is THE single run monitor (the chat suppresses its live
+ * timeline while a preview pane is up): a {@link RunTimeline} of friendly phase
+ * steps that tick in live, each CLICKABLE to reveal the context that step pulled
+ * in. Plus a step count + elapsed timer; the deliverable "assembles" below.
  */
-const PreviewSkeleton: React.FC = () => {
-  // Live progress signals, derived from the trace feed already accumulated in
-  // the store (owner-gated). The full content stays behind the "Show context"
-  // checkbox; here we only surface the latest activity LABEL + a count.
-  const items = useExecutionStore((s) => s.transientPreview);
-  const owner = useExecutionStore((s) => s.transientPreviewOwnerSessionId);
-  const currentSession = useSessionStore((s) => s.currentSessionId);
-  const owned = owner === currentSession ? items : [];
-  const stepCount = owned.length;
-  const latest = stepCount > 0 ? owned[stepCount - 1].label : '';
+interface PreviewSkeletonProps {
+  /** The run's steps (sourced from the persistent chat trace messages). */
+  steps: RunStep[];
+  /** Dock the activity into the chat's "Working…" bar instead of this pane. */
+  onMoveActivityToChat?: () => void;
+}
 
-  // Elapsed timer — the skeleton mounts when execution starts, so mount time is
-  // a good-enough run start. Ticks once a second; cleaned up on unmount.
-  const [elapsed, setElapsed] = useState(0);
+/**
+ * Isolated elapsed timer — its OWN component so the 1s tick re-renders only this
+ * tiny node, never the whole skeleton / timeline (which otherwise flickered).
+ * Anchored to the run's store-backed start time so it reflects the true duration
+ * and survives a re-render.
+ */
+const RunElapsed: React.FC = () => {
+  const runStartedAt = useExecutionStore((s) => s.runStartedAt);
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const start = Date.now();
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+  const elapsed = Math.max(0, Math.floor((now - (runStartedAt ?? mountedAt)) / 1000));
+  return (
+    <span className="font-mono tabular-nums" data-testid="preview-skeleton-elapsed">
+      {mmss(elapsed)}
+    </span>
+  );
+};
+
+const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ steps, onMoveActivityToChat }) => {
+  const stepCount = steps.length;
+  // A step the user opened to read its full context WHILE the run is still going
+  // (null = show the live thinking stream). "Back" returns to the stream.
+  const [activeStep, setActiveStep] = useState<RunStep | null>(null);
 
   return (
     <aside
@@ -63,55 +81,65 @@ const PreviewSkeleton: React.FC = () => {
     >
       {/* Header — mirrors PreviewPanel's so the swap to the live renderer is seamless */}
       <div
-        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+        className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border-color)' }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-            Running agent…
-          </span>
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-1"
-            style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-secondary)' }}
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+          Running agent…
+        </span>
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-1"
+          style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-secondary)' }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--accent)' }} />
+          WORKING
+        </span>
+        {onMoveActivityToChat && (
+          <button
+            type="button"
+            onClick={onMoveActivityToChat}
+            className="ml-auto text-[11px] transition-colors hover:opacity-80"
+            style={{ color: 'var(--text-muted)' }}
+            title="Show the activity in the chat instead"
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ backgroundColor: 'var(--accent)' }}
-            />
-            WORKING
-          </span>
-        </div>
-        <ShowContextToggle />
+            Show in chat
+          </button>
+        )}
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-hidden p-6">
-        {/* Live status line — honest progress so a long run never looks stalled. */}
-        <div className="flex items-center gap-2 mb-5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: 'var(--accent)' }} />
-          <span className="truncate" style={{ color: 'var(--text-secondary)' }}>
-            {latest ? `Running ${latest}` : 'Thinking…'}
-          </span>
-          {stepCount > 0 && (
-            <span className="flex-shrink-0">· {stepCount} step{stepCount === 1 ? '' : 's'}</span>
-          )}
-          <span className="ml-auto font-mono tabular-nums flex-shrink-0" data-testid="preview-skeleton-elapsed">
-            {mmss(elapsed)}
-          </span>
-        </div>
-
-        {/* Shimmer body — neutral placeholder blocks, no agent content. */}
-        <div className="animate-pulse flex flex-col gap-4" data-testid="preview-skeleton-body">
-          <div className="h-8 rounded-lg" style={{ backgroundColor: 'var(--bg-secondary)', width: '60%' }} />
-          <div className="h-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', width: '90%' }} />
-          <div className="h-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', width: '80%' }} />
-          <div className="h-4 rounded" style={{ backgroundColor: 'var(--bg-secondary)', width: '85%' }} />
-          <div className="mt-4 grid grid-cols-2 gap-4">
-            <div className="h-24 rounded-xl" style={{ backgroundColor: 'var(--bg-secondary)' }} />
-            <div className="h-24 rounded-xl" style={{ backgroundColor: 'var(--bg-secondary)' }} />
+      {activeStep ? (
+        // A chosen step's context on its own page — readable mid-run too.
+        <div className="flex-1 min-h-0 flex flex-col">
+          <button
+            type="button"
+            onClick={() => setActiveStep(null)}
+            className="flex items-center gap-1.5 w-full px-4 py-2 flex-shrink-0 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}
+            aria-label="Back to the run activity"
+          >
+            <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            Back · {friendlyStep(activeStep.label)}
+          </button>
+          <div className="flex-1 min-h-0 overflow-y-auto" data-testid="run-step-context">
+            <LogSurface body={activeStep.detail || ''} />
           </div>
         </div>
-      </div>
+      ) : (
+        // Body — the live "thinking" stream; each step is clickable to read its
+        // full context without waiting for the run to finish.
+        <div className="flex-1 min-h-0 flex flex-col p-6">
+          {/* Meta: steps so far + elapsed */}
+          <div className="flex-shrink-0 flex items-center justify-between mb-4 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <span>{stepCount > 0 ? `${stepCount} step${stepCount === 1 ? '' : 's'} so far` : 'Starting…'}</span>
+            <RunElapsed />
+          </div>
+          <div className="flex-1 min-h-0" data-testid="preview-skeleton-body">
+            <ThinkingStream steps={steps} live onSelect={setActiveStep} />
+          </div>
+        </div>
+      )}
     </aside>
   );
 };

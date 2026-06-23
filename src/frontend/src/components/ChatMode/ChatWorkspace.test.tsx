@@ -1,5 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+
+// Unmount every rendered ChatWorkspace between tests. Without this, a prior test's
+// component stays mounted and its async reconnect effect can fire startExecution on
+// the next test's shared mock — polluting the reconnect assertions (got 2× not 1×).
+afterEach(() => cleanup());
 
 // ---------------------------------------------------------------------------
 // Shared, mutable mock state + captured callbacks (hoisted before vi.mock).
@@ -65,6 +70,7 @@ const h = vi.hoisted(() => {
         return ae && ae.jobId === jobId ? 'owner-session' : null;
       }),
       clearJobOwner: vi.fn(),
+      abandonExecution: vi.fn(),
       stashSessionPreview: vi.fn(),
       updateExecutionStatus: vi.fn(),
       saveSessionState: vi.fn(),
@@ -73,12 +79,8 @@ const h = vi.hoisted(() => {
       reopenPreview: vi.fn(),
       clearPreview: vi.fn(),
       toggleChatCollapsed: vi.fn(),
-      transientPreview: [] as unknown[],
-      transientPreviewOwnerSessionId: null as unknown,
-      pushTransientPreview: vi.fn(),
-      clearTransientPreview: vi.fn(),
-      showRetrievedContext: false,
-      setShowRetrievedContext: vi.fn(),
+      runStartedAt: null as number | null,
+      runningJobBySession: {} as Record<string, string>,
     },
     app: {
       models: [{ key: 'm1', name: 'Model 1' }],
@@ -106,6 +108,7 @@ const h = vi.hoisted(() => {
     listExecutions: vi.fn(async () => []),
     stopExecution: vi.fn(async () => {}),
     getExecutionStatus: vi.fn(async () => ({ status: 'running' })),
+    getJobTraces: vi.fn(async () => []),
     saveGeneratedCrew: vi.fn(async () => ({ id: 'crew-1', name: 'Saved Crew' })),
     saveSessionPreview: vi.fn(),
     getSessionPreview: vi.fn(async () => null),
@@ -148,7 +151,15 @@ vi.mock('./hooks/useDispatcher', () => ({
 vi.mock('./hooks/useExecutionStream', () => ({
   useExecutionStream: (opts: Record<string, (...a: unknown[]) => void>) => {
     Object.assign(h.streamOpts, opts);
-    return { startStream: h.startStream, stopStream: h.stopStream };
+    // Return a STABLE object (like the real hook) so a consumer effect that
+    // depends on `executionStream` doesn't re-run on every render — an unstable
+    // object re-fired the reconnect effect and, across the reconnect tests,
+    // double-counted startExecution.
+    h.streamApi ??= {
+      startStream: (...a: unknown[]) => h.startStream(...a),
+      stopStream: (...a: unknown[]) => h.stopStream(...a),
+    };
+    return h.streamApi;
   },
 }));
 vi.mock('./utils/generationStreamManager', () => ({
@@ -167,6 +178,7 @@ vi.mock('./api/executions', () => ({
   listExecutions: (...a: unknown[]) => h.listExecutions(...a),
   stopExecution: (...a: unknown[]) => h.stopExecution(...a),
   getExecutionStatus: (...a: unknown[]) => h.getExecutionStatus(...a),
+  getJobTraces: (...a: unknown[]) => h.getJobTraces(...a),
 }));
 vi.mock('./api/crews', () => ({
   saveGeneratedCrew: (...a: unknown[]) => h.saveGeneratedCrew(...a),
@@ -251,6 +263,7 @@ import ChatWorkspace, {
   cleanTaskLabel,
   extractResultText,
   stripEmbeddedUiDocument,
+  tracesToRunSteps,
 } from './ChatWorkspace';
 import { buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 
@@ -296,6 +309,37 @@ describe('summarizeArgs', () => {
   });
   it('returns undefined for args that are neither string nor object', () => {
     expect(summarizeArgs(5 as unknown)).toBeUndefined();
+  });
+  it('surfaces only the meaningful query, not a CSV of every argument', () => {
+    // The real-world search args that read as ", 10, 30, Switzerland news today, CH, …".
+    const args = JSON.stringify({
+      max_results: 10, max_chars: 30, query: 'Switzerland news today',
+      country: 'CH', safesearch: 'moderate', markdown: true, freshness: 'day', lang: 'en',
+    });
+    expect(summarizeArgs(args)).toBe('Switzerland news today');
+  });
+  it('summarizes a list of visited pages as a count', () => {
+    expect(summarizeArgs(JSON.stringify(['https://a.com/1', 'https://b.com/2', 'https://c.com/3']))).toBe('3 pages');
+    expect(summarizeArgs(JSON.stringify({ urls: ['https://a.com/1', 'https://b.com/2'] }))).toBe('2 pages');
+  });
+  it('uses the longest string value when no preferred field is present', () => {
+    expect(summarizeArgs(JSON.stringify({ code: 'US', note: 'a much longer descriptive value' }))).toBe('a much longer descriptive value');
+  });
+});
+
+describe('tracesToRunSteps — durable restore from execution traces', () => {
+  it('rebuilds tool_result steps (memory + SQL) from persisted traces, skipping non-tool events', () => {
+    const traces = [
+      { id: 1, event_type: 'task_started', output: {} }, // noise → dropped
+      { id: 2, event_type: 'memory_retrieval', output: { content: 'recalled the project goals' }, trace_metadata: { query_time_ms: 16000 } },
+      { id: 3, event_type: 'databricks_sql_execute_sql_read_only_run', output: { tool_name: 'databricks_sql_execute_sql_read_only', content: '{"x":1}', duration_ms: 3000 } },
+      { id: 4, event_type: 'llm_retry', output: {} }, // noise → dropped
+    ];
+    const steps = tracesToRunSteps(traces);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toMatchObject({ label: 'Memory', detail: 'recalled the project goals' });
+    expect(steps[1]).toMatchObject({ label: 'databricks_sql_execute_sql_read_only' });
+    expect(steps.every((s) => s.id.startsWith('trace-'))).toBe(true);
   });
 });
 
@@ -406,6 +450,31 @@ describe('buildTraceEntry', () => {
     expect(e?.kind).toBe('tool_result');
     expect(e?.label).toBe('Memory');
     expect(e?.detail).toContain('Swiss news');
+  });
+  it('reads the real memory duration from trace_metadata (query/retrieval time)', () => {
+    // Memory recall's output.duration_ms is a tiny unrelated value; the REAL time
+    // is query_time_ms/retrieval_time_ms in trace_metadata — those must win, or
+    // long recalls show 0.0s.
+    const e = buildTraceEntry('', {
+      event_type: 'memory_retrieval',
+      output: { content: 'remembered fact', duration_ms: 7 }, // tiny → must NOT win
+      trace_metadata: { query_time_ms: 16208.93 },
+    });
+    expect(e?.durationMs).toBe(16208.93);
+    const e2 = buildTraceEntry('', {
+      event_type: 'memory_retrieval',
+      output: { content: 'remembered fact' },
+      trace_metadata: { retrieval_time_ms: 11382 },
+    });
+    expect(e2?.durationMs).toBe(11382);
+  });
+  it('prefers output.duration_ms over trace_metadata when both are present', () => {
+    const e = buildTraceEntry('', {
+      event_type: 'perplexitytool_run',
+      output: { tool_name: 'P', content: 'x', duration_ms: 2200 },
+      trace_metadata: { query_time_ms: 99999 },
+    });
+    expect(e?.durationMs).toBe(2200);
   });
   it('surfaces a memory pill with no event_source (source falls back to undefined)', () => {
     const e = buildTraceEntry('', {
@@ -630,6 +699,12 @@ describe('ChatWorkspace component', () => {
       h.streamOpts.onError('boom');
     });
     expect(h.exec.completeExecution).toHaveBeenCalled();
+    // Promoting the tool_call pill to its tool_result MUST re-send resultType so
+    // the persisted row stays a 'trace' — otherwise the tool context is lost on
+    // refresh (generation_result is overwritten with packExtras(updates)).
+    expect(h.session.updateMessageInTargetSession).toHaveBeenCalledWith(
+      's1', 'mid', expect.objectContaining({ resultType: 'trace' }),
+    );
     // No run was started in this test, so the SSE path stamps an undefined jobId.
     expect(h.exec.failExecution).toHaveBeenCalledWith('boom', undefined);
   });
@@ -2061,6 +2136,62 @@ describe('ChatWorkspace component', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(h.exec.startExecution).not.toHaveBeenCalledWith('job-other', 's1', { preservePreview: true });
+  });
+
+  it('reconnect to a job whose status 404s abandons it (gone) instead of looping', async () => {
+    // The job's row no longer exists for this workspace (deleted, or different
+    // group). getExecutionStatus 404s. The backstop must treat it as terminal:
+    // stop the stream + abandonExecution — NOT keep the optimistic state (which
+    // left the global poller hammering 404s and a refresh re-detecting the dead
+    // job, AND — once abandon cleared activeExecution — re-attaching in a loop).
+    h.exec.runningJobBySession = {}; // marker (IndexedDB) is the only source here
+    // mockReset clears any queued mockResolvedValueOnce a prior reconnect test
+    // left UNCONSUMED (e.g. the "bails when already active" test, which returns
+    // before reading the marker) — otherwise our first read gets that stale value.
+    h.getSessionRunningJob.mockReset();
+    h.getSessionRunningJob.mockResolvedValue('job-gone');
+    h.getExecutionStatus.mockReset();
+    h.exec.activeExecution = null;
+    h.exec.startExecution.mockImplementation((jobId: string) => {
+      h.exec.activeExecution = { jobId, status: 'running' };
+      h.exec.isExecuting = true;
+    });
+    // Mirror the real store: abandonExecution clears the live slot. This removes
+    // the activeExecution re-entry guard, so any re-attach loop would surface as
+    // repeated startExecution calls — the dead-job guard must prevent that.
+    h.exec.abandonExecution.mockImplementation(() => {
+      h.exec.activeExecution = null;
+      h.exec.isExecuting = false;
+    });
+    h.getExecutionStatus.mockRejectedValue({ response: { status: 404 } });
+    h.session.currentSessionId = 's1';
+
+    let utils!: ReturnType<typeof render>;
+    await act(async () => {
+      utils = render(<ChatWorkspace />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Force extra render passes — a dead job must never be re-attached.
+    await act(async () => {
+      utils.rerender(<ChatWorkspace />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(h.exec.startExecution).toHaveBeenCalledWith('job-gone', 's1', { preservePreview: true });
+    expect(h.exec.abandonExecution).toHaveBeenCalledWith('job-gone');
+    expect(h.stopStream).toHaveBeenCalled();
+    // Optimistically re-attached exactly once — no loop.
+    expect(h.exec.startExecution).toHaveBeenCalledTimes(1);
+    // 404 is the "gone" path, not the "already-finished" path (which clears the
+    // marker directly): abandonExecution owns the cleanup here.
+    expect(h.clearSessionRunningJob).not.toHaveBeenCalled();
+
+    // These persistent mocks would otherwise leak into later tests (beforeEach
+    // only clearAllMocks — clears calls, not implementations). Restore defaults.
+    h.getExecutionStatus.mockResolvedValue({ status: 'running' });
+    h.getSessionRunningJob.mockResolvedValue(null);
+    h.exec.startExecution.mockReset();
+    h.exec.abandonExecution.mockReset();
   });
 
   // =========================================================================

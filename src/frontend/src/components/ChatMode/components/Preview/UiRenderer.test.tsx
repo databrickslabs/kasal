@@ -627,6 +627,40 @@ describe('UiRenderer — surface theme', () => {
     expect(style).not.toContain('#dbe3ff');
     expect(style).toContain('var(--ui-text');
   });
+
+  it('hyperlinks the first column to its row source url (http only, new tab)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Table', columns: ['Title', 'Page Age'], rows: [{ Title: 'Swiss News', 'Page Age': '2026-06-22' }], links: ['https://swissinfo.ch/x'] },
+    })} />);
+    const a = container.querySelector('tbody a') as HTMLAnchorElement;
+    expect(a).not.toBeNull();
+    expect(a.getAttribute('href')).toBe('https://swissinfo.ch/x');
+    expect(a.getAttribute('target')).toBe('_blank');
+    expect(a.getAttribute('rel') || '').toContain('noopener');
+    expect(a.textContent).toBe('Swiss News');
+  });
+
+  it('does not hyperlink a non-http row link (no javascript: urls)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Table', columns: ['Title'], rows: [{ Title: 'X' }], links: ['javascript:alert(1)'] },
+    })} />);
+    expect(container.querySelector('tbody a')).toBeNull();
+  });
+
+  it('sorts rows numerically when a column header is clicked (asc → desc → off)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: { id: 'root', component: 'Table', columns: ['Name', 'Score'], rows: [{ Name: 'A', Score: 30 }, { Name: 'B', Score: 10 }, { Name: 'C', Score: 20 }] },
+    })} />);
+    const scoreHeader = container.querySelectorAll('thead th')[1] as HTMLElement;
+    const scores = () => Array.from(container.querySelectorAll('tbody tr')).map((tr) => tr.querySelectorAll('td')[1].textContent);
+    expect(scores()).toEqual(['30', '10', '20']); // original order
+    fireEvent.click(scoreHeader);
+    expect(scores()).toEqual(['10', '20', '30']); // ascending (numeric, not lexicographic)
+    fireEvent.click(scoreHeader);
+    expect(scores()).toEqual(['30', '20', '10']); // descending
+    fireEvent.click(scoreHeader);
+    expect(scores()).toEqual(['30', '10', '20']); // back to original
+  });
 });
 
 describe('UiRenderer — Album', () => {

@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExecutionStatus } from './types/execution';
-import { createExecution, stopExecution, listExecutions, getExecutionStatus } from './api/executions';
+import { createExecution, stopExecution, listExecutions, getExecutionStatus, getJobTraces } from './api/executions';
 import { saveGeneratedCrew, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
@@ -17,7 +17,6 @@ import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
-import PreviewActivity from './components/Preview/PreviewActivity';
 import { parseUiDocument } from './utils/uiDocument';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
@@ -56,22 +55,45 @@ export function toolMatchKey(name: unknown, args: unknown): string {
 
 export function summarizeArgs(args: unknown): string | undefined {
   if (!args) return undefined;
-  let parsed: Record<string, unknown> = {};
-  try {
-    if (typeof args === 'string') {
-      parsed = JSON.parse(args.replace(/'/g, '"'));
-    } else if (typeof args === 'object') {
-      parsed = args as Record<string, unknown>;
+  const clip = (s: string): string => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
+  let raw: unknown = args;
+  if (typeof args === 'string') {
+    try {
+      raw = JSON.parse(args.replace(/'/g, '"'));
+    } catch {
+      // A non-JSON string is already a plain value (e.g. a bare query).
+      const s = args.trim();
+      return s ? clip(s) : undefined;
     }
-  } catch {
-    // The catch only runs when JSON.parse throws, which only happens for string args.
-    return args as string;
   }
-  const vals = Object.values(parsed).filter((v) => typeof v === 'string');
-  let s = vals.join(', ');
-  if (!s) return undefined;
-  if (s.length > 80) s = s.slice(0, 80) + '…';
-  return s;
+  // A bare list of strings (e.g. the URLs a reader visited) → "N pages".
+  if (Array.isArray(raw)) {
+    const items = raw.filter((x) => typeof x === 'string' && String(x).trim()).map((x) => String(x).trim());
+    if (items.length === 1) return clip(items[0]);
+    if (items.length > 1) return `${items.length} pages`;
+    return undefined;
+  }
+  if (!raw || typeof raw !== 'object') return undefined;
+  const parsed = raw as Record<string, unknown>;
+  // Surface the ONE meaningful field a human cares about — the query / question /
+  // topic / url — instead of dumping EVERY argument value as a CSV (which reads as
+  // ", 10, 30, Switzerland news today, CH, moderate, …" to a non-technical user).
+  const lower: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed)) lower[k.toLowerCase()] = v;
+  const PREFERRED = ['query', 'search_query', 'searchquery', 'q', 'question', 'prompt', 'search', 'topic', 'text', 'url', 'urls', 'website_url', 'task'];
+  for (const key of PREFERRED) {
+    const v = lower[key];
+    if (typeof v === 'string' && v.trim()) return clip(v.trim());
+    if (Array.isArray(v)) {
+      const items = v.filter((x) => typeof x === 'string' && String(x).trim()).map((x) => String(x).trim());
+      if (items.length === 1) return clip(items[0]);
+      if (items.length > 1) return `${items.length} pages`;
+    }
+  }
+  // Fallback: the single longest string value (the substantive one), not a CSV.
+  const strings = Object.values(parsed).filter((v) => typeof v === 'string' && (v as string).trim()) as string[];
+  if (!strings.length) return undefined;
+  return clip(strings.reduce((a, b) => (b.length > a.length ? b : a)).trim());
 }
 
 /**
@@ -103,7 +125,18 @@ export function buildTraceEntry(
   };
   const output = asObject(data?.output);
   const extra = asObject(output.extra_data);
-  const duration = typeof output.duration_ms === 'number' ? (output.duration_ms as number) : undefined;
+  const metadata = asObject(data?.trace_metadata);
+  const num = (o: Record<string, unknown>, k: string): number | undefined =>
+    typeof o[k] === 'number' ? (o[k] as number) : undefined;
+  // Prefer the backend's explicit duration; for MEMORY recall the real time lives
+  // in trace_metadata (query_time_ms / retrieval_time_ms), matching the Job-History
+  // trace. Without this, long memory reads (10–16s) showed as 0.0s in the timeline.
+  const durationMs =
+    num(output, 'duration_ms')
+    ?? num(metadata, 'duration_ms')
+    ?? num(metadata, 'query_time_ms')
+    ?? num(metadata, 'retrieval_time_ms')
+    ?? num(metadata, 'save_time_ms');
   const now = Date.now();
 
   // Hard-filter known noise events.
@@ -152,7 +185,7 @@ export function buildTraceEntry(
       kind: 'tool_result',
       label: toolName,
       sublabel: summarizeArgs(input),
-      durationMs: duration,
+      durationMs,
       source: eventSource || undefined,
       detail: content || undefined,
       timestamp: now,
@@ -169,12 +202,17 @@ export function buildTraceEntry(
     const content = typeof output.content === 'string' ? (output.content as string).trim() : '';
     const foundNothing = !content || /no relevant memories|no memories found|^\[\]$/i.test(content);
     if (foundNothing) return null; // nothing retrieved — don't add a redundant pill
+    // For memory recall the REAL time is the query/retrieval time in metadata —
+    // output.duration_ms is a tiny unrelated value, so it must NOT win here (that
+    // made long recalls show 0.0s). Matches the Job-History trace's "Memory Read".
+    const memoryDurationMs =
+      num(metadata, 'query_time_ms') ?? num(metadata, 'retrieval_time_ms') ?? durationMs;
     return {
       kind: 'tool_result',
       // Same label so consecutive recalls group under one "Memory" line.
       label: 'Memory',
       sublabel: 'context retrieved',
-      durationMs: duration,
+      durationMs: memoryDurationMs,
       source: eventSource || undefined,
       detail: content,
       timestamp: now,
@@ -197,6 +235,32 @@ export function buildTraceEntry(
     detail: trimmed.length > 80 ? trimmed : undefined,
     timestamp: now,
   };
+}
+
+/**
+ * Rebuild the run-activity steps from the DURABLE execution traces (the
+ * /traces/job rows), running each through {@link buildTraceEntry} — the SAME
+ * mapping the live SSE path uses. This lets a refreshed session restore the full
+ * tool context (memory recalls, SQL/Genie result tables, …) straight from the
+ * database, independent of whatever the per-message copy retained.
+ */
+export function tracesToRunSteps(
+  traces: { id?: number; event_type?: string; output?: unknown; trace_metadata?: unknown; event_source?: string }[],
+): { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] {
+  const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
+  traces.forEach((t, idx) => {
+    const entry = buildTraceEntry('', t as unknown as Record<string, unknown>);
+    if (!entry || entry.kind !== 'tool_result' || !entry.label) return;
+    steps.push({
+      id: `trace-${t.id ?? idx}`,
+      label: entry.label,
+      sublabel: entry.sublabel,
+      detail: entry.detail,
+      durationMs: entry.durationMs,
+      timestamp: idx,
+    });
+  });
+  return steps;
 }
 
 /**
@@ -379,11 +443,12 @@ const ChatWorkspace: React.FC = () => {
   const previewOwnerSessionId = useExecutionStore((s) => s.previewOwnerSessionId);
   const previewHistory = useExecutionStore((s) => s.previewHistory);
   const previewIndex = useExecutionStore((s) => s.previewIndex);
-  const transientPreview = useExecutionStore((s) => s.transientPreview);
-  const transientPreviewOwnerSessionId = useExecutionStore((s) => s.transientPreviewOwnerSessionId);
-  const showRetrievedContext = useExecutionStore((s) => s.showRetrievedContext);
   const navigatePreview = useExecutionStore((s) => s.navigatePreview);
   const chatCollapsed = useExecutionStore((s) => s.chatCollapsed);
+  // Where the run activity ("thinking" stream) is shown: the preview pane (default)
+  // or collapsed into the chat's "Working…" bar (expandable). A persisted choice.
+  const activityPlacement = useExecutionStore((s) => s.activityPlacement);
+  const activityInChat = activityPlacement === 'chat';
   // "Workspace memory" recall scope, owned by the store so it persists across
   // the empty→conversation input swap (local state would reset to ON).
   const workspaceMemory = useExecutionStore((s) => s.workspaceMemory);
@@ -425,13 +490,82 @@ const ChatWorkspace: React.FC = () => {
   const showPreviewSkeleton = shouldShowPreviewSkeleton({
     runActive: viewIsExecuting,
     hasPreview: !!previewContent,
-  });
+  })
+    // In 'chat' placement the activity lives in the chat's Working bar, so the
+    // preview pane stays out until there's a real deliverable.
+    && !activityInChat;
   const previewPaneVisible = !!previewContent || showPreviewSkeleton;
-  // Live (transient, non-persisted) answers for the run on screen. While the
-  // skeleton is up, these elegant cards replace the blank shimmer; they're
-  // never written to previewHistory/IndexedDB and clear when the run ends.
-  const transientItems =
-    transientPreviewOwnerSessionId === currentSessionId ? transientPreview : [];
+
+  // The run-activity timeline shown in the preview pane (live skeleton AND
+  // collapsed above the finished result). Sourced from the PERSISTENT chat trace
+  // messages — the latest run's tool_result steps — so it survives the run
+  // finishing (unlike the ephemeral live feed). Each tool_result message's
+  // resultData carries the label / query / context the step pulled in.
+  const messageActivitySteps = useMemo(() => {
+    let start = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { start = i + 1; break; }
+    }
+    // Show EVERY tool_result step — no pruning/dedup. The user wants to see each
+    // step the agent ran, even when two look similar (repeated memory recalls or
+    // Genie queries that share a SQL prefix).
+    const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
+    messages.slice(start).forEach((m, idx) => {
+      if (m.resultType !== 'trace') return;
+      const t = m.resultData as Partial<TraceEntry> | undefined;
+      if (!t || t.kind !== 'tool_result' || !t.label) return;
+      steps.push({
+        id: m.id || `step-${idx}`,
+        label: t.label,
+        sublabel: t.sublabel,
+        detail: t.detail,
+        durationMs: t.durationMs,
+        timestamp: t.timestamp ?? idx,
+      });
+    });
+    return steps;
+  }, [messages]);
+
+  // The latest run's job id (a crew_actions / result message carries `executionId`)
+  // — used to restore the activity from the durable execution traces on refresh.
+  const latestRunJobId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const e = messages[i].executionId;
+      if (e) return e;
+    }
+    return undefined;
+  }, [messages]);
+
+  // Run activity restored from the PERSISTED execution traces, keyed by job id —
+  // the durable, complete source (a refresh can lose the per-message copy).
+  const [restoredStepsByJob, setRestoredStepsByJob] = useState<Record<string, ReturnType<typeof tracesToRunSteps>>>({});
+  const fetchedTraceJobsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    // Only restore for a FINISHED run we're viewing — a live run streams its own
+    // steps into the messages; the traces are fetched once it has settled.
+    if (!latestRunJobId || viewIsExecuting) return;
+    if (fetchedTraceJobsRef.current.has(latestRunJobId)) return;
+    fetchedTraceJobsRef.current.add(latestRunJobId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const traces = await getJobTraces(latestRunJobId);
+        if (cancelled) return;
+        const steps = tracesToRunSteps(traces);
+        if (steps.length) setRestoredStepsByJob((prev) => ({ ...prev, [latestRunJobId]: steps }));
+      } catch {
+        /* best-effort: fall back to the per-message steps */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [latestRunJobId, viewIsExecuting]);
+
+  // Prefer the durable restored steps when available (complete + survives a
+  // refresh); otherwise the per-message steps (the live source during a run).
+  const runActivitySteps = useMemo(() => {
+    const restored = latestRunJobId ? restoredStepsByJob[latestRunJobId] : undefined;
+    return restored && restored.length ? restored : messageActivitySteps;
+  }, [restoredStepsByJob, latestRunJobId, messageActivitySteps]);
 
   const models = useAppStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
@@ -662,19 +796,9 @@ const ChatWorkspace: React.FC = () => {
 
     const trace = buildTraceEntry(message, data);
     if (trace) {
-      // Surface the answer LIVE in the preview pane (transient, non-persisted):
-      // tool_result events carry the actual findings. No-op unless this run's
-      // session is the one on screen (gated inside the store action).
-      if (trace.kind === 'tool_result') {
-        useExecutionStore.getState().pushTransientPreview(ownerSession || null, {
-          id: generateId(),
-          label: trace.label,
-          sublabel: trace.sublabel,
-          detail: trace.detail,
-          durationMs: trace.durationMs,
-          timestamp: trace.timestamp,
-        });
-      }
+      // The run-activity timeline (preview pane) is derived from these trace
+      // messages — see `runActivitySteps`. tool_result traces carry the step's
+      // label / query / context the agent pulled in.
       const sessionStore = useSessionStore.getState();
       let handled = false;
 
@@ -685,7 +809,13 @@ const ChatWorkspace: React.FC = () => {
           // event (has duration + content), so promote the pill to it; drop
           // any later tool_call for an already-resolved key.
           if (trace.kind === 'tool_result' && !existing.resolved) {
-            const updates = { resultData: trace };
+            // Re-send resultType too: the persistence layer OVERWRITES
+            // generation_result with packExtras(updates), so omitting resultType
+            // would drop it from the stored row — and on refresh the promoted
+            // tool step would no longer be a 'trace' (its context vanishes from
+            // the run activity). Keeping it here makes the tool context survive
+            // a reload (it's restored from the persisted message, not just live).
+            const updates = { resultType: 'trace', resultData: trace };
             if (ownerSession) {
               sessionStore.updateMessageInTargetSession(ownerSession, existing.messageId, updates);
             } else {
@@ -829,15 +959,29 @@ const ChatWorkspace: React.FC = () => {
       if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
       failExecutionOnce(jobId, 'Execution stopped');
     };
+    // The poller hit a definitive 404 loop: the job's row no longer exists for
+    // this workspace (deleted, or a different group). Abandon it — drop the
+    // running banner + the durable reconnect marker — so neither the poller nor a
+    // refresh resurrects it. Routed by owner like the completion events, and a
+    // no-op once the job is untracked (e.g. the reconnect backstop already
+    // abandoned it). Deliberately posts NO chat message: the run isn't a failure.
+    const onJobNotFound = (e: Event) => {
+      const { jobId } = (e as CustomEvent).detail || {};
+      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
+      jobOwnerRef.current.delete(jobId);
+      useExecutionStore.getState().abandonExecution(jobId);
+    };
     window.addEventListener('traceUpdate', onTraceUpdate as EventListener);
     window.addEventListener('jobCompleted', onJobCompleted as EventListener);
     window.addEventListener('jobFailed', onJobFailed as EventListener);
     window.addEventListener('jobStopped', onJobStopped as EventListener);
+    window.addEventListener('jobNotFound', onJobNotFound as EventListener);
     return () => {
       window.removeEventListener('traceUpdate', onTraceUpdate as EventListener);
       window.removeEventListener('jobCompleted', onJobCompleted as EventListener);
       window.removeEventListener('jobFailed', onJobFailed as EventListener);
       window.removeEventListener('jobStopped', onJobStopped as EventListener);
+      window.removeEventListener('jobNotFound', onJobNotFound as EventListener);
     };
   }, [processTrace, completeExecutionOnce, failExecutionOnce]);
 
@@ -1017,27 +1161,55 @@ const ChatWorkspace: React.FC = () => {
   // it (async), re-attach the SSE stream + execution state, and verify status.
   // Attempted once per session id (covers refresh on the running session, and
   // switching to it afterwards).
-  const reconnectAttemptedRef = useRef<Set<string>>(new Set());
+  // In-flight guard so a re-render can't fire a duplicate reconnect for the SAME
+  // session while its (async) marker read is pending. Unlike a once-ever Set,
+  // this RESETS after each attempt, so switching BACK to a still-running session
+  // re-detects and restores it — the bug where switch-away/return lost the
+  // monitoring while a refresh (fresh component) brought it back.
+  const reconnectingRef = useRef<string | null>(null);
+  // Job ids proven gone (a 404 during the reconnect backstop, or finalized as
+  // already-finished). Without this the effect would re-attach the SAME dead job
+  // on every re-render: handleStartExecutionStream re-persists the IndexedDB
+  // marker, abandonExecution clears activeExecution (removing the re-entry guard
+  // below) and async-clears the marker — so a re-run that reads the not-yet-
+  // cleared marker re-attaches → 404 → abandon → loop (tight render loop, screen
+  // flicker, 404 storm). A dead job id never returns (UUIDs), so we never clear it.
+  const deadJobsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const sid = currentSessionId;
-    if (!sid || reconnectAttemptedRef.current.has(sid)) return;
-    // Mark BEFORE the async work so a re-render (handleStartExecutionStream /
-    // executionStream change identity) can't start a second attempt. We
-    // intentionally do NOT use a cleanup "cancelled" flag: the reconnect drives
-    // the GLOBAL store (not component-local state), so it's safe to complete
-    // even across re-renders/unmounts — and a cleanup flag was aborting the one
-    // in-flight read before it resolved, so the Stop button never came back.
-    reconnectAttemptedRef.current.add(sid);
+    if (!sid || reconnectingRef.current === sid) return;
+    const st = useExecutionStore.getState();
+    // Already showing THIS session's run as active (snapshot restore handled it)
+    // — nothing to reconnect.
+    if (st.executionOwnerSessionId === sid && (st.isExecuting || st.isGenerating)) return;
+    // A DIFFERENT run holds the live slot — don't clobber it.
+    if (st.activeExecution) return;
+    // Detect a running job for this session: the Zustand store first (survives
+    // session switches in memory), then the IndexedDB marker (covers refresh,
+    // where the in-memory store was wiped).
+    const known = st.runningJobBySession[sid];
+    reconnectingRef.current = sid;
+    // Cancelled on unmount so an in-flight reconnect never re-attaches after the
+    // component is gone (also keeps tests isolated: a prior render's pending async
+    // can't fire startExecution into the next test).
+    let cancelled = false;
     (async () => {
-      const jobId = await readActiveExecution(sid);
-      if (!jobId) return;
-      // Reconnect ONLY restores a run into an EMPTY store (post-refresh). If any
-      // execution is already active — the user started a new run, or another
-      // reconnect ran while this one awaited the marker read — bail. Otherwise a
-      // late-resolving reconnect would swap the live SSE stream + owner back to
-      // this (older) job, leaking its output into whatever session is now on
-      // screen. (This is what made one session's output appear in another.)
-      if (useExecutionStore.getState().activeExecution) return;
+      const jobId = known || (await readActiveExecution(sid));
+      // Re-check after the async read: still on this session, still nothing active.
+      if (!jobId || useSessionStore.getState().currentSessionId !== sid) {
+        reconnectingRef.current = null;
+        return;
+      }
+      if (useExecutionStore.getState().activeExecution) {
+        reconnectingRef.current = null;
+        return;
+      }
+      // Already proven gone this session — don't re-attach it (would loop: the
+      // marker clear is async, so a stale re-read could resurrect it otherwise).
+      if (deadJobsRef.current.has(jobId)) {
+        reconnectingRef.current = null;
+        return;
+      }
 
       // Restore the running state OPTIMISTICALLY so the Stop button reappears
       // immediately, and re-attach the SSE stream (its replay buffer + future
@@ -1045,6 +1217,10 @@ const ChatWorkspace: React.FC = () => {
       // this on a status fetch — if that fetch failed or returned an unexpected
       // shape, the Stop button would vanish even though the crew is still
       // running, which is exactly the bug we're fixing.
+      if (cancelled || useSessionStore.getState().currentSessionId !== sid) {
+        reconnectingRef.current = null;
+        return;
+      }
       handleStartExecutionStream(jobId, sid, { preservePreview: true });
 
       // Backstop: if the job had ALREADY finished before the refresh, drop the
@@ -1056,6 +1232,7 @@ const ChatWorkspace: React.FC = () => {
         const status = String(exec?.status || '').toLowerCase();
         const finished = ['completed', 'failed', 'stopped', 'cancelled', 'error'].includes(status);
         if (finished && useExecutionStore.getState().activeExecution?.jobId === jobId) {
+          deadJobsRef.current.add(jobId);
           executionStream.stopStream();
           useExecutionStore.setState({
             isExecuting: false,
@@ -1065,14 +1242,45 @@ const ChatWorkspace: React.FC = () => {
           });
           clearActiveExecution(sid);
           // We finalized this job directly (it was already done) — drop its
-          // owner mapping so a late poller event can't re-post a completion.
+          // owner mapping so a late poller event can't re-post a completion, and
+          // drop the Zustand switch-back entry so we don't re-detect a dead run.
           useExecutionStore.getState().clearJobOwner(jobId);
+          useExecutionStore.setState((s) => {
+            if (!(sid in s.runningJobBySession)) return {};
+            const next = { ...s.runningJobBySession };
+            delete next[sid];
+            return { runningJobBySession: next };
+          });
         }
-      } catch {
-        // Status check failed (offline / transient) — keep the optimistic
-        // running state; the SSE stream remains the source of truth.
+      } catch (err) {
+        // A 404 means the run no longer exists for this workspace (deleted, or it
+        // belongs to a group you no longer have selected). Without this, the
+        // optimistic running state + the IndexedDB reconnect marker persist, so
+        // the global poller hammers /executions + /traces every 2s with 404s and
+        // the NEXT refresh re-detects the dead job and resumes the storm. Treat it
+        // as terminal: stop the stream and abandon the job (clears the marker +
+        // the running banner). Any OTHER error (offline / 5xx / transient) keeps
+        // the optimistic state — the SSE stream / next poll stays the source of truth.
+        const httpStatus = (err as { response?: { status?: number } })?.response?.status;
+        if (httpStatus === 404) {
+          deadJobsRef.current.add(jobId);
+          executionStream.stopStream();
+          jobOwnerRef.current.delete(jobId);
+          useExecutionStore.getState().abandonExecution(jobId);
+          // handleStartExecutionStream above dispatched 'jobCreated', arming the
+          // global poller's grace timer. Tell it to stand down now so it never
+          // starts hammering this dead job (no residual 404 tail).
+          window.dispatchEvent(new CustomEvent('jobNotFound', { detail: { jobId } }));
+        }
+        // else: offline / transient — keep optimistic state; SSE/next poll resolves it.
+      } finally {
+        // Allow a future switch-back to re-detect (the guard is per-attempt, not
+        // once-ever) — this is what makes switching away and returning restore
+        // the monitoring, like a refresh does.
+        reconnectingRef.current = null;
       }
     })();
+    return () => { cancelled = true; reconnectingRef.current = null; };
   }, [currentSessionId, handleStartExecutionStream, executionStream]);
 
   const doExecuteCrew = useCallback(
@@ -1873,6 +2081,10 @@ const ChatWorkspace: React.FC = () => {
               isExecuting={viewIsExecuting}
               isGenerating={viewIsGenerating}
               executionContext={viewExecutionContext}
+              hideLiveTimeline={!activityInChat && previewPaneVisible}
+              activityInChat={activityInChat}
+              runSteps={runActivitySteps}
+              onToggleActivityPlacement={() => useExecutionStore.getState().setActivityPlacement(activityInChat ? 'preview' : 'chat')}
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
@@ -1907,16 +2119,20 @@ const ChatWorkspace: React.FC = () => {
           history={previewHistory}
           index={previewIndex}
           onNavigate={navigatePreview}
+          runSteps={activityInChat ? [] : runActivitySteps}
+          onMoveActivityToChat={() => useExecutionStore.getState().setActivityPlacement('chat')}
         />
       )}
 
-      {/* Preview skeleton — shown WHILE the viewed session's run builds its
-          deliverable (no preview yet). Mutually exclusive with PreviewPanel:
-          showPreviewSkeleton already implies !previewContent. */}
-      {showPreviewSkeleton &&
-        (showRetrievedContext && transientItems.length > 0
-          ? <PreviewActivity items={transientItems} />
-          : <PreviewSkeleton />)}
+      {/* Preview skeleton — the single run monitor (a clickable step timeline)
+          shown WHILE the viewed session's run builds its deliverable (no preview
+          yet). Mutually exclusive with PreviewPanel. */}
+      {showPreviewSkeleton && (
+        <PreviewSkeleton
+          steps={runActivitySteps}
+          onMoveActivityToChat={() => useExecutionStore.getState().setActivityPlacement('chat')}
+        />
+      )}
 
     </div>
   );

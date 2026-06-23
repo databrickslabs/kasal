@@ -2,9 +2,11 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
-import ChatMessageComponent, { TraceEntryData, formatDurationMs } from './ChatMessage';
+import ChatMessageComponent, { TraceEntryData } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
+import ThinkingStream from '../Preview/ThinkingStream';
+import type { RunStep } from '../Preview/RunTimeline';
 
 /**
  * Group trace messages for a readable timeline (shown inside the RunProgress
@@ -53,70 +55,6 @@ function groupChatItems(messages: ChatMessageType[]): RenderItem[] {
   return items;
 }
 
-/** One step on the RunProgress timeline: a dot on the left rail, the call name
- *  in bold, its duration, a short summary line, and — behind a per-step toggle —
- *  the retrieved context / full tool output (kept hidden so the timeline stays
- *  scannable; the user expands a step only when they want to read what it pulled
- *  in). */
-const TimelineStep: React.FC<{ step: TraceEntryData; last: boolean }> = ({ step, last }) => {
-  const [open, setOpen] = useState(false);
-  const name = step.label; // always set: a label-less trace never reaches the timeline
-  const duration = formatDurationMs(step.durationMs);
-  const summary = step.sublabel || ''; // short line, always visible
-  // Retrieved context / full output — only when it adds something beyond the summary.
-  const context = step.detail && step.detail !== step.sublabel ? step.detail : '';
-  return (
-    <li className="relative pl-5 pb-3 last:pb-0">
-      <span aria-hidden="true" className="absolute left-0 top-1 w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent)' }} />
-      {!last && (
-        <span aria-hidden="true" className="absolute left-[3px] top-3 bottom-0 w-px" style={{ backgroundColor: 'var(--border-color)' }} />
-      )}
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{name}</span>
-        {duration && (
-          <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{duration}</span>
-        )}
-      </div>
-      {summary && (
-        <div className="text-xs mt-1 whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>
-          {summary}
-        </div>
-      )}
-      {context && (
-        <div className="mt-1">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-label={`${open ? 'Hide' : 'Show'} context for ${name}`}
-            className="flex items-center gap-1 text-[10px] font-medium transition-colors hover:opacity-80"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <svg
-              className="w-3 h-3 transition-transform"
-              style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-            {open ? 'Hide context' : 'Show context'}
-          </button>
-          {open && (
-            <div
-              className="text-xs mt-1 whitespace-pre-wrap break-words max-h-40 overflow-y-auto rounded-md p-2"
-              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-            >
-              {context}
-            </div>
-          )}
-        </div>
-      )}
-    </li>
-  );
-};
-
 /** One-line live status for the collapsed header: the LATEST step's name plus
  *  the first line of its query/answer, so the box visibly progresses while the
  *  crew works (agent → task → memory query → memory answer → tool call → …)
@@ -127,6 +65,18 @@ export function liveStepLine(step: TraceEntryData): { name: string; line: string
   const src = step.label === 'Memory' ? step.detail || step.sublabel : step.sublabel || step.detail;
   const line = (src || '').split('\n').map((l) => l.trim()).find((l) => l !== '') || '';
   return { name: step.label, line: line.length > 100 ? `${line.slice(0, 100)}…` : line };
+}
+
+/** Convert a segment's chat trace groups into RunStep[] (tool_result steps only)
+ *  for the thinking stream — the same shape the preview pane uses. */
+function deriveStepsFromGroups(groups: TraceGroupItem[]): RunStep[] {
+  const out: RunStep[] = [];
+  groups.flatMap((g) => g.msgs).forEach((m, i) => {
+    const t = m.resultData as TraceEntryData | undefined;
+    if (!t || t.kind !== 'tool_result' || !t.label) return;
+    out.push({ id: m.id || `step-${i}`, label: t.label, sublabel: t.sublabel, detail: t.detail, durationMs: t.durationMs });
+  });
+  return out;
 }
 
 /**
@@ -146,7 +96,12 @@ const RunProgress: React.FC<{
   running: boolean;
   generating: boolean;
   onStop?: () => void;
-}> = ({ groups, running, generating, onStop }) => {
+  /** When provided, the expanded section shows the "thinking" stream (the chat
+   *  placement of the run activity) instead of the raw timeline. */
+  streamSteps?: RunStep[];
+  /** Dock the activity to the preview pane instead of this chat bar. */
+  onTogglePlacement?: () => void;
+}> = ({ groups, running, generating, onStop, streamSteps, onTogglePlacement }) => {
   const [open, setOpen] = useState(false);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
@@ -154,7 +109,11 @@ const RunProgress: React.FC<{
   useEffect(() => {
     if (!running) setStopping(false);
   }, [running]);
-  const hasTimeline = groups.length > 0;
+  // The activity ALWAYS renders as the thinking stream: use the caller-supplied
+  // steps (the latest run) or derive them from this segment's trace groups
+  // (historical runs) — the legacy raw timeline is gone.
+  const displaySteps = streamSteps ?? deriveStepsFromGroups(groups);
+  const hasTimeline = displaySteps.length > 0;
   // The latest streamed step drives a live one-liner in the header while the
   // run is active — the static labels are only fallbacks for the gaps before
   // the first trace arrives and after the run ends.
@@ -248,6 +207,17 @@ const RunProgress: React.FC<{
               </svg>
             )}
           </button>
+          {onTogglePlacement && (
+            <button
+              type="button"
+              onClick={onTogglePlacement}
+              className="text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+              style={{ color: 'var(--text-muted)' }}
+              title="Show the activity in the preview panel instead"
+            >
+              Show in panel
+            </button>
+          )}
           {onStop && (
             <button
               type="button"
@@ -276,13 +246,9 @@ const RunProgress: React.FC<{
           )}
         </div>
         {open && hasTimeline && (
-          <ol className="list-none flex flex-col px-4 py-3" style={{ borderTop: '1px solid var(--border-color)' }}>
-            {groups
-              .flatMap((g) => g.msgs.map((m) => m.resultData as TraceEntryData))
-              .map((step, i, arr) => (
-                <TimelineStep key={i} step={step} last={i === arr.length - 1} />
-              ))}
-          </ol>
+          <div className="px-4 py-3 max-h-[60vh] overflow-y-auto" style={{ borderTop: '1px solid var(--border-color)' }}>
+            <ThinkingStream steps={displaySteps} live={running} />
+          </div>
         )}
       </div>
     </div>
@@ -316,6 +282,19 @@ interface ChatContainerProps {
   isExecuting?: boolean;
   isGenerating?: boolean;
   executionContext?: ExecutionContext | null;
+  /** While the live run is monitored in the RIGHT preview pane (the clickable
+   *  step timeline), suppress THIS chat's in-conversation live timeline so the
+   *  steps aren't shown twice. The status row + Stop control stay; only the
+   *  expandable timeline of the live segment is hidden. Completed (historical)
+   *  segments keep their timeline. */
+  hideLiveTimeline?: boolean;
+  /** When true, the run activity lives HERE in the chat: the "Working…" bar
+   *  expands to the same thinking stream as the preview pane. */
+  activityInChat?: boolean;
+  /** The latest run's steps (for the chat thinking stream when activityInChat). */
+  runSteps?: RunStep[];
+  /** Toggle the activity between the chat bar and the preview pane. */
+  onToggleActivityPlacement?: () => void;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -345,6 +324,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   isLoading,
   isExecuting,
   isGenerating,
+  hideLiveTimeline,
+  activityInChat,
+  runSteps,
+  onToggleActivityPlacement,
   models,
   selectedModel,
   onModelChange,
@@ -456,7 +439,17 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             const placedSegs = new Set<number>();
             const renderRunProgress = (s: number) => {
               const live = running && s === lastSeg;
-              const msgs = segTraces.get(s) ?? [];
+              // 'preview' placement: the LATEST run's activity lives in the RIGHT
+              // preview pane — don't duplicate it here. While live we keep a compact
+              // status row + Stop; once done there's nothing left to show, so skip.
+              const inPreviewPane = Boolean(hideLiveTimeline) && s === lastSeg;
+              if (inPreviewPane && !live) return null;
+              // Whenever the CHAT hosts the latest run's activity — 'chat' placement,
+              // OR a run that produced no preview-pane deliverable — render the same
+              // thinking stream (not the legacy raw timeline). Older segments keep
+              // their own historical timeline (runSteps only covers the latest run).
+              const useStream = s === lastSeg && !inPreviewPane && Array.isArray(runSteps);
+              const msgs = inPreviewPane ? [] : (segTraces.get(s) ?? []);
               return (
                 <RunProgress
                   key={`run-progress-${s}`}
@@ -464,6 +457,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   running={live}
                   generating={live && Boolean(isGenerating)}
                   onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
+                  streamSteps={useStream ? (runSteps ?? []) : undefined}
+                  // The "Show in panel" toggle only makes sense in 'chat' placement.
+                  onTogglePlacement={useStream && activityInChat ? onToggleActivityPlacement : undefined}
                 />
               );
             };

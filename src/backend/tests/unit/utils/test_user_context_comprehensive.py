@@ -762,7 +762,9 @@ class TestFromEmailUsesSmartSession:
 
     @pytest.mark.asyncio
     async def test_from_email_no_groups_falls_back_to_individual(self):
-        """When user has no group memberships, falls back to individual group ID."""
+        """When user has no group memberships and no specific workspace is
+        requested, falls back to their individual group ID. (Requesting an
+        unauthorized group now raises — see test_no_groups_explicit_other_group_id_rejected.)"""
         mock_user = Mock(id="user-1", email="solo@example.com", is_system_admin=False)
 
         with patch.object(
@@ -772,7 +774,6 @@ class TestFromEmailUsesSmartSession:
             ctx = await GroupContext.from_email(
                 email="solo@example.com",
                 access_token="tok",
-                group_id="some_group"
             )
 
         # With no group memberships, should use individual group ID

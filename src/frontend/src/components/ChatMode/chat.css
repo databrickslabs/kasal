@@ -303,6 +303,14 @@
   }
 }
 
+/* Subtle row highlight on the results table (run-activity context). */
+.ui-table-row {
+  transition: background-color 0.12s ease;
+}
+.ui-table-row:hover {
+  background-color: var(--ui-surface-strong, rgba(127, 127, 127, 0.06));
+}
+
 /* Thinking dots — sequential blink while a crew is being generated */
 .kasal-thinking-dots span {
   opacity: 0;

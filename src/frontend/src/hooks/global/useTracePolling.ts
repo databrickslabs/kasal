@@ -28,6 +28,13 @@ import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 const POLL_INTERVAL_MS = 2000;
 /** Delay before starting polling after jobCreated — gives SSE a chance to work */
 const SSE_GRACE_PERIOD_MS = 4000;
+/**
+ * Consecutive 404s on the /executions/{id} status probe before we conclude the
+ * job is gone (deleted, or it belongs to a workspace you no longer have
+ * selected) and stop polling. Requiring several in a row — not just one — keeps
+ * a brief just-created/not-yet-persisted race from killing a real run.
+ */
+const NOT_FOUND_LIMIT = 3;
 
 /**
  * Hook that polls for execution state when SSE is unavailable.
@@ -40,6 +47,8 @@ export const useTracePolling = () => {
   const isPollingRef = useRef(false);
   const seenTraceCountRef = useRef<number>(0);
   const lastStatusRef = useRef<string | null>(null);
+  /** Consecutive 404s on the status probe — a gone job (deleted / different group). */
+  const notFoundCountRef = useRef(0);
   /** Set to true if SSE delivers a real trace/execution_update for the active job */
   const sseProvenWorkingRef = useRef(false);
 
@@ -51,14 +60,16 @@ export const useTracePolling = () => {
     try {
       const isFlow = useFlowExecutionStore.getState().currentJobId === jobId;
 
-      // Build requests — always poll status + new traces; add crew-node-states for flows
-      // Try /executions/{id} first; fall back to /executions/history?job_id={id} if it fails
-      // (the latter doesn't require group context, useful when OBO auth assigns different group IDs)
+      // Build requests — always poll status + new traces; add crew-node-states for flows.
+      // The status probe is a RAW /executions/{id}: a 404 must surface as a rejected
+      // result so we can act on it (a job that 404s for several consecutive polls is
+      // gone — see NOT_FOUND_LIMIT below — and we stop instead of looping 404s
+      // forever). The previous /executions/history?job_id={id} fallback was dead code:
+      // /executions/history is shadowed by the /executions/{execution_id} route, so it
+      // resolved as execution_id="history" and just 404'd, adding noise without ever
+      // matching the job.
       const requests: Promise<any>[] = [
-        apiClient.get(`/executions/${jobId}`).catch(() =>
-          apiClient.get(`/executions/history`, { params: { job_id: jobId } })
-            .then(r => ({ data: Array.isArray(r.data) && r.data.length > 0 ? r.data[0] : r.data }))
-        ),
+        apiClient.get(`/executions/${jobId}`),
         apiClient.get(`/traces/job/${jobId}`, {
           params: { limit: 50, offset: seenTraceCountRef.current }
         }),
@@ -73,6 +84,7 @@ export const useTracePolling = () => {
 
       // --- 1. Process execution status ---
       if (results[0].status === 'fulfilled') {
+        notFoundCountRef.current = 0;
         const execData = results[0].value.data;
         if (execData?.status) {
           const status = execData.status.toLowerCase();
@@ -128,7 +140,41 @@ export const useTracePolling = () => {
           }
         }
       } else {
-        console.log(`[TracePolling] Execution status poll failed:`, results[0].status === 'rejected' ? results[0].reason?.message : 'unknown');
+        // The status probe was rejected. A 404 (NotFoundError) means the row no
+        // longer exists for this workspace — deleted, or it belongs to a group you
+        // no longer have selected. Anything else (offline, 5xx, timeout) is
+        // transient. Stop only after several CONSECUTIVE 404s, so a momentary
+        // just-created/not-yet-persisted race can't kill a real run; otherwise the
+        // poller would hammer /executions + /traces every 2s with 404s forever (and
+        // a page refresh would re-detect the dead job and resume the storm).
+        const reason = results[0].status === 'rejected'
+          ? (results[0].reason as { response?: { status?: number }; message?: string })
+          : undefined;
+        const httpStatus = reason?.response?.status;
+        if (httpStatus === 404) {
+          notFoundCountRef.current += 1;
+          console.log(`[TracePolling] Status 404 for job ${jobId} (${notFoundCountRef.current}/${NOT_FOUND_LIMIT})`);
+          if (notFoundCountRef.current >= NOT_FOUND_LIMIT) {
+            console.warn(`[TracePolling] Job ${jobId} not found after ${NOT_FOUND_LIMIT} polls — stopping and abandoning`);
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+            activeJobIdRef.current = null;
+            seenTraceCountRef.current = 0;
+            lastStatusRef.current = null;
+            notFoundCountRef.current = 0;
+            // Let ChatMode (and any other consumer) drop the running banner + the
+            // durable IndexedDB reconnect marker so a refresh / session-switch
+            // can't resurrect this dead job.
+            window.dispatchEvent(new CustomEvent('jobNotFound', { detail: { jobId } }));
+            return;
+          }
+        } else {
+          // Transient failure — don't count it toward "gone".
+          notFoundCountRef.current = 0;
+          console.log(`[TracePolling] Execution status poll failed (transient):`, reason?.message || httpStatus || 'unknown');
+        }
       }
 
       // --- 2. Process new traces (incremental via offset) ---
@@ -214,6 +260,7 @@ export const useTracePolling = () => {
     activeJobIdRef.current = jobId;
     seenTraceCountRef.current = 0;
     lastStatusRef.current = null;
+    notFoundCountRef.current = 0;
     sseProvenWorkingRef.current = false;
     console.log(`[TracePolling] ▶ Starting polling for job ${jobId}`);
 
@@ -235,6 +282,7 @@ export const useTracePolling = () => {
     activeJobIdRef.current = null;
     seenTraceCountRef.current = 0;
     lastStatusRef.current = null;
+    notFoundCountRef.current = 0;
   }, []);
 
   // Listen for job lifecycle events
@@ -300,12 +348,24 @@ export const useTracePolling = () => {
       console.log(`[TracePolling] jobStopped received`);
       stopPolling();
     };
+    // Another consumer (the ChatMode reconnect backstop) proved this job is gone
+    // before our grace timer even fired. Stop for it specifically — gated on the
+    // active job so a jobNotFound for a different job can't kill a live poll, and
+    // so our OWN dispatch (which clears activeJobIdRef first) is a harmless no-op.
+    const handleJobNotFound = (event: CustomEvent) => {
+      const { jobId } = event.detail || {};
+      if (jobId && jobId === activeJobIdRef.current) {
+        console.log(`[TracePolling] jobNotFound received for active job — stopping`);
+        stopPolling();
+      }
+    };
 
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
     window.addEventListener('traceUpdate', handleSSETrace as EventListener);
     window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
     window.addEventListener('jobFailed', handleJobFailed as EventListener);
     window.addEventListener('jobStopped', handleJobStopped as EventListener);
+    window.addEventListener('jobNotFound', handleJobNotFound as EventListener);
 
     console.log('[TracePolling] Hook mounted, event listeners registered');
 
@@ -315,6 +375,7 @@ export const useTracePolling = () => {
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
       window.removeEventListener('jobStopped', handleJobStopped as EventListener);
+      window.removeEventListener('jobNotFound', handleJobNotFound as EventListener);
       stopPolling();
       console.log('[TracePolling] Hook unmounted');
     };

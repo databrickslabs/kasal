@@ -40,3 +40,28 @@ export async function stopExecution(id: string): Promise<void> {
     preserve_partial_results: true,
   });
 }
+
+/** A raw execution trace row (the durable per-step record persisted by the
+ *  backend). Shape mirrors what the SSE `onTrace` data carries, so it can run
+ *  through the SAME buildTraceEntry mapping. */
+export interface ExecutionTrace {
+  id: number;
+  event_type?: string;
+  event_source?: string;
+  output?: unknown;
+  trace_metadata?: unknown;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Fetch ALL persisted traces for a finished run by its job id. The run activity
+ * (the "thinking" stream) can always be rebuilt from these — so a refresh
+ * restores the full tool context even if the live per-message copy was lost.
+ */
+export async function getJobTraces(jobId: string): Promise<ExecutionTrace[]> {
+  const response = await getClient().get<{ traces: ExecutionTrace[] }>(
+    `/traces/job/${jobId}`,
+  );
+  return response.data?.traces || [];
+}

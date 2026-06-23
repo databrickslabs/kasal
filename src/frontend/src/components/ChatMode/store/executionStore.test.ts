@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
-import { saveSessionPreview, getSessionPreview } from '../db/sessionApi';
+import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../db/sessionApi';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
@@ -44,6 +44,7 @@ const setCurrentSessionId = (id: string | null) => {
 
 const mockedSave = saveSessionPreview as unknown as ReturnType<typeof vi.fn>;
 const mockedGet = getSessionPreview as unknown as ReturnType<typeof vi.fn>;
+const mockedClearMarker = clearSessionRunningJob as unknown as ReturnType<typeof vi.fn>;
 const mockedParse = parsePreviewContent as unknown as ReturnType<typeof vi.fn>;
 const mockedDerive = deriveSessionPreviews as unknown as ReturnType<typeof vi.fn>;
 
@@ -756,6 +757,69 @@ describe('executionStore - failExecution', () => {
   });
 });
 
+describe('executionStore - abandonExecution (gone job: deleted / different workspace)', () => {
+  it('clears the live slot, the reconnect marker, and the owner mapping — with NO chat message', () => {
+    setCurrentSessionId('sess-AB');
+    useExecutionStore.getState().startExecution('job-AB', 'sess-AB');
+    // sanity: the run is live + tracked + persisted
+    expect(useExecutionStore.getState().isExecuting).toBe(true);
+    expect(useExecutionStore.getState().runningJobBySession['sess-AB']).toBe('job-AB');
+    expect(useExecutionStore.getState().jobOwnerOf('job-AB')).toBe('sess-AB');
+
+    mockedClearMarker.mockClear();
+    useExecutionStore.getState().abandonExecution('job-AB');
+
+    const s = useExecutionStore.getState();
+    expect(s.activeExecution).toBeNull();
+    expect(s.isExecuting).toBe(false);
+    expect(s.isLoading).toBe(false);
+    expect(s.executionOwnerSessionId).toBeNull();
+    expect(s.runningJobBySession['sess-AB']).toBeUndefined();
+    expect(s.jobOwnerOf('job-AB')).toBeNull();
+    // Durable IndexedDB reconnect marker dropped so a refresh can't resurrect it.
+    expect(mockedClearMarker).toHaveBeenCalledWith('sess-AB');
+    // A gone run is NOT a failure — no message is posted to the chat.
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+    expect(sessionState().addMessage).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent — a second call (e.g. a late poller jobNotFound) is a no-op', () => {
+    setCurrentSessionId('sess-AB2');
+    useExecutionStore.getState().startExecution('job-AB2', 'sess-AB2');
+    useExecutionStore.getState().abandonExecution('job-AB2');
+    mockedClearMarker.mockClear();
+    useExecutionStore.getState().abandonExecution('job-AB2');
+    expect(mockedClearMarker).not.toHaveBeenCalled();
+  });
+
+  it('ignores an untracked job id', () => {
+    mockedClearMarker.mockClear();
+    useExecutionStore.getState().abandonExecution('never-started');
+    expect(mockedClearMarker).not.toHaveBeenCalled();
+  });
+
+  it('scrubs a BACKGROUNDED session snapshot without touching the live slot', () => {
+    // sess-bg's run is backgrounded (we are viewing sess-view); startExecution
+    // parks a snapshot with running flags for it.
+    setCurrentSessionId('sess-view');
+    useExecutionStore.setState({ executionOwnerSessionId: 'sess-view' });
+    useExecutionStore.getState().startExecution('job-bg', 'sess-bg');
+    expect(useExecutionStore.getState().hasActiveExecution('sess-bg')).toBe(true);
+
+    mockedClearMarker.mockClear();
+    useExecutionStore.getState().abandonExecution('job-bg');
+
+    const s = useExecutionStore.getState();
+    // Backgrounded session no longer reports a running execution...
+    expect(s.hasActiveExecution('sess-bg')).toBe(false);
+    expect(s.runningJobBySession['sess-bg']).toBeUndefined();
+    expect(s.jobOwnerOf('job-bg')).toBeNull();
+    expect(mockedClearMarker).toHaveBeenCalledWith('sess-bg');
+    // ...and the live slot (sess-view) is untouched.
+    expect(s.executionOwnerSessionId).toBe('sess-view');
+  });
+});
+
 describe('executionStore - generation lifecycle', () => {
   it('startGeneration with provided sessionId', () => {
     useExecutionStore.getState().startGeneration('sess-G');
@@ -1063,6 +1127,15 @@ describe('executionStore - initial state', () => {
     expect(initialState.chatCollapsed).toBe(false);
     // Agent Bricks endpoints start empty until the user picks one in the "+" menu.
     expect(initialState.selectedAgentBricksEndpoints).toEqual([]);
+    // Run activity defaults to the preview pane.
+    expect(initialState.activityPlacement).toBe('preview');
+  });
+
+  it('setActivityPlacement switches where the run activity is shown', () => {
+    useExecutionStore.getState().setActivityPlacement('chat');
+    expect(useExecutionStore.getState().activityPlacement).toBe('chat');
+    useExecutionStore.getState().setActivityPlacement('preview');
+    expect(useExecutionStore.getState().activityPlacement).toBe('preview');
   });
 });
 
@@ -1326,4 +1399,21 @@ describe('executionStore - generation owner routing', () => {
     expect(useExecutionStore.getState().isGenerating).toBe(false);
     expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull();
   });
+});
+
+describe('executionStore - switch-back run detection', () => {
+  it('records the running job per session on start and clears it on completion', () => {
+    useExecutionStore.setState({ runningJobBySession: {} });
+    setCurrentSessionId('sA');
+    useExecutionStore.getState().startExecution('job-1', 'sA');
+    // The Zustand map is the source of truth for "does this session have a run?"
+    // when you switch back to it.
+    expect(useExecutionStore.getState().runningJobBySession.sA).toBe('job-1');
+    expect(useExecutionStore.getState().runStartedAt).toBeTypeOf('number');
+
+    useExecutionStore.getState().completeExecution('done', 'job-1');
+    expect(useExecutionStore.getState().runningJobBySession.sA).toBeUndefined();
+    expect(useExecutionStore.getState().runStartedAt).toBeNull();
+  });
+
 });
