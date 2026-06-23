@@ -1811,6 +1811,63 @@ class TestRunHousekeeping:
             user_token=None,
         )
 
+    @pytest.fixture(autouse=True)
+    def patch_isolated_session(self, mock_session):
+        """run_housekeeping now runs the purge on a PRIVATE connection
+        (get_isolated_db_session) instead of self.session, so a concurrent crew
+        write can't reset the deferred-FK transaction on the shared SQLite
+        connection. Yield the same mock_session as the isolated session so the
+        existing assertions on execute/commit keep applying."""
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _iso():
+            yield mock_session
+
+        with patch("src.db.session.get_isolated_db_session", side_effect=lambda: _iso()):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_uses_isolated_connection(self, service, mock_session):
+        """Regression: the purge must run on get_isolated_db_session (a private
+        NullPool connection), NOT the shared self.session. On the shared SQLite
+        StaticPool connection a concurrent crew commit reset
+        `PRAGMA defer_foreign_keys=ON` mid-transaction, so the
+        `DELETE FROM executionhistory` tripped 'FOREIGN KEY constraint failed'
+        even though every FK child had already been cleared."""
+        mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+        with patch(
+            "src.db.session.get_isolated_db_session"
+        ) as mock_isolated, patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def _iso():
+                yield mock_session
+            mock_isolated.side_effect = lambda: _iso()
+            MockBackupRepo.get_database_type.return_value = "sqlite"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        mock_isolated.assert_called_once()            # private connection used
+        mock_session.commit.assert_awaited_once()     # commit on the isolated session
+
     @pytest.mark.asyncio
     async def test_run_housekeeping_success(self, service, mock_session):
         """Test successful housekeeping run deletes records from all tables."""
@@ -1822,15 +1879,19 @@ class TestRunHousekeeping:
         }
 
         # SQLite path issues PRAGMA defer_foreign_keys first, then trace deletes
-        # (by run_id ref, by job_id ref, by date), llm delete, and finally VACUUM.
+        # (by run_id ref, by job_id ref, by date), llm delete, chat_history delete,
+        # knowledge_embeddings delete. VACUUM runs on a separate AUTOCOMMIT conn.
         mock_pragma = MagicMock()
         mock_trace_ref = MagicMock(rowcount=30)
         mock_trace_jobid = MagicMock(rowcount=40)
         mock_trace_date = MagicMock(rowcount=5)
         mock_llm = MagicMock(rowcount=8)
+        mock_chat = MagicMock(rowcount=12)
+        mock_knowledge = MagicMock(rowcount=6)
 
         mock_session.execute = AsyncMock(
-            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date, mock_llm, None]
+            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date,
+                         mock_llm, mock_chat, mock_knowledge]
         )
 
         with _patch(
@@ -1866,7 +1927,9 @@ class TestRunHousekeeping:
         assert result["deleted"]["llmlog"] == 8
         assert result["deleted"]["llm_usage_billing"] == 7
         assert result["deleted"]["hitl_approvals"] == 3
-        assert result["total_deleted"] == 130
+        assert result["deleted"]["chat_history"] == 12
+        assert result["deleted"]["knowledge_embeddings"] == 6
+        assert result["total_deleted"] == 148  # 130 + 12 chat + 6 knowledge
 
         mock_session.commit.assert_awaited_once()
 
@@ -1955,10 +2018,18 @@ class TestRunHousekeeping:
         mock_trace_date = MagicMock(rowcount=0)
         mock_llm = MagicMock(rowcount=0)
 
-        # SQLite: PRAGMA first, then trace/llm deletes; last call is VACUUM which raises
+        # SQLite: PRAGMA, 3 trace deletes, llm, chat_history, knowledge_embeddings
+        # (7 execute calls total).
+        mock_chat = MagicMock(rowcount=0)
+        mock_knowledge = MagicMock(rowcount=0)
         mock_session.execute = AsyncMock(
-            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date, mock_llm, RuntimeError("VACUUM locked")]
+            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date,
+                         mock_llm, mock_chat, mock_knowledge]
         )
+        # VACUUM now runs on an AUTOCOMMIT connection (not session.execute) and raises.
+        vacuum_conn = AsyncMock()
+        vacuum_conn.exec_driver_sql = AsyncMock(side_effect=RuntimeError("VACUUM locked"))
+        mock_session.connection = AsyncMock(return_value=vacuum_conn)
 
         with patch(
             "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
@@ -2086,6 +2157,54 @@ class TestRunHousekeeping:
         assert any("job_id" in s for s in trace_deletes), (
             f"expected an execution_trace delete filtered by job_id, got: {trace_deletes}"
         )
+
+    @pytest.mark.asyncio
+    async def test_run_housekeeping_purges_chat_history_and_knowledge(self, service, mock_session):
+        """Regression: housekeeping must also purge chat_history and
+        knowledge_embeddings (both grew unbounded — chat_history was the largest
+        table on disk). documentation_embeddings is intentionally NOT purged.
+        """
+        executed_sql = []
+
+        async def _capture(stmt, *args, **kwargs):
+            try:
+                executed_sql.append(str(stmt))
+            except Exception:
+                executed_sql.append("")
+            return MagicMock(rowcount=0)
+
+        mock_session.execute = AsyncMock(side_effect=_capture)
+
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+            new_callable=AsyncMock,
+            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
+        ), patch(
+            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.repositories.billing_repository.BillingRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+            new_callable=AsyncMock, return_value=0,
+        ), patch(
+            "src.services.database_management_service.DatabaseBackupRepository"
+        ) as MockBackupRepo:
+            MockBackupRepo.get_database_type.return_value = "postgres"
+
+            result = await service.run_housekeeping("2025-01-01")
+
+        assert result["success"] is True
+        assert "chat_history" in result["deleted"]
+        assert "knowledge_embeddings" in result["deleted"]
+        assert any("DELETE FROM chat_history" in s for s in executed_sql), \
+            f"expected a chat_history delete, got: {executed_sql}"
+        assert any("DELETE FROM knowledge_embeddings" in s for s in executed_sql), \
+            f"expected a knowledge_embeddings delete, got: {executed_sql}"
+        # documentation_embeddings must NOT be touched (seeded built-in content)
+        assert not any("DELETE FROM documentation_embeddings" in s for s in executed_sql), \
+            "documentation_embeddings must not be purged by housekeeping"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("db_type,expect_pragma", [("sqlite", True), ("postgres", False)])
