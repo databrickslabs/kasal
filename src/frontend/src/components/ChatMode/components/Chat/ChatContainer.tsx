@@ -308,6 +308,11 @@ interface ChatContainerProps {
   /** A crew/flow loaded from the catalog that the submit button will run. */
   pendingRunLabel?: string;
   onRunPending?: () => void;
+  /** A closed-but-persisted preview exists and can be reopened. Renders a
+   *  "Show preview" pill ABOVE the composer (anchored to it, so it never
+   *  overlaps the input the way a fixed-offset floating button did). */
+  showReopenPreview?: boolean;
+  onReopenPreview?: () => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -338,6 +343,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onMemoryEnabledChange,
   pendingRunLabel,
   onRunPending,
+  showReopenPreview,
+  onReopenPreview,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -362,6 +369,31 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   // flashes for a frame before the restored conversation arrives.
   const isEmpty = messages.length === 0 && !hydrating;
 
+  // Reopen-preview pill: a closed-but-persisted deliverable can be brought back.
+  // Anchored to the TOP of the composer (bottom-full) so it floats just above the
+  // input and never overlaps it — a fixed bottom offset in the parent collided
+  // with the variable-height composer box. Rendered inside whichever composer
+  // wrapper is active (both made `relative`).
+  const reopenPreviewPill = showReopenPreview && onReopenPreview ? (
+    <div className="absolute bottom-full right-2 mb-2 z-10">
+      <button
+        onClick={onReopenPreview}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+        style={{
+          backgroundColor: 'var(--bg-secondary)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border-color)',
+        }}
+        title="Reopen preview panel"
+      >
+        <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+        </svg>
+        Show preview
+      </button>
+    </div>
+  ) : null;
+
   // Empty state: everything centered vertically — greeting + input
   if (isEmpty && !isExecuting) {
     return (
@@ -384,18 +416,21 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           </div>
 
           {/* Input — centered */}
-          <ChatInput
-            onSend={onSend}
-            disabled={isLoading}
-            models={models}
-            selectedModel={selectedModel}
-            onModelChange={onModelChange}
-            sessionId={sessionId}
-            workspaceMemory={workspaceMemory}
-            onWorkspaceMemoryChange={onWorkspaceMemoryChange}
-            memoryEnabled={memoryEnabled}
-            onMemoryEnabledChange={onMemoryEnabledChange}
-          />
+          <div className="relative">
+            {reopenPreviewPill}
+            <ChatInput
+              onSend={onSend}
+              disabled={isLoading}
+              models={models}
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+              sessionId={sessionId}
+              workspaceMemory={workspaceMemory}
+              onWorkspaceMemoryChange={onWorkspaceMemoryChange}
+              memoryEnabled={memoryEnabled}
+              onMemoryEnabledChange={onMemoryEnabledChange}
+            />
+          </div>
         </div>
       </div>
     );
@@ -500,7 +535,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       </div>
 
       {/* Input pinned to bottom — also surfaces run/generation status + Stop */}
-      <div className="max-w-3xl mx-auto w-full">
+      <div className="max-w-3xl mx-auto w-full relative">
+        {reopenPreviewPill}
         <ChatInput
           onSend={onSend}
           disabled={isLoading}

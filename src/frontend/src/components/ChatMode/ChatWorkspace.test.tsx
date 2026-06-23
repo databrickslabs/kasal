@@ -242,6 +242,12 @@ vi.mock('./components/Chat/ChatContainer', () => ({
           for the current session, and the button drives onRunPending. */}
       <span data-testid="cc-pending-label">{(props as { pendingRunLabel?: string }).pendingRunLabel ?? ''}</span>
       <button data-testid="cc-run-pending" onClick={() => props.onRunPending?.()}>run-pending</button>
+      {/* The reopen-preview pill now lives inside ChatContainer; surface it here
+          when armed so the workspace wiring (showReopenPreview/onReopenPreview)
+          stays under test. */}
+      {(props as { showReopenPreview?: boolean }).showReopenPreview && (
+        <button onClick={() => (props as { onReopenPreview?: () => void }).onReopenPreview?.()}>Show preview</button>
+      )}
     </div>
   ),
 }));
@@ -1405,6 +1411,20 @@ describe('ChatWorkspace component', () => {
     h.session.messages = [{ id: 'a', role: 'assistant', content: 'plain', timestamp: new Date() }] as unknown[];
     render(<ChatWorkspace />);
     // allow the effect's promise chain to settle
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
+  });
+
+  it('does NOT leak the pill from a prior session via the global previewHistory', async () => {
+    // The new-chat path flips currentSessionId before restoreSessionState clears
+    // the single global preview slot, so previewHistory can still hold the
+    // PREVIOUS session's runs. The pill must key off session-scoped sources only.
+    h.exec.previewContent = null;
+    h.exec.previewHistory = [{ type: 'ui', data: '<p>old session</p>' }] as unknown[];
+    h.getSessionPreview.mockResolvedValue(null); // this session has nothing stored
+    h.parsePreview.mockReturnValue(null);
+    h.session.messages = [];
+    render(<ChatWorkspace />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
   });
