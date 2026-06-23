@@ -140,7 +140,8 @@ _CORE: List[str] = [
     "the JSON below. It is rendered by a design-system renderer into a polished app.",
     "",
     'Shape (note: each component\'s type goes in the "component" field, NOT "type"):',
-    '{ "messages": [',
+    '{ "summary": "One short sentence describing what you built (shown in chat).",',
+    '  "messages": [',
     '  { "createSurface": { "surfaceId": "s1", "catalogId": "basic" } },',
     '  { "updateComponents": { "surfaceId": "s1", "components": [',
     '    { "id": "root", "component": "Column", "children": ["title", "body"] },',
@@ -148,6 +149,12 @@ _CORE: List[str] = [
     '    { "id": "body", "component": "Text", "variant": "body", "text": "..." }',
     "  ] } }",
     "] }",
+    "",
+    'CHAT SUMMARY: include a top-level "summary" — ONE short, plain sentence (no',
+    'markdown, ~140 chars max) saying what you produced, e.g. "Built a 3-section',
+    'discovery plan for the Kasal schema." It is shown in the chat while the full',
+    "document renders in the preview pane, so put the ACTUAL content in the",
+    'components, never here. Keep "summary" a sibling of "messages" as shown above.',
     "",
     'Every component object MUST use the key "component" (e.g. "component":"Card"), not',
     '"type". components is a FLAT list; build the tree by referencing child ids. The',
@@ -429,8 +436,9 @@ async def apply_ui_emission(
         # behavior, not a special case.
         last_task["expected_output"] = (
             'A single JSON "UI document" — the '
-            '{"messages":[{"createSurface":...},{"updateComponents":...}]} structure '
-            "described in the task. NOT HTML, NOT a file, NOT prose or code fences — "
+            '{"summary":"…","messages":[{"createSurface":...},{"updateComponents":...}]} '
+            'structure described in the task, including the short top-level "summary" '
+            "sentence for the chat. NOT HTML, NOT a file, NOT prose or code fences — "
             "only the JSON document."
         )
         logger.info(

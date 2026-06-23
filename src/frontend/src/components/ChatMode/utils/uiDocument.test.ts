@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseUiDocument,
+  extractDocSummary,
   findUiSurface,
   findUiDocument,
   resolveValue,
@@ -32,6 +33,45 @@ const doc = {
     { version: 'v0.10', dataModelUpdate: { contents: { name: 'Ada' } } },
   ],
 };
+
+describe('extractDocSummary', () => {
+  it('reads a top-level "summary" sibling of messages', () => {
+    expect(extractDocSummary({ summary: 'Built a dashboard.', ...doc } as never)).toBe(
+      'Built a dashboard.',
+    );
+    expect(extractDocSummary(JSON.stringify({ summary: '  trimmed  ', ...doc }))).toBe('trimmed');
+  });
+
+  it('falls back to createSurface.summary and a bare { summary } message', () => {
+    expect(
+      extractDocSummary({
+        messages: [{ createSurface: { surfaceId: 's1', summary: 'On the surface.' } }],
+      } as never),
+    ).toBe('On the surface.');
+    expect(
+      extractDocSummary({ messages: [{ summary: 'Bare message.' }] } as never),
+    ).toBe('Bare message.');
+  });
+
+  it('returns null when there is no summary, or for empty/non-string values', () => {
+    expect(extractDocSummary(doc as never)).toBeNull();
+    expect(extractDocSummary({ summary: '   ', ...doc } as never)).toBeNull();
+    expect(extractDocSummary({ summary: 42, ...doc } as never)).toBeNull();
+    expect(extractDocSummary('not json at all')).toBeNull();
+  });
+
+  it('recovers the summary from a malformed (mismatched-bracket) document', () => {
+    // Same weak-model failure mode as parseUiDocument: the repair path must also
+    // let the chat one-liner through instead of falling back to the generic line.
+    const malformed =
+      '{"summary":"Built a discovery plan.","messages":[' +
+      '{"createSurface":{"surfaceId":"s1"}},' +
+      '{"updateComponents":{"components":[' +
+      '{"id":"root","component":"Text","text":"x"} ]}]}}]}';
+    expect(() => JSON.parse(malformed)).toThrow();
+    expect(extractDocSummary(malformed)).toBe('Built a discovery plan.');
+  });
+});
 
 describe('parseUiDocument', () => {
   it('parses a minimal A2UI document into a surface', () => {
@@ -142,6 +182,31 @@ describe('parseUiDocument', () => {
     expect(parseUiDocument({ foo: 'bar' } as never)).toBeNull(); // object, no messages
     expect(parseUiDocument({ messages: [] } as never)).toBeNull(); // no components
     expect(parseUiDocument({ messages: [{ createSurface: { surfaceId: 's' } }] } as never)).toBeNull(); // surface but no components
+  });
+
+  it('recovers a weak-model document with mismatched/extra brackets', () => {
+    // gpt-5-nano emitted this verbatim: the closing tail is `}]}]}}]}` where a
+    // valid doc needs `}]}}]}` — a spurious `]}`. Strict JSON.parse rejects it,
+    // which used to leak the raw JSON into the chat with an empty preview. The
+    // string-aware bracket repair in coerceJson must rebalance it and render.
+    const malformed =
+      '{"messages":[{"createSurface":{"surfaceId":"s1","catalogId":"basic"}},' +
+      '{"updateComponents":{"surfaceId":"s1","components":[' +
+      '{"id":"root","component":"Column","children":["title","body"]},' +
+      '{"id":"title","component":"Text","variant":"h1","text":"Title (with parens)"} ,' +
+      '{"id":"body","component":"Text","variant":"body","text":"Body: (1) a, (2) b."} ]}]}}]}';
+    expect(() => JSON.parse(malformed)).toThrow(); // precondition: genuinely invalid JSON
+    const surface = parseUiDocument(malformed);
+    expect(surface).not.toBeNull();
+    expect(surface!.rootId).toBe('root');
+    expect(Object.keys(surface!.components).sort()).toEqual(['body', 'root', 'title']);
+    expect(surface!.components.body.text).toBe('Body: (1) a, (2) b.');
+  });
+
+  it('does not turn invalid non-A2UI text into a surface via repair', () => {
+    // Repair only rebalances brackets — it must never fabricate a document.
+    expect(parseUiDocument('{ this is : not valid json')).toBeNull();
+    expect(parseUiDocument('{"foo": [1, 2, 3}')).toBeNull(); // repairs to valid JSON, but no A2UI shape
   });
 
   it('ignores a data-model message with no contents/data', () => {

@@ -137,6 +137,50 @@ function balancedBlock(text: string, open: string, close: string): string | null
 }
 
 /**
+ * Repair the bracket structure of a JSON-ish string so a slightly-malformed
+ * document still parses. Weak models (e.g. gpt-5-nano) routinely emit A2UI with
+ * MISMATCHED or EXTRA brackets — e.g. a tail of `}]}]}}]}` where `}]}}]}` was
+ * meant — which `JSON.parse` rejects outright, leaking the raw document into the
+ * chat instead of rendering it. This is string-aware (brackets inside string
+ * values are never touched): it drops any closing bracket that doesn't match the
+ * top of the open-bracket stack, and auto-closes anything still open at EOF.
+ *
+ * Conservative by construction — it only rebalances brackets, never invents keys
+ * or values — and it is invoked ONLY after strict parsing has already failed, so
+ * well-formed documents are returned untouched by the caller.
+ */
+function repairJsonBrackets(src: string): string {
+  const out: string[] = [];
+  const stack: string[] = [];
+  const opener: Record<string, string> = { '}': '{', ']': '[' };
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inStr) {
+      out.push(ch);
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; out.push(ch); continue; }
+    if (ch === '{' || ch === '[') { stack.push(ch); out.push(ch); continue; }
+    if (ch === '}' || ch === ']') {
+      if (stack.length && stack[stack.length - 1] === opener[ch]) {
+        stack.pop();
+        out.push(ch);
+      } // else: spurious/mismatched closer — drop it.
+      continue;
+    }
+    out.push(ch);
+  }
+  // Close anything left open (a model that truncated mid-document).
+  while (stack.length) out.push(stack.pop() === '{' ? '}' : ']');
+  return out.join('');
+}
+
+/**
  * Read a JSON value that may be a raw object, a JSON string, a ```json fenced
  * block, or JSON EMBEDDED in surrounding prose. Agents frequently add a
  * preamble ("Here is the UI document: { … }") despite a "JSON only" instruction;
@@ -176,12 +220,27 @@ function coerceJson(
   const arrBlock = trimmed.includes('[') ? balancedBlock(trimmed, '[', ']') : null;
 
   // Order: fenced body, whole string, the {…} object, then the […] array.
-  for (const cand of [fenced, trimmed, objBlock, arrBlock]) {
+  const candidates = [fenced, trimmed, objBlock, arrBlock];
+  for (const cand of candidates) {
     if (!cand) continue;
     const c = cand.trim();
     if (!c.startsWith('{') && !c.startsWith('[')) continue;
     try {
       return JSON.parse(c) as Record<string, unknown>;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+
+  // Every candidate failed STRICT parsing. A weak model likely emitted
+  // mismatched/extra brackets; rebalance (string-aware) and retry so the
+  // document still renders instead of leaking raw JSON into the chat.
+  for (const cand of candidates) {
+    if (!cand) continue;
+    const c = cand.trim();
+    if (!c.startsWith('{') && !c.startsWith('[')) continue;
+    try {
+      return JSON.parse(repairJsonBrackets(c)) as Record<string, unknown>;
     } catch {
       /* try the next candidate */
     }
@@ -194,6 +253,40 @@ function coerceJson(
 function extractMessages(obj: Record<string, unknown>): Record<string, unknown>[] | null {
   if (Array.isArray(obj.messages)) return obj.messages as Record<string, unknown>[];
   if ('createSurface' in obj || 'updateComponents' in obj) return [obj];
+  return null;
+}
+
+/**
+ * Pull the model-authored chat one-liner out of an A2UI document, if it carries
+ * one. The emission prompt (ui_emission.py) asks the agent for a top-level
+ * `summary` sibling of `messages`; we also accept it on `createSurface` or as a
+ * bare `{ summary }` message so minor model variance still surfaces it. Returns
+ * the trimmed sentence, or null when there is none — the caller then falls back
+ * to the generic "Generated an app…" line. Never affects rendering (the renderer
+ * ignores `summary`); this is purely the text shown in the chat transcript.
+ */
+export function extractDocSummary(raw: string | Record<string, unknown>): string | null {
+  const obj = coerceJson(raw);
+  if (!obj || typeof obj !== 'object') return null;
+  const pick = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() ? v.trim() : null;
+  // Canonical location: a top-level `summary` next to `messages`.
+  if (!Array.isArray(obj)) {
+    const top = pick((obj as Record<string, unknown>).summary);
+    if (top) return top;
+  }
+  // Liberal fallbacks: createSurface.summary, or a bare { summary } message.
+  const messages = extractMessages(Array.isArray(obj) ? ({ messages: obj } as never) : obj);
+  if (messages) {
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object') continue;
+      const surf = (msg as { createSurface?: Record<string, unknown> }).createSurface;
+      const fromSurf = surf && typeof surf === 'object' ? pick(surf.summary) : null;
+      if (fromSurf) return fromSurf;
+      const bare = pick((msg as Record<string, unknown>).summary);
+      if (bare) return bare;
+    }
+  }
   return null;
 }
 
