@@ -720,7 +720,32 @@ class ExecutionService:
                 return None
             
             if not execution:
-                # Check in-memory for very early states if needed
+                # DB miss — before declaring a 404, fall back to the in-memory
+                # registry. A just-created run can be polled before its row is
+                # committed (the parent INSERT now commits on a separate isolated
+                # connection), and a still-running run whose row was lost can keep
+                # being observed here while it lives in this process. Honour group
+                # scoping so this never reveals a run from another workspace.
+                in_memory = ExecutionService.executions.get(execution_id)
+                if in_memory and (
+                    not group_ids or in_memory.get("group_id") in group_ids
+                ):
+                    exec_logger.debug(
+                        f"Execution {execution_id} absent from DB; serving in-memory "
+                        f"state ({in_memory.get('status')})."
+                    )
+                    return {
+                        "execution_id": execution_id,
+                        "status": in_memory.get("status"),
+                        "created_at": in_memory.get("created_at"),
+                        "completed_at": None,
+                        "result": None,
+                        "run_name": in_memory.get("run_name"),
+                        "error": None,
+                        "mlflow_trace_id": None,
+                        "mlflow_experiment_name": None,
+                        "mlflow_evaluation_run_id": None,
+                    }
                 exec_logger.warning(f"Execution {execution_id} not found in database.")
                 return None
             
@@ -1027,12 +1052,16 @@ class ExecutionService:
 
             logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING")
 
-            # Add to in-memory storage with RUNNING status
+            # Add to in-memory storage with RUNNING status. Carry the group so a
+            # status lookup that falls back to this entry (see get_execution_status)
+            # can enforce the same tenant scoping the DB query would.
             ExecutionService.add_execution_to_memory(
                 execution_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,
                 run_name=run_name,
-                created_at=datetime.now()  # Remove timezone to match database column type
+                created_at=datetime.now(),  # Remove timezone to match database column type
+                group_id=group_context.primary_group_id if group_context else None,
+                group_email=group_context.group_email if group_context else None,
             )
             logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
 

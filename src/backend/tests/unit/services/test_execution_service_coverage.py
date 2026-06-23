@@ -465,6 +465,84 @@ class TestGetExecutionStatus:
             result = await svc.get_execution_status("exec-1")
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_falls_back_to_in_memory_when_db_miss(self):
+        """A just-created/in-flight run whose row isn't in the DB yet is served
+        from the in-memory registry instead of 404ing."""
+        session = AsyncMock()
+        svc = make_service(session=session)
+        ExecutionService.executions.clear()
+        ExecutionService.executions["exec-1"] = {
+            "execution_id": "exec-1",
+            "status": "RUNNING",
+            "created_at": datetime(2024, 1, 1),
+            "run_name": "run-1",
+            "group_id": "g1",
+            "group_email": "u@e.com",
+        }
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo_cls = MagicMock(return_value=mock_repo)
+        try:
+            with patch.dict("sys.modules", {
+                "src.repositories.execution_history_repository": MagicMock(
+                    ExecutionHistoryRepository=mock_repo_cls
+                )
+            }):
+                result = await svc.get_execution_status("exec-1", group_ids=["g1"])
+        finally:
+            ExecutionService.executions.clear()
+        assert result is not None
+        assert result["execution_id"] == "exec-1"
+        assert result["status"] == "RUNNING"
+        assert result["run_name"] == "run-1"
+
+    @pytest.mark.asyncio
+    async def test_in_memory_fallback_respects_group_scope(self):
+        """The in-memory fallback must never reveal a run from another workspace:
+        a group mismatch still resolves to None (404)."""
+        session = AsyncMock()
+        svc = make_service(session=session)
+        ExecutionService.executions.clear()
+        ExecutionService.executions["exec-1"] = {
+            "execution_id": "exec-1",
+            "status": "RUNNING",
+            "created_at": datetime(2024, 1, 1),
+            "run_name": "run-1",
+            "group_id": "other-group",
+            "group_email": "x@y.com",
+        }
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo_cls = MagicMock(return_value=mock_repo)
+        try:
+            with patch.dict("sys.modules", {
+                "src.repositories.execution_history_repository": MagicMock(
+                    ExecutionHistoryRepository=mock_repo_cls
+                )
+            }):
+                result = await svc.get_execution_status("exec-1", group_ids=["g1"])
+        finally:
+            ExecutionService.executions.clear()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_db_miss_with_no_in_memory_entry_returns_none(self):
+        """Truly gone job (deleted / orphaned, not in memory) still returns None."""
+        session = AsyncMock()
+        svc = make_service(session=session)
+        ExecutionService.executions.clear()
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo_cls = MagicMock(return_value=mock_repo)
+        with patch.dict("sys.modules", {
+            "src.repositories.execution_history_repository": MagicMock(
+                ExecutionHistoryRepository=mock_repo_cls
+            )
+        }):
+            result = await svc.get_execution_status("exec-1", group_ids=["g1"])
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # get_execution_status_detail
