@@ -2,6 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { friendlyStep, type RunStep } from './RunTimeline';
 import { contextSummary, humanizeToolJson } from '../../utils/uiDocument';
 
+/** Kasal brand mark — the hexagon-K logo (transparent), shown in the live "getting started" state. */
+const kasalMark = `${import.meta.env.BASE_URL}logo192.png`;
+
 /**
  * First-person, present-tense narration of a step — the "thinking" voice a
  * non-technical user reads (no tool names, no args, no JSON). The cleaned
@@ -210,7 +213,7 @@ const ThinkingStream: React.FC<ThinkingStreamProps> = ({ steps, live = false, on
     if (!live) return null;
     return (
       <div className="h-full flex flex-col items-center justify-center text-center px-8" data-testid="thinking-empty">
-        <div className="w-9 h-9 rounded-full mb-4 animate-pulse" style={{ backgroundColor: 'var(--accent)', opacity: 0.85 }} />
+        <img src={kasalMark} alt="Kasal" className="w-12 h-12 mb-4 animate-pulse" style={{ opacity: 0.95 }} />
         <div className="text-base font-semibold italic mb-1" style={{ color: 'var(--text-primary)' }}>
           Getting started…
         </div>
