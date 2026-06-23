@@ -350,7 +350,7 @@ class ExecutionStatusService:
         Returns:
             True if successful, False otherwise
         """
-        from src.db.session import request_scoped_session
+        from src.db.session import get_isolated_db_session
         from src.repositories.execution_repository import ExecutionRepository
 
         # Validate job_id
@@ -391,8 +391,18 @@ class ExecutionStatusService:
 
                 return True
             else:
-                # Create database session internally (legacy path)
-                async with request_scoped_session() as session:
+                # No caller-supplied session: write the parent row on a PRIVATE
+                # connection (get_isolated_db_session = a dedicated NullPool engine
+                # on SQLite). The previous request_scoped_session() rode the shared
+                # StaticPool connection, so a concurrent run's commit/rollback — or
+                # the request session being closed when the response returned, while
+                # this still ran in a background task ("sqlite3.ProgrammingError:
+                # Cannot operate on a closed database") — could silently discard the
+                # INSERT. The crew subprocess then kept writing execution_logs on its
+                # own connection, leaving an orphaned run (logs, no executionhistory
+                # row) that every status poll 404s on forever. A private connection
+                # commits this row independently and durably.
+                async with get_isolated_db_session() as session:
                     # Create repository instance
                     repo = ExecutionRepository(session)
 

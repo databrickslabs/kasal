@@ -320,7 +320,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_success(self, sample_execution_data):
         """Test successful execution creation."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -340,7 +340,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_with_group_context(self, sample_execution_data, mock_group_context):
         """Test execution creation with group context."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -366,7 +366,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_already_exists(self, sample_execution_data):
         """Test execution creation when record already exists."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -420,7 +420,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_database_exception(self, sample_execution_data):
         """Test execution creation when database operation raises exception."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session_factory.side_effect = Exception("Database connection error")
 
             result = await ExecutionStatusService.create_execution(sample_execution_data)
@@ -430,7 +430,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_repository_exception(self, sample_execution_data):
         """Test execution creation when repository operation raises exception."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -447,7 +447,7 @@ class TestExecutionStatusService:
     @pytest.mark.asyncio
     async def test_create_execution_with_group_context_filtering(self, sample_execution_data, mock_group_context):
         """Test execution creation with group context filtering."""
-        with patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with patch('src.db.session.get_isolated_db_session') as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
             mock_session_factory.return_value.__aexit__.return_value = None
@@ -469,6 +469,36 @@ class TestExecutionStatusService:
                     job_id=sample_execution_data["job_id"],
                     group_ids=mock_group_context.group_ids
                 )
+
+    @pytest.mark.asyncio
+    async def test_create_execution_uses_isolated_connection(self, sample_execution_data):
+        """Regression: the no-session path must write the parent row on a PRIVATE
+        connection (get_isolated_db_session), never the shared request-scoped one.
+
+        The shared SQLite StaticPool connection let a concurrent run's
+        commit/rollback — or the request session closing when the response
+        returned while creation still ran in a background task — silently discard
+        this INSERT, orphaning the run (logs written by the crew subprocess on its
+        own connection, but no executionhistory row) so every status poll 404s.
+        """
+        with patch('src.db.session.get_isolated_db_session') as mock_isolated, \
+             patch('src.db.session.request_scoped_session') as mock_shared:
+            mock_session = AsyncMock()
+            mock_isolated.return_value.__aenter__.return_value = mock_session
+            mock_isolated.return_value.__aexit__.return_value = None
+
+            with patch('src.repositories.execution_repository.ExecutionRepository') as mock_repo_class:
+                mock_repo = AsyncMock()
+                mock_repo.get_execution_by_job_id.return_value = None
+                mock_repo.create_execution.return_value = MockExecution()
+                mock_repo_class.return_value = mock_repo
+
+                result = await ExecutionStatusService.create_execution(sample_execution_data)
+
+                assert result is True
+                mock_isolated.assert_called_once()       # private connection used
+                mock_shared.assert_not_called()          # shared connection NOT used
+                mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
     @patch('src.services.execution_status_service.logger')
