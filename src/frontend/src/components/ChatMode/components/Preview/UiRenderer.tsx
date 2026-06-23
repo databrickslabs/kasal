@@ -1665,18 +1665,48 @@ const Node: React.FC<{
       );
     }
     case 'Table': {
-      const columns = (Array.isArray(node.columns) ? node.columns : []).map((c) => String(c));
+      // Columns may be plain strings OR objects ({label/title/name/header} for the
+      // display text + {key/field} for keyed-row lookup). Normalize to a display
+      // LABEL plus the KEY used to read cells out of keyed row objects — otherwise
+      // an object column stringifies to "[object Object]" and keyed rows miss.
+      const colDefs = (Array.isArray(node.columns) ? node.columns : []).map((c) => {
+        if (c && typeof c === 'object') {
+          const o = c as Record<string, unknown>;
+          const label = o.label ?? o.title ?? o.name ?? o.header ?? o.key ?? o.field ?? '';
+          const key = o.key ?? o.field ?? o.name ?? o.label ?? o.title ?? o.header ?? '';
+          return { label: String(label), key: String(key) };
+        }
+        return { label: String(c), key: String(c) };
+      });
+      const columns = colDefs.map((c) => c.label);
       // resolveValue returns a literal array as-is and resolves `{path}` bindings,
       // so this single check covers literal, bound and missing rows.
       const resolvedRows = resolveValue(node.rows, data);
       const rawRows = Array.isArray(resolvedRows) ? resolvedRows : [];
-      const cell = (v: unknown) => (v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-      const rowToCells = (r: unknown): string[] =>
-        Array.isArray(r)
-          ? r.map(cell)
-          : (r && typeof r === 'object'
-            ? columns.map((c) => cell((r as Record<string, unknown>)[c]))
-            : [cell(r)]);
+      // A cell may be a Databricks {string_value: …} wrapper (statement_response
+      // data_array) — unwrap to the scalar before stringifying.
+      const cell = (v: unknown) => {
+        const u = v && typeof v === 'object' && 'string_value' in (v as object)
+          ? (v as Record<string, unknown>).string_value
+          : v;
+        return u === null || u === undefined ? '' : typeof u === 'object' ? JSON.stringify(u) : String(u);
+      };
+      const rowToCells = (r: unknown): string[] => {
+        if (Array.isArray(r)) return r.map(cell);
+        if (r && typeof r === 'object') {
+          const o = r as Record<string, unknown>;
+          // Models frequently emit each row as { values: [...] } (the Databricks
+          // data_array shape) — POSITIONAL cells aligned to columns, not keyed by
+          // column name. Without this the keyed lookup below misses every cell and
+          // the table renders blank rows.
+          if (Array.isArray(o.values)) return o.values.map(cell);
+          // Keyed row: read each column by its KEY, falling back to its label, so
+          // both {key:...} columns and plain-string columns resolve.
+          return colDefs.map(({ key, label }) =>
+            cell(key in o ? o[key] : o[label]));
+        }
+        return [cell(r)];
+      };
       const rows = (rawRows as unknown[]).map(rowToCells);
       // Optional per-row hrefs (parallel to rows): the FIRST column becomes a link
       // to its source so a results table is navigable. Only http(s) links render.
