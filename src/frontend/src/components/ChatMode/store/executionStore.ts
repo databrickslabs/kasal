@@ -886,9 +886,11 @@ export const useExecutionStore = create<ExecutionStore>()(
     }),
     {
       name: 'kasal-chatmode-mcp-selection',
-      // Persist ONLY the chat "+" picker selections so a page refresh or a switch
-      // to a new chat keeps the connected MCP servers / Agent Bricks endpoints —
-      // users complained when these reset. Everything else here is volatile,
+      // Persist ONLY stable USER PREFERENCES so a page refresh (or a switch to a
+      // new chat) keeps them — the chat "+" picker selections (MCP servers /
+      // Agent Bricks endpoints), the activity placement, and the memory mode
+      // (workspace / session / no memory) chosen in the chat input. Users
+      // complained when any of these reset. Everything else here is volatile,
       // per-run / per-session state (active execution, preview, transient feed)
       // that MUST NOT survive a reload: persisting it would resurrect a stale
       // "running" banner or a dead preview against a job that's long gone.
@@ -896,6 +898,8 @@ export const useExecutionStore = create<ExecutionStore>()(
         selectedMcpServers: s.selectedMcpServers,
         selectedAgentBricksEndpoints: s.selectedAgentBricksEndpoints,
         activityPlacement: s.activityPlacement,
+        workspaceMemory: s.workspaceMemory,
+        memoryEnabled: s.memoryEnabled,
       }),
     },
   ),

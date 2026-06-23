@@ -169,6 +169,9 @@ describe('executionStore - basic setters & log', () => {
     // "running" banner / dead preview on refresh).
     useExecutionStore.getState().setSelectedMcpServers(['My MCP', 'Databricks Genie: Sales']);
     useExecutionStore.getState().setSelectedAgentBricksEndpoints(['mas-1-endpoint']);
+    // The memory mode is a user preference and must survive a refresh too.
+    useExecutionStore.getState().setMemoryEnabled(false);
+    useExecutionStore.getState().setWorkspaceMemory(false);
     // Dirty some volatile state that must be excluded from the persisted blob.
     useExecutionStore.setState({
       activeExecution: { jobId: 'job-1', status: 'running' },
@@ -183,6 +186,9 @@ describe('executionStore - basic setters & log', () => {
     // Selections are persisted...
     expect(persisted.selectedMcpServers).toEqual(['My MCP', 'Databricks Genie: Sales']);
     expect(persisted.selectedAgentBricksEndpoints).toEqual(['mas-1-endpoint']);
+    // ...the memory-mode preference is persisted so "No memory" survives a refresh...
+    expect(persisted.memoryEnabled).toBe(false);
+    expect(persisted.workspaceMemory).toBe(false);
     // ...and nothing volatile is.
     expect(persisted).not.toHaveProperty('activeExecution');
     expect(persisted).not.toHaveProperty('isExecuting');
@@ -190,6 +196,8 @@ describe('executionStore - basic setters & log', () => {
 
     useExecutionStore.getState().setSelectedMcpServers([]);
     useExecutionStore.getState().setSelectedAgentBricksEndpoints([]);
+    useExecutionStore.getState().setMemoryEnabled(true);
+    useExecutionStore.getState().setWorkspaceMemory(true);
   });
 
   it('setMemoryEnabled toggles whether crews run with memory (default enabled)', () => {
