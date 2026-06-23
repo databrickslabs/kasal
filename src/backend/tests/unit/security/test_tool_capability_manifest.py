@@ -8,6 +8,7 @@ from src.engines.crewai.security.tool_capability_manifest import (
     ToolCapability,
     TOOL_CAPABILITIES,
     assess_trifecta,
+    classify_mcp_server,
     log_trifecta_warning,
 )
 
@@ -163,3 +164,59 @@ class TestToolCapabilityRegistry:
         caps = TOOL_CAPABILITIES["MCPTool"]
         assert caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT
         assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+
+    def test_agent_bricks_is_sensitive_untrusted_and_external(self):
+        # Agent Bricks is an opaque agent that may read internal data, browse the
+        # web, and call out — so it carries all three capabilities (trips alone).
+        for key in ("AgentBricksTool", "agent_bricks_tool"):
+            caps = TOOL_CAPABILITIES[key]
+            assert caps & ToolCapability.READS_SENSITIVE_DATA
+            assert caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT
+            assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+
+    def test_agent_bricks_alone_trips_trifecta(self):
+        assert assess_trifecta(["AgentBricksTool"]).has_trifecta
+
+
+class TestClassifyMcpServer:
+    def test_databricks_sql_is_sensitive_external_destructive(self):
+        caps = classify_mcp_server("Databricks SQL")
+        assert caps & ToolCapability.READS_SENSITIVE_DATA
+        assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+        assert caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+        # Not flagged untrusted — it reads internal data, it is not a web channel.
+        assert not (caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT)
+
+    def test_uc_functions_with_dynamic_suffix(self):
+        # The dynamic "(catalog.schema)" suffix must still match by substring.
+        caps = classify_mcp_server("Unity Catalog Functions (main.default)")
+        assert caps & ToolCapability.READS_SENSITIVE_DATA
+        assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+        assert not (caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS)
+
+    def test_uc_functions_system_ai_is_destructive(self):
+        # system.ai exposes python_exec (arbitrary code) → destructive.
+        caps = classify_mcp_server("Unity Catalog Functions (system.ai)")
+        assert caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+
+    def test_genie_ai_search_vector_search_are_sensitive_external(self):
+        for name in ("Genie", "AI Search Indexes", "Databricks Vector Search"):
+            caps = classify_mcp_server(name)
+            assert caps & ToolCapability.READS_SENSITIVE_DATA
+            assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+            assert not (caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT)
+
+    def test_classification_is_case_insensitive(self):
+        # The picker passes display names verbatim, so matching must be lowercased.
+        assert classify_mcp_server("DATABRICKS SQL") & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+
+    def test_unknown_server_defaults_to_untrusted_external(self):
+        # The crux: we can't enumerate internet-capable MCP servers, so anything
+        # unrecognised is assumed to ingest untrusted content + reach external.
+        caps = classify_mcp_server("Some Custom Slack MCP")
+        assert caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT
+        assert caps & ToolCapability.EXTERNAL_COMMUNICATION
+        assert not (caps & ToolCapability.READS_SENSITIVE_DATA)
+
+    def test_empty_name_is_none(self):
+        assert classify_mcp_server("") == ToolCapability.NONE

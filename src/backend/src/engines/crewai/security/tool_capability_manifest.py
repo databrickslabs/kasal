@@ -49,8 +49,12 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     "databricks_jobs_tool":                           _S | _E | _D,   # runtime name
     "DatabricksKnowledgeSearchTool":                  _S | _E,
     "databricks_knowledge_search_tool":               _S | _E,  # runtime name
-    "AgentBricksTool":                                _E,
-    "agent_bricks_tool":                              _E,        # runtime name
+    # Agent Bricks endpoints are opaque Mosaic AI agents: behind one endpoint
+    # there may be Genie/Vector Search/UC reads AND web browsing AND outbound
+    # calls. We can't see inside, so we assume all three capabilities — one
+    # endpoint can trip the trifecta on its own.
+    "AgentBricksTool":                                _S | _U | _E,
+    "agent_bricks_tool":                              _S | _U | _E,  # runtime name
 
     # Web / external search tools (ingest untrusted content)
     "SerperDevTool":                                  _U | _E,
@@ -89,6 +93,41 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     # DatabricksJobsTool runtime name (BaseTool.name differs from class name)
     "Databricks Jobs Manager":                        _S | _E | _D,
 }
+
+
+def classify_mcp_server(name: str) -> ToolCapability:
+    """
+    Classify a *managed/selected MCP server by display name*.
+
+    Internet access (and untrusted-content ingestion) can be reached through ANY
+    MCP endpoint, and all we ever have is a server name — so we never try to
+    enumerate which servers reach the web. We recognise only the finite, knowable
+    set of Databricks-managed *internal data sources* and flag those as sensitive
+    readers; EVERY other server name defaults to untrusted + external
+    (assume-the-worst), because we can't prove it's inert.
+
+    Mirrors classifyMcpServer() in the frontend manifest — keep the two in sync.
+    Names come from /mcp/databricks/available (mcp_router.py); Unity Catalog
+    Functions carry a dynamic "(catalog.schema)" suffix, matched by substring.
+    """
+    n = (name or "").strip().lower()
+    if not n:
+        return ToolCapability.NONE
+    # Databricks SQL executes arbitrary statements with the caller's warehouse
+    # permissions — reads sensitive data AND can mutate/delete it.
+    if n == "databricks sql":
+        return _S | _E | _D
+    # Unity Catalog Functions run server-side UC functions; system.ai includes
+    # python_exec (arbitrary code execution) so it's also treated as destructive.
+    if "unity catalog function" in n:
+        return (_S | _E | _D) if "system.ai" in n else (_S | _E)
+    if "genie" in n:
+        return _S | _E
+    if "ai search" in n or "vector search" in n:
+        return _S | _E
+    # Unknown / external / custom MCP server: could ingest untrusted content and
+    # reach any external endpoint. We cannot prove otherwise, so assume both.
+    return _U | _E
 
 
 @dataclass
