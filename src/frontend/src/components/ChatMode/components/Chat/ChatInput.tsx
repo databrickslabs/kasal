@@ -3,6 +3,7 @@ import { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import McpPicker from './McpPicker';
 import TrifectaNotice from './TrifectaNotice';
+import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useExecutionStore } from '../../store/executionStore';
 
 // The crew tool that searches uploaded knowledge. Passed to the dispatcher so a
@@ -504,6 +505,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
         data-testid="chat-file-input"
         aria-hidden="true"
       />
+
+      {/* Shared-workspace data-exposure notice. Shown once per shared (team)
+          workspace: runs/results/memory here are visible to all members. */}
+      <SharedWorkspaceNotice />
 
       {/* Lethal-trifecta heads-up — inline, non-blocking. Shows when the picked
           MCP servers / Agent Bricks endpoints combine an internal data source
