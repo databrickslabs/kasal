@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import McpPicker from './McpPicker';
+import TrifectaNotice from './TrifectaNotice';
 import { useExecutionStore } from '../../store/executionStore';
 
 // The crew tool that searches uploaded knowledge. Passed to the dispatcher so a
@@ -503,6 +504,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
         data-testid="chat-file-input"
         aria-hidden="true"
       />
+
+      {/* Lethal-trifecta heads-up — inline, non-blocking. Shows when the picked
+          MCP servers / Agent Bricks endpoints combine an internal data source
+          with a channel that could reach the internet or untrusted content. */}
+      <TrifectaNotice />
 
       {/* Input container — two-row layout, also a drop target.
           No `overflow-hidden`: the MCP picker's popover is an absolutely-

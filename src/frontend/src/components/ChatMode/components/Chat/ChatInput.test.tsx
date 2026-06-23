@@ -79,6 +79,28 @@ describe('ChatInput — typing & send', () => {
   });
 });
 
+describe('ChatInput — trifecta notice integration', () => {
+  it('shows the inline security notice for a risky selection, hidden otherwise', () => {
+    // Two internal sources alone: no egress channel → no notice.
+    useExecutionStore.setState({
+      selectedMcpServers: ['Genie', 'Databricks SQL'],
+      selectedAgentBricksEndpoints: [],
+    });
+    const { rerender } = render(<ChatInput {...baseProps} />);
+    expect(screen.queryByTestId('trifecta-notice')).toBeNull();
+
+    // Add an unknown MCP server (assumed untrusted+external) → notice appears.
+    act(() =>
+      useExecutionStore.setState({
+        selectedMcpServers: ['Genie', 'Some Custom MCP'],
+        selectedAgentBricksEndpoints: [],
+      }),
+    );
+    rerender(<ChatInput {...baseProps} />);
+    expect(screen.getByTestId('trifecta-notice')).toBeInTheDocument();
+  });
+});
+
 describe('ChatInput — slash command autocomplete', () => {
   it('shows the command list when typing "/" and filters', () => {
     render(<ChatInput {...baseProps} />);
