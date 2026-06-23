@@ -93,6 +93,21 @@ class LakebaseUnavailableError(KasalError):
     detail = "Database connection unavailable"
 
 
+class LakebaseInstanceUnavailableError(LakebaseUnavailableError):
+    """The configured Lakebase instance/project resolves via NEITHER the provisioned
+    Database Instance API nor the autoscaling Postgres Project API (503).
+
+    Distinct from a transient connectivity failure: this is a configuration/
+    provisioning problem (instance not provisioned, wrong name, or the process is
+    authenticated to a different workspace) that retrying will not fix. Inherits the
+    503 mapping so the global handler in main.py returns a proper status, and keeps a
+    self-explanatory ``detail`` so the cause stays legible when it surfaces deep
+    inside CrewAI's end-of-run memory drain.
+    """
+
+    detail = "Lakebase instance not found"
+
+
 class MCPConnectionError(KasalError):
     """MCP server connection failed (e.g. 403 Forbidden, timeout)."""
 

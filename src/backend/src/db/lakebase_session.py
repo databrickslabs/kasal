@@ -25,6 +25,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
+from src.core.exceptions import LakebaseInstanceUnavailableError
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
 from src.utils.telemetry import get_application_name
@@ -34,6 +35,33 @@ logger = logging.getLogger(__name__)
 
 # Token refresh interval: 50 minutes (tokens expire at 60 min, 10 min safety margin)
 TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
+
+
+def _is_not_found(err: Exception) -> bool:
+    """True when an SDK/connection error means the instance/project does not exist."""
+    text = str(err).lower()
+    return "not found" in text or "not_found" in text
+
+
+def _unavailable_message(instance_name: str, w, orig: Exception) -> str:
+    """Build an actionable message for a Lakebase instance that resolves nowhere."""
+    host = None
+    try:
+        host = getattr(getattr(w, "config", None), "host", None)
+    except Exception:
+        host = None
+    where = f" in workspace {host}" if host else ""
+    return (
+        f"Lakebase instance/project '{instance_name}' is not available{where}. "
+        f"Tried both the provisioned Database Instance API "
+        f"(database.get_database_instance) and the autoscaling Postgres Project API "
+        f"(postgres.list_endpoints) — neither could resolve it. This usually means the "
+        f"instance is not provisioned in this workspace, the configured instance name is "
+        f"wrong, or the process is authenticated to a different workspace. The "
+        f"Lakebase-backed feature (e.g. CrewAI agent memory) is configured to use this "
+        f"instance; provision it, correct the instance name, or disable the Lakebase "
+        f"backend. Underlying error: {orig}"
+    )
 
 # Cached SPN credentials, captured the first time all three env vars are present.
 # CRITICAL (deployed Databricks Apps): the crew subprocess is multi-threaded and
@@ -227,14 +255,22 @@ class LakebaseSessionFactory:
             logger.info(f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})")
             return cred.token
         except Exception as e:
-            if "not found" not in str(e).lower() and "not_found" not in str(e).lower():
+            if not _is_not_found(e):
                 raise
             logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
 
         # Fall back to autoscaling project
-        endpoints = list(w.postgres.list_endpoints(
-            parent=f"projects/{self.instance_name}/branches/production"
-        ))
+        try:
+            endpoints = list(w.postgres.list_endpoints(
+                parent=f"projects/{self.instance_name}/branches/production"
+            ))
+        except Exception as autoscale_err:
+            # Neither API knows this instance — surface a legible error.
+            if _is_not_found(autoscale_err):
+                raise LakebaseInstanceUnavailableError(
+                    _unavailable_message(self.instance_name, w, autoscale_err)
+                ) from autoscale_err
+            raise
         if not endpoints:
             raise ValueError(f"No endpoints found for project {self.instance_name}")
         cred = w.postgres.generate_database_credential(endpoint=endpoints[0].name)
@@ -280,13 +316,22 @@ class LakebaseSessionFactory:
                     raise ValueError(f"Lakebase instance {self.instance_name} is not ready (state: {instance.state})")
                 dns = instance.read_write_dns
             except Exception as e:
-                if "not found" not in str(e).lower() and "not_found" not in str(e).lower():
+                if not _is_not_found(e):
                     raise
-                # Try autoscaling project
+                # Provisioned instance not found — try the autoscaling project API.
                 logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
-                endpoints = list(w.postgres.list_endpoints(
-                    parent=f"projects/{self.instance_name}/branches/production"
-                ))
+                try:
+                    endpoints = list(w.postgres.list_endpoints(
+                        parent=f"projects/{self.instance_name}/branches/production"
+                    ))
+                except Exception as autoscale_err:
+                    # Neither API knows this instance — surface a legible error
+                    # instead of the raw SDK NotFound buried in the memory drain.
+                    if _is_not_found(autoscale_err):
+                        raise LakebaseInstanceUnavailableError(
+                            _unavailable_message(self.instance_name, w, autoscale_err)
+                        ) from autoscale_err
+                    raise
                 for ep in endpoints:
                     if hasattr(ep, 'status') and ep.status:
                         hosts = getattr(ep.status, 'hosts', None)

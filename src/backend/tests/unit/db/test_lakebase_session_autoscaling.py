@@ -166,3 +166,79 @@ async def test_get_connection_string_instance_not_ready(factory):
     with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "spn-id"}):
         with pytest.raises(ValueError, match="not ready"):
             await factory.get_connection_string()
+
+
+# ---- legible error when the instance exists in NEITHER API ----
+
+
+@pytest.mark.asyncio
+async def test_get_connection_string_instance_unavailable_everywhere(factory):
+    """When both APIs report 'not found', a legible LakebaseInstanceUnavailableError
+    is raised (not the raw SDK NotFound that surfaces inside the memory drain)."""
+    from src.core.exceptions import LakebaseInstanceUnavailableError
+
+    mock_w = MagicMock()
+    mock_w.config.host = "https://my-workspace.example.com"
+    # Provisioned API: not found
+    mock_w.database.get_database_instance.side_effect = Exception("instance not found")
+    # Autoscaling API: project does not exist either
+    mock_w.postgres.list_endpoints.side_effect = Exception(
+        "Project with name 'projects/test-inst' not found"
+    )
+    factory._get_workspace_client = AsyncMock(return_value=mock_w)
+
+    with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "spn-id"}):
+        with pytest.raises(LakebaseInstanceUnavailableError) as exc_info:
+            await factory.get_connection_string()
+
+    msg = str(exc_info.value)
+    # Message must name the instance, the workspace, and how to fix it.
+    assert "test-inst" in msg
+    assert "my-workspace.example.com" in msg
+    assert "not provisioned" in msg
+    # Original SDK error is chained for debugging.
+    assert exc_info.value.__cause__ is not None
+    # Wired into the Kasal exception hierarchy so the global handler maps it to 503.
+    from src.core.exceptions import KasalError, LakebaseUnavailableError
+
+    assert isinstance(exc_info.value, KasalError)
+    assert isinstance(exc_info.value, LakebaseUnavailableError)
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_get_connection_string_autoscaling_non_not_found_propagates(factory):
+    """A non-'not found' error from list_endpoints is NOT wrapped — it propagates raw."""
+    from src.core.exceptions import LakebaseInstanceUnavailableError
+
+    mock_w = MagicMock()
+    mock_w.database.get_database_instance.side_effect = Exception("not found")
+    mock_w.postgres.list_endpoints.side_effect = RuntimeError("permission denied")
+    factory._get_workspace_client = AsyncMock(return_value=mock_w)
+
+    with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "spn-id"}):
+        with pytest.raises(RuntimeError, match="permission denied") as exc_info:
+            await factory.get_connection_string()
+    assert not isinstance(exc_info.value, LakebaseInstanceUnavailableError)
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_instance_unavailable_everywhere(factory):
+    """_refresh_token raises a legible LakebaseInstanceUnavailableError when neither
+    the provisioned nor the autoscaling API can resolve the instance."""
+    from src.core.exceptions import LakebaseInstanceUnavailableError
+
+    mock_w = MagicMock()
+    mock_w.config.host = "https://my-workspace.example.com"
+    mock_w.database.generate_database_credential.side_effect = Exception("not found")
+    mock_w.postgres.list_endpoints.side_effect = Exception(
+        "Project with name 'projects/test-inst' not found"
+    )
+    factory._get_workspace_client = AsyncMock(return_value=mock_w)
+
+    with pytest.raises(LakebaseInstanceUnavailableError) as exc_info:
+        await factory._refresh_token()
+
+    msg = str(exc_info.value)
+    assert "test-inst" in msg
+    assert exc_info.value.__cause__ is not None
