@@ -247,6 +247,45 @@ describe('UiRenderer — rich components', () => {
     }, 'root', { rows: [['solo'], [{ nested: true }]] })} />);
     expect(screen.getByText('solo')).toBeInTheDocument();
   });
+
+  it('renders { values: [...] } positional rows (the data_array shape models emit)', () => {
+    const { container } = render(<UiRenderer surface={surface({
+      root: {
+        id: 'root', component: 'Table', columns: ['Event ID', 'Event Name'],
+        rows: [
+          { values: ['EVT001', 'AI Day 2026 Paris'] },
+          { values: [{ string_value: 'EVT002' }, { string_value: 'VivaTech 2026' }] },
+        ],
+      },
+    })} />);
+    expect(container.querySelectorAll('tbody tr').length).toBe(2);
+    expect(screen.getByText('AI Day 2026 Paris')).toBeInTheDocument();
+    // Databricks {string_value: …} cell wrappers are unwrapped to the scalar.
+    expect(screen.getByText('VivaTech 2026')).toBeInTheDocument();
+    expect(screen.getByText('EVT002')).toBeInTheDocument();
+  });
+
+  it('renders {label,key} object columns with rows keyed by key', () => {
+    render(<UiRenderer surface={surface({
+      root: {
+        id: 'root', component: 'Table',
+        columns: [
+          { label: 'Event ID', key: 'event_id' },
+          { label: 'Event Name', key: 'event_name' },
+        ],
+        rows: [
+          { event_id: 'EVT001', event_name: 'PCAIDE 2026' },
+          { event_id: 'EVT002', event_name: 'AI Day 2026 Paris' },
+        ],
+      },
+    })} />);
+    // Header shows the LABEL, not "[object Object]".
+    expect(screen.getByText('Event Name')).toBeInTheDocument();
+    expect(screen.queryByText(/object Object/i)).not.toBeInTheDocument();
+    // Cells resolve via each column's KEY.
+    expect(screen.getByText('PCAIDE 2026')).toBeInTheDocument();
+    expect(screen.getByText('AI Day 2026 Paris')).toBeInTheDocument();
+  });
 });
 
 describe('UiRenderer — branch coverage', () => {
