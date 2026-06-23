@@ -623,14 +623,18 @@ const ChatWorkspace: React.FC = () => {
       setHasHiddenPreview(false);
       return;
     }
-    // A run's deliverable is derived from its execution result and held in
-    // previewHistory (populated by restoreSessionState). A non-empty history with
-    // the pane closed means there's a deliverable to reopen.
-    if (useExecutionStore.getState().previewHistory.length > 0) {
-      setHasHiddenPreview(true);
-      return;
-    }
+    // Reset eagerly: the pill must NOT linger from the previous session while the
+    // async, session-scoped lookups below resolve. We deliberately do NOT consult
+    // the in-memory previewHistory — it's a single GLOBAL slot, and on a session
+    // switch (esp. a new chat, where currentSessionId flips BEFORE
+    // restoreSessionState clears the slot) it can still hold the prior session's
+    // runs, which leaked the pill into a fresh chat. getSessionPreview (IndexedDB)
+    // and the message scan are both session-scoped, and a shown deliverable is
+    // always persisted via saveSessionPreview, so this loses no real case.
+    setHasHiddenPreview(false);
+    let cancelled = false;
     getSessionPreview(currentSessionId).then((stored) => {
+      if (cancelled) return;
       if (stored) {
         setHasHiddenPreview(true);
         return;
@@ -644,12 +648,13 @@ const ChatWorkspace: React.FC = () => {
         if (preview) {
           // Save to IndexedDB so it persists and reopenPreview() works
           saveSessionPreview(currentSessionId, preview);
-          setHasHiddenPreview(true);
+          if (!cancelled) setHasHiddenPreview(true);
           return;
         }
       }
-      setHasHiddenPreview(false);
+      if (!cancelled) setHasHiddenPreview(false);
     });
+    return () => { cancelled = true; };
   }, [currentSessionId, previewContent, messages]);
 
   // Sync chat theme from Kasal's theme store (dark-mode toggle).
@@ -2059,28 +2064,8 @@ const ChatWorkspace: React.FC = () => {
               (ChatModeHeaderSlot), so the main area no longer renders its own
               header — this keeps it vertically stable when the sidebar toggles. */}
 
-          {/* Reopen preview button — shown when a preview was closed but data persists */}
-          {hasHiddenPreview && !previewContent && (
-            <div className="absolute bottom-20 right-4 z-10">
-              <button
-                onClick={() => useExecutionStore.getState().reopenPreview()}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
-                style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-color)',
-                }}
-                title="Reopen preview panel"
-              >
-                <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-                </svg>
-                Show preview
-              </button>
-            </div>
-          )}
-
-          {/* Chat container */}
+          {/* Chat container — the reopen-preview pill is rendered inside it,
+              anchored above the composer, so it never overlaps the input. */}
           <div className="flex-1 overflow-hidden">
             <ChatContainer
               messages={messages}
@@ -2117,6 +2102,8 @@ const ChatWorkspace: React.FC = () => {
                   run();
                 }
               }}
+              showReopenPreview={hasHiddenPreview && !previewContent}
+              onReopenPreview={() => useExecutionStore.getState().reopenPreview()}
             />
           </div>
         </main>

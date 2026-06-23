@@ -125,6 +125,25 @@ describe('ChatContainer', () => {
     expect(onSend).toHaveBeenCalledWith('cmd');
   });
 
+  it('renders the reopen-preview pill above the composer (conversation + empty state) and wires the click', () => {
+    const onReopenPreview = vi.fn();
+    // Conversation state.
+    const { unmount } = render(
+      <ChatContainer {...baseProps} messages={[msg('a')]} showReopenPreview onReopenPreview={onReopenPreview} />,
+    );
+    fireEvent.click(screen.getByText('Show preview'));
+    expect(onReopenPreview).toHaveBeenCalledTimes(1);
+    unmount();
+    // Empty state shows it too (e.g. a restored session whose deliverable persisted).
+    render(<ChatContainer {...baseProps} messages={[]} showReopenPreview onReopenPreview={onReopenPreview} />);
+    expect(screen.getByText('Show preview')).toBeInTheDocument();
+  });
+
+  it('hides the reopen-preview pill when not armed', () => {
+    render(<ChatContainer {...baseProps} messages={[msg('a')]} />);
+    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
+  });
+
   it('disables the input while loading', () => {
     render(<ChatContainer {...baseProps} messages={[]} isLoading />);
     expect(screen.getByTestId('chat-input')).toBeDisabled();
