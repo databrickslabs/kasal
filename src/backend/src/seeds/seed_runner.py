@@ -70,11 +70,21 @@ try:
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding model_configs seeder: {e}")
 
-try:
-    SEEDERS["documentation"] = documentation.seed
-    debug_log("Added documentation.seed to SEEDERS")
-except (NameError, AttributeError) as e:
-    logger.error(f"Error adding documentation seeder: {e}")
+# Documentation embeddings seeder is intentionally DISABLED.
+# Reasons: (1) the three generators (agent/crew/task) already disabled
+# documentation retrieval, so the documentation_embeddings table is no longer
+# read during generation; (2) the seeder is append-only and its idempotency
+# guard checks the Databricks index (not the local table that writes now go to),
+# so it re-seeded the full chunk set on every restart and bloated the table
+# ~96x. Leaving it unregistered keeps it from running while preserving the
+# module/table/service/router and the separate KnowledgeEmbedding logic.
+# To re-enable: SEEDERS["documentation"] = documentation.seed
+#
+# try:
+#     SEEDERS["documentation"] = documentation.seed
+#     debug_log("Added documentation.seed to SEEDERS")
+# except (NameError, AttributeError) as e:
+#     logger.error(f"Error adding documentation seeder: {e}")
 
 # Roles seeder removed - using simplified 3-tier role system
 

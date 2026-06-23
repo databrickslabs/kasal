@@ -52,12 +52,18 @@ class TestSeedersRegistration:
             "schemas",
             "prompt_templates",
             "model_configs",
-            "documentation",
             "groups",
             "api_keys",
         }
         for name in core:
             assert name in seed_runner.SEEDERS, f"Missing core seeder: {name}"
+
+    def test_documentation_seeder_intentionally_disabled(self):
+        """The documentation embeddings seeder is intentionally NOT registered:
+        it is no longer read during generation and its append-only re-seed (with
+        an idempotency guard that checked the wrong store) bloated the table on
+        every restart. It must stay unregistered until that is fixed."""
+        assert "documentation" not in seed_runner.SEEDERS
 
     def test_optional_seeders_in_known_set(self):
         """Optional seeders (dspy_examples, example_crews) may or may not be
