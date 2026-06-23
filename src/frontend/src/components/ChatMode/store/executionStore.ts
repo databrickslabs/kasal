@@ -15,33 +15,6 @@ import {
 } from './activeExecutionMarker';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
-/**
- * A single intermediate "answer" surfaced LIVE in the preview pane while a run
- * is still building its deliverable (a tool result / finding). Purely in-memory
- * decoration — NEVER persisted to previewHistory or IndexedDB; it exists only
- * for the duration of the run and is replaced by the real deliverable.
- */
-export interface TransientPreviewItem {
-  id: string;
-  label: string;
-  sublabel?: string;
-  detail?: string;
-  durationMs?: number;
-  timestamp: number;
-}
-
-/** Append `item` to the live feed, de-duping a re-emitted result (same
- *  label+sublabel) and capping to the most recent `max`. Pure for testability. */
-export function pushTransientItem(
-  list: TransientPreviewItem[],
-  item: TransientPreviewItem,
-  max = 8,
-): TransientPreviewItem[] {
-  const filtered = list.filter((i) => !(i.label === item.label && i.sublabel === item.sublabel));
-  const next = [...filtered, item];
-  return next.length > max ? next.slice(next.length - max) : next;
-}
-
 interface SessionExecSnapshot {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
   isExecuting: boolean;
@@ -117,19 +90,28 @@ interface ExecutionState {
    */
   selectedAgentBricksEndpoints: string[];
   /**
-   * Live, NON-PERSISTED feed of intermediate answers shown in the preview pane
-   * while a run is building its deliverable. Replaced by the real deliverable
-   * on completion; never written to previewHistory or IndexedDB.
+   * Epoch ms when the current execution started (or null when idle). Lives in
+   * the store — not the skeleton's local state — so the "Running agent…" elapsed
+   * timer reflects the true run duration and survives switching away and back.
    */
-  transientPreview: TransientPreviewItem[];
-  /** The session the live feed belongs to (render only when it's on screen). */
-  transientPreviewOwnerSessionId: string | null;
+  runStartedAt: number | null;
   /**
-   * Whether the preview pane shows the live "retrieved context / working
-   * results" feed during a run. Opt-in via a checkbox (default false); off keeps
-   * the pane a plain skeleton. Persisted in the store like the memory toggles.
+   * In-flight job id per session id. The Zustand store is a singleton that
+   * survives session switches (unlike the per-session snapshot, which the live
+   * slot can lose), so this is the source of truth for "does this session have a
+   * running job?" when you switch BACK to it — the switch handler reads it to
+   * re-attach the run and bring the monitoring back. NOT persisted (a stale
+   * reload must not resurrect a dead run — refresh reconnect uses the IndexedDB
+   * marker instead); cleared when the run finalizes.
    */
-  showRetrievedContext: boolean;
+  runningJobBySession: Record<string, string>;
+  /**
+   * Where the run-activity (the "thinking" stream) is shown: 'preview' (the right
+   * preview pane, the default) or 'chat' (collapsed into the chat's "Working…" bar,
+   * expandable to the same stream). A user preference — persisted like the other
+   * chat toggles.
+   */
+  activityPlacement: 'preview' | 'chat';
 }
 
 interface ExecutionActions {
@@ -150,12 +132,7 @@ interface ExecutionActions {
   setSelectedMcpServers: (names: string[]) => void;
   toggleAgentBricksEndpoint: (name: string) => void;
   setSelectedAgentBricksEndpoints: (names: string[]) => void;
-  /** Push an intermediate answer onto the live (transient) preview feed. No-op
-   *  unless `sessionId` is the session currently on screen. */
-  pushTransientPreview: (sessionId: string | null, item: TransientPreviewItem) => void;
-  /** Drop the live feed (e.g. when the deliverable lands or a new run starts). */
-  clearTransientPreview: () => void;
-  setShowRetrievedContext: (value: boolean) => void;
+  setActivityPlacement: (placement: 'preview' | 'chat') => void;
   clearPreview: () => void;
   reopenPreview: () => void;
   appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
@@ -174,6 +151,16 @@ interface ExecutionActions {
   jobOwnerOf: (jobId: string) => string | null;
   /** Drop a job's owner mapping (e.g. when a reconnect finalizes it directly). */
   clearJobOwner: (jobId: string) => void;
+  /**
+   * Abandon a tracked job whose execution row no longer exists for this
+   * workspace (deleted, or it belongs to a group you no longer have selected).
+   * Unlike failExecution this posts NO chat message — the run isn't a failure,
+   * it's just gone — it only drops the running banner/Stop button AND the durable
+   * IndexedDB reconnect marker, so the trace poller and the refresh-reconnect
+   * stop resurrecting a dead job and looping 404s. Idempotent (no-op once the
+   * job is untracked / already finalized).
+   */
+  abandonExecution: (jobId: string) => void;
 
   // Generation lifecycle
   startGeneration: (sessionId?: string) => void;
@@ -272,9 +259,11 @@ export const useExecutionStore = create<ExecutionStore>()(
   memoryEnabled: true,
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
-  transientPreview: [],
-  transientPreviewOwnerSessionId: null,
-  showRetrievedContext: false,
+  runStartedAt: null,
+  runningJobBySession: {},
+  activityPlacement: 'preview',
+
+  setActivityPlacement: (placement) => set({ activityPlacement: placement }),
 
   appendLog: (entry) => set((s) => ({
     executionLog: [
@@ -352,21 +341,6 @@ export const useExecutionStore = create<ExecutionStore>()(
         : [...s.selectedAgentBricksEndpoints, name],
     })),
   setSelectedAgentBricksEndpoints: (names) => set({ selectedAgentBricksEndpoints: names }),
-  // Accumulate intermediate answers for the FOREGROUND run only — the live feed
-  // is decoration for the run you're watching, never persisted and never shown
-  // for a backgrounded run. Owner-stamped so a stale slot can't leak across a
-  // session switch (the render gates on owner === current too).
-  pushTransientPreview: (sessionId, item) =>
-    set((s) => {
-      if (!sessionId || sessionId !== useSessionStore.getState().currentSessionId) return {};
-      const base = s.transientPreviewOwnerSessionId === sessionId ? s.transientPreview : [];
-      return {
-        transientPreview: pushTransientItem(base, item),
-        transientPreviewOwnerSessionId: sessionId,
-      };
-    }),
-  clearTransientPreview: () => set({ transientPreview: [], transientPreviewOwnerSessionId: null }),
-  setShowRetrievedContext: (value) => set({ showRetrievedContext: value }),
   clearPreview: () => {
     // Only hide the preview panel — keep history/data so the user can reopen
     set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
@@ -400,6 +374,9 @@ export const useExecutionStore = create<ExecutionStore>()(
     if (owner) jobOwners.set(jobId, owner);
     // Persist so a page refresh can reconnect to this still-running job.
     if (owner) persistActiveExecution(owner, jobId);
+    // Zustand source of truth for switch-back detection (survives session
+    // switches in memory; not persisted — refresh reconnect uses the marker).
+    if (owner) set((s) => ({ runningJobBySession: { ...s.runningJobBySession, [owner]: jobId } }));
     // A refine continues the same artifact lineage, so it keeps the existing
     // preview + history and just appends the revised output. A fresh run clears
     // the previous preview so an unrelated prompt doesn't inherit stale output.
@@ -417,9 +394,7 @@ export const useExecutionStore = create<ExecutionStore>()(
         previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
         previewHistory: preserve ? s.previewHistory : [],
         previewIndex: preserve ? s.previewIndex : 0,
-        // The live feed is per-run — a new run always starts with an empty one.
-        transientPreview: [],
-        transientPreviewOwnerSessionId: null,
+        runStartedAt: Date.now(),
         executionLog: [],
       });
     } else {
@@ -470,6 +445,13 @@ export const useExecutionStore = create<ExecutionStore>()(
 
     // Run is over — drop the persisted reconnect marker.
     if (ownerSession) clearActiveExecution(ownerSession);
+    // Run finalized — drop the switch-back detection entry for this session.
+    if (ownerSession) set((s) => {
+      if (!(ownerSession in s.runningJobBySession)) return {};
+      const next = { ...s.runningJobBySession };
+      delete next[ownerSession];
+      return { runningJobBySession: next };
+    });
 
     // Parse preview content if any
     let preview: PreviewContent | null = null;
@@ -531,9 +513,9 @@ export const useExecutionStore = create<ExecutionStore>()(
         executionContext: null,
         isLoading: false,
         executionOwnerSessionId: null,
-        // Run is over — drop the live feed; the deliverable (if any) now shows.
-        transientPreview: [],
-        transientPreviewOwnerSessionId: null,
+        // Keep the live feed so the finished preview can show the run timeline
+        // collapsed above the result; just stop the elapsed timer.
+        runStartedAt: null,
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {
@@ -582,6 +564,13 @@ export const useExecutionStore = create<ExecutionStore>()(
 
     // Run is over — drop the persisted reconnect marker.
     if (ownerSession) clearActiveExecution(ownerSession);
+    // Run finalized — drop the switch-back detection entry for this session.
+    if (ownerSession) set((s) => {
+      if (!(ownerSession in s.runningJobBySession)) return {};
+      const next = { ...s.runningJobBySession };
+      delete next[ownerSession];
+      return { runningJobBySession: next };
+    });
 
     if (ownerSession) {
       sessionStore.addMessageToTargetSession(
@@ -602,8 +591,7 @@ export const useExecutionStore = create<ExecutionStore>()(
         executionContext: null,
         isLoading: false,
         executionOwnerSessionId: null,
-        transientPreview: [],
-        transientPreviewOwnerSessionId: null,
+        runStartedAt: null,
       });
       if (ownerSession) sessionSnapshots.delete(ownerSession);
     } else if (ownerSession) {
@@ -624,6 +612,54 @@ export const useExecutionStore = create<ExecutionStore>()(
       // Only clear the live slot's owner if it belongs to the job that failed —
       // a backgrounded session failing must not blank the viewed session.
       set((s) => (s.executionOwnerSessionId === ownerSession ? { executionOwnerSessionId: null } : {}));
+    }
+  },
+
+  abandonExecution: (jobId: string) => {
+    // Untracked or already finalized — nothing to do (keeps double calls, e.g.
+    // the reconnect backstop AND a late poller 'jobNotFound', a clean no-op).
+    if (!jobId || !jobOwners.has(jobId)) return;
+    const ownerSession = jobOwners.get(jobId)!;
+    jobOwners.delete(jobId);
+
+    // Drop the durable reconnect marker + switch-back entry so neither a page
+    // refresh nor a session switch re-detects and re-polls this dead job.
+    clearActiveExecution(ownerSession);
+    set((s) => {
+      if (!(ownerSession in s.runningJobBySession)) return {};
+      const next = { ...s.runningJobBySession };
+      delete next[ownerSession];
+      return { runningJobBySession: next };
+    });
+
+    // Clear the running banner / Stop button. If the dead job holds the live
+    // slot, reset it; otherwise scrub the backgrounded session's snapshot so a
+    // switch-back doesn't restore a stale "running" state for a job that's gone.
+    const state = get();
+    const ownsLiveSlot =
+      state.executionOwnerSessionId === ownerSession ||
+      state.activeExecution?.jobId === jobId;
+    if (ownsLiveSlot) {
+      set({
+        activeExecution: null,
+        isExecuting: false,
+        isLoading: false,
+        executionContext: null,
+        executionOwnerSessionId: null,
+        runStartedAt: null,
+      });
+      sessionSnapshots.delete(ownerSession);
+    } else {
+      const prevSnap = sessionSnapshots.get(ownerSession);
+      if (prevSnap) {
+        sessionSnapshots.set(ownerSession, {
+          ...prevSnap,
+          activeExecution: null,
+          isExecuting: false,
+          isGenerating: false,
+          isLoading: false,
+        });
+      }
     }
   },
 
@@ -859,6 +895,7 @@ export const useExecutionStore = create<ExecutionStore>()(
       partialize: (s) => ({
         selectedMcpServers: s.selectedMcpServers,
         selectedAgentBricksEndpoints: s.selectedAgentBricksEndpoints,
+        activityPlacement: s.activityPlacement,
       }),
     },
   ),

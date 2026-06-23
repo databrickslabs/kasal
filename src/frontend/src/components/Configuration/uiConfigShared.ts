@@ -40,6 +40,10 @@ export const DELIVERABLE_TYPES = [
   { key: 'quiz', label: 'Quiz' },
   { key: 'flashcards', label: 'Flashcards' },
   { key: 'report', label: 'Report' },
+  // The run-activity "context" / logs view (per-step retrieved context shown in
+  // the preview pane). Styled distinctly from deliverables — see the Logs preset
+  // and LOGS_THEME (the built-in fallback when this isn't customized).
+  { key: 'logs', label: 'Run activity (logs)' },
 ] as const;
 export type DeliverableKey = (typeof DELIVERABLE_TYPES)[number]['key'];
 
@@ -69,6 +73,9 @@ export const THEME_PRESETS: { key: string; label: string; theme: Theme }[] = [
   // Mirrors the renderer's built-in presentation deck identity (UiRenderer
   // DECK_THEME_VARS) so users can pin it as an explicit palette and tweak it.
   { key: 'studio', label: 'Studio', theme: { accent: '#FF3621', background: '#0E1B21', surface: '#16272F', text: '#E8EEF2', heading: '#FFFFFF', muted: '#8FA3AD', font: 'sans', density: 'comfortable' } },
+  // Elegant light identity for the run-activity "logs"/context view — clean sans,
+  // compact, dark ink on a soft light surface. Mirrors LOGS_THEME in uiDocument.ts.
+  { key: 'logs', label: 'Run activity (context)', theme: { accent: '#2563EB', background: '#F6F8FA', surface: '#FFFFFF', text: '#1F2937', heading: '#0F172A', muted: '#64748B', font: 'sans', density: 'compact' } },
 ];
 
 export const DEFAULT_THEME: Theme = THEME_PRESETS[0].theme;

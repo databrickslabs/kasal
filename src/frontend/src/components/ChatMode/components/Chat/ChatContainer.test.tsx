@@ -170,7 +170,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       content: '',
       timestamp: new Date(),
       resultType: 'trace',
-      resultData: { label, kind: 'tool_call', durationMs: 100, ...extra },
+      resultData: { label, kind: 'tool_result', durationMs: 100, ...extra },
     } as unknown as ChatMessageType);
 
   it('shows a live "Thinking…" indicator with animated dots while generating', () => {
@@ -182,7 +182,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.queryByTestId('trace-group')).toBeNull();
   });
 
-  it('while executing with traces: live latest-step header, Stop on the right, expandable timeline (dots + bold names + text)', () => {
+  it('while executing with traces: live header, Stop, and an expandable thinking stream (friendly phases)', () => {
     const onStop = vi.fn();
     render(
       <ChatContainer
@@ -190,8 +190,8 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         messages={[
           msg('u', 'q'),
           traceMsg('t1', 'PerplexityTool', { sublabel: 'find stock photos' }),
-          traceMsg('t2', 'Memory', { durationMs: undefined, detail: 'recalled 3 items' }),
-          traceMsg('t3', 'ScrapeTool', { durationMs: undefined }),
+          traceMsg('t2', 'Memory', { detail: 'recalled 3 items' }),
+          traceMsg('t3', 'ScrapeTool'),
         ]}
         isExecuting
         onStopExecution={onStop}
@@ -199,29 +199,20 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     );
     // The header tracks the LATEST step (no static "Working…" once traces exist).
     expect(screen.queryByText('Working…')).toBeNull();
-    expect(screen.getByText('ScrapeTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // collapsed by default → no steps visible yet (only the live header line)
-    expect(screen.queryByText('PerplexityTool')).toBeNull();
-    // expand → chronological steps, bold names + their summary + duration
+    // collapsed by default → the stream is hidden.
+    expect(screen.queryByText('Searching the web')).toBeNull();
+    // expand → the thinking stream's friendly phase headings (not raw tool names).
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
-    expect(screen.getByText('find stock photos')).toBeInTheDocument(); // summary (sublabel), always shown
-    expect(screen.getByText('Memory')).toBeInTheDocument();
-    // the retrieved context (detail) stays hidden until that step is expanded
-    expect(screen.queryByText('recalled 3 items')).toBeNull();
-    fireEvent.click(screen.getByLabelText('Show context for Memory'));
-    expect(screen.getByText('recalled 3 items')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Hide context for Memory'));
-    expect(screen.queryByText('recalled 3 items')).toBeNull();
-    // Stop was pressed → the header shows "Stopping…", so the only ScrapeTool
-    // left is the timeline step (no summary, no duration, no context).
-    expect(screen.getAllByText('ScrapeTool')).toHaveLength(1);
-    expect(screen.getByText('100ms')).toBeInTheDocument(); // first step's duration
-    // toggling closed again (Collapse label)
+    expect(screen.getByText('Searching the web')).toBeInTheDocument();
+    expect(screen.getByText('Recalling context')).toBeInTheDocument();
+    expect(screen.getByText('Reading sources')).toBeInTheDocument();
+    // the search query is woven into the first-person narrative.
+    expect(screen.getByText(/find stock photos/)).toBeInTheDocument();
+    // toggling closed again (Collapse label) hides the stream.
     fireEvent.click(screen.getByLabelText('Collapse run activity'));
-    expect(screen.queryByText('PerplexityTool')).toBeNull();
+    expect(screen.queryByText('Searching the web')).toBeNull();
   });
 
   it('live header shows the latest step name + first line of its query (one-liner)', () => {
@@ -260,31 +251,32 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.queryByText(/Brent at/)).toBeNull();
   });
 
-  it('shows no "Show context" toggle when a step\'s detail just duplicates its summary', () => {
+  it('expands into the thinking stream (no per-step "Show context" toggle)', () => {
+    // Not executing → no live header one-liner, so the content appears once.
     render(
       <ChatContainer
         {...baseProps}
-        messages={[msg('u'), traceMsg('e1', 'EchoTool', { sublabel: 'same text', detail: 'same text' })]}
-        isExecuting
+        messages={[msg('u'), traceMsg('e1', 'EchoTool', { sublabel: 'same text', detail: 'extra context' })]}
       />,
     );
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('same text')).toBeInTheDocument(); // summary
-    expect(screen.queryByLabelText('Show context for EchoTool')).toBeNull(); // detail === summary → no toggle
+    // Unknown tool → its name is the heading; the legacy "Show context" toggle is gone.
+    expect(screen.getByText('EchoTool')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Show context for EchoTool')).toBeNull();
   });
 
-  it('collapses consecutive same-tool traces into one chronological run of steps', () => {
+  it('renders each tool call as its own step in the thinking stream', () => {
     render(
       <ChatContainer
         {...baseProps}
         messages={[msg('u'), traceMsg('p1', 'PerplexityTool', { sublabel: 'q1' }), traceMsg('p2', 'PerplexityTool', { sublabel: 'q2' })]}
-        isExecuting
       />,
     );
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    // two consecutive Perplexity calls → one group → two timeline steps
-    expect(screen.getByText('q1')).toBeInTheDocument();
-    expect(screen.getByText('q2')).toBeInTheDocument();
+    // Two Perplexity calls → two "Searching the web" steps; each query in its narrative.
+    expect(screen.getAllByText('Searching the web')).toHaveLength(2);
+    expect(screen.getByText(/q1/)).toBeInTheDocument();
+    expect(screen.getByText(/q2/)).toBeInTheDocument();
   });
 
   it('after the run (not executing) shows "Run activity" and no Stop', () => {
@@ -357,11 +349,12 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
     expect(screen.getByLabelText('Stop execution')).toBeInTheDocument();
-    // timeline collapsed by default; expands like tool activity
-    expect(screen.queryByText('find stock photos')).toBeNull();
+    // stream collapsed by default; expands to the friendly phase + narrative.
+    expect(screen.queryByText('Searching the web')).toBeNull();
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getAllByText('PerplexityTool')).toHaveLength(2); // header + timeline step
-    expect(screen.getByText('find stock photos')).toBeInTheDocument();
+    expect(screen.getByText('Searching the web')).toBeInTheDocument();
+    // The query shows in the live header AND the stream narrative while executing.
+    expect(screen.getAllByText(/find stock photos/).length).toBeGreaterThan(0);
   });
 
   it('keeps an inline-rendered Genie answer in the chat (not inside the container)', () => {
@@ -406,7 +399,7 @@ describe('ChatContainer — one run-activity section per prompt', () => {
     ({
       id, role: 'assistant', content: '', timestamp: new Date(),
       resultType: 'trace',
-      resultData: { label, ...(sublabel ? { sublabel } : {}), kind: 'event', timestamp: Date.now() },
+      resultData: { label, ...(sublabel ? { sublabel } : {}), kind: 'tool_result', timestamp: Date.now() },
     } as unknown as ChatMessageType);
 
   it('a second prompt gets its OWN activity section under it (not merged into the first)', () => {
@@ -415,11 +408,9 @@ describe('ChatContainer — one run-activity section per prompt', () => {
         {...baseProps}
         messages={[
           userMsg('u1', 'first prompt'),
-          trace('t1', 'Crew planned', '1 agent · 2 tasks'),
-          trace('t2', 'Agent ready', 'Image Curator Agent'),
+          trace('t1', 'PerplexityTool', 'alpha query'),
           userMsg('u2', 'second prompt'),
-          trace('t3', 'Crew planned', '2 agents · 2 tasks'),
-          trace('t4', 'Agent ready', 'Image Collector'),
+          trace('t2', 'GenieTool', 'beta query'),
         ]}
       />,
     );
@@ -433,13 +424,13 @@ describe('ChatContainer — one run-activity section per prompt', () => {
     expect(first.compareDocumentPosition(p2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(p2.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Each timeline contains only its own steps
+    // Each section's stream contains only its OWN step (friendly phase heading).
     fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
-    expect(screen.getByText('Image Curator Agent')).toBeInTheDocument();
-    expect(screen.queryByText('Image Collector')).toBeNull();
+    expect(screen.getByText('Searching the web')).toBeInTheDocument();
+    expect(screen.queryByText('Querying your data')).toBeNull();
     // The first toggle now reads "Collapse…" — the remaining Expand is section 2
     fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
-    expect(screen.getByText('Image Collector')).toBeInTheDocument();
+    expect(screen.getByText('Querying your data')).toBeInTheDocument();
   });
 
   it('only the LATEST prompt section is live while running (Stop only there)', () => {
@@ -478,5 +469,31 @@ describe('ChatContainer — one run-activity section per prompt', () => {
     // Previous run keeps its own finished section; the new one thinks fresh
     expect(screen.getByText('Run activity')).toBeInTheDocument();
     expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+  });
+});
+
+describe('ChatContainer — run activity in the chat ("chat" placement)', () => {
+  const steps = [
+    { id: '1', label: 'PerplexityTool', sublabel: 'Switzerland news today', detail: 'Title: SwissInfo\nUrl: https://www.swissinfo.ch/eng/x' },
+  ];
+
+  it('shows the Working bar with a "Show in panel" toggle, expandable to the thinking stream', () => {
+    const onToggle = vi.fn();
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[msg('u', 'q')]}
+        isExecuting
+        activityInChat
+        runSteps={steps}
+        onToggleActivityPlacement={onToggle}
+      />,
+    );
+    expect(screen.getByText('Working…')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show in panel'));
+    expect(onToggle).toHaveBeenCalled();
+    // Expanding the bar reveals the thinking stream (friendly phase heading).
+    fireEvent.click(screen.getByLabelText('Expand run activity'));
+    expect(screen.getByText('Searching the web')).toBeInTheDocument();
   });
 });

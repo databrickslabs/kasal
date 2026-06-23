@@ -568,8 +568,13 @@ class TestCreateAgentAdditionalParams:
         cfg = _base_config(reasoning=True, max_reasoning_attempts=3)
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("reasoning") is True
-        assert call_kwargs.get("max_reasoning_attempts") == 3
+        # reasoning=True migrates to an explicit, bounded PlanningConfig (CrewAI 1.14.x).
+        # The deprecated reasoning / max_reasoning_attempts flags are NOT passed to Agent
+        # (passing both makes CrewAI drop the cap); max_reasoning_attempts feeds max_attempts.
+        assert "reasoning" not in call_kwargs
+        assert "max_reasoning_attempts" not in call_kwargs
+        assert call_kwargs.get("planning_config") is not None
+        assert call_kwargs["planning_config"].max_attempts == 3
 
     @pytest.mark.asyncio
     async def test_inject_date_param(self):

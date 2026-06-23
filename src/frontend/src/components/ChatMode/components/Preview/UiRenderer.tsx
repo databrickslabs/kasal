@@ -291,6 +291,100 @@ export const ChartView: React.FC<{
 };
 
 /**
+ * A compact, professional data table: click a column header to sort (asc → desc →
+ * off; numeric-aware), cells truncate with a tooltip on hover, a sticky header,
+ * and a scrollable body so a large result stays tidy. The first column links to
+ * its row's source when a safe http(s) link is supplied.
+ */
+const TableNode: React.FC<{ columns: string[]; rows: string[][]; links?: string[] }> = ({ columns, rows, links = [] }) => {
+  const [sort, setSort] = useState<{ col: number; dir: 'asc' | 'desc' } | null>(null);
+  const safeHref = (h: string) => (/^https?:\/\//i.test(h || '') ? h : '');
+  const ordered = useMemo(() => {
+    const items = rows.map((cells, i) => ({ cells, href: safeHref(links[i] || '') }));
+    if (!sort) return items;
+    const { col, dir } = sort;
+    const sign = dir === 'asc' ? 1 : -1;
+    return [...items].sort((a, b) => {
+      const av = a.cells[col] ?? '';
+      const bv = b.cells[col] ?? '';
+      const an = Number(av);
+      const bn = Number(bv);
+      const numeric = av !== '' && bv !== '' && !Number.isNaN(an) && !Number.isNaN(bn);
+      const cmp = numeric ? an - bn : String(av).localeCompare(String(bv), undefined, { numeric: true });
+      return sign * cmp;
+    });
+  }, [rows, links, sort]);
+  const toggleSort = (col: number) =>
+    setSort((s) => (s && s.col === col ? (s.dir === 'asc' ? { col, dir: 'desc' } : null) : { col, dir: 'asc' }));
+  return (
+    <div style={{ ...CARD_STYLE, padding: 0, overflow: 'auto', maxHeight: '24rem' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', lineHeight: 1.4 }}>
+        {columns.length > 0 && (
+          <thead>
+            <tr>
+              {columns.map((c, ci) => {
+                const active = sort?.col === ci;
+                return (
+                  <th
+                    key={c}
+                    onClick={() => toggleSort(ci)}
+                    title="Sort by this column"
+                    style={{
+                      textAlign: 'left', padding: '8px 12px', color: active ? ACCENT : MUTED,
+                      fontSize: '0.66rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+                      borderBottom: `1px solid ${GLASS_BORDER}`, whiteSpace: 'nowrap', cursor: 'pointer',
+                      userSelect: 'none', position: 'sticky', top: 0, background: 'var(--ui-surface, #ffffff)', zIndex: 1,
+                    }}
+                  >
+                    {c}
+                    <span style={{ marginLeft: 4, opacity: active ? 1 : 0.3, fontSize: '0.7em' }}>
+                      {active ? (sort!.dir === 'asc' ? '▲' : '▼') : '↕'}
+                    </span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {ordered.map((row, ri) => (
+            <tr key={ri} className="ui-table-row">
+              {row.cells.map((val, ci) => {
+                const linked = ci === 0 && row.href;
+                return (
+                  <td
+                    key={ci}
+                    title={val}
+                    // Themed text color (var(--ui-text)) so cells stay readable on a
+                    // light OR dark theme; truncate long values with a hover tooltip.
+                    style={{
+                      padding: '7px 12px', color: TEXT, borderBottom: `1px solid ${GLASS_BORDER}`,
+                      whiteSpace: 'nowrap', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis',
+                      fontWeight: ci === 0 ? 600 : 400,
+                    }}
+                  >
+                    {linked ? (
+                      <a
+                        href={row.href} target="_blank" rel="noopener noreferrer"
+                        style={{ color: ACCENT, textDecoration: 'none' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                      >
+                        {val}
+                      </a>
+                    ) : val}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+/**
  * A navigable slide deck: one slide fills the stage (vertically centered, large
  * text), navigated by clickable dots OR the ← / → keyboard keys. No arrows.
  */
@@ -1113,7 +1207,6 @@ type Flashcard = { front: string; back: string };
 const FlashcardsNode: React.FC<{ title?: string; cards: Flashcard[]; layout?: 'grid' | 'carousel' }> = ({ title, cards, layout = 'grid' }) => {
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
   const [idx, setIdx] = useState(0);
-  if (cards.length === 0) return null;
 
   const toggle = (i: number) =>
     setFlipped((prev) => {
@@ -1123,7 +1216,8 @@ const FlashcardsNode: React.FC<{ title?: string; cards: Flashcard[]; layout?: 'g
       return next;
     });
 
-  // Keyboard navigation for carousel
+  // Keyboard navigation for carousel. Hooks must run unconditionally — the
+  // empty-deck early return lives BELOW all hooks (not between them).
   React.useEffect(() => {
     if (layout !== 'carousel') return;
     const onKey = (e: KeyboardEvent) => {
@@ -1133,6 +1227,8 @@ const FlashcardsNode: React.FC<{ title?: string; cards: Flashcard[]; layout?: 'g
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [layout, cards.length]);
+
+  if (cards.length === 0) return null;
 
   // Shared face style: fills the card, centers content, hides its back side so
   // only the up-facing side shows during/after the flip.
@@ -1582,33 +1678,10 @@ const Node: React.FC<{
             ? columns.map((c) => cell((r as Record<string, unknown>)[c]))
             : [cell(r)]);
       const rows = (rawRows as unknown[]).map(rowToCells);
-      return (
-        <div style={{ ...CARD_STYLE, padding: 4, overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
-            {columns.length > 0 && (
-              <thead>
-                <tr>
-                  {columns.map((c) => (
-                    <th key={c} style={{ textAlign: 'left', padding: '10px 12px', color: MUTED, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${GLASS_BORDER}`, whiteSpace: 'nowrap' }}>{c}</th>
-                  ))}
-                </tr>
-              </thead>
-            )}
-            <tbody>
-              {rows.map((cells, ri) => (
-                <tr key={ri}>
-                  {cells.map((val, ci) => (
-                    // Themed tokens (not a hardcoded light color): TEXT falls back to
-                    // the dark-theme default when unthemed, but follows --ui-text on a
-                    // light theme so cells stay readable instead of washing out.
-                    <td key={ci} style={{ padding: '9px 12px', color: TEXT, borderBottom: `1px solid ${GLASS_BORDER}` }}>{val}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
+      // Optional per-row hrefs (parallel to rows): the FIRST column becomes a link
+      // to its source so a results table is navigable. Only http(s) links render.
+      const links = (Array.isArray(node.links) ? node.links : []).map((l) => String(l ?? ''));
+      return <TableNode columns={columns} rows={rows} links={links} />;
     }
     case 'Slide': {
       const childIds = Array.isArray(node.children) ? node.children : [];

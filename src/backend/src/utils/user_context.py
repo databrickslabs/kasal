@@ -138,9 +138,20 @@ class GroupContext:
             user, user_groups_with_roles = await cls._get_user_group_memberships_with_roles(email)
 
             if not user_groups_with_roles or len(user_groups_with_roles) == 0:
-                # User is NOT in any groups - use individual groups
+                # User is NOT in any groups - they only have their individual workspace.
                 # Create a unique group ID based on the user's email (sanitized)
                 individual_group_id = cls.generate_individual_group_id(email)
+                # SECURITY: if a specific workspace was requested it must be the
+                # user's OWN personal workspace. Silently substituting the personal
+                # workspace for an unauthorized group_id would run the request (and
+                # its credentials) under personal while the UI believes it is the
+                # selected workspace. Reject instead — consistent with the in-groups
+                # branch below, which raises Access denied for unauthorized groups.
+                if group_id and group_id != individual_group_id:
+                    logger.warning(
+                        f"SECURITY: User {email} (no group memberships) attempted to access group {group_id}"
+                    )
+                    raise ValueError(f"Access denied: User does not have access to group {group_id}")
                 logger.debug(f"User {email} not in any groups, using individual group: {individual_group_id}")
                 user_group_ids = [individual_group_id]
                 user_role = None  # No role for individual workspace

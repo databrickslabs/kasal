@@ -11,6 +11,9 @@ import type { Theme } from '../../../Configuration/uiConfigShared';
 import { useWorkspaceThemes } from '../../hooks/useWorkspaceThemes';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
 import UiRenderer from './UiRenderer';
+import { friendlyStep, type RunStep } from './RunTimeline';
+import ThinkingStream from './ThinkingStream';
+import LogSurface from './LogSurface';
 import RefinePanel from './RefinePanel';
 
 // The preview pane renders structured A2UI documents ONLY — the UI document is
@@ -40,6 +43,11 @@ interface PreviewPanelProps {
   index?: number;
   /** Switch the displayed preview to another history entry. */
   onNavigate?: (index: number) => void;
+  /** The run's step timeline (from the persistent chat trace), shown collapsed
+   *  above the result so the activity is never lost once the deliverable lands. */
+  runSteps?: RunStep[];
+  /** Dock the activity into the chat's "Working…" bar instead of this pane. */
+  onMoveActivityToChat?: () => void;
 }
 
 /**
@@ -104,11 +112,23 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   return null;
 }
 
-const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate }) => {
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat }) => {
   const [refineOpen, setRefineOpen] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // The run's step timeline lives ON THE RIGHT the whole time: while building
+  // (PreviewSkeleton) and — collapsed above the result — once it's done, so it's
+  // never lost. `runSteps` comes from the persistent chat trace, so it survives
+  // the run finishing. Collapsed by default.
+  const [activityOpen, setActivityOpen] = useState(false);
+  // Master→detail inside the activity view: which step's context is open full-page
+  // (null = show the step list). A step is chosen from the list; "Back" clears it.
+  const [activeStep, setActiveStep] = useState<RunStep | null>(null);
+  const toggleActivity = () => {
+    setActivityOpen((v) => !v);
+    setActiveStep(null); // toggling always returns to the list / deliverable
+  };
 
   // TRUE browser full screen (hides the browser chrome / top menu) via the
   // Fullscreen API, kept in sync so an Esc / browser-driven exit also flips the
@@ -273,6 +293,23 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               </div>
             );
           })()}
+          {runSteps.length > 0 && (
+            <button
+              onClick={toggleActivity}
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+              style={{
+                color: activityOpen ? 'var(--accent)' : 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-secondary)',
+              }}
+              title="Show the run activity timeline (steps + context)"
+              aria-pressed={activityOpen}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008zM8.25 6.75h12M8.25 12h12m-12 5.25h12" />
+              </svg>
+              Activity
+            </button>
+          )}
           {onRefine && (
             <button
               onClick={() => setRefineOpen((v) => !v)}
@@ -356,7 +393,72 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
 
       {/* Content — A2UI only; non-UI documents are never previewable. */}
       <div className="flex-1 overflow-auto">
-        {uiSurface && (
+        {/* Run activity — collapsed above the result so it's never lost. The list
+            shows plain-English steps; clicking one opens its context full-page. */}
+        {runSteps.length > 0 && !fullscreen && (
+          <div style={{ borderBottom: '1px solid var(--border-color)' }}>
+            {activeStep ? (
+              // Detail header: a Back affordance to return to the step list.
+              <button
+                type="button"
+                onClick={() => setActiveStep(null)}
+                className="flex items-center gap-1.5 w-full px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label="Back to the run activity"
+              >
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+                Back · {friendlyStep(activeStep.label)}
+              </button>
+            ) : (
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={toggleActivity}
+                  className="flex items-center gap-1.5 flex-1 px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-muted)' }}
+                  aria-expanded={activityOpen}
+                >
+                  <svg
+                    className="w-3 h-3 flex-shrink-0 transition-transform"
+                    style={{ transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                  Run activity · {runSteps.length} step{runSteps.length === 1 ? '' : 's'}
+                </button>
+                {onMoveActivityToChat && (
+                  <button
+                    type="button"
+                    onClick={onMoveActivityToChat}
+                    className="px-3 py-2 text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+                    style={{ color: 'var(--text-muted)' }}
+                    title="Show the activity in the chat instead"
+                  >
+                    Show in chat
+                  </button>
+                )}
+              </div>
+            )}
+            {activityOpen && !activeStep && (
+              <div className="px-4 pb-3">
+                <ThinkingStream steps={runSteps} onSelect={setActiveStep} />
+              </div>
+            )}
+          </div>
+        )}
+        {/* A chosen step's context, on its own full page (replaces the deliverable
+            and fills the pane). */}
+        {activeStep && (
+          <div data-testid="run-step-context" style={{ minHeight: '100%' }}>
+            <LogSurface body={activeStep.detail || ''} />
+          </div>
+        )}
+        {/* When the activity is open (list or detail) it REPLACES the deliverable
+            — the pane shows one or the other, never stacked. */}
+        {!activityOpen && !activeStep && uiSurface && (
           // Key on the displayed content so a refine (or history navigation)
           // REMOUNTS the renderer instead of reusing the instance. The refined
           // deck reuses the same component ids (root/slide1…), so without a key
