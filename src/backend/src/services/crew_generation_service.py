@@ -115,20 +115,13 @@ class CrewGenerationService:
         if tools:
             tools_context = "\n\nAvailable tools:\n"
             for tool in tools:
-                # Add full tool details including name, description, and parameters
+                # Generation only needs the tool NAME + short description to decide
+                # assignments; parameter schemas matter at execution, not here.
+                # Omitting them keeps the prompt small (it scales with tool count)
+                # without changing which tools the model picks.
                 name = tool.get('name', 'Unknown Tool')
                 description = tool.get('description', 'No description available')
-                parameters = tool.get('parameters', {})
-
                 tools_context += f"- {name}: {description}\n"
-
-                # Add parameter details if available
-                if parameters:
-                    tools_context += "  Parameters:\n"
-                    for param_name, param_details in parameters.items():
-                        param_desc = param_details.get('description', 'No description')
-                        param_type = param_details.get('type', 'any')
-                        tools_context += f"    - {param_name} ({param_type}): {param_desc}\n"
 
             tools_context += "\n\nEnsure that agents and tasks only use tools from this list. Assign tools to agents based on their capabilities and the tools' functionalities."
 
