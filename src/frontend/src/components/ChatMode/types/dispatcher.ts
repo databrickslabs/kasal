@@ -27,6 +27,10 @@ export interface DispatcherRequest {
   // `message`). The backend grounds the generated crew's run with this so the
   // crew answers the real request, not "create a crew plan with…".
   original_prompt?: string;
+  // True for ChatMode prompts. ChatMode always builds a crew; the backend
+  // collapses "create a task"/"create an agent" intents to generate_crew.
+  // Entity creation is only for the AgentBuilder / crew canvas (omits this).
+  chat_mode?: boolean;
   // When true (ChatMode only), the backend runs the generated crew immediately.
   // The crew canvas omits this (defaults false): it renders the plan and the
   // user runs it via Play — sending it true here would double-run the crew.

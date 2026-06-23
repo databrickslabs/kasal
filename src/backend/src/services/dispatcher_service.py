@@ -153,6 +153,13 @@ class DispatcherService:
         r"\b(i need|give me|set up)\b.*\b(an?\s+)?(agent|bot|assistant|chatbot)\b",
     ]
 
+    # Patterns that indicate explicit single-task creation intent.
+    # "task force"/"task list" are excluded — they connote broader work.
+    TASK_CREATION_PATTERNS = [
+        r"\b(create|add|make|generate|set up)\b\s+(a\s+|an\s+|the\s+|another\s+|new\s+)*task\b(?!\s+(force|list|board))",
+        r"\b(i need|give me)\b\s+(a\s+|an\s+|the\s+|another\s+|new\s+)*task\b(?!\s+(force|list|board))",
+    ]
+
     # Multi-step workflow indicators — boost crew score
     MULTI_STEP_PATTERNS = [
         r"\bthen\b",                       # "research then write then present"
@@ -847,12 +854,76 @@ class DispatcherService:
             "Only suggest tools that are directly relevant. Return an empty list if no tools apply."
         )
 
+    def _explicit_creation_intent(self, message: str) -> Optional[str]:
+        """Deterministic intent for UNAMBIGUOUS single-entity creation requests.
+
+        "create a task" / "add a task"   -> generate_task
+        "create an agent" / "make a bot" -> generate_agent
+
+        Returns None for multi-step messages (those stay crew-first, even if the
+        word "task"/"agent" appears) and for everything else (the LLM decides).
+        This is a guardrail so a weak intent model can't misroute an explicit
+        "create a task" into a crew plan — the chat default is heavily crew-biased,
+        which small models over-apply.
+        """
+        msg = message.lower()
+        # Multi-step workflows are crews even if "task"/"agent" appears.
+        if any(re.search(p, msg) for p in self.MULTI_STEP_PATTERNS):
+            return None
+        if any(re.search(p, msg) for p in self.TASK_CREATION_PATTERNS):
+            return "generate_task"
+        if any(re.search(p, msg) for p in self.AGENT_CREATION_PATTERNS):
+            return "generate_agent"
+        return None
+
+    def _resolve_surface_intent(
+        self, message: str, current_intent: Optional[str], chat_mode: bool
+    ) -> tuple[str, Optional[str]]:
+        """Apply the per-surface intent rule. Returns (intent, override_reason).
+
+        - ChatMode (chat_mode=True): single-entity creation is NOT available here —
+          task/agent intents collapse to generate_crew. (Commands like
+          execute/configure/catalog are left untouched.) ChatMode always builds a crew.
+        - AgentBuilder / crew canvas (chat_mode=False): an explicit "create a task"
+          / "create an agent" deterministically routes to that generator, even when
+          a weak intent model defaulted elsewhere.
+        """
+        if chat_mode:
+            if current_intent in ("generate_task", "generate_agent"):
+                return "generate_crew", f"chat_mode forces crew (was {current_intent})"
+            return current_intent or "generate_crew", None
+        forced = self._explicit_creation_intent(message)
+        if forced and forced != current_intent:
+            return forced, f"explicit creation (was {current_intent})"
+        return current_intent or "generate_crew", None
+
+    @staticmethod
+    def _resolve_effective_tools(
+        requested: Optional[List[str]], enabled_titles: set
+    ) -> List[str]:
+        """Restrict the tools available to generation to the workspace's ENABLED set.
+
+        - requested (client preference): keep only the ones actually enabled, so a
+          stale/over-broad selection can't smuggle in a non-enabled tool. If the
+          enabled set couldn't be resolved (empty, e.g. a transient error), fall
+          back to the requested list rather than stripping everything.
+        - no request: offer all enabled tools EXCEPT DatabricksKnowledgeSearchTool,
+          which reads chat-uploaded docs — only meaningful with attachments (the
+          frontend signals that by adding it to request.tools).
+        """
+        if requested:
+            if not enabled_titles:
+                return list(requested)
+            return [t for t in requested if t in enabled_titles]
+        return [t for t in enabled_titles if t != "DatabricksKnowledgeSearchTool"]
+
     async def detect_intent(
         self,
         message: str,
         model: str,
         group_context: Optional[GroupContext] = None,
         available_tools: Optional[List[Dict[str, str]]] = None,
+        chat_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Detect the intent from the user's message using LLM enhanced with semantic analysis.
@@ -952,9 +1023,11 @@ Please analyze this message and provide your intent classification."""
 
         # Circuit breaker check — fail fast if model is in open state
         if self._check_circuit_breaker(model):
+            # ChatMode always builds a crew; canvas honours explicit task/agent creation.
+            forced = None if chat_mode else self._explicit_creation_intent(message)
             return {
-                "intent": "generate_crew",
-                "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
+                "intent": forced or "generate_crew",
+                "confidence": 0.95 if forced else self.DEFAULT_FALLBACK_CONFIDENCE,
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": "circuit_breaker_fallback",
@@ -979,6 +1052,17 @@ Please analyze this message and provide your intent classification."""
         if cached is not None:
             logger.info(f"Intent cache hit for model {model}")
             cached["source"] = "cache"
+            # Apply the per-surface rule to cached results too, so a result cached
+            # before this guardrail existed (or from a weak model) can't keep
+            # misrouting — and ChatMode hits still collapse task/agent to crew.
+            new_intent, reason = self._resolve_surface_intent(
+                message, cached.get("intent"), chat_mode
+            )
+            if reason:
+                logger.info(f"Intent override (cache): {reason} -> '{new_intent}'.")
+                cached["intent"] = new_intent
+                cached["confidence"] = max(float(cached.get("confidence") or 0), 0.95)
+                cached["source"] = "cache+surface_override"
             return cached
 
         try:
@@ -1068,8 +1152,25 @@ Please analyze this message and provide your intent classification."""
             # Enhance extracted_info with semantic analysis (factual only)
             result["extracted_info"]["semantic_analysis"] = semantic_analysis
 
-            # Trust the LLM — no semantic override
-            result["source"] = "llm"
+            # Per-surface guardrail (keeps the LLM's extracted_info/suggested_prompt):
+            #  - ChatMode: task/agent intents collapse to generate_crew (entity
+            #    creation is only for the AgentBuilder/crew canvas).
+            #  - Canvas/builder: an explicit "create a task/agent" deterministically
+            #    routes there even when a weak intent model defaulted elsewhere
+            #    (guarded against multi-step messages, which stay crew-first).
+            new_intent, reason = self._resolve_surface_intent(
+                message, result.get("intent"), chat_mode
+            )
+            if reason:
+                logger.info(
+                    f"Intent override: LLM returned '{result.get('intent')}', {reason} "
+                    f"-> forcing '{new_intent}'."
+                )
+                result["intent"] = new_intent
+                result["confidence"] = max(float(result.get("confidence") or 0), 0.95)
+                result["source"] = "llm+surface_override"
+            else:
+                result["source"] = "llm"
 
             # Cache successful LLM results (never cache fallback/degraded)
             await intent_cache.set(group_id, cache_key, result)
@@ -1079,13 +1180,15 @@ Please analyze this message and provide your intent classification."""
         except Exception as e:
             logger.error(f"Error detecting intent: {str(e)}")
             self._record_failure(model)
-            # LLM failed — default to generate_crew (the safe default)
+            # LLM failed — ChatMode always builds a crew; the canvas honours an
+            # explicit "create a task/agent". Otherwise default to generate_crew.
+            forced = None if chat_mode else self._explicit_creation_intent(message)
             return {
-                "intent": "generate_crew",
-                "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
+                "intent": forced or "generate_crew",
+                "confidence": 0.95 if forced else self.DEFAULT_FALLBACK_CONFIDENCE,
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
-                "source": "semantic_fallback",
+                "source": "explicit_override" if forced else "semantic_fallback",
                 "suggested_tools": [],
             }
 
@@ -1155,7 +1258,8 @@ Please analyze this message and provide your intent classification."""
 
             # Detect intent
             intent_result = await self.detect_intent(
-                request.message, model, group_context, available_tools
+                request.message, model, group_context, available_tools,
+                chat_mode=request.chat_mode,
             )
 
             # Log the intent detection to DB (separate from MLflow)
@@ -1179,33 +1283,29 @@ Please analyze this message and provide your intent classification."""
                 suggested_tools=intent_result.get("suggested_tools", []),
             )
 
-            # Resolve workspace tools: use user-selected tools if provided,
-            # otherwise fetch all enabled workspace tools so the LLM can
-            # make informed tool assignments based on actual availability.
+            # Resolve workspace tools against the group's ENABLED set (the
+            # server-side source of truth). A client-supplied request.tools is
+            # only a PREFERENCE — we intersect it with the enabled tools so a
+            # stale or over-broad selection can't smuggle in a tool that isn't
+            # enabled for this workspace (e.g. SerperDevTool/ScrapeWebsiteTool
+            # leaking into generated crews when they were never enabled).
+            enabled_titles: set = set()
+            try:
+                from src.services.tool_service import ToolService
+                tool_svc = ToolService(self.session)
+                if group_context:
+                    tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
+                else:
+                    tools_resp = await tool_svc.get_enabled_tools()
+                enabled_titles = {t.title for t in tools_resp.tools}
+            except Exception as e:
+                logger.warning(f"Failed to fetch enabled workspace tools: {e}")
+
+            effective_tools = self._resolve_effective_tools(request.tools, enabled_titles)
             if request.tools:
-                effective_tools = request.tools
-            else:
-                try:
-                    from src.services.tool_service import ToolService
-                    tool_svc = ToolService(self.session)
-                    if group_context:
-                        tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
-                    else:
-                        tools_resp = await tool_svc.get_enabled_tools()
-                    # Exclude the knowledge-search tool from the default catalog:
-                    # it reads documents the user UPLOADED in this chat, so it's
-                    # only meaningful when files are attached. The frontend adds
-                    # it to request.tools ONLY when there are attachments (the
-                    # branch above), so when nothing is explicitly requested we
-                    # must not offer it — otherwise the generator picks it for
-                    # any "research" task and calls it with no documents.
-                    effective_tools = [
-                        t.title for t in tools_resp.tools
-                        if t.title != 'DatabricksKnowledgeSearchTool'
-                    ]
-                except Exception as e:
-                    logger.warning(f"Failed to fetch workspace tools, falling back to suggested: {e}")
-                    effective_tools = intent_result.get("suggested_tools", [])
+                dropped = [t for t in request.tools if enabled_titles and t not in enabled_titles]
+                if dropped:
+                    logger.info(f"Dropped non-enabled tools from request.tools: {dropped}")
 
             # Dispatch to appropriate service based on intent
             generation_result = None

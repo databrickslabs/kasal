@@ -14,6 +14,10 @@ export async function dispatch(
   originalPrompt?: string
 ): Promise<DispatchResult> {
   const request: DispatcherRequest = { message };
+  // ChatMode always builds a crew. "create a task"/"create an agent" entity
+  // creation is only for the AgentBuilder / crew canvas; this flag tells the
+  // backend to collapse those intents to generate_crew for ChatMode prompts.
+  request.chat_mode = true;
   if (model) request.model = model;
   if (tools) request.tools = tools;
   // The clean user message (message may carry an intent-steering prefix).

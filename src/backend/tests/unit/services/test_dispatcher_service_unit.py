@@ -1959,7 +1959,7 @@ class TestEdgeCases:
         request = DispatcherRequest(message="hello", model="m")
         await svc.dispatch(request, group_context=gc)
 
-        svc.detect_intent.assert_awaited_once_with("hello", "m", gc, None)
+        svc.detect_intent.assert_awaited_once_with("hello", "m", gc, None, chat_mode=False)
 
     def test_semantic_analysis_returns_all_expected_keys(self):
         svc = _build_service()
@@ -2210,30 +2210,39 @@ class TestDispatchWithSuggestedTools:
         return result
 
     @pytest.mark.asyncio
-    async def test_dispatch_uses_suggested_tools_when_request_tools_empty(self):
-        """When request.tools is empty, suggested_tools should be used."""
+    async def test_dispatch_drops_non_enabled_request_tools(self):
+        """A client-supplied tool that isn't enabled for the workspace is dropped
+        before generation (e.g. SerperDevTool/ScrapeWebsiteTool leaking into a
+        generated crew when they were never enabled)."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result(
-                "generate_crew",
-                suggested_tools=["SerperDevTool", "ScrapeWebsiteTool"],
-            )
+            return_value=self._make_intent_result("generate_crew")
         )
         svc._log_llm_interaction = AsyncMock()
         svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        # The workspace enables only GenieTool.
+        mock_tool_svc = MagicMock()
+        mock_tool_svc.get_enabled_tools = AsyncMock(
+            return_value=SimpleNamespace(tools=[SimpleNamespace(title="GenieTool")])
+        )
 
         def capture_create_task(coro):
             coro.close()
             return MagicMock()
 
-        request = DispatcherRequest(message="research AI trends", model="m", tools=[])
-        with patch("asyncio.create_task", side_effect=capture_create_task):
+        request = DispatcherRequest(
+            message="research AI trends", model="m",
+            tools=["SerperDevTool", "ScrapeWebsiteTool", "GenieTool"],
+        )
+        with patch("asyncio.create_task", side_effect=capture_create_task), patch(
+            "src.services.tool_service.ToolService", return_value=mock_tool_svc
+        ):
             await svc.dispatch(request)
 
-        call_args = svc.crew_service.create_crew_progressive.call_args
-        streaming_req = call_args[0][0]
-        assert streaming_req.tools == ["SerperDevTool", "ScrapeWebsiteTool"]
+        streaming_req = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_req.tools == ["GenieTool"]  # Serper + Scrape dropped
 
     @pytest.mark.asyncio
     async def test_dispatch_uses_request_tools_over_suggested(self):
@@ -2330,24 +2339,31 @@ class TestDispatchWithSuggestedTools:
         assert streaming_req.auto_execute is False
 
     @pytest.mark.asyncio
-    async def test_dispatch_suggested_tools_in_agent_generation(self):
-        """suggested_tools should be passed to agent generation when no request tools."""
+    async def test_dispatch_agent_generation_uses_enabled_tools(self):
+        """With no client tools, agent generation receives the workspace's ENABLED
+        tools (not the LLM's unvalidated suggested_tools)."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
             return_value=self._make_intent_result(
                 "generate_agent",
-                suggested_tools=["FileReadTool"],
+                suggested_tools=["SerperDevTool"],  # must NOT leak through
             )
         )
         svc._log_llm_interaction = AsyncMock()
         svc.agent_service.generate_agent = AsyncMock(return_value={})
 
+        mock_tool_svc = MagicMock()
+        mock_tool_svc.get_enabled_tools = AsyncMock(
+            return_value=SimpleNamespace(tools=[SimpleNamespace(title="FileReadTool")])
+        )
+
         request = DispatcherRequest(message="create an agent", model="m")
-        await svc.dispatch(request)
+        with patch("src.services.tool_service.ToolService", return_value=mock_tool_svc):
+            await svc.dispatch(request)
 
         call_kwargs = svc.agent_service.generate_agent.call_args.kwargs
-        assert call_kwargs["tools"] == ["FileReadTool"]
+        assert call_kwargs["tools"] == ["FileReadTool"]  # enabled, not suggested
 
     @pytest.mark.asyncio
     async def test_dispatch_response_contains_suggested_tools(self):
@@ -3727,8 +3743,10 @@ class TestDispatchStreamingCrewAndToolResolution:
                 assert streaming_req.tools == ["WorkspaceTool1", "WorkspaceTool2"]
 
     @pytest.mark.asyncio
-    async def test_dispatch_workspace_tools_fallback(self):
-        """When ToolService fetch fails, suggested_tools from intent are used."""
+    async def test_dispatch_tool_fetch_failure_yields_no_tools(self):
+        """When the enabled-tools fetch fails and the client sent no tools, the
+        crew gets NO tools — we never fall back to the LLM's unvalidated
+        suggested_tools (which could include non-enabled tools)."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
@@ -3754,14 +3772,15 @@ class TestDispatchStreamingCrewAndToolResolution:
             ):
                 await svc.dispatch(request)
 
-                # Verify fallback to suggested_tools
+                # No enabled set resolved + no client tools -> no tools (not suggested)
                 progressive_call = svc.crew_service.create_crew_progressive.call_args
                 streaming_req = progressive_call[0][0]
-                assert streaming_req.tools == ["FallbackTool1", "FallbackTool2"]
+                assert streaming_req.tools == []
 
     @pytest.mark.asyncio
-    async def test_dispatch_user_tools_take_precedence(self):
-        """When request.tools is provided, ToolService is NOT called."""
+    async def test_dispatch_user_tools_intersected_with_enabled(self):
+        """request.tools is a PREFERENCE: it's intersected with the enabled set,
+        so a non-enabled client tool is dropped (enabled ones pass through)."""
         svc = _build_service()
         svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
         svc.detect_intent = AsyncMock(
@@ -3773,23 +3792,25 @@ class TestDispatchStreamingCrewAndToolResolution:
         svc._log_llm_interaction = AsyncMock()
         svc.crew_service.create_crew_progressive = AsyncMock()
 
+        # Workspace enables UserTool1 only; UserTool2 is not enabled.
+        mock_tool_svc = MagicMock()
+        mock_tool_svc.get_enabled_tools = AsyncMock(
+            return_value=SimpleNamespace(tools=[SimpleNamespace(title="UserTool1")])
+        )
+
         request = DispatcherRequest(
             message="build a team", model="m", tools=["UserTool1", "UserTool2"]
         )
 
         with patch("src.services.dispatcher_service.asyncio.create_task"):
             with patch(
-                "src.services.tool_service.ToolService",
-            ) as mock_tool_cls:
+                "src.services.tool_service.ToolService", return_value=mock_tool_svc
+            ):
                 await svc.dispatch(request)
 
-                # ToolService should NOT be instantiated when user provides tools
-                mock_tool_cls.assert_not_called()
-
-                # Verify user tools are passed through
                 progressive_call = svc.crew_service.create_crew_progressive.call_args
                 streaming_req = progressive_call[0][0]
-                assert streaming_req.tools == ["UserTool1", "UserTool2"]
+                assert streaming_req.tools == ["UserTool1"]  # UserTool2 dropped (not enabled)
 
 
 # ===================================================================
@@ -5112,3 +5133,107 @@ class TestMlflowTracingHardToggle:
         from src.services import dispatcher_service as m
         with patch.object(m, "_HAS_MLFLOW", False):
             m._set_mlflow_tracing(False)  # must not raise
+
+
+# ===================================================================
+# Tests for _explicit_creation_intent (deterministic intent guardrail)
+# ===================================================================
+
+
+class TestExplicitCreationIntent:
+    """An explicit single-entity creation request must deterministically route
+    to that generator, regardless of how a weak intent model classifies it —
+    but multi-step messages stay crew-first."""
+
+    def test_create_a_task_routes_to_task(self):
+        svc = _build_service()
+        # The exact bug report: "create a task with gpt nano" was misrouted to a crew/plan.
+        assert svc._explicit_creation_intent("create a task with gpt nano") == "generate_task"
+        assert svc._explicit_creation_intent("add a task to check server status") == "generate_task"
+        assert svc._explicit_creation_intent("create a new task") == "generate_task"
+
+    def test_create_an_agent_routes_to_agent(self):
+        svc = _build_service()
+        assert svc._explicit_creation_intent("create an agent that analyzes data") == "generate_agent"
+        assert svc._explicit_creation_intent("make me a bot") == "generate_agent"
+
+    def test_multi_step_messages_stay_crew_first(self):
+        svc = _build_service()
+        # "and <verb>" / "then" -> multi-step workflow -> crew (None = let LLM/default decide)
+        assert svc._explicit_creation_intent("create a task and then send an email") is None
+        assert svc._explicit_creation_intent("create a task, analyze it, and write a report") is None
+
+    def test_task_force_is_not_a_task(self):
+        svc = _build_service()
+        # "task force"/"task list" connote broader work, not a single task entity.
+        assert svc._explicit_creation_intent("create a task force to research the market") is None
+
+    def test_generic_messages_defer_to_llm(self):
+        svc = _build_service()
+        assert svc._explicit_creation_intent("get me the latest news from switzerland") is None
+        assert svc._explicit_creation_intent("analyze sales and build a dashboard") is None
+
+
+# ===================================================================
+# Tests for _resolve_surface_intent (ChatMode vs canvas/builder rule)
+# ===================================================================
+
+
+class TestResolveSurfaceIntent:
+    """ChatMode always builds a crew; the AgentBuilder/crew canvas allows
+    explicit task/agent creation."""
+
+    def test_chatmode_collapses_task_and_agent_to_crew(self):
+        svc = _build_service()
+        # Even if the LLM (or the explicit phrasing) says task/agent, ChatMode -> crew.
+        assert svc._resolve_surface_intent("create a task", "generate_task", chat_mode=True)[0] == "generate_crew"
+        assert svc._resolve_surface_intent("create an agent", "generate_agent", chat_mode=True)[0] == "generate_crew"
+
+    def test_chatmode_leaves_commands_untouched(self):
+        svc = _build_service()
+        # Commands (execute/configure/catalog) are not generation — left as-is in ChatMode.
+        assert svc._resolve_surface_intent("execute crew", "execute_crew", chat_mode=True) == ("execute_crew", None)
+        assert svc._resolve_surface_intent("get me the news", "generate_crew", chat_mode=True) == ("generate_crew", None)
+
+    def test_canvas_honours_explicit_task_creation(self):
+        svc = _build_service()
+        # Canvas (chat_mode=False): explicit "create a task" overrides an LLM crew guess.
+        intent, reason = svc._resolve_surface_intent("create a task with gpt nano", "generate_crew", chat_mode=False)
+        assert intent == "generate_task" and reason is not None
+
+    def test_canvas_multi_step_stays_crew(self):
+        svc = _build_service()
+        assert svc._resolve_surface_intent("create a task and then email it", "generate_crew", chat_mode=False) == ("generate_crew", None)
+
+
+# ===================================================================
+# Tests for _resolve_effective_tools (enabled-tool enforcement)
+# ===================================================================
+
+
+class TestResolveEffectiveTools:
+    """Generation may only use tools ENABLED for the workspace — a client tool
+    list can't smuggle in a non-enabled tool (e.g. SerperDevTool)."""
+
+    def test_requested_intersected_with_enabled(self):
+        enabled = {"GenieTool", "ScrapeWebsiteTool"}
+        # Frontend sent Serper (not enabled) + Scrape (enabled) -> Serper dropped.
+        out = DispatcherService._resolve_effective_tools(
+            ["SerperDevTool", "ScrapeWebsiteTool", "GenieTool"], enabled
+        )
+        assert "SerperDevTool" not in out
+        assert set(out) == {"ScrapeWebsiteTool", "GenieTool"}
+
+    def test_requested_all_disabled_returns_empty(self):
+        out = DispatcherService._resolve_effective_tools(["SerperDevTool"], {"GenieTool"})
+        assert out == []
+
+    def test_empty_enabled_set_falls_back_to_requested(self):
+        # Transient failure to resolve enabled set -> don't strip everything.
+        out = DispatcherService._resolve_effective_tools(["GenieTool"], set())
+        assert out == ["GenieTool"]
+
+    def test_no_request_offers_enabled_minus_knowledge_tool(self):
+        enabled = {"GenieTool", "DatabricksKnowledgeSearchTool"}
+        out = DispatcherService._resolve_effective_tools([], enabled)
+        assert out == ["GenieTool"]
