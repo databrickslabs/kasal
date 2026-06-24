@@ -283,6 +283,10 @@ class TestCreateTablesAsyncDetailed:
         conn = AsyncMock()
         conn.execute = AsyncMock()
         conn.run_sync = AsyncMock()
+        _sp = MagicMock()
+        _sp.__aenter__ = AsyncMock(return_value=None)
+        _sp.__aexit__ = AsyncMock(return_value=False)
+        conn.begin_nested = MagicMock(return_value=_sp)  # savepoint-isolated DDL
         engine = _async_engine(conn)
 
         mock_emb_table = MagicMock()
@@ -478,6 +482,10 @@ class TestCreateTablesAsyncStream:
         conn = AsyncMock()
         conn.execute = AsyncMock()
         conn.run_sync = AsyncMock()
+        _sp = MagicMock()
+        _sp.__aenter__ = AsyncMock(return_value=None)
+        _sp.__aexit__ = AsyncMock(return_value=False)
+        conn.begin_nested = MagicMock(return_value=_sp)  # savepoint-isolated DDL
         engine = _async_engine(conn)
 
         mock_table = MagicMock()

@@ -430,6 +430,7 @@ class _SwappableSessionFactory:
     def __init__(self, default_factory):
         self._factory = default_factory
         self._is_lakebase = False
+        self._on_swap_callbacks = []
 
     # --- async_sessionmaker-compatible interface ---
 
@@ -437,19 +438,45 @@ class _SwappableSessionFactory:
         """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
         return self._factory()
 
+    # --- swap-invalidation hooks ---
+
+    def register_on_swap(self, callback):
+        """Register a zero-arg callback fired whenever the active DB is swapped
+        (Lakebase activate/deactivate). Use it to flush in-memory caches keyed to
+        the OLD database — e.g. ExecutionService's execution registry — so a
+        status lookup after a swap doesn't serve/poll rows that only existed in
+        the previous DB (the 'Execution not found' 404 storm)."""
+        self._on_swap_callbacks.append(callback)
+
+    def _fire_swap_callbacks(self):
+        for cb in self._on_swap_callbacks:
+            try:
+                cb()
+            except Exception as e:
+                logger.warning(f"[SESSION FACTORY] on-swap cache hook failed: {e}")
+
     # --- hot-swap API ---
 
     def activate_lakebase(self, lakebase_factory):
         """Replace the underlying factory with a Lakebase-backed one."""
+        changed = not self._is_lakebase
         self._factory = lakebase_factory
         self._is_lakebase = True
         logger.info("[SESSION FACTORY] Swapped to Lakebase engine")
+        # Only on an actual transition — activate_lakebase can be called more
+        # than once (startup + per-request router); firing every time would
+        # wipe live caches needlessly.
+        if changed:
+            self._fire_swap_callbacks()
 
     def deactivate_lakebase(self):
         """Revert to the local (SQLite / PG) factory."""
+        changed = self._is_lakebase
         self._factory = _local_session_factory
         self._is_lakebase = False
         logger.info("[SESSION FACTORY] Reverted to local engine")
+        if changed:
+            self._fire_swap_callbacks()
 
     @property
     def is_lakebase(self) -> bool:

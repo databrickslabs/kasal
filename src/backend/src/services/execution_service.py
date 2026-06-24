@@ -301,7 +301,21 @@ class ExecutionService:
             "group_id": group_id,
             "group_email": group_email
         }
-    
+
+    @classmethod
+    def clear_in_memory_cache(cls) -> int:
+        """Drop the in-memory execution registry. Invoked when the underlying DB
+        is swapped (Lakebase activate/deactivate). Entries are keyed to the
+        PREVIOUS database, so without this a status lookup after a swap serves /
+        polls executions that don't exist in the new DB — the recurring
+        "Execution <id> not found in database" 404 storm. Registered as an
+        on-swap hook on async_session_factory (see bottom of module)."""
+        n = len(cls.executions)
+        cls.executions.clear()
+        if n:
+            logger.info(f"[ExecutionService] Cleared {n} in-memory execution(s) after DB swap")
+        return n
+
     @staticmethod
     def sanitize_for_database(data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1613,3 +1627,14 @@ class ExecutionService:
                     pass
             
             raise Exception(f"Failed to stop execution: {str(e)}")
+
+# Flush the in-memory execution registry whenever the active database is swapped
+# (Lakebase activate/deactivate). Entries are keyed to the previous DB, so a
+# status lookup after a swap would otherwise 404 on rows that only existed in
+# the old database. Best-effort registration at import time — the API process
+# imports ExecutionService before any runtime swap, so the hook is in place.
+try:  # pragma: no cover - import-time wiring
+    from src.db.session import async_session_factory as _async_session_factory
+    _async_session_factory.register_on_swap(ExecutionService.clear_in_memory_cache)
+except Exception as _reg_err:  # noqa: BLE001
+    logger.warning(f"[ExecutionService] Could not register DB-swap cache hook: {_reg_err}")

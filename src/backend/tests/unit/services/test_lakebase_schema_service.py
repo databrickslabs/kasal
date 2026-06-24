@@ -235,6 +235,13 @@ class TestCreateTablesAsync:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
         mock_conn.run_sync = AsyncMock()
+        # The doc-embeddings column ensure now runs each DDL in a SAVEPOINT
+        # (begin_nested) so an orphaned-owner failure can't abort the migration;
+        # give the mock a working async-context-manager savepoint.
+        _savepoint = MagicMock()
+        _savepoint.__aenter__ = AsyncMock(return_value=None)
+        _savepoint.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.begin_nested = MagicMock(return_value=_savepoint)
         mock_engine = _make_async_engine_with_conn(mock_conn)
 
         # Create a mock table named documentation_embeddings
@@ -551,3 +558,71 @@ class TestCreateTablesSyncStream:
             with patch.object(service, "_create_tables_batch_sync", side_effect=RuntimeError("db down")):
                 with pytest.raises(RuntimeError):
                     events = list(service.create_tables_sync_stream(mock_engine))
+
+
+# ---------------------------------------------------------------------------
+# Orphaned table-owner tolerance (Postgres 42501 "must be owner")
+# ---------------------------------------------------------------------------
+
+from src.services.lakebase_schema_service import _is_not_owner_error, _owner_remediation
+
+
+class TestOwnershipTolerance:
+    """A table owned by a previous deploy's service principal can't be ALTERed
+    by today's role (Postgres 42501). The migrate must log remediation and skip
+    that statement rather than abort with 'Error creating tables'."""
+
+    def test_is_not_owner_error_detects_42501_and_message(self):
+        assert _is_not_owner_error(Exception("{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}"))
+        assert _is_not_owner_error(Exception("must be owner of table crews"))
+
+    def test_is_not_owner_error_ignores_other_errors(self):
+        assert not _is_not_owner_error(Exception('relation "crews" does not exist'))
+        assert not _is_not_owner_error(Exception("syntax error at or near"))
+
+    def test_owner_remediation_names_table_and_reassign(self):
+        msg = _owner_remediation(
+            "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+        )
+        assert "documentation_embeddings" in msg
+        assert "REASSIGN OWNED" in msg
+
+    @staticmethod
+    def _async_savepoint_conn(execute_side_effect):
+        conn = MagicMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=None)
+        cm.__aexit__ = AsyncMock(return_value=False)  # don't suppress — let errors propagate
+        conn.begin_nested = MagicMock(return_value=cm)
+        conn.execute = AsyncMock(side_effect=execute_side_effect)
+        return conn
+
+    @pytest.mark.asyncio
+    async def test_tolerant_async_skips_owner_error(self):
+        conn = self._async_savepoint_conn(
+            Exception("{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}")
+        )
+        # Must NOT raise — ownership error is tolerated.
+        await LakebaseSchemaService._exec_ddl_tolerant_async(
+            conn, "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_tolerant_async_reraises_other_error(self):
+        conn = self._async_savepoint_conn(Exception("syntax error at or near"))
+        with pytest.raises(Exception, match="syntax error"):
+            await LakebaseSchemaService._exec_ddl_tolerant_async(
+                conn, "ALTER TABLE x ADD COLUMN y INT"
+            )
+
+    def test_tolerant_sync_skips_owner_error(self):
+        conn = MagicMock()
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=None)
+        cm.__exit__ = MagicMock(return_value=False)
+        conn.begin_nested = MagicMock(return_value=cm)
+        conn.execute = MagicMock(side_effect=Exception("42501 must be owner of table documentation_embeddings"))
+        # Must NOT raise.
+        LakebaseSchemaService._exec_ddl_tolerant_sync(
+            conn, "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+        )
