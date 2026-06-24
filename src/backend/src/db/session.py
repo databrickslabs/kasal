@@ -631,6 +631,29 @@ async def get_isolated_db_session():
     Lakebase-swapped) factory.
     """
     if str(settings.DATABASE_URI).startswith("sqlite") and not async_session_factory.is_lakebase:
+        # The global Lakebase swap (main.py lifespan / activate_lakebase_in_subprocess)
+        # is PER-PROCESS and can fail or lag, leaving THIS process's
+        # async_session_factory on local SQLite even though Lakebase is enabled in
+        # the DB config. Reads route to Lakebase off is_lakebase_enabled() via
+        # get_smart_db_session — INDEPENDENT of the swap state. So if we wrote to the
+        # private SQLite engine here while Lakebase is enabled, the row would land in
+        # local SQLite while every read looks in Lakebase, i.e. "Execution not found"
+        # 404 storms (e751d923 moved create_execution's parent-row write onto this
+        # helper and regressed exactly that). Follow the SAME signal as reads: when
+        # Lakebase is enabled, write through the same Lakebase factory the reads use.
+        from src.db.database_router import (
+            get_lakebase_config_from_db,
+            is_lakebase_enabled,
+        )
+
+        if await is_lakebase_enabled():
+            from src.db.lakebase_session import get_lakebase_session
+
+            config = await get_lakebase_config_from_db()
+            instance_name = (config or {}).get("instance_name")
+            async with get_lakebase_session(instance_name) as session:
+                yield session
+            return
         factory = _get_isolated_sqlite_session_factory()
         async with factory() as session:
             yield session
