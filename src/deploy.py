@@ -95,6 +95,33 @@ def prune_remote_dir(client, remote_dir, local_dir):
             # orphaned files inside it (e.g. assets/*-<hash> Vite chunks).
             prune_remote_dir(client, entry_path, local_dir / name)
 
+
+def clear_remote_dir(client, remote_dir):
+    """Delete a remote workspace dir wholesale (one recursive server-side call).
+
+    Used for frontend_static instead of prune_remote_dir: Vite content-hashes
+    every chunk (``index-<hash>.js``), so the whole ``assets/`` tree is new each
+    build and almost nothing is reusable. Pruning has to LIST every remote dir
+    and DELETE each orphan one-by-one (thousands of stale chunks across deploys)
+    — slow. A single recursive delete of the parent wipes them in one call, and
+    the sync re-creates the dir fresh.
+
+    CALLER CONTRACT: re-upload with a FULL sync afterwards. ``databricks sync
+    --diff`` keys off a local snapshot, so after the remote is emptied out-of-band
+    a diff sync would wrongly think the files still exist remotely and skip them,
+    leaving an empty frontend_static (a broken app).
+
+    Returns True if a delete was issued, False if there was nothing to clear.
+    """
+    try:
+        client.workspace.delete(remote_dir, recursive=True)
+        logger.info(f"Cleared remote dir for clean re-upload: {remote_dir}")
+        return True
+    except Exception as e:
+        logger.debug(f"Nothing to clear at {remote_dir}: {e}")
+        return False
+
+
 def build_frontend(root_dir, api_url=None):
     """Build the frontend locally so every deploy ships fresh static assets.
 
@@ -556,7 +583,12 @@ def deploy_source_to_databricks(
             if ship_backend:
                 prune_remote_dir(client, f"{workspace_dir}/backend", databricks_dist / "backend")
             if ship_frontend:
-                prune_remote_dir(client, f"{workspace_dir}/frontend_static", databricks_dist / "frontend_static")
+                # frontend_static is wiped wholesale (one recursive delete) rather
+                # than pruned file-by-file — Vite re-hashes every chunk so the whole
+                # assets/ tree is new each build, making a per-file prune slow for no
+                # benefit. The sync below re-uploads it fresh; it is forced --full
+                # because the diff snapshot would otherwise skip into the emptied dir.
+                clear_remote_dir(client, f"{workspace_dir}/frontend_static")
                 prune_remote_dir(client, f"{workspace_dir}/docs", databricks_dist / "docs")
 
             # Upload each component with `databricks sync` (parallel transfers).
@@ -564,13 +596,14 @@ def deploy_source_to_databricks(
             # ~/.databricks, keyed on local+remote path) skips unchanged files —
             # copy2 preserves source mtimes, so the snapshot stays valid even
             # though the bundle directory is recreated each run.
-            def run_sync(local_dir, remote_dir):
+            def run_sync(local_dir, remote_dir, force_full=False):
+                use_full = full_sync or force_full
                 sync_cmd = ["databricks", "sync", str(local_dir), remote_dir]
-                if full_sync:
+                if use_full:
                     sync_cmd.append("--full")
                 if profile is not None:
                     sync_cmd.extend(["--profile", profile])
-                logger.info(f"Syncing {local_dir.name}/ to {remote_dir}{' (full)' if full_sync else ' (diff)'}")
+                logger.info(f"Syncing {local_dir.name}/ to {remote_dir}{' (full)' if use_full else ' (diff)'}")
                 result = subprocess.run(sync_cmd, check=True, capture_output=True, text=True)
                 if result.stderr:
                     logger.debug(f"sync output: {result.stderr.strip()}")
@@ -578,7 +611,10 @@ def deploy_source_to_databricks(
             if ship_backend:
                 run_sync(databricks_dist / "backend", f"{workspace_dir}/backend")
             if ship_frontend:
-                run_sync(databricks_dist / "frontend_static", f"{workspace_dir}/frontend_static")
+                # force_full: the remote frontend_static was just wiped wholesale
+                # (clear_remote_dir), so a diff sync would skip the now-missing
+                # files and leave it empty. Always re-upload it fully.
+                run_sync(databricks_dist / "frontend_static", f"{workspace_dir}/frontend_static", force_full=True)
                 if (databricks_dist / "docs").exists():
                     run_sync(databricks_dist / "docs", f"{workspace_dir}/docs")
 

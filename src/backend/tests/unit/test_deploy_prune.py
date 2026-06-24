@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
-from deploy import prune_remote_dir
+from deploy import prune_remote_dir, clear_remote_dir
 
 
 def _entry(path):
@@ -141,3 +141,35 @@ def test_delete_error_is_swallowed_and_does_not_abort(tmp_path):
     prune_remote_dir(client, "/remote", tmp_path)  # must not raise
 
     assert _deleted_paths(client) == ["/remote/stale1.js", "/remote/stale2.js"]
+
+
+# ---------------------------------------------------------------------------
+# clear_remote_dir — wholesale wipe used for frontend_static
+# ---------------------------------------------------------------------------
+
+
+def test_clear_remote_dir_deletes_recursively():
+    """frontend_static is wiped in ONE recursive delete (not listed/pruned
+    file-by-file), then re-uploaded fresh by a full sync."""
+    client = MagicMock()
+
+    result = clear_remote_dir(client, "/remote/frontend_static")
+
+    assert result is True
+    client.workspace.delete.assert_called_once()
+    call = client.workspace.delete.call_args
+    assert call.args[0] == "/remote/frontend_static"
+    assert call.kwargs.get("recursive") is True
+    # Must NOT walk the tree — that's the slow path we're replacing.
+    client.workspace.list.assert_not_called()
+
+
+def test_clear_remote_dir_missing_is_noop():
+    """If the remote dir doesn't exist yet, the delete error is swallowed and
+    we report nothing was cleared (first-ever deploy)."""
+    client = MagicMock()
+    client.workspace.delete.side_effect = Exception("RESOURCE_DOES_NOT_EXIST")
+
+    result = clear_remote_dir(client, "/remote/frontend_static")  # must not raise
+
+    assert result is False
