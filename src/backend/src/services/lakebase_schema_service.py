@@ -60,6 +60,32 @@ def _quote_pg_role(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def _is_not_owner_error(exc: Exception) -> bool:
+    """True for PostgreSQL 'must be owner of …' (SQLSTATE 42501).
+
+    The orphaned-owner case: a table was CREATEd by a previous deploy's service
+    principal, so the role running the migration today doesn't own it and can't
+    ALTER it. We tolerate this specific error rather than aborting the whole
+    migration over one un-ownable table.
+    """
+    s = str(exc)
+    return "42501" in s or "must be owner" in s.lower()
+
+
+def _owner_remediation(stmt: str) -> str:
+    """Actionable message for an ownership-blocked ALTER."""
+    m = re.search(r'\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][\w."]*)', stmt or "", re.IGNORECASE)
+    table = m.group(1) if m else "the table"
+    return (
+        f"Cannot apply DDL — this role does not own {table} (Postgres 42501 'must be owner'). "
+        f"It was created by a previous deploy's service principal (orphaned owner). A Lakebase "
+        f"instance owner / superuser must reassign ownership, then re-run the migration:\n"
+        f"    REASSIGN OWNED BY <old_owner_role> TO CURRENT_USER;\n"
+        f"  (or per-table:  ALTER TABLE {table} OWNER TO \"<this_app_role>\";)\n"
+        f"Skipped statement: {stmt}"
+    )
+
+
 class LakebaseSchemaService(BaseService):
     """Service for managing Lakebase database schema operations."""
 
@@ -483,16 +509,52 @@ class LakebaseSchemaService(BaseService):
         "SELECT 1 FROM pg_extension WHERE extname IN ('vector', 'pgvector')"
     )
 
+    @staticmethod
+    async def _exec_ddl_tolerant_async(conn, stmt: str) -> None:
+        """Run one idempotent DDL statement inside a SAVEPOINT.
+
+        The savepoint keeps an orphaned-owner failure (Postgres 42501 'must be
+        owner') from poisoning the surrounding transaction; that specific error
+        is logged with remediation and skipped so it doesn't abort the whole
+        migration. Any other error still propagates.
+        """
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text(stmt))
+        except Exception as e:
+            if _is_not_owner_error(e):
+                logger.error(_owner_remediation(stmt))
+                return
+            raise
+
+    @staticmethod
+    def _exec_ddl_tolerant_sync(conn, stmt: str) -> None:
+        """Sync counterpart of _exec_ddl_tolerant_async (savepoint-isolated)."""
+        try:
+            with conn.begin_nested():
+                conn.execute(text(stmt))
+        except Exception as e:
+            if _is_not_owner_error(e):
+                logger.error(_owner_remediation(stmt))
+                return
+            raise
+
     async def _ensure_doc_embeddings_columns_async(self, conn) -> None:
-        """Bring the documentation_embeddings table up to the pgvector schema (async)."""
+        """Bring the documentation_embeddings table up to the pgvector schema (async).
+
+        Each DDL runs in its own savepoint and tolerates the orphaned-owner case
+        (see _exec_ddl_tolerant_async), so a table owned by a previous deploy's
+        service principal logs a clear remediation instead of aborting the
+        migration with 'Error creating tables: must be owner of table'.
+        """
         for stmt in self._DOC_EMB_PLAIN_DDL:
-            await conn.execute(text(stmt))
+            await self._exec_ddl_tolerant_async(conn, stmt)
         # The vector column requires the pgvector extension; only add it when the
         # extension is present so we don't poison the surrounding transaction.
         result = await conn.execute(text(self._DOC_EMB_PGVECTOR_CHECK))
         if result.fetchone():
             for stmt in self._DOC_EMB_VECTOR_DDL:
-                await conn.execute(text(stmt))
+                await self._exec_ddl_tolerant_async(conn, stmt)
         else:
             logger.warning(
                 "pgvector extension not found; documentation_embeddings.embedding "
@@ -503,11 +565,11 @@ class LakebaseSchemaService(BaseService):
     def _ensure_doc_embeddings_columns_sync(self, conn) -> None:
         """Bring the documentation_embeddings table up to the pgvector schema (sync)."""
         for stmt in self._DOC_EMB_PLAIN_DDL:
-            conn.execute(text(stmt))
+            self._exec_ddl_tolerant_sync(conn, stmt)
         result = conn.execute(text(self._DOC_EMB_PGVECTOR_CHECK))
         if result.fetchone():
             for stmt in self._DOC_EMB_VECTOR_DDL:
-                conn.execute(text(stmt))
+                self._exec_ddl_tolerant_sync(conn, stmt)
         else:
             logger.warning(
                 "pgvector extension not found; documentation_embeddings.embedding "
