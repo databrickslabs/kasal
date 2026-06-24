@@ -394,7 +394,12 @@ class GroupService:
             group_user = await self.group_user_repo.add(group_user)
         
         logger.info(f"Assigned user {user_email} to group {group_id} with role {role}")
-        
+
+        # Membership changed — drop cached resolution so the next request
+        # re-reads this user's groups/role instead of serving a stale entry.
+        from src.utils.user_context import clear_membership_cache
+        clear_membership_cache(user_email)
+
         return {
             'id': group_user.id,
             'group_id': group_user.group_id,
@@ -437,8 +442,15 @@ class GroupService:
                 update_data[field] = value
 
         update_data['updated_at'] = datetime.utcnow()
-        return await self.group_user_repo.update(group_user.id, update_data)
-    
+        updated = await self.group_user_repo.update(group_user.id, update_data)
+
+        # Role/status changed — invalidate cached memberships. We only have
+        # user_id here, not email, so clear the whole (small, short-TTL) cache.
+        from src.utils.user_context import clear_membership_cache
+        clear_membership_cache()
+
+        return updated
+
     async def remove_user_from_group(
         self,
         group_id: str,
@@ -455,8 +467,13 @@ class GroupService:
         
         if not success:
             raise ValueError(f"User {user_id} not found in group {group_id}")
-        
+
         logger.info(f"Removed user {user_id} from group {group_id}")
+
+        # Membership changed — invalidate cached memberships (user_id only,
+        # so clear the whole short-TTL cache).
+        from src.utils.user_context import clear_membership_cache
+        clear_membership_cache()
 
     async def delete_group(self, group_id: str) -> None:
         """
@@ -481,9 +498,13 @@ class GroupService:
         try:
             # Delete the group (cascade will handle group_users)
             await self.group_repo.delete(group_id)
-            
+
             logger.info(f"Deleted group {group_id} and all associated data")
-            
+
+            # Group (and its memberships) gone — invalidate cached resolutions.
+            from src.utils.user_context import clear_membership_cache
+            clear_membership_cache()
+
         except Exception as e:
             logger.error(f"Error deleting group {group_id}: {e}")
             raise ValueError(f"Failed to delete group: {str(e)}")

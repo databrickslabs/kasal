@@ -29,6 +29,8 @@ Example:
 """
 
 import logging
+import os
+import time
 from contextvars import ContextVar
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -40,6 +42,35 @@ logger = logging.getLogger(__name__)
 _user_access_token: ContextVar[Optional[str]] = ContextVar('user_access_token', default=None)
 _user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar('user_context', default=None)
 _group_context: ContextVar[Optional['GroupContext']] = ContextVar('group_context', default=None)
+
+# --- Group-membership resolution cache ---------------------------------------
+# Resolving a user's group memberships costs several DB round-trips
+# (users + group_users + groups) plus a commit, and it runs on EVERY
+# authenticated request. Status/trace polling from the run-history UI fires
+# this dozens of times per second for a single running job even though
+# membership almost never changes mid-session — it was the dominant query
+# load on the hot path. Cache the resolved (user, groups_with_roles) tuple per
+# email for a short TTL so repeat polls do zero DB work. Membership mutations
+# call clear_membership_cache() to drop stale entries immediately, and the TTL
+# bounds staleness for anything that mutates outside this process.
+_MEMBERSHIP_CACHE_TTL = float(os.getenv("GROUP_MEMBERSHIP_CACHE_TTL", "30"))
+# email -> (expires_at_monotonic, (user, groups_with_roles))
+_membership_cache: Dict[str, tuple] = {}
+
+
+def clear_membership_cache(email: Optional[str] = None) -> None:
+    """Invalidate cached group memberships.
+
+    Call after any change to a user's group membership or role so the next
+    request re-resolves from the database instead of serving a stale entry.
+
+    Args:
+        email: Specific user to invalidate; None clears the whole cache.
+    """
+    if email is None:
+        _membership_cache.clear()
+    else:
+        _membership_cache.pop(email, None)
 
 
 @dataclass
@@ -333,6 +364,18 @@ class GroupContext:
         Returns:
             Tuple of (user, groups_with_roles) where groups_with_roles is a list of tuples containing (group, role)
         """
+        # Serve from the short-TTL cache when fresh. This is the hot polling
+        # path (run-history status/trace polling) — membership rarely changes
+        # mid-session, so a cache hit avoids the users/group_users/groups
+        # queries and the write transaction entirely.
+        cached = _membership_cache.get(email)
+        if cached is not None:
+            expires_at, value = cached
+            if expires_at > time.monotonic():
+                return value
+            # Expired — drop it and fall through to a fresh lookup.
+            _membership_cache.pop(email, None)
+
         try:
             # Import here to avoid circular imports
             from src.services.group_service import GroupService
@@ -363,7 +406,17 @@ class GroupContext:
 
             # Use the smart session which routes to Lakebase when active
             # (where groups/users live) and falls back to local SQLite otherwise.
-            return await execute_db_operation_smart(_lookup)
+            result = await execute_db_operation_smart(_lookup)
+
+            # Cache only successful resolutions so a transient DB failure isn't
+            # pinned for the whole TTL. result is (user, groups_with_roles).
+            if result and result[0] is not None:
+                _membership_cache[email] = (
+                    time.monotonic() + _MEMBERSHIP_CACHE_TTL,
+                    result,
+                )
+
+            return result
 
         except Exception as e:
             logger.error(f"Error getting user group memberships with roles for {email}: {e}")
