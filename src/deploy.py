@@ -58,6 +58,43 @@ def custom_ignore_function(excluded_dirs, excluded_patterns):
         return ignored
     return _ignore
 
+def prune_remote_dir(client, remote_dir, local_dir):
+    """Recursively delete remote workspace entries absent from the local bundle.
+
+    `databricks sync` only adds/overwrites — it never mirror-deletes — so stale
+    files from older deploys would otherwise live in the workspace (and the app
+    deployment snapshot) forever.
+
+    MUST recurse into subdirectories. frontend_static/assets is the critical
+    case: Vite content-hashes every chunk (``index-<hash>.js``), so each build
+    emits NEW filenames and the old ones are orphaned. A shallow (top-level
+    only) prune kept ``assets/`` because its *name* still exists locally, so
+    stale chunks accumulated there across deploys (2400+ remote vs ~150 real),
+    bloating the app deployment's per-file source sync past the platform's hard
+    10-minute app-start window → "App process did not start within 10 minutes".
+    """
+    try:
+        remote_entries = list(client.workspace.list(remote_dir))
+    except Exception:
+        return  # remote dir doesn't exist yet
+    local_names = {p.name for p in local_dir.iterdir()} if local_dir.exists() else set()
+    for entry in remote_entries:
+        entry_path = entry.path or ""
+        if not entry_path:
+            continue
+        name = entry_path.rsplit("/", 1)[-1]
+        if name not in local_names:
+            # Entire entry is orphaned (recursive=True handles directories).
+            try:
+                client.workspace.delete(entry_path, recursive=True)
+                logger.info(f"Pruned remote leftover: {entry_path}")
+            except Exception as prune_err:
+                logger.warning(f"Could not prune {entry_path}: {prune_err}")
+        elif (local_dir / name).is_dir():
+            # Name still present locally AND it's a directory — recurse to prune
+            # orphaned files inside it (e.g. assets/*-<hash> Vite chunks).
+            prune_remote_dir(client, entry_path, local_dir / name)
+
 def build_frontend(root_dir, api_url=None):
     """Build the frontend locally so every deploy ships fresh static assets.
 
@@ -508,32 +545,19 @@ def deploy_source_to_databricks(
                 except Exception:
                     pass  # not present — nothing to clean
 
-            # Prune remote entries that are not part of the local bundle.
-            # `databricks sync` never deletes files it didn't upload itself, so
-            # junk from older deploys (.ruff_cache, kasal_default_* memory dirs,
-            # .DS_Store, tests/, migrations/, ...) would otherwise live in the
-            # workspace — and the deployment snapshot — forever.
-            def prune_remote_dir(remote_dir, local_dir):
-                try:
-                    remote_entries = list(client.workspace.list(remote_dir))
-                except Exception:
-                    return  # remote dir doesn't exist yet
-                local_names = {p.name for p in local_dir.iterdir()} if local_dir.exists() else set()
-                for entry in remote_entries:
-                    entry_path = entry.path or ""
-                    name = entry_path.rsplit("/", 1)[-1]
-                    if entry_path and name not in local_names:
-                        try:
-                            client.workspace.delete(entry_path, recursive=True)
-                            logger.info(f"Pruned remote leftover: {entry_path}")
-                        except Exception as prune_err:
-                            logger.warning(f"Could not prune {entry_path}: {prune_err}")
-
+            # Prune remote entries no longer in the local bundle (recursively —
+            # see prune_remote_dir). `databricks sync` only adds/overwrites and
+            # never mirror-deletes, so without this, junk from older deploys
+            # (.ruff_cache, kasal_default_* memory dirs, tests/, migrations/, and
+            # — critically — orphaned Vite content-hashed assets/*-<hash> chunks)
+            # would accumulate in the workspace and the deployment snapshot
+            # forever, bloating the app's source sync past the platform's hard
+            # 10-minute app-start window.
             if ship_backend:
-                prune_remote_dir(f"{workspace_dir}/backend", databricks_dist / "backend")
+                prune_remote_dir(client, f"{workspace_dir}/backend", databricks_dist / "backend")
             if ship_frontend:
-                prune_remote_dir(f"{workspace_dir}/frontend_static", databricks_dist / "frontend_static")
-                prune_remote_dir(f"{workspace_dir}/docs", databricks_dist / "docs")
+                prune_remote_dir(client, f"{workspace_dir}/frontend_static", databricks_dist / "frontend_static")
+                prune_remote_dir(client, f"{workspace_dir}/docs", databricks_dist / "docs")
 
             # Upload each component with `databricks sync` (parallel transfers).
             # Full upload by default; with --diff the per-pair snapshot (under
