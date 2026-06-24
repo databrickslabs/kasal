@@ -759,6 +759,14 @@ async def migrate_to_lakebase_stream(
                         config["instance_name"] = instance_name
                         config["endpoint"] = endpoint
                         await config_service.save_config(config)
+                        # save_config/upsert only FLUSH; async_sessionmaker's context
+                        # manager rolls back on exit without an explicit commit, so this
+                        # enabled/migration_completed flip would be discarded and the app
+                        # would never actually switch to Lakebase (the migration's own
+                        # engines commit the data, masking it). The working "Use Existing
+                        # Data" path persists only because it rides the DI session the
+                        # router commits — this separate session must commit itself.
+                        await config_session.commit()
                         yield f"data: {json.dumps({'type': 'success', 'message': '✅ Lakebase configuration updated and enabled'})}\n\n"
                 except Exception as config_error:
                     logger.error(
@@ -790,6 +798,10 @@ async def migrate_to_lakebase_stream(
                         config["instance_name"] = instance_name
                         config["endpoint"] = endpoint
                         await config_service.save_config(config)
+                        # Commit the disable flip too — without it the rollback on
+                        # context exit would leave a half-migrated instance still marked
+                        # enabled (see the success-branch note above).
+                        await config_session.commit()
                     yield f"data: {json.dumps({'type': 'warning', 'message': '⚠️ Migration failed — Lakebase disabled, using SQLite'})}\n\n"
                 except Exception as config_error:
                     logger.error(

@@ -203,7 +203,7 @@ class TestMigrateToLakbaseStream:
 
     def _stream_patches(self, mock_service, extract_return="tok", dispose=True):
         """Build context managers for migrate_to_lakebase_stream tests."""
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
         return mock_sess
@@ -223,7 +223,7 @@ class TestMigrateToLakbaseStream:
         mock_service.get_config = AsyncMock(return_value={})
         mock_service.save_config = AsyncMock(return_value={})
 
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
@@ -263,7 +263,7 @@ class TestMigrateToLakbaseStream:
         mock_service.get_config = AsyncMock(return_value={})
         mock_service.save_config = AsyncMock(return_value={})
 
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
@@ -296,7 +296,7 @@ class TestMigrateToLakbaseStream:
         mock_service = MagicMock()
         mock_service.get_instance = AsyncMock(return_value={"read_write_dns": None})
 
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
@@ -327,7 +327,7 @@ class TestMigrateToLakbaseStream:
         mock_service = MagicMock()
         mock_service.get_instance = AsyncMock(side_effect=Exception("API down"))
 
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
@@ -428,7 +428,7 @@ class TestMigrateToLakbaseStream:
         mock_service.get_config = AsyncMock(return_value={})
         mock_service.save_config = AsyncMock(return_value={})
 
-        mock_sess = MagicMock()
+        mock_sess = AsyncMock()
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
@@ -455,3 +455,49 @@ class TestMigrateToLakbaseStream:
         start_events = [e for e in events if e.get("type") == "start"]
         assert len(start_events) > 0
         assert "schema creation" in start_events[0].get("message", "")
+
+    @pytest.mark.asyncio
+    async def test_successful_migration_commits_config_flip(self):
+        """Regression: the enabled/migration_completed flip is written on a SEPARATE
+        _local_session_factory() session. upsert only flush()es and async_sessionmaker
+        rolls back on context exit, so without an explicit commit the switch silently
+        reverts — the symptom where 'Migrate Schema & Data' / 'Schema Only' report
+        success but the app never moves to Lakebase, while 'Use Existing Data' (which
+        rides the DI session the router commits) works."""
+        ctx = SysAdminCtx()
+        raw_request = self._make_request_obj()
+
+        async def fake_stream(instance, endpoint, recreate_schema, migrate_data):
+            yield {"type": "result", "success": True, "message": "done"}
+
+        mock_service = MagicMock()
+        mock_service.migrate_existing_data_stream = fake_stream
+        mock_service.get_config = AsyncMock(return_value={})
+        mock_service.save_config = AsyncMock(return_value={})
+
+        # AsyncMock so .commit() is awaitable and assertable.
+        mock_sess = AsyncMock()
+        mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+        mock_sess.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.databricks_auth.extract_user_token_from_request",
+                   return_value="tok"), \
+             patch("src.api.database_management_router.LakebaseService",
+                   return_value=mock_service), \
+             patch("src.db.session._local_session_factory",
+                   return_value=mock_sess), \
+             patch("src.db.session.dispose_engines", AsyncMock()):
+
+            response = await migrate_to_lakebase_stream(
+                request={"instance_name": "kb", "endpoint": "pg.example.com"},
+                raw_request=raw_request,
+                group_context=ctx,
+            )
+            events = await self._collect_events(response)
+
+        # The config session MUST be committed, else the flip rolls back on exit.
+        mock_sess.commit.assert_awaited()
+        assert any(
+            e.get("type") == "success" and "updated and enabled" in e.get("message", "")
+            for e in events
+        )
