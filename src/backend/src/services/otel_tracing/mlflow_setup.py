@@ -337,6 +337,27 @@ async def configure_mlflow_in_subprocess(
         )
         trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, alog)
 
+        # When UC trace storage is active, stop the Databricks Apps OTLP sidecar
+        # from intercepting the spans. The platform sets OTEL_EXPORTER_OTLP_ENDPOINT
+        # (e.g. http://localhost:4314), so the OTel SDK ships every span to the
+        # sidecar (-> the workspace's `otel_spans` table) and MLflow's UC trace
+        # store receives only the trace metadata — the trace renders with no span
+        # tree. Disabling the OTLP traces exporter for this subprocess routes the
+        # spans to MLflow's UC destination instead. Logs are unaffected (the
+        # subprocess writes to crew.log; the main-process log sidecar is separate).
+        if trace_location is not None:
+            os.environ["OTEL_TRACES_EXPORTER"] = "none"
+            for _otlp_k in (
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+            ):
+                if _otlp_k in os.environ:
+                    os.environ.pop(_otlp_k, None)
+            alog.info(
+                "[SUBPROCESS] UC trace storage active — disabled OTLP traces export "
+                "so spans route to MLflow Unity Catalog (not the app OTLP sidecar)"
+            )
+
         def _set_experiment(name: str):
             """set_experiment with UC trace_location when available, else legacy."""
             if trace_location is not None:
