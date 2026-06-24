@@ -142,3 +142,62 @@ async def test_get_isolated_db_session_uses_private_nullpool_engine_for_sqlite(m
         iso = sess_mod._isolated_sqlite_engine
         if iso is not None:
             await iso.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_isolated_db_session_routes_to_lakebase_when_enabled_but_not_swapped(
+    monkeypatch, tmp_path
+):
+    """Regression (Lakebase 'Execution not found' 404 storm):
+
+    The global Lakebase swap (main.py lifespan / activate_lakebase_in_subprocess)
+    is PER-PROCESS and can fail or lag, leaving this process's async_session_factory
+    on local SQLite even though Lakebase is enabled in the DB config. Reads route to
+    Lakebase off is_lakebase_enabled() via get_smart_db_session, INDEPENDENT of the
+    swap. So an isolated WRITE here must follow the same signal — when Lakebase is
+    enabled it must go to Lakebase (where reads look), NOT the private local-SQLite
+    engine. Otherwise the parent executionhistory row lands in local SQLite while
+    every trace/status poll queries Lakebase and 404s forever (e751d923 moved
+    create_execution's parent write onto this helper and regressed exactly that).
+    """
+    import contextlib
+
+    from src.db import database_router
+    from src.db import lakebase_session as lb_mod
+    from src.db import session as sess_mod
+
+    db_file = tmp_path / "iso_helper.db"
+    monkeypatch.setattr(sess_mod.settings, "DATABASE_URI", f"sqlite+aiosqlite:///{db_file}")
+    # Global factory was NOT swapped to Lakebase in this process...
+    monkeypatch.setattr(sess_mod.async_session_factory, "_is_lakebase", False, raising=False)
+    # ...so we'd otherwise fall to the private SQLite engine. Prove we don't build it.
+    monkeypatch.setattr(sess_mod, "_isolated_sqlite_engine", None)
+    monkeypatch.setattr(sess_mod, "_isolated_sqlite_session_factory", None)
+
+    # ...but Lakebase IS enabled per the DB config (the signal reads key off).
+    async def _enabled():
+        return True
+
+    async def _config():
+        return {"instance_name": "kasal-test-instance"}
+
+    monkeypatch.setattr(database_router, "is_lakebase_enabled", _enabled)
+    monkeypatch.setattr(database_router, "get_lakebase_config_from_db", _config)
+
+    sentinel = object()
+    captured = {}
+
+    @contextlib.asynccontextmanager
+    async def _fake_lakebase_session(instance_name=None, *args, **kwargs):
+        captured["instance_name"] = instance_name
+        yield sentinel
+
+    monkeypatch.setattr(lb_mod, "get_lakebase_session", _fake_lakebase_session)
+
+    async with sess_mod.get_isolated_db_session() as session:
+        # Routed to the Lakebase factory (where reads look), NOT a local-SQLite session.
+        assert session is sentinel
+    # Used the instance_name from config, matching get_smart_db_session's read path.
+    assert captured["instance_name"] == "kasal-test-instance"
+    # The private local-SQLite engine must NOT have been built for a Lakebase write.
+    assert sess_mod._isolated_sqlite_engine is None
