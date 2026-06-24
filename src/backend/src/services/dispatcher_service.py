@@ -584,8 +584,11 @@ class DispatcherService:
 
                     mlflow.set_tracking_uri("databricks")
 
-                    # Get MLflow experiment name from Databricks config via service
+                    # Get MLflow experiment name + UC trace storage from Databricks config
                     exp_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
+                    uc_catalog = None
+                    uc_schema = None
+                    warehouse_id = None
                     try:
                         from src.db.session import async_session_factory
 
@@ -595,18 +598,48 @@ class DispatcherService:
                                 return await svc.get_databricks_config()
 
                         db_config = asyncio.run(_fetch_experiment_name())
-                        if db_config and db_config.mlflow_experiment_name:
-                            # Ensure experiment name starts with /Shared/ for proper organization
-                            if not db_config.mlflow_experiment_name.startswith("/"):
-                                exp_name = f"/Shared/{db_config.mlflow_experiment_name}"
-                            else:
-                                exp_name = db_config.mlflow_experiment_name
+                        if db_config:
+                            if db_config.mlflow_experiment_name:
+                                # Ensure experiment name starts with /Shared/ for proper organization
+                                if not db_config.mlflow_experiment_name.startswith("/"):
+                                    exp_name = f"/Shared/{db_config.mlflow_experiment_name}"
+                                else:
+                                    exp_name = db_config.mlflow_experiment_name
+                            uc_catalog = getattr(db_config, "catalog", None)
+                            # schema field is `db_schema` (aliased "schema"); reading
+                            # "schema" returns BaseModel.schema (a method) -> MLflow
+                            # "bad argument type for built-in operation".
+                            uc_schema = getattr(db_config, "db_schema", None)
+                            warehouse_id = getattr(db_config, "warehouse_id", None)
                     except Exception as config_err:
                         logger.info(
-                            f"[Dispatcher] Could not fetch MLflow experiment name from config: {config_err}, using default"
+                            f"[Dispatcher] Could not fetch MLflow config: {config_err}, using default"
                         )
 
-                    exp = mlflow.set_experiment(exp_name)
+                    # In-network UC trace storage (MLflow >= 3.11): store spans in UC
+                    # Delta tables via the SQL warehouse instead of a traces.json blob
+                    # in workspace object storage (unreachable from a serverless App).
+                    from src.services.otel_tracing.mlflow_setup import (
+                        _build_uc_trace_location,
+                        KASAL_TRACE_TABLE_PREFIX,
+                    )
+                    if warehouse_id:
+                        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
+                    logger.info(
+                        f"[Dispatcher] MLflow trace storage config — catalog={uc_catalog!r}, "
+                        f"schema={uc_schema!r}, warehouse_id={warehouse_id!r}"
+                    )
+                    trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, logger)
+
+                    if trace_location is not None:
+                        exp = mlflow.set_experiment(exp_name, trace_location=trace_location)
+                        logger.info(
+                            f"[Dispatcher] MLflow trace storage: Unity Catalog "
+                            f"{uc_catalog}.{uc_schema}.{KASAL_TRACE_TABLE_PREFIX}_otel_* "
+                            f"(warehouse={warehouse_id})"
+                        )
+                    else:
+                        exp = mlflow.set_experiment(exp_name)
                     logger.info(
                         f"[Dispatcher] MLflow experiment set successfully with {auth_method}"
                     )
