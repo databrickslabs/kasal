@@ -5,7 +5,17 @@ from dataclasses import dataclass
 
 # Test user_context utilities - based on actual code inspection
 
-from src.utils.user_context import GroupContext, UserContext
+from src.utils.user_context import GroupContext, UserContext, clear_membership_cache
+
+
+@pytest.fixture(autouse=True)
+def _reset_membership_cache():
+    """Group memberships are cached at module scope for a short TTL. Clear it
+    around every test so a resolution in one test doesn't satisfy another's
+    lookup (which would skip the DB mocks these tests assert on)."""
+    clear_membership_cache()
+    yield
+    clear_membership_cache()
 
 
 class TestGroupContextBasic:
