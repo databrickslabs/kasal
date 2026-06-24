@@ -5,8 +5,18 @@ create (94), update branches, update_with_group_check, update_limited_fields, up
 delete_with_group_check (312), delete_all_for_group (337-341)
 """
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
+
+
+def _patch_isolated_session(mock_session):
+    """Patch get_isolated_db_session (used by agent delete methods) to yield mock_session."""
+    @asynccontextmanager
+    async def _cm():
+        yield mock_session
+
+    return patch("src.db.session.get_isolated_db_session", _cm)
 
 
 def make_service():
@@ -232,10 +242,14 @@ async def test_delete_with_group_check_success():
     svc = make_service()
     agent = make_agent()
     group_ctx = MagicMock()
-    svc.repository.delete = AsyncMock(return_value=True)
-    with patch.object(svc, 'get_with_group_check', new_callable=AsyncMock, return_value=agent):
+    iso_session = AsyncMock()
+    with patch.object(svc, 'get_with_group_check', new_callable=AsyncMock, return_value=agent), \
+            _patch_isolated_session(iso_session):
         result = await svc.delete_with_group_check("a1", group_ctx)
     assert result is True
+    # Two deletes (tasks then agent) committed on the private connection
+    assert iso_session.execute.await_count == 2
+    iso_session.commit.assert_awaited_once()
 
 
 # ---- delete_all_for_group ----
@@ -262,9 +276,12 @@ async def test_delete_all_for_group_with_agents():
 
     agent1 = make_agent("a1")
     agent2 = make_agent("a2")
-    svc.repository.delete = AsyncMock()
+    iso_session = AsyncMock()
 
-    with patch.object(svc, 'find_by_group', new_callable=AsyncMock, return_value=[agent1, agent2]):
+    with patch.object(svc, 'find_by_group', new_callable=AsyncMock, return_value=[agent1, agent2]), \
+            _patch_isolated_session(iso_session):
         await svc.delete_all_for_group(group_ctx)
 
-    assert svc.repository.delete.call_count == 2
+    # Two deletes (tasks then agents) committed on the private connection
+    assert iso_session.execute.await_count == 2
+    iso_session.commit.assert_awaited_once()
