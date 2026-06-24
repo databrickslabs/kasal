@@ -281,26 +281,67 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
     
+    @staticmethod
+    async def _delete_agents_and_tasks(session, agent_ids: List[str]) -> None:
+        """
+        Delete the given agents and the tasks assigned to them, on ``session``.
+
+        Tasks reference agents via a foreign key (tasks.agent_id -> agents.id),
+        so the tasks must be deleted before the agents or the agent delete trips
+        a FOREIGN KEY constraint error. Deleting an agent therefore also deletes
+        the tasks assigned to it; no table references tasks, so this is safe.
+
+        Args:
+            session: The database session to run the deletes on
+            agent_ids: IDs of the agents to delete
+        """
+        if not agent_ids:
+            return
+
+        from sqlalchemy import delete as sql_delete
+        from src.models.task import Task
+
+        await session.execute(
+            sql_delete(Task).where(Task.agent_id.in_(agent_ids))
+        )
+        await session.execute(
+            sql_delete(Agent).where(Agent.id.in_(agent_ids))
+        )
+
     async def delete(self, id: str) -> bool:
         """
-        Delete an agent by ID.
-        
+        Delete an agent by ID (and the tasks assigned to it).
+
         Args:
             id: ID of the agent to delete
-            
+
         Returns:
             True if agent was deleted, False if not found
         """
-        return await self.repository.delete(id)
-    
+        # Run the delete + commit on a private connection. On SQLite the request
+        # session rides the shared StaticPool connection, so a concurrent
+        # request's commit/rollback (the frontend fires many DELETEs at once) can
+        # silently discard this committed delete — the agents "come back". A
+        # private connection (get_isolated_db_session) commits durably and is
+        # immune to that interference.
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            existing = await session.get(Agent, id)
+            if not existing:
+                return False
+            await self._delete_agents_and_tasks(session, [id])
+            await session.commit()
+            return True
+
     async def delete_with_group_check(self, id: str, group_context: GroupContext) -> bool:
         """
         Delete an agent by ID with group verification.
-        
+
         Args:
             id: ID of the agent to delete
             group_context: Group context for verification
-            
+
         Returns:
             True if agent was deleted, False if not found or not authorized
         """
@@ -308,37 +349,58 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agent = await self.get_with_group_check(id, group_context)
         if not agent:
             return False
-        
-        return await self.repository.delete(id)
-    
+
+        # Delete + commit on a private connection (see delete() for why).
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            await self._delete_agents_and_tasks(session, [id])
+            await session.commit()
+            return True
+
     async def delete_all(self) -> None:
         """
-        Delete all agents.
-        
+        Delete all agents (and the tasks assigned to them).
+
         Returns:
             None
         """
-        await self.repository.delete_all()
-    
+        from sqlalchemy import delete as sql_delete
+        from src.models.task import Task
+        from src.db.session import get_isolated_db_session
+
+        # Delete + commit on a private connection (see delete() for why).
+        async with get_isolated_db_session() as session:
+            # Delete all assigned tasks first so the agent deletes don't trip the FK constraint
+            await session.execute(
+                sql_delete(Task).where(Task.agent_id.isnot(None))
+            )
+            await session.execute(sql_delete(Agent))
+            await session.commit()
+
     async def delete_all_for_group(self, group_context: GroupContext) -> None:
         """
-        Delete all agents for a specific group.
-        
+        Delete all agents for a specific group (and the tasks assigned to them).
+
         Args:
             group_context: Group context for filtering
-            
+
         Returns:
             None
         """
         if not group_context or not group_context.group_ids:
             return
-        
+
         # Get all agents for the group
         agents = await self.find_by_group(group_context)
-        
-        # Delete each agent
-        for agent in agents:
-            await self.repository.delete(agent.id)
+        agent_ids = [agent.id for agent in agents]
+
+        # Delete + commit on a private connection (see delete() for why).
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            await self._delete_agents_and_tasks(session, agent_ids)
+            await session.commit()
     
 
     async def create_with_group(self, obj_in: AgentCreate, group_context: GroupContext) -> Agent:

@@ -5,12 +5,26 @@ Tests the functionality of agent management service including
 CRUD operations with group isolation.
 """
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.services.agent_service import AgentService
+
+
+def _patch_isolated_session(mock_session):
+    """Patch get_isolated_db_session to yield the given mock session.
+
+    Agent delete methods run their write+commit on a private connection via
+    get_isolated_db_session(); these tests redirect it to a mock session.
+    """
+    @asynccontextmanager
+    async def _cm():
+        yield mock_session
+
+    return patch("src.db.session.get_isolated_db_session", _cm)
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
 from src.schemas.agent import AgentCreate, AgentUpdate, AgentLimitedUpdate
@@ -338,37 +352,47 @@ class TestAgentServiceDelete:
     """Test cases for delete method."""
     
     @pytest.mark.asyncio
-    async def test_delete_success(self, agent_service, mock_repository):
-        """Test successful agent deletion."""
-        mock_repository.delete.return_value = True
-        
-        result = await agent_service.delete("agent-123")
-        
+    async def test_delete_success(self, agent_service):
+        """Test successful agent deletion (deletes tasks + agent, commits)."""
+        iso_session = AsyncMock(spec=AsyncSession)
+        iso_session.get = AsyncMock(return_value=MockAgent(id="agent-123"))
+
+        with _patch_isolated_session(iso_session):
+            result = await agent_service.delete("agent-123")
+
         assert result is True
-        mock_repository.delete.assert_called_once_with("agent-123")
-    
+        # Two deletes: tasks then agents, then an explicit commit
+        assert iso_session.execute.await_count == 2
+        iso_session.commit.assert_awaited_once()
+
     @pytest.mark.asyncio
-    async def test_delete_not_found(self, agent_service, mock_repository):
+    async def test_delete_not_found(self, agent_service):
         """Test delete when agent is not found."""
-        mock_repository.delete.return_value = False
-        
-        result = await agent_service.delete("non-existent")
-        
+        iso_session = AsyncMock(spec=AsyncSession)
+        iso_session.get = AsyncMock(return_value=None)
+
+        with _patch_isolated_session(iso_session):
+            result = await agent_service.delete("non-existent")
+
         assert result is False
-        mock_repository.delete.assert_called_once_with("non-existent")
+        iso_session.execute.assert_not_awaited()
+        iso_session.commit.assert_not_awaited()
 
 
 class TestAgentServiceDeleteAll:
     """Test cases for delete_all method."""
-    
+
     @pytest.mark.asyncio
-    async def test_delete_all_success(self, agent_service, mock_repository):
-        """Test successful delete all agents."""
-        mock_repository.delete_all.return_value = None
-        
-        await agent_service.delete_all()
-        
-        mock_repository.delete_all.assert_called_once()
+    async def test_delete_all_success(self, agent_service):
+        """Test successful delete all agents (tasks + agents, commits)."""
+        iso_session = AsyncMock(spec=AsyncSession)
+
+        with _patch_isolated_session(iso_session):
+            await agent_service.delete_all()
+
+        # Two deletes: assigned tasks then all agents, then an explicit commit
+        assert iso_session.execute.await_count == 2
+        iso_session.commit.assert_awaited_once()
 
 
 class TestAgentServiceCreateWithGroup:

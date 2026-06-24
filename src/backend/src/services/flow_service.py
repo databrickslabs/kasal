@@ -344,10 +344,19 @@ class FlowService:
         """
         try:
             # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import text
-            
+            from sqlalchemy import text, bindparam
+            from sqlalchemy.dialects.postgresql import UUID as PGUUID
+
+            # Coerce to a UUID object and bind it with the column's UUID type so
+            # SQLAlchemy applies the correct per-dialect conversion (native UUID on
+            # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
+            # fails: SQLite can't bind UUID, and str() yields the dashed form that
+            # doesn't match SQLite's stored hex.
+            flow_id = flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
+
             # First check if the flow exists
-            check_query = text("SELECT id FROM flows WHERE id = :flow_id")
+            check_query = text("SELECT id FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
             result = await self.session.execute(check_query, {"flow_id": flow_id})
             if not result.first():
                 raise NotFoundError(detail="Flow not found")
@@ -358,7 +367,7 @@ class FlowService:
             find_executions_query = text("""
                 SELECT id FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
+            """).bindparams(flow_id_param)
             result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
             execution_ids = [row[0] for row in result.fetchall()]
 
@@ -366,8 +375,8 @@ class FlowService:
             if execution_ids:
                 trace_delete_query = text("""
                     DELETE FROM execution_trace
-                    WHERE run_id = ANY(:execution_ids)
-                """)
+                    WHERE run_id IN :execution_ids
+                """).bindparams(bindparam("execution_ids", expanding=True))
                 trace_result = await self.session.execute(trace_delete_query, {"execution_ids": execution_ids})
                 logger.info(f"Deleted {trace_result.rowcount} execution_trace records for flow {flow_id}")
 
@@ -375,14 +384,14 @@ class FlowService:
             execution_delete_query = text("""
                 DELETE FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
+            """).bindparams(flow_id_param)
             result = await self.session.execute(execution_delete_query, {"flow_id": flow_id})
             deleted_count = result.rowcount
             if deleted_count > 0:
                 logger.info(f"Deleted {deleted_count} flow executions for flow {flow_id}")
 
             # Delete the flow itself
-            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
+            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
 
             logger.info(f"Successfully deleted flow {flow_id} with all its executions")
@@ -414,13 +423,22 @@ class FlowService:
         """
         try:
             # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import text
-            
+            from sqlalchemy import text, bindparam
+            from sqlalchemy.dialects.postgresql import UUID as PGUUID
+
+            # Coerce to a UUID object and bind it with the column's UUID type so
+            # SQLAlchemy applies the correct per-dialect conversion (native UUID on
+            # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
+            # fails: SQLite can't bind UUID, and str() yields the dashed form that
+            # doesn't match SQLite's stored hex.
+            flow_id = flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
+
             # First check if the flow exists and user has access
-            check_query = text("SELECT id, group_id FROM flows WHERE id = :flow_id")
+            check_query = text("SELECT id, group_id FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
             result = await self.session.execute(check_query, {"flow_id": flow_id})
             row = result.first()
-            
+
             if not row:
                 raise NotFoundError(detail="Flow not found")
 
@@ -430,14 +448,14 @@ class FlowService:
             if flow_group_id and group_context and group_context.group_ids:
                 if flow_group_id not in group_context.group_ids:
                     raise ForbiddenError(detail="Access denied to this flow")
-            
+
             logger.info(f"Starting force deletion of flow {flow_id} with group check")
 
             # Find all flow executions for this flow using executionhistory table
             find_executions_query = text("""
                 SELECT id, job_id FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
+            """).bindparams(flow_id_param)
             result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
             rows = result.fetchall()
             execution_ids = [row[0] for row in rows]
@@ -450,8 +468,8 @@ class FlowService:
             if execution_ids:
                 trace_delete_query = text("""
                     DELETE FROM execution_trace
-                    WHERE run_id = ANY(:execution_ids)
-                """)
+                    WHERE run_id IN :execution_ids
+                """).bindparams(bindparam("execution_ids", expanding=True))
                 trace_result = await self.session.execute(trace_delete_query, {"execution_ids": execution_ids})
                 logger.info(f"Deleted {trace_result.rowcount} execution_trace records for flow {flow_id}")
 
@@ -459,11 +477,11 @@ class FlowService:
             execution_delete_query = text("""
                 DELETE FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
+            """).bindparams(flow_id_param)
             await self.session.execute(execution_delete_query, {"flow_id": flow_id})
 
             # Delete the flow itself
-            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id")
+            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
 
             logger.info(f"Successfully deleted flow {flow_id} with all its executions (group verified)")
