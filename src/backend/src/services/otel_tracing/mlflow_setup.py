@@ -22,6 +22,58 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger(__name__)
 
 
+# Default prefix for the four UC OTel trace tables (<prefix>_otel_spans, etc.).
+KASAL_TRACE_TABLE_PREFIX = "kasal"
+
+
+def _build_uc_trace_location(
+    catalog: Optional[str], schema: Optional[str], warehouse_id: Optional[str], log
+) -> Any:
+    """Build a UnityCatalog trace location so MLflow stores trace spans in UC
+    Delta tables (in-network, via the SQL warehouse) instead of uploading a
+    traces.json blob to workspace object storage — which a serverless Databricks
+    App often cannot reach (``Connection refused`` to ``*.storage.cloud.databricks.com``).
+
+    Requires MLflow >= 3.11 and a configured catalog + schema + SQL warehouse id.
+    Returns ``None`` when any of those is missing (in which case the caller falls
+    back to the legacy experiment artifact storage). The warehouse id is REQUIRED:
+    MLflow runs the trace-table DDL through it, and passing a missing id into the
+    backend raises an opaque "bad argument type for built-in operation" instead of
+    a clear error.
+    """
+    if not (catalog and schema):
+        return None
+    # Guard against non-string values (e.g. a Pydantic BaseModel.schema *method*
+    # leaking through when the field is read by its alias instead of `db_schema`).
+    # Passing a non-str into MLflow surfaces only as "bad argument type for built-in
+    # operation"; fail clearly here instead.
+    if not (isinstance(catalog, str) and isinstance(schema, str)):
+        log.warning(
+            f"[MLflow] UC trace storage skipped: catalog/schema must be strings, got "
+            f"catalog={type(catalog).__name__}, schema={type(schema).__name__}"
+        )
+        return None
+    if not warehouse_id:
+        log.warning(
+            "[MLflow] UC trace storage skipped: no SQL warehouse id configured "
+            "(set warehouse_id in the Databricks config) — falling back to artifact storage"
+        )
+        return None
+    try:
+        from mlflow.entities.trace_location import UnityCatalog
+    except Exception:
+        log.info(
+            "[MLflow] UnityCatalog trace location unavailable (needs MLflow >= 3.11) "
+            "— falling back to experiment artifact storage"
+        )
+        return None
+    return UnityCatalog(
+        catalog_name=catalog,
+        schema_name=schema,
+        table_prefix=KASAL_TRACE_TABLE_PREFIX,
+    )
+
+
 @dataclass
 class MlflowSetupResult:
     """Result of MLflow subprocess configuration."""
@@ -188,21 +240,28 @@ async def configure_mlflow_in_subprocess(
                 auth_header[:7] if auth_header else "(empty)",
             )
             if auth_header.startswith("Bearer "):
-                extracted = auth_header[len("Bearer "):]
+                # SPN credentials verified. Configure UNIFIED OAuth M2M auth — the
+                # recommended pattern for Databricks Apps — by KEEPING host +
+                # client_id + client_secret so the SDK mints and refreshes tokens
+                # itself. This is required for MLflow UC trace storage, which builds
+                # its own WorkspaceClient() for the SQL-warehouse DDL. We do NOT
+                # downgrade to a static PAT (not recommended for Apps in production).
                 workspace_url = host.rstrip("/")
                 if not workspace_url.startswith("http"):
                     workspace_url = f"https://{workspace_url}"
                 os.environ["DATABRICKS_HOST"] = workspace_url
-                os.environ["DATABRICKS_TOKEN"] = extracted
+                os.environ["DATABRICKS_CLIENT_ID"] = client_id
+                os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret
+                os.environ["DATABRICKS_AUTH_TYPE"] = "oauth-m2m"
+                # Remove static token vars so oauth-m2m is the SINGLE auth method
+                # (the SDK errors with "more than one authorization method
+                # configured" if a token is also present).
+                for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+                    os.environ.pop(_k, None)
                 auth_method = "service_principal"
                 alog.info(
-                    "[SUBPROCESS] SPN credential set (len=%d)", len(extracted)
+                    "[SUBPROCESS] MLflow configured with SPN OAuth M2M (unified auth)"
                 )
-
-                # Remove SPN vars — subprocess-only, so MLflow exporter
-                # only sees HOST + TOKEN
-                for _k in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
-                    os.environ.pop(_k, None)
             else:
                 alog.warning("[SUBPROCESS] Unexpected auth header format")
         except Exception as spn_err:
@@ -227,9 +286,12 @@ async def configure_mlflow_in_subprocess(
         mlflow.set_tracking_uri("databricks")
 
         # -------------------------------------------------------
-        # 5. Experiment name resolution + set_experiment
+        # 5. Experiment name + UC trace storage resolution
         # -------------------------------------------------------
         experiment_name = "/Shared/kasal-crew-execution-traces"  # default
+        uc_catalog = None
+        uc_schema = None
+        warehouse_id = None
         try:
             from src.db.session import async_session_factory
             from src.services.databricks_service import DatabricksService
@@ -240,34 +302,69 @@ async def configure_mlflow_in_subprocess(
                     group_id=group_id,
                 )
                 fresh_config = await databricks_service.get_databricks_config()
-                if fresh_config and fresh_config.mlflow_experiment_name:
-                    exp_name = fresh_config.mlflow_experiment_name
-                    if not exp_name.startswith("/"):
-                        exp_name = f"/Shared/{exp_name}"
-                    experiment_name = exp_name
-                    alog.info(
-                        f"[SUBPROCESS] Using MLflow experiment name from config: {experiment_name}"
-                    )
+                if fresh_config:
+                    if fresh_config.mlflow_experiment_name:
+                        exp_name = fresh_config.mlflow_experiment_name
+                        if not exp_name.startswith("/"):
+                            exp_name = f"/Shared/{exp_name}"
+                        experiment_name = exp_name
+                        alog.info(
+                            f"[SUBPROCESS] Using MLflow experiment name from config: {experiment_name}"
+                        )
+                    # Reuse the workspace's configured catalog/schema/warehouse for
+                    # in-network UC trace storage (MLflow >= 3.11).
+                    # NOTE: the schema field is `db_schema` (Pydantic aliases it to
+                    # "schema"); `getattr(config, "schema")` returns BaseModel.schema
+                    # (a method), which MLflow then rejects with the opaque
+                    # "bad argument type for built-in operation".
+                    uc_catalog = getattr(fresh_config, "catalog", None)
+                    uc_schema = getattr(fresh_config, "db_schema", None)
+                    warehouse_id = getattr(fresh_config, "warehouse_id", None)
         except Exception as config_err:
             alog.info(
-                f"[SUBPROCESS] Could not fetch MLflow experiment name from config: "
-                f"{config_err}, using default: {experiment_name}"
+                f"[SUBPROCESS] Could not fetch MLflow config: "
+                f"{config_err}, using default experiment: {experiment_name}"
             )
+
+        # UC trace storage needs the SQL warehouse id in the environment BEFORE
+        # set_experiment creates/binds the trace tables.
+        if warehouse_id:
+            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
+
+        alog.info(
+            f"[SUBPROCESS] MLflow trace storage config — catalog={uc_catalog!r}, "
+            f"schema={uc_schema!r}, warehouse_id={warehouse_id!r}"
+        )
+        trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, alog)
+
+        def _set_experiment(name: str):
+            """set_experiment with UC trace_location when available, else legacy."""
+            if trace_location is not None:
+                exp = mlflow.set_experiment(name, trace_location=trace_location)
+                alog.info(
+                    f"[SUBPROCESS] MLflow trace storage: Unity Catalog "
+                    f"{uc_catalog}.{uc_schema}.{KASAL_TRACE_TABLE_PREFIX}_otel_* "
+                    f"(warehouse={warehouse_id})"
+                )
+                return exp
+            return mlflow.set_experiment(name)
 
         experiment = None
         experiment_id = None
         try:
-            experiment = mlflow.set_experiment(experiment_name)
+            experiment = _set_experiment(experiment_name)
             experiment_id = experiment.experiment_id
             alog.info(
                 f"[SUBPROCESS] MLflow experiment set: {experiment_name} (ID: {experiment_id})"
             )
         except Exception as exp_error:
+            import traceback as _tb
             alog.warning(
-                f"[SUBPROCESS] Could not set experiment {experiment_name}: {exp_error}"
+                f"[SUBPROCESS] Could not set experiment {experiment_name}: {exp_error}\n"
+                f"{_tb.format_exc()}"
             )
             try:
-                experiment = mlflow.set_experiment("/Shared/crew-traces")
+                experiment = _set_experiment("/Shared/crew-traces")
                 experiment_id = experiment.experiment_id
                 alog.info(
                     f"[SUBPROCESS] MLflow fallback experiment set: /Shared/crew-traces "

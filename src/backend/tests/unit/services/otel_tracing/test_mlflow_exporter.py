@@ -20,6 +20,8 @@ from src.services.otel_tracing.mlflow_exporter import (
     _InstantSpan,
     _EVENT_PAIRS,
     _END_TO_STARTS,
+    _span_type_for,
+    _as_chat_outputs,
 )
 
 
@@ -74,7 +76,6 @@ def _make_exporter(job_id="job-1"):
         job_id=job_id,
         mlflow_result=mlflow_result,
         group_context=None,
-        max_workers=1,
     )
 
 
@@ -210,11 +211,11 @@ class TestKasalMLflowSpanExporterInit:
         assert exporter._flushed is False
         assert exporter._is_flow is False
 
-    def test_creates_thread_pool(self):
+    def test_no_thread_pool(self):
+        # Flush is synchronous now — no background ThreadPoolExecutor that the
+        # subprocess could kill mid-upload.
         exporter = _make_exporter()
-        assert exporter._executor is not None
-        exporter._executor.shutdown(wait=False)
-
+        assert not hasattr(exporter, "_executor")
 
 class TestExport:
     def test_returns_success(self):
@@ -222,68 +223,52 @@ class TestExport:
         spans = [_make_span("s1", "crew_started")]
         result = exporter.export(spans)
         assert result == SpanExportResult.SUCCESS
-        exporter._executor.shutdown(wait=False)
-
     def test_skips_spans_without_event_type(self):
         exporter = _make_exporter()
         span = MagicMock(spec=ReadableSpan)
         span.attributes = {"other.attr": "value"}
         exporter.export([span])
         assert len(exporter._buffer) == 0
-        exporter._executor.shutdown(wait=False)
-
     def test_buffers_spans_with_event_type(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "crew_started"), _make_span("s2", "task_started")]
         exporter.export(spans)
         assert len(exporter._buffer) == 2
-        exporter._executor.shutdown(wait=False)
-
     def test_detects_flow_context_from_flow_started(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "flow_started")]
         exporter.export(spans)
         assert exporter._is_flow is True
-        exporter._executor.shutdown(wait=False)
-
     def test_detects_flow_context_from_flow_created(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "flow_created")]
         exporter.export(spans)
         assert exporter._is_flow is True
-        exporter._executor.shutdown(wait=False)
-
     def test_crew_completed_triggers_flush_for_crew(self):
+        # Flush runs SYNCHRONOUSLY (inline) on crew_completed — the trace must be
+        # built before export() returns so the subprocess can't tear down first.
         exporter = _make_exporter()
-        with patch.object(exporter._executor, "submit") as mock_submit:
+        with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
-        mock_submit.assert_called_once()
-        exporter._executor.shutdown(wait=False)
-
+        mock_flush.assert_called_once()
     def test_flow_completed_triggers_flush_for_flow(self):
         exporter = _make_exporter()
         exporter._is_flow = True
-        with patch.object(exporter._executor, "submit") as mock_submit:
+        with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "flow_completed")])
-        mock_submit.assert_called_once()
-        exporter._executor.shutdown(wait=False)
-
+        mock_flush.assert_called_once()
     def test_crew_completed_not_flush_when_in_flow_mode(self):
         exporter = _make_exporter()
         exporter._is_flow = True
-        with patch.object(exporter._executor, "submit") as mock_submit:
+        with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
-        mock_submit.assert_not_called()
-        exporter._executor.shutdown(wait=False)
-
+        mock_flush.assert_not_called()
     def test_no_flush_after_already_flushed(self):
         exporter = _make_exporter()
         exporter._flushed = True
-        with patch.object(exporter._executor, "submit") as mock_submit:
+        with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
-        mock_submit.assert_not_called()
-        exporter._executor.shutdown(wait=False)
-
+        mock_flush.assert_not_called()
 
 class TestPairEvents:
     def test_pairs_crew_started_crew_completed(self):
@@ -451,24 +436,18 @@ class TestFlush:
         with patch.object(exporter, "_build_mlflow_trace") as mock_build:
             exporter._flush()
         mock_build.assert_not_called()
-        exporter._executor.shutdown(wait=False)
-
     def test_marks_flushed_after_flush(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
         with patch.object(exporter, "_build_mlflow_trace"):
             exporter._flush()
         assert exporter._flushed is True
-        exporter._executor.shutdown(wait=False)
-
     def test_clears_buffer_after_flush(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
         with patch.object(exporter, "_build_mlflow_trace"):
             exporter._flush()
         assert exporter._buffer == []
-        exporter._executor.shutdown(wait=False)
-
     def test_second_flush_is_noop(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
@@ -476,15 +455,11 @@ class TestFlush:
             exporter._flush()
             exporter._flush()  # second call
         mock_build.assert_called_once()  # only once
-        exporter._executor.shutdown(wait=False)
-
     def test_handles_build_error_gracefully(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_completed"))
         with patch.object(exporter, "_build_mlflow_trace", side_effect=RuntimeError("build error")):
             exporter._flush()  # Should not raise
-        exporter._executor.shutdown(wait=False)
-
 
 class TestShutdown:
     def test_flushes_remaining_buffer(self):
@@ -549,8 +524,6 @@ class TestBuildMlflowTrace:
             except Exception:
                 pass  # Expected if mlflow not available
 
-        exporter._executor.shutdown(wait=False)
-
     def test_handles_empty_spans_gracefully(self):
         exporter = _make_exporter()
 
@@ -561,8 +534,6 @@ class TestBuildMlflowTrace:
 
             # Empty all_spans should cause early return
             exporter._build_mlflow_trace([], [], [])
-
-        exporter._executor.shutdown(wait=False)
 
     def test_creates_trace_with_spans(self):
         exporter = _make_exporter()
@@ -588,8 +559,6 @@ class TestBuildMlflowTrace:
             mock_client.start_trace.assert_called_once()
             mock_client.end_trace.assert_called_once()
 
-        exporter._executor.shutdown(wait=False)
-
     def test_handles_start_trace_failure(self):
         exporter = _make_exporter()
         all_spans = [_make_span("s", "crew_started", start_time=100, end_time=200)]
@@ -604,8 +573,6 @@ class TestBuildMlflowTrace:
                 exporter._build_mlflow_trace([], [], all_spans)
             except Exception:
                 pass
-
-        exporter._executor.shutdown(wait=False)
 
     def test_includes_group_context_in_inputs(self):
         mlflow_result = MagicMock()
@@ -640,7 +607,96 @@ class TestBuildMlflowTrace:
 
         assert "group_id" in captured_inputs
         assert captured_inputs["group_id"] == "grp-42"
-        exporter._executor.shutdown(wait=False)
+
+
+class TestSpanTypes:
+    """MLflow span types make the trace UI render each span correctly (and chat
+    conversations render for CHAT_MODEL/LLM spans)."""
+
+    def test_span_type_mapping(self):
+        assert _span_type_for("llm_call") == "CHAT_MODEL"
+        assert _span_type_for("agent_execution") == "AGENT"
+        assert _span_type_for("tool_usage") == "TOOL"
+        assert _span_type_for("task_started") == "CHAIN"
+        assert _span_type_for("knowledge_retrieval_started") == "RETRIEVER"
+        assert _span_type_for("memory_write_started") == "MEMORY"
+        assert _span_type_for("something_unknown") == "UNKNOWN"
+
+    def test_as_chat_outputs_shapes_assistant_message(self):
+        out = _as_chat_outputs("hello world")
+        assert out == {"choices": [{"message": {"role": "assistant", "content": "hello world"}}]}
+        assert _as_chat_outputs("") is None
+        assert _as_chat_outputs(None) is None
+
+    def test_root_trace_typed_agent(self):
+        exporter = _make_exporter()
+        all_spans = [_make_span("s", "crew_started", start_time=100, end_time=200)]
+        captured = {}
+
+        mock_root = MagicMock(trace_id="t1", span_id="root1")
+
+        def cap_start_trace(**kwargs):
+            captured.update(kwargs)
+            return mock_root
+
+        with patch("mlflow.tracking.MlflowClient") as MockClient:
+            mock_client = MagicMock()
+            MockClient.return_value = mock_client
+            mock_client.start_trace.side_effect = cap_start_trace
+            exporter._build_mlflow_trace([], [], all_spans)
+
+        assert captured.get("span_type") == "AGENT"
+
+    def test_leaf_llm_span_typed_chat_model_with_chat_outputs(self):
+        exporter = _make_exporter()
+        all_spans = [_make_span("s", "crew_started", start_time=100, end_time=900)]
+
+        # An LLM-call leaf span with captured content.
+        paired = [
+            _PairedSpan(
+                name="llm_call",
+                start_time=200,
+                end_time=300,
+                event_type="llm_call",
+                agent_name="Alice",
+                outputs={"content": "the answer is 42"},
+            )
+        ]
+
+        start_span_calls = []
+        end_span_calls = []
+        mock_root = MagicMock(trace_id="t1", span_id="root1")
+
+        with patch("mlflow.tracking.MlflowClient") as MockClient:
+            mock_client = MagicMock()
+            MockClient.return_value = mock_client
+            mock_client.start_trace.return_value = mock_root
+
+            def cap_start_span(**kwargs):
+                start_span_calls.append(kwargs)
+                return MagicMock(span_id=f"span-{len(start_span_calls)}")
+
+            def cap_end_span(**kwargs):
+                end_span_calls.append(kwargs)
+
+            mock_client.start_span.side_effect = cap_start_span
+            mock_client.end_span.side_effect = cap_end_span
+
+            exporter._build_mlflow_trace(paired, [], all_spans)
+
+        # The llm_call leaf span must be typed CHAT_MODEL.
+        llm_starts = [c for c in start_span_calls if c.get("span_type") == "CHAT_MODEL"]
+        assert llm_starts, f"expected a CHAT_MODEL span, got {[c.get('span_type') for c in start_span_calls]}"
+
+        # Its output must be chat-shaped (assistant message), so the UI renders chat.
+        chat_ends = [
+            c for c in end_span_calls
+            if isinstance(c.get("outputs"), dict) and "choices" in c["outputs"]
+        ]
+        assert chat_ends, "expected chat-shaped outputs on the CHAT_MODEL span"
+        msg = chat_ends[0]["outputs"]["choices"][0]["message"]
+        assert msg["role"] == "assistant"
+        assert msg["content"] == "the answer is 42"
 
 
 class TestDeriveRootIO:

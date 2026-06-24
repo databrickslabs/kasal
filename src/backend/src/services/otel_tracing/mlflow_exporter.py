@@ -33,7 +33,6 @@ Buffering strategy:
 import logging
 import threading
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -65,6 +64,43 @@ _EVENT_PAIRS: Dict[str, str] = {
 _END_TO_STARTS: Dict[str, List[str]] = defaultdict(list)
 for _start, _end in _EVENT_PAIRS.items():
     _END_TO_STARTS[_end].append(_start)
+
+
+# kasal event_type -> MLflow SpanType string (values of mlflow.entities.SpanType).
+# Plain strings so this module never imports mlflow at load time (the ~1.1s import
+# is paid lazily inside _build_mlflow_trace). Setting the span type is what makes the
+# MLflow UI render each span correctly — in particular CHAT_MODEL/LLM spans render as
+# a chat conversation when their inputs/outputs are messages-shaped.
+_SPAN_TYPE_BY_EVENT: Dict[str, str] = {
+    "crew_started": "CHAIN",
+    "flow_started": "CHAIN",
+    "flow_created": "CHAIN",
+    "agent_execution": "AGENT",
+    "task_started": "CHAIN",
+    "llm_call": "CHAT_MODEL",
+    "llm_response": "CHAT_MODEL",
+    "tool_usage": "TOOL",
+    "mcp_tool_started": "TOOL",
+    "mcp_connection_started": "TOOL",
+    "memory_write_started": "MEMORY",
+    "memory_retrieval_started": "RETRIEVER",
+    "knowledge_retrieval_started": "RETRIEVER",
+    "reasoning_started": "AGENT",
+    "guardrail_started": "CHAIN",
+}
+
+
+def _span_type_for(event_type: str) -> str:
+    """Map a kasal event type to an MLflow SpanType string (default UNKNOWN)."""
+    return _SPAN_TYPE_BY_EVENT.get(event_type, "UNKNOWN")
+
+
+def _as_chat_outputs(content: Any) -> Optional[Dict[str, Any]]:
+    """Wrap an LLM/chat span's text output in the OpenAI-style chat shape so the
+    MLflow trace UI renders it as an assistant chat message."""
+    if not content:
+        return None
+    return {"choices": [{"message": {"role": "assistant", "content": str(content)}}]}
 
 
 @dataclass
@@ -191,7 +227,6 @@ class KasalMLflowSpanExporter(SpanExporter):
         job_id: Execution/job ID for logging.
         mlflow_result: MlflowSetupResult with experiment_id and tracing_ready.
         group_context: Optional group context for tenant isolation.
-        max_workers: Thread pool size for async flush operations.
     """
 
     def __init__(
@@ -199,12 +234,10 @@ class KasalMLflowSpanExporter(SpanExporter):
         job_id: str,
         mlflow_result: Any,
         group_context: Any = None,
-        max_workers: int = 1,
     ):
         self._job_id = job_id
         self._mlflow_result = mlflow_result
         self._group_context = group_context
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._lock = threading.Lock()
 
         # Single flat buffer — all spans for this execution
@@ -260,7 +293,14 @@ class KasalMLflowSpanExporter(SpanExporter):
                         )
 
         if should_flush:
-            self._executor.submit(self._flush)
+            # Flush SYNCHRONOUSLY (inline on the span-ending thread), NOT on a
+            # background thread. This exporter runs in a crew/flow subprocess that
+            # tears down immediately after the completion event; a flush submitted
+            # to a ThreadPoolExecutor was killed mid-upload before the trace landed,
+            # so the experiment never received a single kasal trace. Building the
+            # trace inline here costs a few seconds on the (already-finished) crew's
+            # thread but guarantees the trace is uploaded before teardown.
+            self._flush()
 
         return SpanExportResult.SUCCESS
 
@@ -475,15 +515,21 @@ class KasalMLflowSpanExporter(SpanExporter):
         outputs: Dict[str, Any],
         attributes: Dict[str, Any],
         status: str = "OK",
+        span_type: str = "UNKNOWN",
+        inputs: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        """Create an MLflow span and return its span_id."""
+        """Create an MLflow span (typed) and return its span_id."""
         try:
-            child = client.start_span(
-                name=name,
-                trace_id=trace_id,
-                parent_id=parent_id,
-                start_time_ns=start_time,
-            )
+            start_kwargs: Dict[str, Any] = {
+                "name": name,
+                "trace_id": trace_id,
+                "parent_id": parent_id,
+                "start_time_ns": start_time,
+                "span_type": span_type,
+            }
+            if inputs:
+                start_kwargs["inputs"] = inputs
+            child = client.start_span(**start_kwargs)
             end_kwargs: Dict[str, Any] = {
                 "trace_id": trace_id,
                 "span_id": child.span_id,
@@ -564,6 +610,8 @@ class KasalMLflowSpanExporter(SpanExporter):
         try:
             start_trace_kwargs: Dict[str, Any] = {
                 "name": f"kasal:{self._job_id}",
+                # Root of a crew/flow run renders as a top-level agent run.
+                "span_type": "AGENT",
                 "start_time_ns": first_time,
                 "inputs": trace_inputs,
                 "attributes": trace_attributes,
@@ -658,6 +706,7 @@ class KasalMLflowSpanExporter(SpanExporter):
                     outputs=info["outputs"],
                     attributes=info["attributes"],
                     status=info["status"],
+                    span_type="AGENT",
                 )
                 if span_id:
                     agent_spans[agent] = span_id
@@ -684,6 +733,7 @@ class KasalMLflowSpanExporter(SpanExporter):
                         outputs=item["outputs"],
                         attributes=item["attributes"],
                         status=item["status"],
+                        span_type="CHAIN",
                     )
                     if span_id:
                         task_spans[task_key] = span_id
@@ -734,14 +784,25 @@ class KasalMLflowSpanExporter(SpanExporter):
                     elif agent in agent_spans:
                         parent_id = agent_spans[agent]
 
+                span_type = _span_type_for(item["event_type"])
+                outputs = item["outputs"]
+                # CHAT_MODEL/LLM spans render as a chat conversation in the MLflow
+                # UI when their outputs are messages-shaped — wrap the captured
+                # content as an assistant message.
+                if span_type in ("CHAT_MODEL", "LLM"):
+                    chat_outputs = _as_chat_outputs((outputs or {}).get("content"))
+                    if chat_outputs:
+                        outputs = chat_outputs
+
                 self._create_mlflow_span(
                     client, root_trace_id, parent_id,
                     name=item["name"],
                     start_time=item["start_time"],
                     end_time=item["end_time"],
-                    outputs=item["outputs"],
+                    outputs=outputs,
                     attributes=item["attributes"],
                     status=item["status"],
+                    span_type=span_type,
                 )
 
             # End root trace. The response is the primary output so the trace
@@ -765,17 +826,14 @@ class KasalMLflowSpanExporter(SpanExporter):
 
             # CRITICAL: flush the async trace-logging queue NOW.
             #
-            # mlflow.config.enable_async_logging() (set in mlflow_setup) makes
-            # end_trace write the trace *info* synchronously but upload the
-            # span-data artifact (traces.json) on a background thread. This
-            # exporter runs late, inside its own ThreadPoolExecutor, in a crew
-            # execution subprocess that tears down immediately afterwards —
-            # shutdown(wait=True) only joins THIS exporter's threads, not
-            # MLflow's async-logging queue. Without this flush the subprocess
-            # exits before traces.json uploads, leaving a trace whose info is
-            # searchable but whose spans 404 (MlflowTraceDataNotFound) — i.e.
-            # an empty/unreadable trace in the UI. terminate=False keeps the
-            # queue alive so flow runs with multiple crews still export.
+            # mlflow_setup sets enable_async_logging(False), so end_trace should
+            # upload span data synchronously; this flush is a belt-and-suspenders
+            # no-op in that case. If async logging is ever on, end_trace writes the
+            # trace *info* synchronously but uploads the span-data artifact
+            # (traces.json) on a background thread that the subprocess can kill
+            # before it finishes, leaving a trace whose info is searchable but whose
+            # spans 404 (MlflowTraceDataNotFound). terminate=False keeps the queue
+            # alive so flow runs with multiple crews still export.
             try:
                 import mlflow
                 mlflow.flush_trace_async_logging(terminate=False)
@@ -814,7 +872,8 @@ class KasalMLflowSpanExporter(SpanExporter):
             f"buffer_size={buf_size}, already_flushed={flushed}, is_flow={is_flow}"
         )
 
-        # Flush remaining buffered spans if not already flushed
+        # Flush remaining buffered spans if not already flushed (safety net for
+        # executions that ended without a crew_completed/flow_completed event).
         has_remaining = buf_size > 0 and not flushed
 
         if has_remaining:
@@ -825,7 +884,6 @@ class KasalMLflowSpanExporter(SpanExporter):
                     f"[OTel-MLflow][{self._job_id}] Error flushing on shutdown: {e}"
                 )
 
-        self._executor.shutdown(wait=True)
         logger.info(f"[OTel-MLflow][{self._job_id}] shutdown() complete")
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:

@@ -20,7 +20,91 @@ from src.services.otel_tracing.mlflow_setup import (
     execute_with_mlflow_trace_async,
     post_execution_mlflow_cleanup,
     _try_import_mlflow,
+    _build_uc_trace_location,
+    KASAL_TRACE_TABLE_PREFIX,
 )
+
+
+class TestBuildUcTraceLocation:
+    """UC trace location keeps trace span data in Unity Catalog Delta tables
+    (in-network via SQL warehouse) instead of a traces.json blob in workspace
+    object storage that a serverless App can't reach."""
+
+    def test_none_when_catalog_or_schema_missing(self):
+        log = logging.getLogger("t")
+        assert _build_uc_trace_location(None, "s", "wh", log) is None
+        assert _build_uc_trace_location("c", None, "wh", log) is None
+        assert _build_uc_trace_location(None, None, "wh", log) is None
+
+    def test_none_when_warehouse_missing(self):
+        # Warehouse id is required: MLflow runs the trace-table DDL through it, and
+        # a missing id raises an opaque "bad argument type for built-in operation".
+        log = logging.getLogger("t")
+        assert _build_uc_trace_location("c", "s", None, log) is None
+        assert _build_uc_trace_location("c", "s", "", log) is None
+
+    def test_none_when_schema_is_not_a_string(self):
+        # Regression: the config field is `db_schema` (aliased "schema"); reading
+        # `config.schema` returns BaseModel.schema (a METHOD), which previously
+        # reached MLflow as schema_name and raised the opaque
+        # "bad argument type for built-in operation". The helper must reject it.
+        log = logging.getLogger("t")
+
+        class _M:
+            def schema(self):
+                return {}
+
+        assert _build_uc_trace_location("cat", _M().schema, "wh", log) is None
+        assert _build_uc_trace_location(_M().schema, "sch", "wh", log) is None
+
+    def test_databricks_config_schema_is_read_via_db_schema(self):
+        # Locks in the real-world gotcha: getattr(config, "schema") is a method,
+        # getattr(config, "db_schema") is the value.
+        from src.schemas.databricks_config import DatabricksConfigResponse
+
+        cfg = DatabricksConfigResponse.model_construct(
+            warehouse_id="wh-1", catalog="cat", db_schema="sch"
+        )
+        assert callable(getattr(cfg, "schema", None))  # the trap
+        assert getattr(cfg, "db_schema", None) == "sch"  # the correct field
+
+    def test_none_when_unitycatalog_unavailable(self):
+        # Simulate MLflow < 3.11 (no UnityCatalog trace-location entity).
+        log = logging.getLogger("t")
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "mlflow.entities.trace_location":
+                raise ImportError("not available")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            assert _build_uc_trace_location("c", "s", "wh", log) is None
+
+    def test_builds_unitycatalog_when_available(self):
+        log = logging.getLogger("t")
+        captured = {}
+
+        class _FakeUC:
+            def __init__(self, catalog_name, schema_name, table_prefix):
+                captured.update(
+                    catalog_name=catalog_name,
+                    schema_name=schema_name,
+                    table_prefix=table_prefix,
+                )
+
+        fake_mod = MagicMock()
+        fake_mod.UnityCatalog = _FakeUC
+        with patch.dict("sys.modules", {"mlflow.entities.trace_location": fake_mod}):
+            result = _build_uc_trace_location("cat", "sch", "wh-1", log)
+
+        assert isinstance(result, _FakeUC)
+        assert captured == {
+            "catalog_name": "cat",
+            "schema_name": "sch",
+            "table_prefix": KASAL_TRACE_TABLE_PREFIX,
+        }
 
 
 # ---------------------------------------------------------------------------
