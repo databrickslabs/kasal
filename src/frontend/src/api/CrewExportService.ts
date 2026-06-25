@@ -1,5 +1,8 @@
 import { apiClient as API } from '../config/api/ApiConfig';
 import {
+  AppDeploymentRequest,
+  AppDeploymentResponse,
+  AppDeploymentStatusResponse,
   CrewExportRequest,
   CrewExportResponse,
   DeploymentRequest,
@@ -82,6 +85,45 @@ export class CrewExportService {
       return response.data;
     } catch (error) {
       console.error('Error deploying crew:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Deploy crew as a Databricks App directly from the UI (background job).
+   * Returns a deployment_id to poll with getAppDeploymentStatus.
+   */
+  static async deployApp(
+    crewId: string,
+    request: AppDeploymentRequest
+  ): Promise<AppDeploymentResponse> {
+    try {
+      const response = await API.post<AppDeploymentResponse>(
+        `/crews/${crewId}/deploy-app`,
+        request
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error deploying crew app:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Poll the status of a Databricks Apps deployment started via deployApp.
+   */
+  static async getAppDeploymentStatus(
+    crewId: string,
+    deploymentId: string
+  ): Promise<AppDeploymentStatusResponse> {
+    try {
+      const response = await API.get<AppDeploymentStatusResponse>(
+        `/crews/${crewId}/deploy-app/status`,
+        { params: { deployment_id: deploymentId } }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching app deployment status:', error);
       throw error;
     }
   }

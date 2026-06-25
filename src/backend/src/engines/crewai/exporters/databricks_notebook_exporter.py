@@ -8,7 +8,7 @@ import logging
 import aiofiles
 from .base_exporter import BaseExporter
 from .yaml_generator import YAMLGenerator
-from .code_generator import CodeGenerator
+from .code_generator import CodeGenerator, _parse_task_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,18 @@ class DatabricksNotebookExporter(BaseExporter):
         deploy_catalog = crew_data.get('databricks_catalog') or 'main'
         deploy_schema = crew_data.get('databricks_schema') or 'agents'
 
+        # Crew-level execution settings (process, planning, reasoning, manager,
+        # memory) so exports match Kasal's runtime instead of forcing sequential.
+        crew_config = {
+            'process': crew_data.get('process') or 'sequential',
+            'planning': bool(crew_data.get('planning')),
+            'planning_llm': crew_data.get('planning_llm'),
+            'reasoning': bool(crew_data.get('reasoning')),
+            'reasoning_llm': crew_data.get('reasoning_llm'),
+            'manager_llm': crew_data.get('manager_llm'),
+            'memory': crew_data.get('memory', True),
+        }
+
         # Determine if this is a deployment-only export
         deployment_only = include_deployment and not include_evaluation and not include_tracing
         logger.info(f"[Export Logic] Deployment-only mode: {deployment_only}")
@@ -113,7 +125,7 @@ class DatabricksNotebookExporter(BaseExporter):
             ))
 
             cells.append(self._create_code_cell(
-                await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers)
+                await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers, crew_config=crew_config)
             ))
 
         else:
@@ -199,26 +211,27 @@ class DatabricksNotebookExporter(BaseExporter):
                 agents,
                 tasks,
                 tools,
-                process_type='sequential',
+                process_type=crew_config['process'],
                 include_comments=False,
                 for_notebook=True,
-                mcp_servers=mcp_servers
+                mcp_servers=mcp_servers,
+                crew_config=crew_config
             )
             cells.append(self._create_code_cell(crew_code))
 
-            # 14. Execution instructions (markdown)
+            # 14. Conversation layer instructions (markdown)
             cells.append(self._create_markdown_cell(
-                "## Execute the Crew"
+                "## Chat with the Crew (Conversational Layer)\n\n"
+                "Call `chat(\"your message\")` repeatedly. The layer keeps multi-turn "
+                "conversation state, asks a clarifying question when the request is "
+                "missing details, and runs the crew once there's enough information."
             ))
 
-            # 15. Main execution logic (code)
-            main_code = self.code_generator.generate_main_code(
+            # 15. Conversational multi-turn execution layer (code)
+            main_code = self.code_generator.generate_conversation_main_code(
                 sanitized_name,
                 sample_inputs={'topic': 'Artificial Intelligence trends in 2025'},
-                include_comments=False,
-                for_notebook=True,
-                include_tracing=include_tracing,
-                mcp_servers=mcp_servers
+                has_mcp=bool(mcp_servers),
             )
             cells.append(self._create_code_cell(main_code))
 
@@ -248,7 +261,7 @@ class DatabricksNotebookExporter(BaseExporter):
                 ))
 
                 cells.append(self._create_code_cell(
-                    await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers)
+                    await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers, crew_config=crew_config)
                 ))
 
         # Create notebook structure
@@ -949,7 +962,8 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
         model_override: Optional[str] = None,
         catalog: str = "main",
         schema: str = "agents",
-        mcp_servers: Optional[List[Dict[str, Any]]] = None
+        mcp_servers: Optional[List[Dict[str, Any]]] = None,
+        crew_config: Optional[Dict[str, Any]] = None
     ) -> str:
         """Generate Databricks agent deployment code using MLflow 3.x ResponsesAgent with custom tools
 
@@ -1033,6 +1047,46 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
             block.append("            print('MCP setup failed: ' + str(_mcp_err))")
             mcp_setup_code = "        mcp_tools = []\n" + "\n".join(block) + "\n"
 
+        # Crew-level execution settings for the served crew (brace-free injections).
+        crew_config = crew_config or {}
+        _proc = crew_config.get('process') or 'sequential'
+        deploy_process = 'Process.hierarchical' if _proc == 'hierarchical' else 'Process.sequential'
+
+        # Reasoning → a bounded PlanningConfig (built once, shared by agents).
+        # reasoning_llm drives the reasoning loop; otherwise the agent's own LLM.
+        reasoning_setup = ''
+        reasoning_arg = ''
+        if crew_config.get('reasoning'):
+            _rl = crew_config.get('reasoning_llm')
+            _rl_kw = ("llm=self._build_llm('" + str(_rl) + "')") if _rl else ''
+            reasoning_setup = (
+                "        from crewai.agent.planning_config import PlanningConfig\n"
+                "        _planning_cfg = PlanningConfig(reasoning_effort='low', max_attempts=1, "
+                "max_steps=3, max_step_iterations=3, step_timeout=20, max_replans=0"
+                + ((", " + _rl_kw) if _rl_kw else "") + ")\n"
+            )
+            reasoning_arg = ',\n                planning_config=_planning_cfg'
+
+        crew_extra_lines = []
+        if _proc == 'hierarchical' and crew_config.get('manager_llm'):
+            crew_extra_lines.append("            manager_llm=self._build_llm('" + str(crew_config['manager_llm']) + "'),")
+        if crew_config.get('planning'):
+            crew_extra_lines.append("            planning=True,")
+            if crew_config.get('planning_llm'):
+                crew_extra_lines.append("            planning_llm=self._build_llm('" + str(crew_config['planning_llm']) + "'),")
+        crew_extra_lines.append("            memory=" + ("True" if crew_config.get('memory', True) else "False") + ",")
+        crew_extra_args = ("\n" + "\n".join(crew_extra_lines)) if crew_extra_lines else ""
+
+        # LLM guardrails keyed by the same task key the embedded YAML uses.
+        import json as _json_gr
+        _gr_map = {}
+        for _t in tasks:
+            _g = _parse_task_guardrail(_t)
+            if _g and _g[0] == 'llm':
+                _key = _t.get('name', 'task').lower().replace(' ', '_')
+                _gr_map[_key] = {'description': _g[1], 'llm_model': _g[2]}
+        llm_guardrails_repr = repr(_json_gr.dumps(_gr_map))
+
         # Use the working approach - generate agent code using f-string with properly doubled braces
         return f'''"""
 Deploy Crew as Model Serving Endpoint
@@ -1080,12 +1134,17 @@ print("\\nCreating agent Python file...")
 escaped_agents = fixed_agents_yaml.replace('\\\\', '\\\\\\\\').replace("'", "\\\\'").replace('\\n', '\\\\n')
 escaped_tasks = fixed_tasks_yaml.replace('\\\\', '\\\\\\\\').replace("'", "\\\\'").replace('\\n', '\\\\n')
 
+# LLM guardrails baked as a JSON string and escaped for single-quote embedding.
+guardrails_json = {llm_guardrails_repr}
+escaped_guardrails = guardrails_json.replace('\\\\', '\\\\\\\\').replace("'", "\\\\'")
+
 agent_code = f"""import os
 import mlflow
 from mlflow.pyfunc import ResponsesAgent
 from mlflow.models import set_model
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 import yaml
+import json
 import sys
 
 if not hasattr(sys.stdout, 'isatty'):
@@ -1095,10 +1154,32 @@ if not hasattr(sys.stderr, 'isatty'):
 
 AGENTS_YAML = '{{escaped_agents}}'
 TASKS_YAML = '{{escaped_tasks}}'
+LLM_GUARDRAILS = json.loads('{{escaped_guardrails}}')
 
 class CrewAgentWrapper(ResponsesAgent):
     def __init__(self):
         self.crew = None
+
+    def _build_llm(self, llm_model, temperature=0.7):
+        # Codex-aware LLM builder (Responses API for gpt-5-3-codex), reused for
+        # agents, manager_llm, planning_llm and LLM guardrails.
+        if not llm_model.startswith('databricks/'):
+            llm_model = 'databricks/' + llm_model
+        bare_model = llm_model.replace('databricks/', '')
+        if 'gpt-5-3-codex' in bare_model.lower():
+            from crewai.llms.providers.openai.completion import OpenAICompletion
+            from databricks.sdk import WorkspaceClient
+            cfg = WorkspaceClient().config
+            host = cfg.host.rstrip('/')
+            token = cfg.token
+            if not token:
+                _auth = (cfg.authenticate() or dict()).get('Authorization', '')
+                token = _auth.split(' ', 1)[1] if _auth.startswith('Bearer ') else (os.environ.get('DATABRICKS_TOKEN') or '')
+            gateway_on = os.environ.get('DATABRICKS_AI_GATEWAY_ENABLED', 'false').lower() in ('1', 'true', 'yes')
+            base_path = 'ai-gateway/openai/v1' if gateway_on else 'serving-endpoints'
+            return OpenAICompletion(model=bare_model, api='responses', base_url=host + '/' + base_path, api_key=token, timeout=300)
+        from crewai import LLM
+        return LLM(model=llm_model, temperature=temperature)
 
     def load_context(self, context):
         print('Initializing crew...')
@@ -1106,53 +1187,32 @@ class CrewAgentWrapper(ResponsesAgent):
         agents_config = yaml.safe_load(AGENTS_YAML)
         tasks_config = yaml.safe_load(TASKS_YAML)
         agents_list = []
-{mcp_setup_code}        for name, data in agents_config.items():
-            llm_model = data.get('llm', 'databricks/databricks-llama-4-maverick')
-            if not llm_model.startswith('databricks/'):
-                llm_model = 'databricks/' + llm_model
-            bare_model = llm_model.replace('databricks/', '')
-            if 'gpt-5-3-codex' in bare_model.lower():
-                # gpt-5-3-codex ONLY supports the Databricks Responses API.
-                # Resolve host/token from the SDK, which auto-authenticates inside
-                # Model Serving (no DATABRICKS_HOST/TOKEN env vars required).
-                from crewai.llms.providers.openai.completion import OpenAICompletion
-                from databricks.sdk import WorkspaceClient
-                cfg = WorkspaceClient().config
-                host = cfg.host.rstrip('/')
-                # In Model Serving the credential is usually OAuth/M2M, so
-                # cfg.token is empty; derive a bearer from cfg.authenticate()
-                # (the SDK's resolved auth headers) so api_key is never None.
-                token = cfg.token
-                if not token:
-                    _auth = (cfg.authenticate() or dict()).get('Authorization', '')
-                    token = _auth.split(' ', 1)[1] if _auth.startswith('Bearer ') else (os.environ.get('DATABRICKS_TOKEN') or '')
-                gateway_on = os.environ.get('DATABRICKS_AI_GATEWAY_ENABLED', 'false').lower() in ('1', 'true', 'yes')
-                base_path = 'ai-gateway/openai/v1' if gateway_on else 'serving-endpoints'
-                llm = OpenAICompletion(model=bare_model, api='responses', base_url=host + '/' + base_path, api_key=token, timeout=300)
-            else:
-                llm = LLM(model=llm_model, temperature=data.get('temperature', 0.7))
+{reasoning_setup}{mcp_setup_code}        for name, data in agents_config.items():
+            llm = self._build_llm(data.get('llm', 'databricks/databricks-llama-4-maverick'), data.get('temperature', 0.7))
             agent = Agent(
                 role=data['role'],
                 goal=data['goal'],
                 backstory=data['backstory'],
                 llm=llm,
                 verbose=data.get('verbose', True),
-                allow_delegation=data.get('allow_delegation', False){mcp_tools_arg}
+                allow_delegation=data.get('allow_delegation', False){reasoning_arg}{mcp_tools_arg}
             )
             agents_list.append(agent)
         tasks_list = []
         for name, data in tasks_config.items():
             agent_idx = list(agents_config.keys()).index(data['agent'])
-            task = Task(
-                description=data['description'],
-                expected_output=data['expected_output'],
-                agent=agents_list[agent_idx]
-            )
+            task_kwargs = dict(description=data['description'], expected_output=data['expected_output'], agent=agents_list[agent_idx])
+            _gr = LLM_GUARDRAILS.get(name)
+            if _gr:
+                from crewai.tasks.llm_guardrail import LLMGuardrail
+                _gr_llm = self._build_llm(_gr['llm_model']) if _gr.get('llm_model') else agents_list[agent_idx].llm
+                task_kwargs['guardrail'] = LLMGuardrail(description=_gr['description'], llm=_gr_llm)
+            task = Task(**task_kwargs)
             tasks_list.append(task)
         self.crew = Crew(
             agents=agents_list,
             tasks=tasks_list,
-            process=Process.sequential,
+            process={deploy_process},{crew_extra_args}
             verbose=True
         )
         print('Crew initialized')

@@ -117,13 +117,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+# NOTE: src/engines/crewai/exporters/templates/ holds a bundled Databricks
+# agent-app TEMPLATE shipped verbatim to exported projects. Its *.py files
+# contain {{TOKEN}} placeholders (invalid Python until rendered) and import
+# packages (crewai, mlflow.genai) not in this backend's env, so every linter
+# below must skip that tree.
+
 [tool.black]
 line-length = 88
 target-version = ["py311"]
+extend-exclude = "src/engines/crewai/exporters/templates/"
 
 [tool.isort]
 profile = "black"
 line_length = 88
+extend_skip_glob = ["*/exporters/templates/*"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -131,6 +139,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+exclude = ["src/engines/crewai/exporters/templates/"]
 
 [tool.ruff]
 line-length = 88
@@ -142,6 +151,7 @@ exclude = [
     ".venv",
     "__pycache__",
     "alembic",
+    "src/engines/crewai/exporters/templates",
 ]
 
 [tool.pytest.ini_options]

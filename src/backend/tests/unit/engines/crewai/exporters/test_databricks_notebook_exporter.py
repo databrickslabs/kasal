@@ -847,3 +847,107 @@ class TestExportProducesNonBrokenNotebook:
         joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
         assert 'os.getenv("CATALOG_NAME", "main")' in joined
         assert 'os.getenv("SCHEMA_NAME", "agents")' in joined
+
+    def _full_crew(self, **extra):
+        crew = {
+            'id': 'x', 'name': 'Full Crew',
+            'agents': [
+                {'id': 'a1', 'name': 'Researcher', 'role': 'R', 'goal': 'g', 'backstory': 'b',
+                 'llm': 'databricks-claude-opus-4-5', 'tools': []},
+                {'id': 'a2', 'name': 'Writer', 'role': 'W', 'goal': 'g', 'backstory': 'b',
+                 'llm': 'databricks-claude-opus-4-5', 'tools': []},
+            ],
+            'tasks': [
+                {'id': 't1', 'name': 'Gather', 'description': 'd', 'expected_output': 'o', 'agent_id': 'a1',
+                 'llm_guardrail': {'description': 'Must have 3 links', 'llm_model': 'databricks-llama-4-maverick'}},
+                {'id': 't2', 'name': 'Write', 'description': 'd', 'expected_output': 'o', 'agent_id': 'a2',
+                 'guardrail': 'empty_data_processing'},
+            ],
+        }
+        crew.update(extra)
+        return crew
+
+    @pytest.mark.asyncio
+    async def test_hierarchical_process_and_manager_in_execute_and_deploy(self, exporter):
+        """Hierarchical crews export as hierarchical with a manager_llm (not forced sequential)."""
+        crew = self._full_crew(process='hierarchical', manager_llm='databricks-claude-opus-4-5')
+        r = await exporter.export(crew, {'include_deployment': True})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert 'Process.hierarchical' in joined
+        assert 'manager_llm=' in joined
+        assert 'Process.sequential' not in joined.split('def predict')[0]  # no stray sequential in crew build
+
+    @pytest.mark.asyncio
+    async def test_planning_reasoning_memory_exported(self, exporter):
+        """Planning (Crew), reasoning (Agent PlanningConfig + reasoning_llm) and memory."""
+        crew = self._full_crew(planning=True, planning_llm='databricks-claude-opus-4-5',
+                               reasoning=True, reasoning_llm='databricks-llama-4-maverick', memory=True)
+        r = await exporter.export(crew, {'include_deployment': True})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert 'planning=True' in joined
+        assert 'planning_llm=' in joined
+        # reasoning → bounded PlanningConfig on agents, using the reasoning_llm
+        assert 'planning_config' in joined
+        assert 'PlanningConfig(' in joined
+        assert 'databricks/databricks-llama-4-maverick' in joined  # reasoning_llm built
+        assert 'memory=True' in joined
+
+    @pytest.mark.asyncio
+    async def test_llm_guardrail_in_execute_and_deploy(self, exporter):
+        """LLM guardrails map to CrewAI LLMGuardrail in both execute and deploy paths."""
+        r = await exporter.export(self._full_crew(), {'include_deployment': True})
+        code_cells = [''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code']
+        joined = '\n'.join(code_cells)
+        assert 'LLMGuardrail(description=' in joined            # execute cell
+        assert 'LLM_GUARDRAILS = json.loads(' in joined          # deploy wrapper embed
+        # code/factory guardrail is surfaced as a TODO, not silently dropped
+        assert "guardrail 'empty_data_processing'" in joined
+
+    @pytest.mark.asyncio
+    async def test_conversation_layer_baked_into_notebook(self, exporter):
+        """Every notebook gets a multi-turn, info-gathering conversation Flow."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'), {})
+        conv = next(''.join(c['source']) for c in r['notebook']['cells']
+                    if c['cell_type'] == 'code' and 'class ChatFlow' in ''.join(c['source']))
+        # Flow + persistence + the three info-gathering branches + chat() helper
+        assert '@persist()' in conv
+        assert 'class ChatFlow(Flow[ChatState])' in conv
+        assert 'handle_pleasantry' in conv and 'handle_need_info' in conv and 'handle_ready' in conv
+        assert 'def chat(message)' in conv
+        # async methods + kickoff_async so it survives the notebook event loop
+        assert 'async def classify_message' in conv
+        assert 'kickoff_async' in conv
+
+    @pytest.mark.asyncio
+    async def test_conversation_layer_runs_crew(self, exporter):
+        """The 'ready' branch runs the synthesized crew (non-MCP path)."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'), {})
+        conv = next(''.join(c['source']) for c in r['notebook']['cells']
+                    if c['cell_type'] == 'code' and 'class ChatFlow' in ''.join(c['source']))
+        assert 'await crew.kickoff_async(inputs=inputs)' in conv
+
+    @pytest.mark.asyncio
+    async def test_conversation_layer_runs_crew_with_mcp(self, exporter):
+        """With MCP, the 'ready' branch runs create_crew under the adapter context."""
+        crew = self._mcp_crew([{
+            'name': 'nemotemo',
+            'server_url': 'https://ws.cloud.databricks.com/api/2.0/mcp/external/nemotemo',
+            'server_type': 'streamable', 'auth_type': 'databricks_spn',
+        }])
+        r = await exporter.export(crew, {})
+        conv = next(''.join(c['source']) for c in r['notebook']['cells']
+                    if c['cell_type'] == 'code' and 'class ChatFlow' in ''.join(c['source']))
+        assert 'with MCPServerAdapter(mcp_server_params) as mcp_tools:' in conv
+        assert 'active_crew = create_crew(mcp_tools=mcp_tools)' in conv
+        assert 'await active_crew.kickoff_async(inputs=inputs)' in conv
+
+    @pytest.mark.asyncio
+    async def test_default_sequential_when_no_settings(self, exporter):
+        """A plain crew (no settings) stays sequential with no planning/manager."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'),
+                                  {'include_deployment': True})
+        crew_cell = next(''.join(c['source']) for c in r['notebook']['cells']
+                         if c['cell_type'] == 'code' and 'crew = Crew(' in ''.join(c['source']))
+        assert 'Process.sequential' in crew_cell
+        assert 'planning=True' not in crew_cell
+        assert 'manager_llm=' not in crew_cell
