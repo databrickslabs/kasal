@@ -22,9 +22,18 @@ def test_generate_task_template_stays_on_a_diet():
     assert "TOOL CATALOG" not in GENERATE_TASK_TEMPLATE
     assert "PowerBIAnalysisTool" not in GENERATE_TASK_TEMPLATE
 
-    # The contract pieces survive.
-    for marker in ("QUALITY REQUIREMENTS", "DELIVERABLE OUTPUT RULE",
-                   "llm_guardrail", "advanced_config", "Available tools"):
+    # The contract pieces survive. Section headers were shortened in the diet
+    # ("QUALITY REQUIREMENTS" -> "QUALITY:", "DELIVERABLE OUTPUT RULE" ->
+    # "DELIVERABLE:") and the "advanced_config" mention was dropped entirely —
+    # the template now states "the platform fills defaults", so the LLM no longer
+    # needs to be told about it. The essential output contract still survives.
+    for marker in (
+        "QUALITY",
+        "DELIVERABLE",
+        "expected_output",
+        "llm_guardrail",
+        "Available tools",
+    ):
         assert marker in GENERATE_TASK_TEMPLATE, marker
 
 
