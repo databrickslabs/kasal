@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
-from src.services.dispatcher_service import DispatcherService
+from src.services.dispatcher_service import DEFAULT_DISPATCHER_MODEL, DispatcherService
 from src.services.tool_service import ToolService
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
@@ -102,10 +102,13 @@ async def detect_intent_only(
     available_tools = await _fetch_available_tools(session, group_context)
 
     # Only detect intent without dispatching
+    # Intent classification always rides the fast model chain; the caller's
+    # model is passed only as a last-resort fallback (see detect_intent).
     intent_result = await dispatcher_service.detect_intent(
         request.message,
-        request.model or "databricks-gpt-5-3-codex",
+        DEFAULT_DISPATCHER_MODEL,
         available_tools=available_tools,
+        last_resort_model=request.model,
     )
 
     # Create response
