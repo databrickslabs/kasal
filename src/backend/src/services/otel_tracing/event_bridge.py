@@ -72,6 +72,16 @@ _EVENT_SPAN_MAP = {
 # Events to skip (too noisy)
 _SKIP_EVENTS = {"LLMStreamChunkEvent"}
 
+# Tool-call span names (by _EVENT_SPAN_MAP span_name) that we ALSO mirror into
+# the active MLflow trace so tool/MCP calls show up in the UC trace
+# (kasal_otel_spans). Native mlflow.crewai.autolog captures crew/task/agent/LLM
+# spans but NOT tool calls. We bridge the generic CrewAI ToolUsage events, which
+# fire for every tool — built-in, custom, and MCP (Genie) — so coverage is
+# uniform. The MCP-specific events stay in the Kasal UI trace only (bridging
+# them too would double-count, since MCP tools also fire ToolUsage events).
+_MLFLOW_TOOL_START_SPANS = {"CrewAI.tool.execute"}
+_MLFLOW_TOOL_END_SPANS = {"CrewAI.tool.complete", "CrewAI.tool.error"}
+
 # Tools whose spans are redundant with the richer ``Memory*`` events emitted
 # by CrewAI's unified Memory class. We absorb them to show one span per
 # logical memory operation, not three.
@@ -214,6 +224,11 @@ class OTelEventBridge:
         self._guardrail_owner_agent: Optional[str] = None
         self._guardrail_owner_task: Optional[str] = None
         self._guardrail_owner_task_id: Optional[str] = None
+        # Open MLflow tool spans (LIFO), bridged into the active autolog trace so
+        # tool/MCP calls land in the UC trace. CrewAI tool usage is synchronous
+        # and properly bracketed (Started -> tool runs -> Finished/Error), so a
+        # stack correctly pairs each finish with its start.
+        self._mlflow_tool_spans: list = []
 
     def register(self, event_bus: Any) -> int:
         """Register span-creating handlers for all available CrewAI event types.
@@ -479,6 +494,11 @@ class OTelEventBridge:
                 else:
                     output = "(no memories matched the query)"
 
+            # Mirror tool calls into the active MLflow trace (UC tables). Done
+            # outside the OTel span block so MLflow nests under autolog's span,
+            # not our OTel span. Never breaks the existing OTel path on failure.
+            self._bridge_tool_to_mlflow(span_name, tool_name, output, event)
+
             with self._tracer.start_as_current_span(span_name) as span:
                 if not span.is_recording():
                     logger.warning(
@@ -523,6 +543,63 @@ class OTelEventBridge:
                 f"[OTel-Bridge][{self._job_id}] Error emitting span "
                 f"{span_name}/{event_type}: {e}",
                 exc_info=True,
+            )
+
+    def _bridge_tool_to_mlflow(
+        self, span_name: str, tool_name: str, output: str, event: Any
+    ) -> None:
+        """Mirror a CrewAI tool call into the active MLflow trace.
+
+        Native ``mlflow.crewai.autolog`` records crew/task/agent/LLM spans but
+        not tool calls, so MCP/Genie tool usage was missing from the UC trace.
+        We open an MLflow span on tool start and close it on finish/error,
+        nesting under the currently-active autolog span. We only ever start a
+        span when there IS an active span — otherwise the tool call would become
+        a separate root trace instead of nesting. All failures are swallowed so
+        tracing never affects crew execution.
+        """
+        is_start = span_name in _MLFLOW_TOOL_START_SPANS
+        is_end = span_name in _MLFLOW_TOOL_END_SPANS
+        if not (is_start or is_end):
+            return
+        try:
+            import mlflow
+        except Exception:
+            return
+        try:
+            if is_start:
+                # Only nest under an active autolog span; never orphan a root.
+                if mlflow.get_current_active_span() is None:
+                    return
+                cm = mlflow.start_span(name=tool_name or "tool", span_type="TOOL")
+                span = cm.__enter__()
+                try:
+                    tool_args = getattr(event, "tool_args", None)
+                    if hasattr(span, "set_inputs"):
+                        span.set_inputs(
+                            {"tool": tool_name, "args": _safe_str(tool_args, 4000)}
+                            if tool_args is not None
+                            else {"tool": tool_name}
+                        )
+                except Exception:
+                    pass
+                self._mlflow_tool_spans.append((cm, span))
+            else:  # finish / error
+                if not self._mlflow_tool_spans:
+                    return
+                cm, span = self._mlflow_tool_spans.pop()
+                try:
+                    if output and hasattr(span, "set_outputs"):
+                        span.set_outputs({"result": _safe_str(output, 8000)})
+                    if span_name == "CrewAI.tool.error" and hasattr(span, "set_status"):
+                        span.set_status("ERROR")
+                except Exception:
+                    pass
+                cm.__exit__(None, None, None)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] MLflow tool-span bridge failed for %s: %s",
+                self._job_id, span_name, e,
             )
 
     def _set_extra_attributes(self, span: Any, event: Any) -> None:
