@@ -692,6 +692,76 @@ class TestDetectIntent:
 
 
 # ===================================================================
+# Tests for the ChatMode intent fast-path (skips the LLM round-trip)
+# ===================================================================
+
+
+class TestChatModeFastPath:
+    """ChatMode only ever builds crews, so detect_intent short-circuits to
+    generate_crew without calling the intent LLM."""
+
+    @pytest.mark.asyncio
+    async def test_chat_mode_skips_llm_and_returns_crew(self):
+        svc = _build_service()
+        # Template fetch and the LLM should never be touched on the fast-path.
+        svc.template_service.get_template_content = AsyncMock(
+            side_effect=AssertionError("template should not be fetched")
+        )
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+        ) as mock_completion:
+            result = await svc.detect_intent(
+                "get me the latest news from switzerland", "m", chat_mode=True
+            )
+
+        mock_completion.assert_not_awaited()
+        svc.template_service.get_template_content.assert_not_awaited()
+        assert result["intent"] == "generate_crew"
+        assert result["confidence"] == 1.0
+        assert result["source"] == "chat_mode_fast_path"
+        # suggested_prompt is the (steered) message verbatim — the crew prompt.
+        assert result["suggested_prompt"] == "get me the latest news from switzerland"
+        assert "semantic_analysis" in result["extracted_info"]
+
+    @pytest.mark.asyncio
+    async def test_chat_mode_slash_command_still_takes_precedence(self):
+        """Slash commands are detected before the fast-path, so /list etc. keep
+        working in ChatMode without becoming generate_crew."""
+        svc = _build_service()
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+        ) as mock_completion:
+            result = await svc.detect_intent("/list crews", "m", chat_mode=True)
+
+        mock_completion.assert_not_awaited()
+        assert result["intent"] == "catalog_list"
+        assert result["source"] == "slash_command"
+
+    @pytest.mark.asyncio
+    async def test_non_chat_mode_still_calls_llm(self):
+        """The fast-path is gated on chat_mode — the canvas/builder path still
+        runs full LLM intent detection."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+        llm_content = '{"intent": "generate_agent", "confidence": 0.9}'
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=llm_content,
+        ) as mock_completion:
+            result = await svc.detect_intent("create an agent", "m", chat_mode=False)
+
+        mock_completion.assert_awaited()
+        assert result["intent"] == "generate_agent"
+        assert result["source"] == "llm"
+
+
+# ===================================================================
 # Tests for dispatch
 # ===================================================================
 
@@ -817,6 +887,27 @@ class TestDispatch:
 
         streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
         assert streaming_request.agentbricks_endpoints == []
+
+    @pytest.mark.asyncio
+    async def test_dispatch_chat_mode_skips_phantom_intent_log(self):
+        """A chat_mode dispatch takes the intent fast-path (no LLM), so it must
+        NOT record a phantom detect-intent LLM interaction. detect_intent runs
+        for real here (not mocked) to exercise the fast-path end-to-end."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        request = DispatcherRequest(
+            message="get me the latest news", model="test-model", chat_mode=True
+        )
+        mock_task = MagicMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            result = await svc.dispatch(request)
+
+        assert result["service_called"] == "generate_crew"
+        assert result["dispatcher"]["source"] == "chat_mode_fast_path"
+        svc._log_llm_interaction.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_dispatch_execute_crew(self):
@@ -1677,7 +1768,14 @@ class TestEdgeCases:
         request = DispatcherRequest(message="hello", model="m")
         await svc.dispatch(request, group_context=gc)
 
-        svc.detect_intent.assert_awaited_once_with("hello", "m", gc, None, chat_mode=False)
+        # Intent runs on the fast chain (DEFAULT_DISPATCHER_MODEL), with the
+        # user's crew model "m" passed only as a last-resort fallback.
+        from src.services.dispatcher_service import DEFAULT_DISPATCHER_MODEL
+
+        svc.detect_intent.assert_awaited_once_with(
+            "hello", DEFAULT_DISPATCHER_MODEL, gc, None,
+            chat_mode=False, last_resort_model="m",
+        )
 
     def test_semantic_analysis_returns_all_expected_keys(self):
         svc = _build_service()
@@ -3690,18 +3788,21 @@ class TestCircuitBreaker:
         assert "unknown-model" not in DispatcherService._intent_failures
 
     @pytest.mark.asyncio
-    async def test_detect_intent_circuit_breaker_fallback(self):
-        """When circuit breaker is open, detect_intent returns fallback immediately."""
+    async def test_detect_intent_all_circuits_open_fails_fast(self):
+        """When EVERY candidate model's breaker is open, detect_intent fails fast
+        without calling any LLM and returns circuit_breaker_fallback."""
         import time as time_mod
+        from src.services.dispatcher_service import DISPATCHER_FALLBACK_MODELS
 
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
 
-        # Trip the circuit breaker
-        DispatcherService._intent_failures["cb-model"] = {
-            "count": DispatcherService._failure_threshold,
-            "last_failure": time_mod.time(),
-        }
+        # Trip the breaker for the preferred model AND every fallback candidate.
+        for m in ["cb-model", *DISPATCHER_FALLBACK_MODELS]:
+            DispatcherService._intent_failures[m] = {
+                "count": DispatcherService._failure_threshold,
+                "last_failure": time_mod.time(),
+            }
 
         with patch(
             "src.services.dispatcher_service.LLMManager.completion",
@@ -3709,11 +3810,90 @@ class TestCircuitBreaker:
         ) as mock_completion:
             result = await svc.detect_intent("hello", "cb-model")
 
-        # Should NOT have called LLM
+        # No candidate was callable -> no LLM call at all.
         mock_completion.assert_not_awaited()
         assert result["source"] == "circuit_breaker_fallback"
         assert result["intent"] == "generate_crew"
         assert result["confidence"] == svc.DEFAULT_FALLBACK_CONFIDENCE
+
+    @pytest.mark.asyncio
+    async def test_detect_intent_skips_open_breaker_and_uses_fallback(self):
+        """When only the preferred model's breaker is open, detect_intent skips it
+        and succeeds via the next healthy fallback model."""
+        import time as time_mod
+
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        # Only the preferred model is circuit-broken; fallbacks are healthy.
+        DispatcherService._intent_failures["cb-model"] = {
+            "count": DispatcherService._failure_threshold,
+            "last_failure": time_mod.time(),
+        }
+
+        llm_content = (
+            '{"intent": "generate_crew", "confidence": 0.95, '
+            '"extracted_info": {}, "suggested_prompt": "hello"}'
+        )
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=llm_content,
+        ) as mock_completion:
+            result = await svc.detect_intent("hello", "cb-model")
+
+        # A fallback model was called and produced the result.
+        mock_completion.assert_awaited()
+        assert result["source"] == "llm"
+        assert result["intent"] == "generate_crew"
+
+    @pytest.mark.asyncio
+    async def test_detect_intent_falls_back_to_next_model_on_error(self):
+        """When the first model errors, detect_intent retries the next fallback
+        and succeeds with its result."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+
+        good = (
+            '{"intent": "generate_crew", "confidence": 0.95, '
+            '"extracted_info": {}, "suggested_prompt": "hi"}'
+        )
+        # First candidate raises a non-retryable error, second returns valid JSON.
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            side_effect=[RuntimeError("boom"), good],
+        ) as mock_completion:
+            result = await svc.detect_intent("hi", "m")
+
+        assert mock_completion.await_count == 2
+        assert result["source"] == "llm"
+        assert result["intent"] == "generate_crew"
+
+    def test_intent_model_candidates_ordering(self):
+        """Preferred first, then the fast chain, then a last-resort model — deduped."""
+        from src.services.dispatcher_service import (
+            DISPATCHER_FALLBACK_MODELS,
+            DispatcherService,
+        )
+
+        # No preferred model: the fast chain runs first, crew model appended last.
+        cands = DispatcherService._intent_model_candidates(
+            None, "databricks-gpt-5-3-codex"
+        )
+        assert cands == [*DISPATCHER_FALLBACK_MODELS, "databricks-gpt-5-3-codex"]
+
+        # A last-resort already present in the fast chain is not duplicated.
+        dupe = DISPATCHER_FALLBACK_MODELS[0]
+        assert (
+            DispatcherService._intent_model_candidates(None, dupe)
+            == DISPATCHER_FALLBACK_MODELS
+        )
+
+        # A preferred model is tried before the chain.
+        assert DispatcherService._intent_model_candidates("databricks-foo")[0] == (
+            "databricks-foo"
+        )
 
 
 # ===================================================================
