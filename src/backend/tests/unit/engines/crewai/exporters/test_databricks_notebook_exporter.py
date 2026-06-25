@@ -565,3 +565,285 @@ class TestGenerateDeploymentCode:
         assert 'Validation response' in result or 'validation' in result.lower()
         # Should have validation mode check before crew execution
         assert "MLFLOW_VALIDATION_MODE" in result
+
+
+class TestExportProducesNonBrokenNotebook:
+    """Regression tests ensuring the exporter never ships a broken notebook.
+
+    See the broken/fixed notebook pair that motivated these:
+    - BaseTool was imported from the wrong module (crewai_tools instead of crewai.tools)
+    - the deployment cell used `from databricks import agents` but databricks-agents
+      was never installed
+    """
+
+    @pytest.fixture
+    def exporter(self):
+        return DatabricksNotebookExporter()
+
+    @pytest.fixture
+    def sample_agents(self):
+        return [
+            {
+                'name': 'Test Agent',
+                'role': 'Researcher',
+                'goal': 'Research topics',
+                'backstory': 'Expert researcher',
+                'llm': 'databricks-llama-4-maverick',
+            }
+        ]
+
+    @pytest.fixture
+    def sample_tasks(self):
+        return [
+            {
+                'name': 'Test Task',
+                'description': 'Test description',
+                'expected_output': 'Test output',
+                'agent_id': 'test-agent-id',
+            }
+        ]
+
+    @pytest.fixture
+    def sample_crew_data(self):
+        return {
+            'id': 'test-crew-123',
+            'name': 'Test Crew',
+            'agents': [
+                {
+                    'id': 'agent-1',
+                    'name': 'Research Agent',
+                    'role': 'Researcher',
+                    'goal': 'Research',
+                    'backstory': 'Expert',
+                    'llm': 'databricks-llama-4-maverick',
+                    'tools': [],
+                }
+            ],
+            'tasks': [
+                {
+                    'id': 'task-1',
+                    'name': 'Research Task',
+                    'description': 'Research',
+                    'expected_output': 'Report',
+                    'agent_id': 'agent-1',
+                }
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_custom_tools_placeholder_imports_basetool_from_crewai_tools(self, exporter):
+        """BaseTool must be imported from crewai.tools, not crewai_tools (broken)."""
+        result = await exporter._generate_custom_tools_placeholder(['AgentBricksTool'])
+        assert 'from crewai.tools import BaseTool' in result
+        assert 'from crewai_tools import BaseTool' not in result
+
+    def test_install_code_includes_databricks_agents(self, exporter):
+        """Deployment cell uses `from databricks import agents`; it must be installed."""
+        result = exporter._generate_install_code([])
+        assert 'databricks-agents' in result
+
+    @pytest.mark.asyncio
+    async def test_deployment_import_is_satisfied_by_install_cell(self, exporter, sample_agents, sample_tasks):
+        """Every `databricks import` in the deploy cell must have an install line."""
+        deploy = await exporter._generate_deployment_code('test_crew', [], sample_agents, sample_tasks)
+        if 'from databricks import agents' in deploy:
+            assert 'databricks-agents' in exporter._generate_install_code([])
+
+    @pytest.mark.asyncio
+    async def test_all_generated_code_cells_compile(self, exporter, sample_crew_data):
+        """Full export: every code cell must be syntactically valid Python."""
+        import ast
+        result = await exporter.export(
+            sample_crew_data,
+            {'include_evaluation': True, 'include_deployment': True, 'include_tracing': True},
+        )
+        for index, cell in enumerate(result['notebook']['cells']):
+            if cell.get('cell_type') != 'code':
+                continue
+            raw = ''.join(cell['source'])
+            python_src = '\n'.join(
+                line for line in raw.splitlines()
+                if not line.lstrip().startswith(('%', '!'))
+            )
+            if not python_src.strip():
+                continue
+            try:
+                ast.parse(python_src)
+            except SyntaxError as exc:
+                pytest.fail(f"Code cell {index} is broken Python: {exc.msg}\n{raw}")
+
+    def test_validate_code_cells_logs_on_broken_cell(self, exporter):
+        """The validation safety net logs an error for a syntactically broken cell."""
+        broken = [exporter._create_code_cell("def oops(:\n    pass")]
+        with patch('src.engines.crewai.exporters.databricks_notebook_exporter.logger') as mock_logger:
+            exporter._validate_code_cells(broken, 'test_crew')
+            assert mock_logger.error.called
+
+    def test_validate_code_cells_ignores_magics(self, exporter):
+        """Notebook magics (%pip) and shell escapes (!) must not trip validation."""
+        cell = exporter._create_code_cell("%pip install crewai\n!ls -la\nimport os\nprint(os.getcwd())")
+        with patch('src.engines.crewai.exporters.databricks_notebook_exporter.logger') as mock_logger:
+            exporter._validate_code_cells([cell], 'test_crew')
+            assert not mock_logger.error.called
+
+    def _codex_crew(self, model):
+        return {
+            'id': 'x', 'name': 'Codex Crew',
+            'agents': [{'id': 'a1', 'name': 'Gen', 'role': 'R', 'goal': 'g',
+                        'backstory': 'b', 'llm': model, 'tools': []}],
+            'tasks': [{'id': 't1', 'name': 'Do', 'description': 'd',
+                       'expected_output': 'o', 'agent_id': 'a1'}],
+        }
+
+    @pytest.mark.asyncio
+    async def test_codex_model_uses_responses_api(self, exporter):
+        """gpt-5-3-codex must be built via the Responses API, not chat completions."""
+        r = await exporter.export(self._codex_crew('databricks-gpt-5-3-codex'),
+                                  {'include_deployment': True})
+        crew_cell = next(c for c in r['notebook']['cells']
+                         if c['cell_type'] == 'code' and 'make_codex_llm' in ''.join(c['source']))
+        src = ''.join(crew_cell['source'])
+        assert 'api="responses"' in src
+        assert 'OpenAICompletion' in src
+        # Must NOT route codex through the plain chat-completions LLM(...)
+        assert 'LLM(model="databricks/databricks-gpt-5-3-codex")' not in src
+
+    @pytest.mark.asyncio
+    async def test_codex_deployment_wrapper_uses_responses_api(self, exporter):
+        """The deployed ResponsesAgent wrapper must also route codex via Responses API."""
+        r = await exporter.export(self._codex_crew('databricks-gpt-5-3-codex'),
+                                  {'include_deployment': True})
+        deploy = next(c for c in r['notebook']['cells']
+                      if c['cell_type'] == 'code' and 'CrewAgentWrapper' in ''.join(c['source']))
+        src = ''.join(deploy['source'])
+        assert "gpt-5-3-codex" in src and "api='responses'" in src
+        # Token must fall back to cfg.authenticate() so api_key is never None in serving
+        assert 'cfg.authenticate()' in src
+
+    @pytest.mark.asyncio
+    async def test_deployment_wrapper_uses_valid_response_status(self, exporter):
+        """ResponseOutputMessage only allows in_progress/completed/incomplete — never 'failed'."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'),
+                                  {'include_deployment': True})
+        deploy = next(c for c in r['notebook']['cells']
+                      if c['cell_type'] == 'code' and 'CrewAgentWrapper' in ''.join(c['source']))
+        src = ''.join(deploy['source'])
+        assert "'status': 'failed'" not in src
+        assert "'status': 'incomplete'" in src  # error path uses a valid status
+
+    @pytest.mark.asyncio
+    async def test_non_codex_model_uses_standard_llm(self, exporter):
+        """Anthropic/Claude (and other Databricks models) keep the standard LLM(...) path."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'), {})
+        crew_cell = next(c for c in r['notebook']['cells']
+                         if c['cell_type'] == 'code' and 'Agent(' in ''.join(c['source']))
+        src = ''.join(crew_cell['source'])
+        assert 'LLM(model="databricks/databricks-claude-opus-4-5")' in src
+        assert 'make_codex_llm' not in src
+        assert 'OpenAICompletion' not in src
+
+    def _mcp_crew(self, mcp_servers):
+        return {
+            'id': 'x', 'name': 'MCP Crew',
+            'agents': [{'id': 'a1', 'name': 'Gen', 'role': 'R', 'goal': 'g',
+                        'backstory': 'b', 'llm': 'databricks-claude-opus-4-5', 'tools': []}],
+            'tasks': [{'id': 't1', 'name': 'Do', 'description': 'd',
+                       'expected_output': 'o', 'agent_id': 'a1'}],
+            'mcp_servers': mcp_servers,
+        }
+
+    @pytest.mark.asyncio
+    async def test_mcp_databricks_server_wired_into_notebook(self, exporter):
+        """A configured Databricks MCP server is imported, parametrized and executed."""
+        crew = self._mcp_crew([{
+            'name': 'nemotemo',
+            'server_url': 'https://ws.cloud.databricks.com/api/2.0/mcp/external/nemotemo',
+            'server_type': 'streamable', 'auth_type': 'databricks_spn',
+        }])
+        r = await exporter.export(crew, {})
+        cells = [''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code']
+        joined = '\n'.join(cells)
+        # Import added
+        assert 'from crewai_tools import SerperDevTool, MCPServerAdapter' in joined
+        # MCP extra installed so MCPServerAdapter doesn't try to uv-add at runtime
+        assert '"crewai-tools[mcp]" mcp' in joined
+        # Params built portably from the notebook context (no hardcoded host)
+        assert 'mcp_server_params = [' in joined
+        assert 'f"{_mcp_host}/api/2.0/mcp/external/nemotemo"' in joined
+        assert 'ws.cloud.databricks.com' not in joined  # host not hardcoded
+        # Databricks MCP is streamable-HTTP, not SSE (else the adapter times out)
+        assert '"transport": "streamable-http"' in joined
+        # Crew built via create_crew + executed under the adapter context
+        assert 'def create_crew(mcp_tools=None):' in joined
+        assert 'with MCPServerAdapter(mcp_server_params) as mcp_tools:' in joined
+        assert 'active_crew = create_crew(mcp_tools=mcp_tools)' in joined
+
+    @pytest.mark.asyncio
+    async def test_mcp_wired_into_deployment_wrapper(self, exporter):
+        """The deployed ResponsesAgent wrapper must also connect to MCP and pass tools."""
+        crew = self._mcp_crew([{
+            'name': 'nemotemo',
+            'server_url': 'https://ws.cloud.databricks.com/api/2.0/mcp/external/nemotemo',
+            'server_type': 'streamable', 'auth_type': 'databricks_spn',
+        }])
+        r = await exporter.export(crew, {'include_deployment': True})
+        deploy = next(c for c in r['notebook']['cells']
+                      if c['cell_type'] == 'code' and 'CrewAgentWrapper' in ''.join(c['source']))
+        src = ''.join(deploy['source'])
+        assert 'MCPServerAdapter(_mcp_params)' in src
+        assert "transport='streamable-http'" in src
+        assert 'tools=mcp_tools' in src           # injected into the agents
+        assert '"crewai-tools[mcp]"' in src       # added to pip_requirements
+
+    @pytest.mark.asyncio
+    async def test_no_mcp_deployment_wrapper_has_no_adapter(self, exporter):
+        """Without MCP the deployed wrapper must not reference MCPServerAdapter."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'),
+                                  {'include_deployment': True})
+        deploy = next(c for c in r['notebook']['cells']
+                      if c['cell_type'] == 'code' and 'CrewAgentWrapper' in ''.join(c['source']))
+        src = ''.join(deploy['source'])
+        assert 'MCPServerAdapter' not in src
+        assert 'tools=mcp_tools' not in src
+
+    @pytest.mark.asyncio
+    async def test_mcp_third_party_server_uses_env_token(self, exporter):
+        """A non-Databricks MCP server keeps its URL and reads a bearer token from env."""
+        crew = self._mcp_crew([{
+            'name': 'My Tools', 'server_url': 'https://mcp.example.com/sse',
+            'server_type': 'sse', 'auth_type': 'api_key',
+        }])
+        r = await exporter.export(crew, {})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert '"url": "https://mcp.example.com/sse"' in joined
+        assert "os.environ.get('MY_TOOLS_MCP_TOKEN'" in joined
+
+    @pytest.mark.asyncio
+    async def test_no_mcp_servers_keeps_plain_crew(self, exporter):
+        """With no MCP servers the notebook keeps the flat crew (no adapter)."""
+        r = await exporter.export(self._mcp_crew([]), {})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert 'MCPServerAdapter' not in joined
+        assert 'create_crew' not in joined
+        assert 'mcp_server_params' not in joined
+        assert 'crew = Crew(' in joined
+
+    @pytest.mark.asyncio
+    async def test_deploy_uses_configured_catalog_schema(self, exporter):
+        """Deploy cell uses the workspace's configured Databricks catalog/schema."""
+        crew = self._codex_crew('databricks-claude-opus-4-5')
+        crew['databricks_catalog'] = 'nemotemo_catalog'
+        crew['databricks_schema'] = 'kasal'
+        r = await exporter.export(crew, {'include_deployment': True})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert 'os.getenv("CATALOG_NAME", "nemotemo_catalog")' in joined
+        assert 'os.getenv("SCHEMA_NAME", "kasal")' in joined
+
+    @pytest.mark.asyncio
+    async def test_deploy_falls_back_to_default_catalog_schema(self, exporter):
+        """Without a configured catalog/schema the deploy cell falls back to main/agents."""
+        r = await exporter.export(self._codex_crew('databricks-claude-opus-4-5'),
+                                  {'include_deployment': True})
+        joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
+        assert 'os.getenv("CATALOG_NAME", "main")' in joined
+        assert 'os.getenv("SCHEMA_NAME", "agents")' in joined

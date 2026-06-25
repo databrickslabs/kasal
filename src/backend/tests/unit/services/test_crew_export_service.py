@@ -621,3 +621,50 @@ class TestConvertToolIdsToNames:
         """Empty list returns empty list."""
         result = await service._convert_tool_ids_to_names([])
         assert result == []
+
+
+class TestGetDatabricksCatalogSchema:
+    """Tests for _get_databricks_catalog_schema (catalog/schema for deploy cell)."""
+
+    @pytest.fixture
+    def mock_session(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(self, mock_session):
+        return CrewExportService(session=mock_session)
+
+    @pytest.fixture
+    def mock_group_context(self):
+        ctx = MagicMock()
+        ctx.primary_group_id = 'test-group'
+        return ctx
+
+    @pytest.mark.asyncio
+    async def test_returns_catalog_and_schema_value_not_method(self, service, mock_group_context):
+        """Must read the schema VALUE (db_schema), not pydantic's BaseModel.schema method."""
+        from src.schemas.databricks_config import DatabricksConfigResponse
+        # Built by alias 'schema' exactly like DatabricksService.get_databricks_config
+        config = DatabricksConfigResponse(
+            catalog='nemotemo_catalog', schema='kasal',
+            warehouse_id='w', workspace_url='', enabled=True,
+        )
+        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+            MockSvc.return_value.get_databricks_config = AsyncMock(return_value=config)
+            catalog, schema = await service._get_databricks_catalog_schema(mock_group_context)
+        assert catalog == 'nemotemo_catalog'
+        assert schema == 'kasal'  # not "<bound method BaseModel.schema ...>"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_config(self, service, mock_group_context):
+        """No active Databricks config → (None, None) so exporter uses defaults."""
+        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+            MockSvc.return_value.get_databricks_config = AsyncMock(return_value=None)
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None)
+
+    @pytest.mark.asyncio
+    async def test_non_fatal_on_error(self, service, mock_group_context):
+        """Errors are swallowed → (None, None), export still proceeds."""
+        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+            MockSvc.return_value.get_databricks_config = AsyncMock(side_effect=RuntimeError('boom'))
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None)

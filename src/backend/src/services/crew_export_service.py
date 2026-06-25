@@ -125,6 +125,15 @@ class CrewExportService:
                 task_dict = await self._task_to_dict(task)
                 tasks.append(task_dict)
 
+        # Get MCP servers enabled for this workspace. At runtime the engine
+        # auto-attaches all enabled MCP servers to the crew's agents, so the
+        # exported notebook mirrors that by wiring them via MCPServerAdapter.
+        mcp_servers = await self._get_enabled_mcp_servers(group_context)
+
+        # Unity Catalog target (catalog/schema) from the workspace's Databricks
+        # configuration, so the deployment cell deploys to the configured location.
+        catalog, schema = await self._get_databricks_catalog_schema(group_context)
+
         return {
             'id': str(crew.id),
             'name': crew.name,
@@ -132,7 +141,64 @@ class CrewExportService:
             'tasks': tasks,
             'nodes': crew.nodes or [],
             'edges': crew.edges or [],
+            'mcp_servers': mcp_servers,
+            'databricks_catalog': catalog,
+            'databricks_schema': schema,
         }
+
+    async def _get_databricks_catalog_schema(
+        self,
+        group_context: Optional[GroupContext] = None
+    ) -> tuple:
+        """Return (catalog, schema) from the workspace's active Databricks config.
+
+        Non-fatal: returns (None, None) if no config or on error, letting the
+        exporter fall back to its defaults (main/agents).
+        """
+        try:
+            from src.services.databricks_service import DatabricksService
+            group_id = group_context.primary_group_id if group_context else None
+            service = DatabricksService(self.session, group_id=group_id)
+            config = await service.get_databricks_config()
+            # NOTE: the schema field is `db_schema` (aliased to "schema") because
+            # `schema` collides with pydantic's BaseModel.schema method — using
+            # `config.schema` returns the bound method, not the value.
+            catalog = getattr(config, 'catalog', None) if config else None
+            schema = getattr(config, 'db_schema', None) if config else None
+            if catalog and schema:
+                logger.info(f"Export: using Databricks catalog/schema {catalog}.{schema}")
+                return catalog, schema
+        except Exception as e:
+            logger.warning(f"Export: could not load Databricks catalog/schema, using defaults: {e}")
+        return None, None
+
+    async def _get_enabled_mcp_servers(
+        self,
+        group_context: Optional[GroupContext] = None
+    ) -> List[Dict[str, Any]]:
+        """Return the workspace's enabled MCP servers for export (group-aware).
+
+        Failures are non-fatal: a crew should still export without MCP if the
+        lookup fails, so any error is logged and an empty list returned.
+        """
+        try:
+            from src.services.mcp_service import MCPService
+            mcp_service = MCPService(self.session)
+            group_id = group_context.primary_group_id if group_context else None
+            response = await mcp_service.get_all_servers_effective(group_id, enabled_only=True)
+            servers = []
+            for server in response.servers:
+                servers.append({
+                    'name': server.name,
+                    'server_url': server.server_url,
+                    'server_type': getattr(server, 'server_type', 'streamable'),
+                    'auth_type': getattr(server, 'auth_type', 'api_key'),
+                })
+            logger.info(f"Export: found {len(servers)} enabled MCP server(s) for group {group_id}")
+            return servers
+        except Exception as e:
+            logger.warning(f"Export: could not load MCP servers, exporting without MCP: {e}")
+            return []
 
     async def _convert_tool_ids_to_names(self, tool_ids: List[Any]) -> List[str]:
         """
