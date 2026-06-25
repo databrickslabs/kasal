@@ -183,6 +183,59 @@ class TestCompletion:
 
         assert mock_llm.max_tokens == 8000
 
+    @pytest.mark.asyncio
+    async def test_completion_emits_llm_span_when_trace_active(self):
+        """When a trace is active, completion wraps the call in an LLM span and
+        records model/messages as inputs and the response as outputs."""
+        mock_llm = MagicMock()
+        messages = [{"role": "user", "content": "hello"}]
+
+        mock_span = MagicMock()
+        span_cm = MagicMock()
+        span_cm.__enter__ = MagicMock(return_value=mock_span)
+        span_cm.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
+            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="response text"),
+            patch("mlflow.get_current_active_span", return_value=MagicMock()),
+            patch("mlflow.start_span", return_value=span_cm) as mock_start_span,
+        ):
+            result = await LLMManager.completion(
+                messages=messages, model="test-model", temperature=0.0,
+            )
+
+        assert result == "response text"
+        mock_start_span.assert_called_once()
+        assert mock_start_span.call_args.kwargs.get("span_type") == "LLM"
+        inputs = mock_span.set_inputs.call_args.args[0]
+        assert inputs["model"] == "test-model"
+        assert inputs["messages"] == messages
+        assert inputs["temperature"] == 0.0
+        outputs = mock_span.set_outputs.call_args.args[0]
+        assert outputs["response"] == "response text"
+
+    @pytest.mark.asyncio
+    async def test_completion_no_span_when_no_active_trace(self):
+        """With no active trace, completion does NOT open a span (so standalone
+        callers never spawn an orphan root trace) but still returns the result."""
+        mock_llm = MagicMock()
+
+        with (
+            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
+            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="ok"),
+            patch("mlflow.get_current_active_span", return_value=None),
+            patch("mlflow.start_span") as mock_start_span,
+        ):
+            result = await LLMManager.completion(
+                messages=[{"role": "user", "content": "hi"}], model="test-model",
+            )
+
+        assert result == "ok"
+        mock_start_span.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # configure_crewai_llm — helper
