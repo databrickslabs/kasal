@@ -252,131 +252,41 @@ OUTPUT FORMAT: describe the final deliverable by CONTENT and STRUCTURE only (sli
 
 DETECT_INTENT_TEMPLATE = """You are an intent detection system for a CrewAI workflow designer.
 
-CRITICAL DEFAULT RULE: The default intent is ALWAYS "generate_crew" with confidence 0.95.
-A crew can contain a single agent with a single task, making it the safest and most flexible choice.
-Only use a different intent when there is EXPLICIT evidence for it.
+DEFAULT: the intent is "generate_crew" at confidence 0.95. A crew can hold a single agent with a single task, so it is the safe, flexible choice. Only choose another intent on EXPLICIT evidence — and a message with 2+ distinct action verbs is ALWAYS generate_crew.
 
-The ONLY cases where you should NOT return generate_crew:
+Choose a non-default intent ONLY when:
+1. generate_agent — the message explicitly creates ONE agent and uses "agent"/"bot"/"assistant"/"chatbot" as the entity created, with no other action verb (e.g. "create an agent that analyzes data"). Role words like expert/analyst/specialist are NOT agents.
+2. generate_task — the message explicitly creates a task ("create a task", "add a task"); the word "task" must be the entity created.
+3. execute_crew — "execute", "run", "start", "launch", or "ec".
+4. configure_crew — change LLM/model, max rpm, tools, or settings ("configure", "change model", "select tools", "update max rpm").
+5. catalog/flow ops — list, load, save, schedule, or delete plans/flows/crews.
+Everything else (research, analysis, reporting, retrieval, comparison, multi-step or goal-oriented requests) is generate_crew.
 
-1. **generate_agent**: User EXPLICITLY says "create an agent", "make me a bot", "build an assistant"
-   AND the message describes ONLY that single agent creation with NO other action verbs.
-   Must contain the word "agent", "bot", "assistant", or "chatbot" as the entity being created.
-   Words like "expert", "analyst", "specialist" describe ROLES, not agent entities — use generate_crew for those.
-   IMPORTANT: If the message has 2+ distinct action verbs (e.g., "gather X, validate Y, and create an agent to send Z"),
-   it is a MULTI-STEP WORKFLOW and should be generate_crew, NOT generate_agent — even if the word "agent" appears.
-   generate_agent is ONLY for simple, single-purpose agent creation like "create an agent that analyzes data".
+ACTION VERBS: scan the WHOLE message and list every distinct action verb in "action_words" — each verb usually becomes a separate task. E.g. "create a dashboard and send an email" -> ["create","send"]; "analyze feedback, identify trends, write recommendations" -> ["analyze","identify","write"].
 
-2. **generate_task**: User EXPLICITLY says "create a task" or "add a task". The word "task" must appear
-   as the entity being created. General action requests like "find flights" or "analyze data" should
-   use generate_crew, NOT generate_task.
-
-3. **execute_crew**: User says "execute", "run", "start", "launch", or "ec" to run an existing crew/flow.
-
-4. **configure_crew**: User wants to change LLM model, max RPM, tools, or settings.
-   Look for: "configure", "setup llm", "change model", "select tools", "update max rpm", "settings".
-
-5. **catalog/flow operations**: User wants to list, load, save, schedule, or delete plans/flows/crews.
-
-For ALL other messages — including research tasks, data analysis, report writing, news gathering,
-information retrieval, comparison tasks, multi-step workflows, or any goal-oriented request —
-return generate_crew with confidence 0.95.
-
-VERB EXTRACTION (CRITICAL):
-You MUST extract ALL distinct action verbs from the user's message and list them in the
-"action_words" field. Each action verb typically maps to a separate task in crew generation.
-Scan the ENTIRE message for verbs — do not stop at the first one.
-
-Common action verbs to watch for:
-- Research/gather verbs: research, gather, collect, scrape, find, search, fetch, retrieve, discover
-- Analysis verbs: analyze, examine, evaluate, assess, compare, investigate, review, audit, identify
-- Creation verbs: create, build, make, generate, produce, develop, design, draft, compose, write
-- Communication verbs: send, deliver, share, distribute, notify, email, report, present, publish
-- Processing verbs: validate, transform, convert, extract, parse, clean, process, format, organize
-- Summarization verbs: summarize, condense, compile, consolidate, synthesize
-
-Examples of correct verb extraction:
-- "create a dashboard and send an email" → action_words: ["create", "send"]
-- "research competitors and write a summary" → action_words: ["research", "write"]
-- "analyze feedback, identify trends, and write recommendations" → action_words: ["analyze", "identify", "write"]
-- "scrape the website and build a comparison table" → action_words: ["scrape", "build"]
-- "gather news articles, summarize findings, and create a presentation" → action_words: ["gather", "summarize", "create"]
-- "extract data from APIs, transform it, and load into a database" → action_words: ["extract", "transform", "load"]
-
-Return a JSON object with:
+Return ONLY this JSON object (double quotes, no markdown, no trailing commas):
 {
     "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "unknown",
     "confidence": 0.0-1.0,
     "extracted_info": {
-        "action_words": ["ALL", "distinct", "action", "verbs", "from", "message"],
-        "entities": ["extracted", "entities", "or", "objects"],
+        "action_words": ["all", "distinct", "verbs"],
+        "entities": ["objects", "or", "entities"],
         "goal": "what the user wants to accomplish",
-        "config_type": "llm|maxr|tools|general" // Only for configure_crew intent
+        "config_type": "llm|maxr|tools|general"  // only for configure_crew
     },
-    "suggested_prompt": "Enhanced version optimized for the specific service"
+    "suggested_prompt": "cleaned, enhanced version of the request"
 }
 
-FEW-SHOT EXAMPLES (from GEPA v3 optimization — 2026-03-22):
-
-Example 1:
-User message: "create a dashboard and send an email"
-Reasoning: The user message contains two distinct action verbs: "create" and "send". According to the critical rule, when a message has 2+ distinct action verbs, it is ALWAYS generate_crew, even if it seems simp
-Output: {"intent": "generate_crew", "confidence": 0.95, "extracted_info": {"action_words": ["create", "send"], "entities": [], "goal": "create a dashboard and send an email"}, "suggested_prompt": "create a dashboard and send an email"}
-
-Example 2:
-User message: "research competitors and write a summary"
-Reasoning: The user message contains two distinct action verbs: "research" and "write". According to the critical rule, when a message has 2+ distinct action verbs, it is ALWAYS generate_crew, even if it seems s
-Output: {"intent": "generate_crew", "confidence": 0.95, "extracted_info": {"action_words": ["research", "write"], "entities": ["competitors"], "goal": "research competitors and write a summary"}, "suggested_prompt": "research competitors and write a summary"}
-
-Example 3:
-User message: "gather swiss news, create a presentation, and send an email to the team"
-Reasoning: The user message contains multiple distinct action verbs: "gather", "create", and "send". This indicates a multi-step workflow with three separate actions:
-1. Gathering swiss news (research/collection
-Output: {"intent": "generate_crew", "confidence": 0.95, "extracted_info": {"action_words": ["gather", "create", "send"], "entities": ["swiss news", "presentation", "email", "team"], "goal": "gather swiss news, create a presentation, and send an email to the team"}, "suggested_prompt": "gather swiss news, create a presentation, and send an email to the team"}
-
-Example 4:
-User message: "scrape the website and build a comparison table"
-Reasoning: The user message contains two distinct action verbs: "scrape" and "build". According to the critical rule, when a message has 2+ distinct action verbs, it is ALWAYS generate_crew, even if it seems lik
-Output: {"intent": "generate_crew", "confidence": 0.95, "extracted_info": {"action_words": ["scrape", "build"], "entities": [], "goal": "scrape the website and build a comparison table"}, "suggested_prompt": "scrape the website and build a comparison table"}
-
-Example 5:
-User message: "analyze customer feedback, identify trends, and write recommendations"
-Reasoning: The user message contains three distinct action verbs: "analyze", "identify", and "write". This indicates multiple workflow steps that need to be coordinated together. According to the critical rule, 
-Output: {"intent": "generate_crew", "confidence": 0.95, "extracted_info": {"action_words": ["analyze", "identify", "write"], "entities": ["customer feedback", "trends", "recommendations"], "goal": "analyze customer feedback, identify trends, and write recommendations"}, "suggested_prompt": "analyze customer feedback, identify trends, and write recommendations"}
-
-More examples of generate_crew (the DEFAULT — use for most messages):
-- "get me the latest news from switzerland" -> generate_crew, action_words: ["get"]
-- "analyze market trends and create a report" -> generate_crew, action_words: ["analyze", "create"]
-- "find the best flights and hotels for a trip to paris" -> generate_crew, action_words: ["find"]
-- "gather news from cnn.com and create a dashboard" -> generate_crew, action_words: ["gather", "create"]
-- "create a report on customer satisfaction" -> generate_crew, action_words: ["create"]
-- "Build a team of agents to handle customer support" -> generate_crew, action_words: ["build", "handle"]
-- "Plan to collect and analyze customer feedback" -> generate_crew, action_words: ["collect", "analyze"]
-- "build a data pipeline to process customer feedback" -> generate_crew, action_words: ["build", "process"]
-- "help me organize and manage my project" -> generate_crew, action_words: ["organize", "manage"]
-- "Conduct financial analysis, gather news, review filings, and recommend investments" -> generate_crew, action_words: ["conduct", "gather", "review", "recommend"]
-- "Research company culture, draft a job posting, and review it for clarity" -> generate_crew, action_words: ["research", "draft", "review"]
-
-Examples of generate_agent (ONLY when explicitly creating an agent entity):
-- "Create an agent that can analyze data" -> generate_agent
-- "make me a chatbot for customer support" -> generate_agent
-- "build an assistant that helps with scheduling" -> generate_agent
-- "create a data engineer agent" -> generate_agent
-- "I need a bot that monitors servers" -> generate_agent
-
-Examples of generate_task (ONLY when explicitly creating a task entity):
+Examples:
+- "get the latest news from switzerland" -> generate_crew
+- "research competitors and write a summary" -> generate_crew
+- "gather news, create a presentation, and email the team" -> generate_crew
+- "build a team to handle customer support" -> generate_crew
+- "create an agent that analyzes data" -> generate_agent
+- "make me a chatbot for support" -> generate_agent
 - "create a task to check server status" -> generate_task
-- "add a task for data validation" -> generate_task
-
-Examples of other intents:
-- "execute crew" -> execute_crew
-- "run crew" -> execute_crew
-- "ec" -> execute_crew
-- "configure crew" -> configure_crew
-- "setup llm" -> configure_crew
-- "change model" -> configure_crew
-- "select tools" -> configure_crew
-- "update max rpm" -> configure_crew
-- "adjust settings" -> configure_crew
+- "run crew" / "ec" -> execute_crew
+- "change model" / "select tools" / "update max rpm" -> configure_crew
 """
 
 # Define template data

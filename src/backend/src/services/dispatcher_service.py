@@ -62,11 +62,32 @@ from src.utils.user_context import GroupContext
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Default model for intent detection (fallback when no model is selected in the
-# chat; gpt-5.3-codex is the safe default — llama-4-maverick can hit the
-# Supervisor API beta gate on some workspaces).
+# Fast-model fallback chain for intent detection. Intent is a 6-way
+# classification emitting fixed JSON — it wants small, fast, reliable instruct
+# models, not a reasoning model. detect_intent tries the caller's preferred model
+# first (the model picked in chat, else this chain's first entry), then walks the
+# rest so a single gated or erroring endpoint can't drop intent to the dumb
+# semantic fallback. Spread across providers (Anthropic / OpenAI / Google) to
+# avoid a correlated outage. Override via env (comma-separated), e.g.
+#   DISPATCHER_FALLBACK_MODELS="databricks-claude-haiku-4-5,databricks-gpt-5-nano"
+DEFAULT_DISPATCHER_FALLBACK_MODELS = [
+    "databricks-claude-haiku-4-5",
+    "databricks-gpt-5-nano",
+    "databricks-gemini-3-5-flash",
+]
+DISPATCHER_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv(
+        "DISPATCHER_FALLBACK_MODELS", ",".join(DEFAULT_DISPATCHER_FALLBACK_MODELS)
+    ).split(",")
+    if m.strip()
+]
+# First chain entry doubles as the default when no model is selected in chat.
 DEFAULT_DISPATCHER_MODEL = os.getenv(
-    "DEFAULT_DISPATCHER_MODEL", "databricks-gpt-5-3-codex"
+    "DEFAULT_DISPATCHER_MODEL",
+    DISPATCHER_FALLBACK_MODELS[0]
+    if DISPATCHER_FALLBACK_MODELS
+    else "databricks-claude-haiku-4-5",
 )
 
 
@@ -453,6 +474,24 @@ class DispatcherService:
             )
         return cls._concurrency_semaphore
 
+    @classmethod
+    def _intent_model_candidates(
+        cls, preferred: Optional[str], last_resort: Optional[str] = None
+    ) -> List[str]:
+        """Ordered intent models: the preferred model first, then the fast
+        fallback chain, then an optional last-resort model appended at the very
+        end — deduped, order preserved. detect_intent walks this list so a single
+        gated/erroring endpoint can't drop intent to the deterministic semantic
+        fallback. The last-resort slot lets the dispatcher run intent on the fast
+        chain by default while still falling back to the user's selected crew
+        model on a workspace where none of the fast models are enabled.
+        """
+        ordered: List[str] = []
+        for m in [preferred, *DISPATCHER_FALLBACK_MODELS, last_resort]:
+            if m and m not in ordered:
+                ordered.append(m)
+        return ordered
+
     async def _maybe_enable_mlflow_tracing(
         self, group_context: Optional[GroupContext]
     ) -> bool:
@@ -714,13 +753,18 @@ class DispatcherService:
         group_context: Optional[GroupContext] = None,
         available_tools: Optional[List[Dict[str, str]]] = None,
         chat_mode: bool = False,
+        last_resort_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Detect the intent from the user's message using LLM enhanced with semantic analysis.
 
         Args:
-            message: User's natural language message
-            model: LLM model to use
+            message: User's natural language message.
+            model: LLM model to use (preferred; tried first in the fallback chain).
+            last_resort_model: Optional model appended after the fast fallback
+                chain — used only if every faster candidate is unavailable (e.g.
+                the user's selected crew model, so intent never hard-fails on a
+                workspace where the fast intent models aren't enabled).
 
         Returns:
             Dictionary containing intent, confidence, and extracted information
@@ -729,6 +773,25 @@ class DispatcherService:
         slash_result = self._detect_slash_command(message)
         if slash_result is not None:
             return slash_result
+
+        # ChatMode fast-path: this surface ONLY builds crews. generate_agent /
+        # generate_task already collapse to generate_crew here (see
+        # _resolve_surface_intent), and catalog/execute are reached via slash
+        # commands (handled above) or intercepted client-side — so the intent
+        # LLM always lands on generate_crew anyway. Skip the classification
+        # round-trip entirely and route straight there, saving a full fast-model
+        # call on every chat message.
+        if chat_mode:
+            return {
+                "intent": "generate_crew",
+                "confidence": 1.0,
+                "extracted_info": {
+                    "semantic_analysis": self._analyze_message_semantics(message)
+                },
+                "suggested_prompt": message,
+                "source": "chat_mode_fast_path",
+                "suggested_tools": [],
+            }
 
         # Perform semantic analysis first
         semantic_analysis = self._analyze_message_semantics(message)
@@ -811,19 +874,6 @@ Please analyze this message and provide your intent classification."""
             {"role": "user", "content": enhanced_user_message},
         ]
 
-        # Circuit breaker check — fail fast if model is in open state
-        if self._check_circuit_breaker(model):
-            # ChatMode always builds a crew; canvas honours explicit task/agent creation.
-            forced = None if chat_mode else self._explicit_creation_intent(message)
-            return {
-                "intent": forced or "generate_crew",
-                "confidence": 0.95 if forced else self.DEFAULT_FALLBACK_CONFIDENCE,
-                "extracted_info": {"semantic_analysis": semantic_analysis},
-                "suggested_prompt": message,
-                "source": "circuit_breaker_fallback",
-                "suggested_tools": [],
-            }
-
         # Cache check — return cached result if available (group-scoped)
         group_id = (
             getattr(group_context, "primary_group_id", None) if group_context else None
@@ -855,132 +905,175 @@ Please analyze this message and provide your intent classification."""
                 cached["source"] = "cache+surface_override"
             return cached
 
-        try:
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
-            intent_extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        intent_extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
 
-            # Acquire concurrency semaphore to limit parallel LLM calls
-            async with self._get_semaphore():
-                # Generate completion with optional MLflow span for tracing
-                if _HAS_MLFLOW and hasattr(_mlflow, "start_span"):
-                    with _mlflow.start_span(
-                        name="intent_detection", span_type="LLM"
-                    ) as intent_span:
-                        if hasattr(intent_span, "set_inputs"):
-                            intent_span.set_inputs(
-                                {
-                                    "model": model,
-                                    "messages": messages,
-                                    "temperature": 0.3,
-                                }
+        # Walk the candidate chain: preferred model first, then the fast
+        # fallbacks. Skip a model whose circuit breaker is open; on error or
+        # empty/unparseable output, move to the next. Only when no candidate
+        # yields a usable result do we drop to the deterministic fallback.
+        candidates = self._intent_model_candidates(model, last_resort_model)
+        result: Optional[Dict[str, Any]] = None
+        used_model: Optional[str] = None
+        attempted = 0  # models actually called (breaker-open skips don't count)
+
+        for candidate in candidates:
+            if self._check_circuit_breaker(candidate):
+                logger.info(
+                    f"Skipping intent model {candidate} (circuit breaker open)"
+                )
+                continue
+            attempted += 1
+            try:
+                # Acquire concurrency semaphore to limit parallel LLM calls
+                async with self._get_semaphore():
+                    # Generate completion with optional MLflow span for tracing
+                    if _HAS_MLFLOW and hasattr(_mlflow, "start_span"):
+                        with _mlflow.start_span(
+                            name="intent_detection", span_type="LLM"
+                        ) as intent_span:
+                            if hasattr(intent_span, "set_inputs"):
+                                intent_span.set_inputs(
+                                    {
+                                        "model": candidate,
+                                        "messages": messages,
+                                        "temperature": 0.3,
+                                    }
+                                )
+                            content = await self._call_llm_with_retry(
+                                messages=messages,
+                                model=candidate,
+                                extra_headers=intent_extra_headers,
                             )
+                            if hasattr(intent_span, "set_outputs"):
+                                intent_span.set_outputs(
+                                    {"response": content[:500] if content else ""}
+                                )
+                    else:
                         content = await self._call_llm_with_retry(
-                            messages=messages, model=model, extra_headers=intent_extra_headers
+                            messages=messages,
+                            model=candidate,
+                            extra_headers=intent_extra_headers,
                         )
-                        if hasattr(intent_span, "set_outputs"):
-                            intent_span.set_outputs(
-                                {"response": content[:500] if content else ""}
-                            )
-                else:
-                    content = await self._call_llm_with_retry(
-                        messages=messages, model=model, extra_headers=intent_extra_headers
-                    )
+            except Exception as e:
+                logger.warning(
+                    f"Intent model {candidate} failed: {e}. Trying next fallback."
+                )
+                self._record_failure(candidate)
+                continue
 
-            # Record success for circuit breaker
-            self._record_success(model)
-
-            # Check if content is empty
             if not content or not content.strip():
                 logger.warning(
-                    f"LLM returned empty response for intent detection with model {model}"
+                    f"Intent model {candidate} returned an empty response. "
+                    "Trying next fallback."
                 )
-                # Fall back to crew as default
-                return {
-                    "intent": "generate_crew",
-                    "confidence": self.DEFAULT_FALLBACK_CONFIDENCE,
-                    "extracted_info": {},
-                    "source": "semantic_fallback",
-                    "suggested_tools": [],
-                }
+                continue
 
-            # Parse the response
-            result = robust_json_parser(content)
-
-            # Validate the response
-            if "intent" not in result:
-                result["intent"] = semantic_analysis["suggested_intent"]
-            if "confidence" not in result:
-                result["confidence"] = 0.5
-            else:
-                # Clamp confidence to valid range [0.0, 1.0]
-                # LLMs sometimes return values > 1.0 (e.g., 1.2 for 120%)
-                try:
-                    confidence_value = float(result["confidence"])
-                    result["confidence"] = max(0.0, min(1.0, confidence_value))
-                    if confidence_value != result["confidence"]:
-                        logger.warning(
-                            f"Clamped confidence from {confidence_value} to {result['confidence']}"
-                        )
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Invalid confidence value: {result['confidence']}, defaulting to 0.5"
-                    )
-                    result["confidence"] = 0.5
-            if "extracted_info" not in result:
-                result["extracted_info"] = {}
-            if "suggested_prompt" not in result:
-                result["suggested_prompt"] = message
-
-            # Extract and validate suggested tools
-            raw_tools = result.get("suggested_tools", [])
-            if available_tools and isinstance(raw_tools, list):
-                valid_titles = {t["title"] for t in available_tools}
-                result["suggested_tools"] = [t for t in raw_tools if t in valid_titles]
-            else:
-                result["suggested_tools"] = []
-
-            # Enhance extracted_info with semantic analysis (factual only)
-            result["extracted_info"]["semantic_analysis"] = semantic_analysis
-
-            # Per-surface guardrail (keeps the LLM's extracted_info/suggested_prompt):
-            #  - ChatMode: task/agent intents collapse to generate_crew (entity
-            #    creation is only for the AgentBuilder/crew canvas).
-            #  - Canvas/builder: an explicit "create a task/agent" deterministically
-            #    routes there even when a weak intent model defaulted elsewhere
-            #    (guarded against multi-step messages, which stay crew-first).
-            new_intent, reason = self._resolve_surface_intent(
-                message, result.get("intent"), chat_mode
-            )
-            if reason:
-                logger.info(
-                    f"Intent override: LLM returned '{result.get('intent')}', {reason} "
-                    f"-> forcing '{new_intent}'."
+            try:
+                parsed = robust_json_parser(content)
+            except Exception as e:
+                logger.warning(
+                    f"Intent model {candidate} returned unparseable output: {e}. "
+                    "Trying next fallback."
                 )
-                result["intent"] = new_intent
-                result["confidence"] = max(float(result.get("confidence") or 0), 0.95)
-                result["source"] = "llm+surface_override"
-            else:
-                result["source"] = "llm"
+                continue
+            if not isinstance(parsed, dict):
+                logger.warning(
+                    f"Intent model {candidate} did not return a JSON object. "
+                    "Trying next fallback."
+                )
+                continue
 
-            # Cache successful LLM results (never cache fallback/degraded)
-            await intent_cache.set(group_id, cache_key, result)
+            # Usable result — record success and stop walking the chain.
+            self._record_success(candidate)
+            result = parsed
+            used_model = candidate
+            break
 
-            return result
-
-        except Exception as e:
-            logger.error(f"Error detecting intent: {str(e)}")
-            self._record_failure(model)
-            # LLM failed — ChatMode always builds a crew; the canvas honours an
-            # explicit "create a task/agent". Otherwise default to generate_crew.
+        if result is None:
+            # No candidate produced a usable result. Distinguish "every circuit
+            # breaker was open" (no LLM was called) from "all attempts failed".
             forced = None if chat_mode else self._explicit_creation_intent(message)
+            if not attempted:
+                logger.warning(
+                    "All intent models have open circuit breakers; failing fast."
+                )
+                source = "circuit_breaker_fallback"
+            elif forced:
+                source = "explicit_override"
+            else:
+                source = "semantic_fallback"
             return {
                 "intent": forced or "generate_crew",
                 "confidence": 0.95 if forced else self.DEFAULT_FALLBACK_CONFIDENCE,
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
-                "source": "explicit_override" if forced else "semantic_fallback",
+                "source": source,
                 "suggested_tools": [],
             }
+
+        logger.info(f"Intent resolved by model {used_model}")
+
+        # Validate the response
+        if "intent" not in result:
+            result["intent"] = semantic_analysis["suggested_intent"]
+        if "confidence" not in result:
+            result["confidence"] = 0.5
+        else:
+            # Clamp confidence to valid range [0.0, 1.0]
+            # LLMs sometimes return values > 1.0 (e.g., 1.2 for 120%)
+            try:
+                confidence_value = float(result["confidence"])
+                result["confidence"] = max(0.0, min(1.0, confidence_value))
+                if confidence_value != result["confidence"]:
+                    logger.warning(
+                        f"Clamped confidence from {confidence_value} to {result['confidence']}"
+                    )
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Invalid confidence value: {result['confidence']}, defaulting to 0.5"
+                )
+                result["confidence"] = 0.5
+        if "extracted_info" not in result:
+            result["extracted_info"] = {}
+        if "suggested_prompt" not in result:
+            result["suggested_prompt"] = message
+
+        # Extract and validate suggested tools
+        raw_tools = result.get("suggested_tools", [])
+        if available_tools and isinstance(raw_tools, list):
+            valid_titles = {t["title"] for t in available_tools}
+            result["suggested_tools"] = [t for t in raw_tools if t in valid_titles]
+        else:
+            result["suggested_tools"] = []
+
+        # Enhance extracted_info with semantic analysis (factual only)
+        result["extracted_info"]["semantic_analysis"] = semantic_analysis
+
+        # Per-surface guardrail (keeps the LLM's extracted_info/suggested_prompt):
+        #  - ChatMode: task/agent intents collapse to generate_crew (entity
+        #    creation is only for the AgentBuilder/crew canvas).
+        #  - Canvas/builder: an explicit "create a task/agent" deterministically
+        #    routes there even when a weak intent model defaulted elsewhere
+        #    (guarded against multi-step messages, which stay crew-first).
+        new_intent, reason = self._resolve_surface_intent(
+            message, result.get("intent"), chat_mode
+        )
+        if reason:
+            logger.info(
+                f"Intent override: LLM returned '{result.get('intent')}', {reason} "
+                f"-> forcing '{new_intent}'."
+            )
+            result["intent"] = new_intent
+            result["confidence"] = max(float(result.get("confidence") or 0), 0.95)
+            result["source"] = "llm+surface_override"
+        else:
+            result["source"] = "llm"
+
+        # Cache successful LLM results (never cache fallback/degraded)
+        await intent_cache.set(group_id, cache_key, result)
+
+        return result
 
     async def dispatch(
         self,
@@ -1046,20 +1139,28 @@ Please analyze this message and provide your intent classification."""
                 except Exception:
                     pass
 
-            # Detect intent
+            # Detect intent. Intent classification ALWAYS rides the fast model
+            # chain (DEFAULT_DISPATCHER_MODEL + fallbacks), decoupled from the
+            # possibly-heavy/reasoning model the user picked for the crew —
+            # request.model is passed only as a last-resort fallback so intent
+            # never hard-fails on a workspace where the fast models aren't enabled.
             intent_result = await self.detect_intent(
-                request.message, model, group_context, available_tools,
-                chat_mode=request.chat_mode,
+                request.message, DEFAULT_DISPATCHER_MODEL, group_context,
+                available_tools, chat_mode=request.chat_mode,
+                last_resort_model=request.model,
             )
 
-            # Log the intent detection to DB (separate from MLflow)
-            await self._log_llm_interaction(
-                endpoint="detect-intent",
-                prompt=request.message,
-                response=str(intent_result),
-                model=model,
-                group_context=group_context,
-            )
+            # Log the intent detection to DB (separate from MLflow). Skip when no
+            # LLM actually ran (ChatMode fast-path) — otherwise every chat message
+            # records a phantom detect-intent call against DEFAULT_DISPATCHER_MODEL.
+            if intent_result.get("source") != "chat_mode_fast_path":
+                await self._log_llm_interaction(
+                    endpoint="detect-intent",
+                    prompt=request.message,
+                    response=str(intent_result),
+                    model=DEFAULT_DISPATCHER_MODEL,
+                    group_context=group_context,
+                )
 
             # Create dispatcher response
             # Clamp confidence to [0.0, 1.0] range (LLM sometimes returns >1.0)
