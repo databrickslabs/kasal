@@ -104,9 +104,12 @@ async def create_agent(
         custom_attrs={'_agent_key': agent_key},
     )
 
-    # Explicitly check if the llm attribute was set correctly
+    # Explicitly check if the llm attribute was set correctly.
+    # NOTE: log only the model identifier — never the LLM object itself. Its
+    # repr exposes api_key, which holds the live Databricks OBO/PAT token.
     if hasattr(agent, 'llm'):
-        logger.info(f"Confirmed agent {agent_key} has llm attribute set to: {agent.llm}")
+        llm_model = getattr(agent.llm, 'model', None)
+        logger.info(f"Confirmed agent {agent_key} has llm attribute set, model={llm_model}")
     else:
         logger.warning(f"Agent {agent_key} does not have llm attribute after creation!")
 
