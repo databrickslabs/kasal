@@ -502,8 +502,19 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] MLflow initialization failed (non-fatal): {mlflow_init_err}"
                 )
 
-            # Add MLflow exporter to OTel pipeline (after mlflow_result is available)
-            if otel_provider and mlflow_result and mlflow_result.tracing_ready:
+            # Add MLflow exporter to OTel pipeline (after mlflow_result is available).
+            # In UC trace-storage mode the imperative KasalMLflowSpanExporter is NOT
+            # used (it writes to the managed artifact store, which cannot populate the
+            # `<prefix>_otel_*` Delta tables). Native autolog + the inline
+            # start_root_trace wrapper produce the spans through MLflow's tracer, which
+            # DatabricksUCTableSpanExporter writes to UC. Keeping otel_exporter_active
+            # False leaves the inline wrapper enabled.
+            if (
+                otel_provider
+                and mlflow_result
+                and mlflow_result.tracing_ready
+                and not getattr(mlflow_result, "uc_trace_storage", False)
+            ):
                 try:
                     from opentelemetry.sdk.trace.export import (
                         SimpleSpanProcessor,
@@ -526,6 +537,11 @@ def run_flow_in_process(
                     async_logger.warning(
                         f"[FLOW_SUBPROCESS] Could not add MLflow exporter to OTel pipeline: {mlflow_otel_err}"
                     )
+            elif otel_provider and mlflow_result and getattr(mlflow_result, "uc_trace_storage", False):
+                async_logger.info(
+                    "[FLOW_SUBPROCESS] UC trace storage active — native MLflow autolog writes "
+                    "the UC trace; imperative KasalMLflowSpanExporter not added"
+                )
 
             # Reset MCP warnings at the start of each flow execution
             try:
@@ -567,6 +583,7 @@ def run_flow_in_process(
                         flow_config=flow_config,
                         inputs=flow_config.get("inputs"),
                         async_logger=async_logger,
+                        execution_id=execution_id,
                         flow_id=flow_id,
                         job_id=execution_id,
                         run_name=run_name,

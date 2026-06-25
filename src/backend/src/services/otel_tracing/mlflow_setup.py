@@ -25,6 +25,24 @@ logger = logging.getLogger(__name__)
 # Default prefix for the four UC OTel trace tables (<prefix>_otel_spans, etc.).
 KASAL_TRACE_TABLE_PREFIX = "kasal"
 
+# Suffix for the dedicated UC-only experiment. UC trace storage requires an
+# experiment that has NEVER contained a managed (non-UC) trace, so UC traces use
+# a separate experiment name that managed writers never touch. Both the crew
+# subprocess and the parent-process services (dispatcher + generation) derive the
+# UC experiment via this suffix so all their traces land together.
+KASAL_UC_EXPERIMENT_SUFFIX = "-uc"
+
+
+def uc_experiment_name(base: str) -> str:
+    """Return the dedicated UC experiment name for a configured base name.
+
+    Idempotent: an already-suffixed name is returned unchanged so repeated
+    derivation (parent + subprocess) cannot produce ``...-uc-uc``.
+    """
+    if base.endswith(KASAL_UC_EXPERIMENT_SUFFIX):
+        return base
+    return f"{base}{KASAL_UC_EXPERIMENT_SUFFIX}"
+
 
 def _build_uc_trace_location(
     catalog: Optional[str], schema: Optional[str], warehouse_id: Optional[str], log
@@ -85,6 +103,7 @@ class MlflowSetupResult:
     auth_method: Optional[str] = None  # "pat", "spn", "default"
     error: Optional[str] = None
     otel_exporter_active: bool = False  # OTel MLflow exporter handles trace creation
+    uc_trace_storage: bool = False  # UC Delta-table trace storage active (native autolog path)
 
 
 async def configure_mlflow_in_subprocess(
@@ -337,25 +356,43 @@ async def configure_mlflow_in_subprocess(
         )
         trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, alog)
 
-        # When UC trace storage is active, stop the Databricks Apps OTLP sidecar
-        # from intercepting the spans. The platform sets OTEL_EXPORTER_OTLP_ENDPOINT
-        # (e.g. http://localhost:4314), so the OTel SDK ships every span to the
-        # sidecar (-> the workspace's `otel_spans` table) and MLflow's UC trace
-        # store receives only the trace metadata — the trace renders with no span
-        # tree. Disabling the OTLP traces exporter for this subprocess routes the
-        # spans to MLflow's UC destination instead. Logs are unaffected (the
-        # subprocess writes to crew.log; the main-process log sidecar is separate).
-        if trace_location is not None:
+        # When UC trace storage is active, spans are written to the
+        # `<prefix>_otel_*` Delta tables by MLflow's DatabricksUCTableSpanExporter
+        # via `MlflowClient.log_spans()` — a direct trace-server/SQL-warehouse
+        # write, NOT the Databricks Apps localhost OTLP sidecar. So we still
+        # neutralize the OTel-SDK default OTLP traces export (we never want the
+        # localhost sidecar path -> the platform `otel_*` tables); MLflow's UC
+        # processor is installed independently of OTEL_TRACES_EXPORTER, so this
+        # does not suppress the UC write. The UC exporter is fed by native
+        # autolog (enabled below) flowing through MLflow's own tracer; the
+        # imperative KasalMLflowSpanExporter writes to the managed artifact store
+        # (unreachable blob) and CANNOT populate UC, so it is NOT added to the
+        # OTel pipeline in this mode (see process_*_executor.py).
+        uc_trace_active = trace_location is not None
+        if uc_trace_active:
             os.environ["OTEL_TRACES_EXPORTER"] = "none"
             for _otlp_k in (
                 "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
                 "OTEL_EXPORTER_OTLP_ENDPOINT",
             ):
-                if _otlp_k in os.environ:
-                    os.environ.pop(_otlp_k, None)
+                os.environ.pop(_otlp_k, None)
             alog.info(
-                "[SUBPROCESS] UC trace storage active — disabled OTLP traces export "
-                "so spans route to MLflow Unity Catalog (not the app OTLP sidecar)"
+                "[SUBPROCESS] UC trace storage active — KasalMLflowSpanExporter owns "
+                "the trace; OTLP traces export disabled (no localhost sidecar)"
+            )
+            # UC trace storage requires an experiment that has NEVER contained a
+            # managed (non-UC) trace: MLflow permanently rejects binding a UC
+            # Trace Destination to an experiment that "already contains traces"
+            # (BAD_REQUEST). The dispatcher runs in the PARENT process where the
+            # DB config is unavailable, so its trace_location is None and it
+            # writes a *managed* trace to the base experiment first — poisoning
+            # it for UC forever. Route UC crew traces to a dedicated, UC-only
+            # experiment that no managed writer (dispatcher / legacy fallback)
+            # ever touches, so the destination always binds and the
+            # `<prefix>_otel_*` Delta tables actually receive spans.
+            experiment_name = uc_experiment_name(experiment_name)
+            alog.info(
+                f"[SUBPROCESS] UC trace storage uses dedicated experiment: {experiment_name}"
             )
 
         def _set_experiment(name: str):
@@ -372,30 +409,38 @@ async def configure_mlflow_in_subprocess(
 
         experiment = None
         experiment_id = None
-        try:
-            experiment = _set_experiment(experiment_name)
-            experiment_id = experiment.experiment_id
-            alog.info(
-                f"[SUBPROCESS] MLflow experiment set: {experiment_name} (ID: {experiment_id})"
-            )
-        except Exception as exp_error:
-            import traceback as _tb
-            alog.warning(
-                f"[SUBPROCESS] Could not set experiment {experiment_name}: {exp_error}\n"
-                f"{_tb.format_exc()}"
-            )
+        # Candidate experiment names. For UC trace storage we self-heal: if the
+        # dedicated UC experiment somehow got poisoned by a managed trace, fall
+        # forward to suffixed siblings rather than silently dropping back to a
+        # managed experiment (the old `/Shared/crew-traces` fallback produced
+        # searchable-but-not-UC traces and hid this bug). Legacy mode keeps the
+        # original managed fallback.
+        if uc_trace_active:
+            candidate_names = [
+                experiment_name,
+                f"{experiment_name}-2",
+                f"{experiment_name}-3",
+            ]
+        else:
+            candidate_names = [experiment_name, "/Shared/crew-traces"]
+
+        for _name in candidate_names:
             try:
-                experiment = _set_experiment("/Shared/crew-traces")
+                experiment = _set_experiment(_name)
                 experiment_id = experiment.experiment_id
                 alog.info(
-                    f"[SUBPROCESS] MLflow fallback experiment set: /Shared/crew-traces "
-                    f"(ID: {experiment_id})"
+                    f"[SUBPROCESS] MLflow experiment set: {_name} (ID: {experiment_id})"
                 )
-            except Exception as fallback_error:
+                break
+            except Exception as exp_error:
+                import traceback as _tb
                 experiment = None
                 alog.warning(
-                    f"[SUBPROCESS] Could not set MLflow experiment: {fallback_error}"
+                    f"[SUBPROCESS] Could not set experiment {_name}: {exp_error}\n"
+                    f"{_tb.format_exc()}"
                 )
+        if experiment is None:
+            alog.warning("[SUBPROCESS] Could not set any MLflow experiment")
 
         # -------------------------------------------------------
         # 6. Tracing destination
@@ -403,15 +448,28 @@ async def configure_mlflow_in_subprocess(
         try:
             from mlflow.tracing.destination import Databricks as _MlflowDbxDest
 
-            if experiment is not None:
+            if experiment is None:
+                alog.info("[SUBPROCESS] MLflow tracing destination not set (no experiment)")
+            elif uc_trace_active:
+                # Do NOT pin the destination to Databricks(experiment_id). That
+                # resolves to an MlflowExperimentLocation, which makes MLflow's
+                # provider._get_span_processors SKIP UC auto-resolution and route
+                # spans to managed (artifact) storage instead of the UC Delta
+                # tables. Leaving the destination unset lets MLflow resolve the
+                # active experiment's UnityCatalog trace_location and install
+                # DatabricksUCTableSpanProcessor -> `<prefix>_otel_*` tables.
+                alog.info(
+                    "[SUBPROCESS] UC trace storage: destination auto-resolves to the "
+                    f"experiment's UnityCatalog location (experiment {experiment.experiment_id}); "
+                    "Databricks experiment-id destination intentionally NOT set"
+                )
+            else:
                 mlflow.tracing.set_destination(
                     _MlflowDbxDest(experiment_id=str(experiment.experiment_id))
                 )
                 alog.info(
                     f"[SUBPROCESS] MLflow tracing destination set to experiment {experiment.experiment_id}"
                 )
-            else:
-                alog.info("[SUBPROCESS] MLflow tracing destination not set (no experiment)")
         except Exception as e:
             alog.info(f"[SUBPROCESS] Could not set MLflow tracing destination: {e}")
 
@@ -437,6 +495,15 @@ async def configure_mlflow_in_subprocess(
         # -------------------------------------------------------
         # 8. Autologs via mlflow_integration.py
         # -------------------------------------------------------
+        # Native MLflow autolog (crewai + litellm) is what produces the spans
+        # that flow through MLflow's own tracer. With UC trace storage active
+        # those spans are written to the `<prefix>_otel_*` Delta tables by
+        # DatabricksUCTableSpanExporter (log_spans -> warehouse, no localhost
+        # sidecar). The inline start_root_trace wrapper (execute_with_mlflow_trace,
+        # gated on otel_exporter_active=False) adds the named root span; autolog
+        # nests the agent/LLM child spans under it. In both UC and legacy modes
+        # we enable the same autologs — the difference is only the destination
+        # (UC tables vs managed experiment).
         try:
             from src.engines.crewai.mlflow_integration import (
                 enable_autologs as _enable_autologs,
@@ -448,9 +515,15 @@ async def configure_mlflow_in_subprocess(
                 crewai_autolog=True,
                 litellm_spans_only=True,
             )
-            alog.info("[SUBPROCESS] Autologs configured via tracing service")
-        except Exception:
-            pass
+            if uc_trace_active:
+                alog.info(
+                    "[SUBPROCESS] Native MLflow autolog enabled — spans route to UC "
+                    "Delta tables via DatabricksUCTableSpanExporter"
+                )
+            else:
+                alog.info("[SUBPROCESS] Autologs configured via tracing service")
+        except Exception as autolog_err:
+            alog.warning(f"[SUBPROCESS] Could not enable MLflow autologs: {autolog_err}")
 
         # -------------------------------------------------------
         # 9. Async logging
@@ -637,6 +710,7 @@ async def configure_mlflow_in_subprocess(
             experiment_name=experiment_name,
             experiment_id=experiment_id,
             auth_method=auth_method,
+            uc_trace_storage=uc_trace_active,
         )
 
     except Exception as mlflow_error:
@@ -803,6 +877,7 @@ def set_trace_attributes(
     span: Any,
     config: dict,
     async_logger: Optional[logging.Logger] = None,
+    run_name: Optional[str] = None,
 ) -> None:
     """Set execution metadata attributes on a root trace span.
 
@@ -813,12 +888,17 @@ def set_trace_attributes(
         config: Execution configuration dict with keys like ``run_name``,
             ``version``, ``process``, ``agents``, ``tasks``, ``model_name``.
         async_logger: Logger routed to the subprocess log file.
+        run_name: Pre-resolved run name (from ``_derive_trace_run_name``) so
+            ``execution.name`` matches the root span name; falls back to the
+            same derivation when not supplied.
     """
     alog = async_logger or logger
     if span is None or not hasattr(span, "set_attribute"):
         return
     try:
-        span.set_attribute("execution.name", config.get("run_name", "Unnamed"))
+        span.set_attribute(
+            "execution.name", run_name or _derive_trace_run_name(config)
+        )
         span.set_attribute("execution.version", config.get("version", "1.0"))
         span.set_attribute(
             "execution.process_type", config.get("process", "sequential")
@@ -890,12 +970,43 @@ def extract_trace_outputs(
 # ---------------------------------------------------------------------------
 
 
+def _derive_trace_run_name(
+    config: dict,
+    inputs: Optional[dict] = None,
+    execution_id: Optional[str] = None,
+) -> str:
+    """Resolve a human-meaningful run name for the MLflow root span.
+
+    Mirrors the ``execution_name`` precedence in crew_preparation.py so the
+    trace root span matches the run name shown elsewhere, and falls back to the
+    execution id so the span is never an opaque ``"Unnamed"`` when any
+    identifier is available. ``run_name`` is frequently nested under
+    ``inputs`` rather than at the top level, which is why the previous
+    ``config.get("run_name")`` alone produced ``crew_kickoff:Unnamed``.
+    """
+    config_inputs = config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    arg_inputs = inputs if isinstance(inputs, dict) else {}
+    for candidate in (
+        config.get("run_name"),
+        arg_inputs.get("run_name"),
+        config_inputs.get("run_name"),
+        config.get("crew_name"),
+        config.get("name"),
+        config.get("execution_id"),
+        execution_id,
+    ):
+        if candidate and str(candidate).strip():
+            return str(candidate).strip()
+    return "Unnamed"
+
+
 def execute_with_mlflow_trace(
     kickoff_fn: Callable[[], Any],
     mlflow_result: Optional[MlflowSetupResult],
     crew_config: dict,
     inputs: Optional[dict] = None,
     async_logger: Optional[logging.Logger] = None,
+    execution_id: Optional[str] = None,
 ) -> Any:
     """Execute a crew/flow kickoff wrapped in an MLflow root trace.
 
@@ -931,13 +1042,13 @@ def execute_with_mlflow_trace(
         alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
         return kickoff_fn()
 
-    run_name = crew_config.get("run_name") or "Unnamed"
+    run_name = _derive_trace_run_name(crew_config, inputs, execution_id)
     trace_name = f"crew_kickoff:{run_name}"
     trace_inputs = {**(inputs or {}), "run_name": run_name}
 
     with start_root_trace(trace_name, trace_inputs) as root_span:
         # Set execution attributes on the root span
-        set_trace_attributes(root_span, crew_config, alog)
+        set_trace_attributes(root_span, crew_config, alog, run_name=run_name)
 
         # Execute the crew/flow
         result = kickoff_fn()
@@ -960,6 +1071,7 @@ async def execute_with_mlflow_trace_async(
     inputs: Optional[dict] = None,
     async_logger: Optional[logging.Logger] = None,
     trace_label: str = "flow_kickoff",
+    execution_id: Optional[str] = None,
     **kickoff_kwargs: Any,
 ) -> Any:
     """Async variant: wraps an awaitable kickoff in an MLflow root trace.
@@ -995,12 +1107,12 @@ async def execute_with_mlflow_trace_async(
         alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
         return await kickoff_coro_fn(**kickoff_kwargs)
 
-    run_name = flow_config.get("run_name") or "Unnamed"
+    run_name = _derive_trace_run_name(flow_config, inputs, execution_id)
     trace_name = f"{trace_label}:{run_name}"
     trace_inputs = {**(inputs or {}), "run_name": run_name}
 
     with start_root_trace(trace_name, trace_inputs) as root_span:
-        set_trace_attributes(root_span, flow_config, alog)
+        set_trace_attributes(root_span, flow_config, alog, run_name=run_name)
         result = await kickoff_coro_fn(**kickoff_kwargs)
         outputs = extract_trace_outputs(result, alog)
         if outputs and root_span is not None and hasattr(root_span, "set_outputs"):
