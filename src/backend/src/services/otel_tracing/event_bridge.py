@@ -564,38 +564,48 @@ class OTelEventBridge:
             return
         try:
             import mlflow
+            from mlflow.tracking import MlflowClient
         except Exception:
             return
         try:
             if is_start:
                 # Only nest under an active autolog span; never orphan a root.
-                if mlflow.get_current_active_span() is None:
+                parent = mlflow.get_current_active_span()
+                if parent is None:
                     return
-                cm = mlflow.start_span(name=tool_name or "tool", span_type="TOOL")
-                span = cm.__enter__()
-                try:
-                    tool_args = getattr(event, "tool_args", None)
-                    if hasattr(span, "set_inputs"):
-                        span.set_inputs(
-                            {"tool": tool_name, "args": _safe_str(tool_args, 4000)}
-                            if tool_args is not None
-                            else {"tool": tool_name}
-                        )
-                except Exception:
-                    pass
-                self._mlflow_tool_spans.append((cm, span))
+                # IMPERATIVE API (start_span/end_span with explicit parent_id) —
+                # NOT the fluent context manager. The start and finish events run
+                # in DIFFERENT OTel contexts, so the fluent manager's
+                # attach/detach(token) raises "Token was created in a different
+                # Context" on exit (which both errors the span AND corrupts the
+                # context stack for sibling autolog spans). The imperative API
+                # never touches contextvars.
+                tool_args = getattr(event, "tool_args", None)
+                inputs = (
+                    {"tool": tool_name, "args": _safe_str(tool_args, 4000)}
+                    if tool_args is not None
+                    else {"tool": tool_name}
+                )
+                span = MlflowClient().start_span(
+                    name=tool_name or "tool",
+                    trace_id=parent.trace_id,
+                    parent_id=parent.span_id,
+                    span_type="TOOL",
+                    inputs=inputs,
+                )
+                self._mlflow_tool_spans.append(span)
             else:  # finish / error
                 if not self._mlflow_tool_spans:
                     return
-                cm, span = self._mlflow_tool_spans.pop()
-                try:
-                    if output and hasattr(span, "set_outputs"):
-                        span.set_outputs({"result": _safe_str(output, 8000)})
-                    if span_name == "CrewAI.tool.error" and hasattr(span, "set_status"):
-                        span.set_status("ERROR")
-                except Exception:
-                    pass
-                cm.__exit__(None, None, None)
+                span = self._mlflow_tool_spans.pop()
+                end_kwargs = {
+                    "trace_id": span.trace_id,
+                    "span_id": span.span_id,
+                    "status": "ERROR" if span_name == "CrewAI.tool.error" else "OK",
+                }
+                if output:
+                    end_kwargs["outputs"] = {"result": _safe_str(output, 8000)}
+                MlflowClient().end_span(**end_kwargs)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
                 "[OTel-Bridge][%s] MLflow tool-span bridge failed for %s: %s",
