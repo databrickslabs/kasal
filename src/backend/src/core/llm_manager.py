@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import json
+from contextlib import nullcontext
 from typing import Dict, Any, List, Optional, Union, Tuple
 import time
 
@@ -409,6 +410,15 @@ def _configure_databricks_mlflow():
             except Exception as e:
                 logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
 
+            # SECURITY: autolog captures raw inputs (incl. the Agent's llm.api_key OBO
+            # token) into span data. Register the secret-redaction span processor so
+            # credentials are scrubbed before any trace is exported. Idempotent.
+            try:
+                from src.services.otel_tracing.trace_redaction import enable_secret_redaction
+                enable_secret_redaction()
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to enable trace secret redaction: {e}")
+
             # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
             # the underlying calls even when using CrewAI's LLM wrapper
 
@@ -635,37 +645,73 @@ class LLMManager:
             # Pass extra_headers to the underlying litellm call via LLM extra_headers param
             llm.extra_headers = extra_headers
 
+        # Emit an MLflow LLM span for this call so the model + messages +
+        # response show up in the active trace (generation/dispatcher root, or a
+        # crew-execution trace). litellm autolog is muted in the parent process
+        # (log_traces=False), so without this a raw completion leaves no span.
+        # Guarded on an ALREADY-active span so standalone callers never spawn an
+        # orphan root trace; fully best-effort so tracing can never break the
+        # actual LLM call.
+        span_cm: Any = nullcontext()
+        try:
+            import mlflow as _mlflow
+            if (
+                hasattr(_mlflow, "get_current_active_span")
+                and hasattr(_mlflow, "start_span")
+                and _mlflow.get_current_active_span() is not None
+            ):
+                span_cm = _mlflow.start_span(name="llm_completion", span_type="LLM")
+        except Exception:
+            span_cm = nullcontext()
+
+        def _set_span_outputs(sp: Any, res: Optional[str]) -> None:
+            if sp is not None and hasattr(sp, "set_outputs"):
+                try:
+                    sp.set_outputs({"response": res[:500] if res else ""})
+                except Exception:
+                    pass
+
         # Use sync call() in a thread to ensure custom wrappers
         # (e.g. DatabricksRetryLLM) are invoked correctly.
         # The async acall() bypasses those overrides.
         start_time = time.time()
-        try:
-            result = await asyncio.to_thread(llm.call, messages)
-            duration = time.time() - start_time
-            logger.info(f"LLM completion: model={model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            # On HTTP 400 with fallback enabled, retry without system messages
-            if fallback_drop_system_on_400 and _is_http_400(e):
-                user_only = [m for m in messages if m.get("role") != "system"]
-                if user_only and len(user_only) < len(messages):
-                    logger.warning(
-                        f"LLM completion got 400, retrying without system message: model={model}"
+        with span_cm as _span:
+            if _span is not None and hasattr(_span, "set_inputs"):
+                try:
+                    _span.set_inputs(
+                        {"model": model, "messages": messages, "temperature": temperature}
                     )
-                    try:
-                        result = await asyncio.to_thread(llm.call, user_only)
-                        fallback_duration = time.time() - start_time
-                        logger.info(
-                            f"LLM completion (user-only fallback): model={model}, "
-                            f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
+                except Exception:
+                    pass
+            try:
+                result = await asyncio.to_thread(llm.call, messages)
+                duration = time.time() - start_time
+                logger.info(f"LLM completion: model={model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
+                _set_span_outputs(_span, result)
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                # On HTTP 400 with fallback enabled, retry without system messages
+                if fallback_drop_system_on_400 and _is_http_400(e):
+                    user_only = [m for m in messages if m.get("role") != "system"]
+                    if user_only and len(user_only) < len(messages):
+                        logger.warning(
+                            f"LLM completion got 400, retrying without system message: model={model}"
                         )
-                        return result
-                    except Exception as retry_err:
-                        logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
-                        raise retry_err
-            logger.error(f"LLM completion failed: model={model}, duration={duration:.2f}s, error={e}")
-            raise
+                        try:
+                            result = await asyncio.to_thread(llm.call, user_only)
+                            fallback_duration = time.time() - start_time
+                            logger.info(
+                                f"LLM completion (user-only fallback): model={model}, "
+                                f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
+                            )
+                            _set_span_outputs(_span, result)
+                            return result
+                        except Exception as retry_err:
+                            logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
+                            raise retry_err
+                logger.error(f"LLM completion failed: model={model}, duration={duration:.2f}s, error={e}")
+                raise
 
     @staticmethod
     async def configure_crewai_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:

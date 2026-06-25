@@ -74,6 +74,15 @@ def enable_autologs(
         except Exception as e:
             logger.info(f"[crewai_mlflow] CrewAI autolog not available: {e}")
 
+    # SECURITY: autolog serializes raw method inputs (incl. the Agent's llm.api_key OBO
+    # token) into span inputs. Register the span processor that scrubs credentials before
+    # any trace is exported. Idempotent / process-wide.
+    try:
+        from src.services.otel_tracing.trace_redaction import enable_secret_redaction
+        enable_secret_redaction()
+    except Exception as e:
+        logger.warning(f"[crewai_mlflow] Could not enable trace secret redaction: {e}")
+
 
 async def update_execution_trace_id(
     execution_id: str,
