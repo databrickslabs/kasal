@@ -10,17 +10,20 @@ from typing import Annotated, Any, Dict
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response, StreamingResponse
 
-from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.crew_export import (
+    AppDeploymentRequest,
+    AppDeploymentResponse,
+    AppDeploymentStatusResponse,
     CrewExportRequest,
     CrewExportResponse,
     DeploymentRequest,
     DeploymentResponse,
     ExportFormat,
 )
+from src.services.crew_app_deployment_service import CrewAppDeploymentService
 from src.services.crew_deployment_service import CrewDeploymentService
 from src.services.crew_export_service import CrewExportService
 
@@ -63,9 +66,17 @@ async def get_deployment_service(session: SessionDep) -> CrewDeploymentService:
     return CrewDeploymentService(session=session)
 
 
+async def get_app_deployment_service(session: SessionDep) -> CrewAppDeploymentService:
+    """Dependency provider for CrewAppDeploymentService (Databricks Apps deploy)."""
+    return CrewAppDeploymentService(session=session)
+
+
 # Type aliases for cleaner function signatures
 ExportServiceDep = Annotated[CrewExportService, Depends(get_export_service)]
 DeploymentServiceDep = Annotated[CrewDeploymentService, Depends(get_deployment_service)]
+AppDeploymentServiceDep = Annotated[
+    CrewAppDeploymentService, Depends(get_app_deployment_service)
+]
 
 
 @router.post(
@@ -124,9 +135,9 @@ async def export_crew(
         )
 
         # Add download URL
-        result[
-            "download_url"
-        ] = f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        result["download_url"] = (
+            f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        )
 
         return CrewExportResponse(**result)
 
@@ -249,9 +260,7 @@ async def download_export(
             return StreamingResponse(
                 zip_buffer,
                 media_type="application/zip",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{prefix}.zip"'
-                },
+                headers={"Content-Disposition": f'attachment; filename="{prefix}.zip"'},
             )
 
         else:  # databricks_notebook
@@ -269,6 +278,67 @@ async def download_export(
     except ValueError as e:
         logger.error(f"Crew not found: {e}")
         raise NotFoundError(str(e))
+
+
+@router.post(
+    "/{crew_id}/deploy-app",
+    response_model=AppDeploymentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def deploy_crew_app(
+    crew_id: str,
+    request: AppDeploymentRequest,
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+):
+    """
+    Deploy a crew as a Databricks App, directly from the UI.
+
+    Generates the Databricks-App project (same as the export) and, on behalf of
+    the requesting user (OBO), creates/updates the app, uploads the project,
+    deploys it, and starts it. The deploy runs in the background — poll
+    `/{crew_id}/deploy-app/status?deployment_id=...` for progress and the app URL.
+
+    Only editors and admins can deploy. A Databricks OAuth (OBO) token is required.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can deploy crews")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        return await service.start_deployment(
+            crew_id=crew_id,
+            config=request.config,
+            group_context=group_context,
+        )
+    except PermissionError as e:
+        raise ForbiddenError(str(e))
+    except ValueError as e:
+        logger.error(f"Crew not found: {e}")
+        raise NotFoundError(str(e))
+
+
+@router.get(
+    "/{crew_id}/deploy-app/status",
+    response_model=AppDeploymentStatusResponse,
+)
+async def get_app_deployment_status(
+    crew_id: str,
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+    deployment_id: str = Query(..., description="Deployment id returned by deploy-app"),
+):
+    """Return the status of an in-flight or completed Databricks Apps deployment."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can check deployment status")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    result = service.get_status(deployment_id)
+    if result is None:
+        raise NotFoundError(f"Deployment {deployment_id} not found")
+    return result
 
 
 @router.post(
@@ -371,6 +441,7 @@ async def get_deployment_status(
 
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.useragent import with_product
+
     from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
     with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
@@ -379,19 +450,23 @@ async def get_deployment_status(
 
     return {
         "endpoint_name": endpoint_name,
-        "state": endpoint.state.ready.value
-        if endpoint.state and endpoint.state.ready
-        else "UNKNOWN",
-        "config_update": endpoint.state.config_update.value
-        if endpoint.state and endpoint.state.config_update
-        else None,
+        "state": (
+            endpoint.state.ready.value
+            if endpoint.state and endpoint.state.ready
+            else "UNKNOWN"
+        ),
+        "config_update": (
+            endpoint.state.config_update.value
+            if endpoint.state and endpoint.state.config_update
+            else None
+        ),
         "pending_config": endpoint.pending_config is not None,
-        "ready_replicas": getattr(endpoint.state, "ready_replicas", 0)
-        if endpoint.state
-        else 0,
-        "target_replicas": getattr(endpoint.config, "target_replicas", 0)
-        if endpoint.config
-        else 0,
+        "ready_replicas": (
+            getattr(endpoint.state, "ready_replicas", 0) if endpoint.state else 0
+        ),
+        "target_replicas": (
+            getattr(endpoint.config, "target_replicas", 0) if endpoint.config else 0
+        ),
         "creator": endpoint.creator,
         "creation_timestamp": endpoint.creation_timestamp,
         "last_updated_timestamp": endpoint.last_updated_timestamp,
@@ -428,6 +503,7 @@ async def delete_deployment(
 
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.useragent import with_product
+
     from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
     with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)

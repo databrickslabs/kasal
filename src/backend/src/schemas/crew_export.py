@@ -2,14 +2,15 @@
 Schemas for crew export and deployment operations.
 """
 
-from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional, List
 from enum import Enum
-from uuid import UUID
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ExportFormat(str, Enum):
     """Available export formats"""
+
     PYTHON_PROJECT = "python_project"
     DATABRICKS_NOTEBOOK = "databricks_notebook"
     DATABRICKS_APP = "databricks_app"
@@ -17,36 +18,70 @@ class ExportFormat(str, Enum):
 
 class DeploymentTarget(str, Enum):
     """Available deployment targets"""
+
     DATABRICKS_MODEL_SERVING = "databricks_model_serving"
     DATABRICKS_APPS = "databricks_apps"
 
 
 class ExportOptions(BaseModel):
     """Options for crew export"""
-    include_custom_tools: bool = Field(True, description="Include custom tool implementations")
+
+    include_custom_tools: bool = Field(
+        True, description="Include custom tool implementations"
+    )
     include_comments: bool = Field(True, description="Add explanatory comments")
-    include_tests: bool = Field(True, description="Include test files (python_project only)")
-    model_override: Optional[str] = Field(None, description="Override LLM model for all agents")
-    include_memory_config: bool = Field(True, description="Include memory backend configuration")
+    include_tests: bool = Field(
+        True, description="Include test files (python_project only)"
+    )
+    model_override: Optional[str] = Field(
+        None, description="Override LLM model for all agents"
+    )
+    include_memory_config: bool = Field(
+        True, description="Include memory backend configuration"
+    )
 
     # Databricks notebook options
-    include_tracing: bool = Field(True, description="Include MLflow tracing/autolog (databricks_notebook only)")
-    include_evaluation: bool = Field(True, description="Include MLflow evaluation cell (databricks_notebook only)")
-    include_deployment: bool = Field(True, description="Include model deployment cell (databricks_notebook only)")
+    include_tracing: bool = Field(
+        True, description="Include MLflow tracing/autolog (databricks_notebook only)"
+    )
+    include_evaluation: bool = Field(
+        True, description="Include MLflow evaluation cell (databricks_notebook only)"
+    )
+    include_deployment: bool = Field(
+        True, description="Include model deployment cell (databricks_notebook only)"
+    )
 
     # Databricks App options
-    include_static_frontend: bool = Field(True, description="Include static frontend UI (databricks_app only)")
-    include_obo_auth: bool = Field(True, description="Include OBO authentication support (databricks_app only)")
+    include_static_frontend: bool = Field(
+        True, description="Include static frontend UI (databricks_app only)"
+    )
+    include_obo_auth: bool = Field(
+        True, description="Include OBO authentication support (databricks_app only)"
+    )
+
+    # Deploy-time overrides written into the generated app's app.yaml env
+    # (set by the one-click Databricks Apps deploy).
+    experiment_id: Optional[str] = Field(
+        None, description="MLflow experiment id to set as MLFLOW_EXPERIMENT_ID"
+    )
+    databricks_catalog: Optional[str] = Field(
+        None, description="UC catalog the deployed app uses (tools/memory)"
+    )
+    databricks_schema: Optional[str] = Field(
+        None, description="UC schema the deployed app uses (tools/memory)"
+    )
 
 
 class CrewExportRequest(BaseModel):
     """Request to export a crew"""
+
     export_format: ExportFormat = Field(..., description="Target export format")
     options: ExportOptions = Field(default_factory=ExportOptions)
 
 
 class ExportFile(BaseModel):
     """Individual file in export"""
+
     path: str = Field(..., description="Relative path in project")
     content: str = Field(..., description="File content")
     type: str = Field(..., description="File type (python, yaml, markdown, text)")
@@ -54,6 +89,7 @@ class ExportFile(BaseModel):
 
 class CrewExportResponse(BaseModel):
     """Response from crew export"""
+
     crew_id: str
     crew_name: str
     export_format: ExportFormat
@@ -74,11 +110,16 @@ class CrewExportResponse(BaseModel):
 
 class ModelServingConfig(BaseModel):
     """Configuration for Databricks Model Serving deployment"""
+
     model_name: str = Field(..., description="Name for the registered model")
-    endpoint_name: Optional[str] = Field(None, description="Model serving endpoint name (defaults to model_name)")
+    endpoint_name: Optional[str] = Field(
+        None, description="Model serving endpoint name (defaults to model_name)"
+    )
 
     # Compute configuration
-    workload_size: str = Field("Small", description="Workload size: Small, Medium, Large")
+    workload_size: str = Field(
+        "Small", description="Workload size: Small, Medium, Large"
+    )
     scale_to_zero_enabled: bool = Field(True, description="Enable scale to zero")
     min_instances: int = Field(0, description="Minimum number of instances")
     max_instances: int = Field(1, description="Maximum number of instances")
@@ -89,20 +130,26 @@ class ModelServingConfig(BaseModel):
     schema_name: Optional[str] = Field(None, description="Unity Catalog schema name")
 
     # Environment
-    environment_vars: Optional[Dict[str, str]] = Field(default_factory=dict, description="Environment variables")
+    environment_vars: Optional[Dict[str, str]] = Field(
+        default_factory=dict, description="Environment variables"
+    )
 
     # Tags
-    tags: Optional[Dict[str, str]] = Field(default_factory=dict, description="Model tags")
+    tags: Optional[Dict[str, str]] = Field(
+        default_factory=dict, description="Model tags"
+    )
 
 
 class DeploymentRequest(BaseModel):
     """Request to deploy a crew"""
+
     deployment_target: DeploymentTarget = Field(..., description="Deployment target")
     config: ModelServingConfig = Field(..., description="Deployment configuration")
 
 
 class DeploymentStatus(str, Enum):
     """Deployment status"""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     READY = "ready"
@@ -110,8 +157,72 @@ class DeploymentStatus(str, Enum):
     UPDATING = "updating"
 
 
+class AppDeploymentConfig(BaseModel):
+    """Configuration for a one-click Databricks Apps deployment."""
+
+    app_name: Optional[str] = Field(
+        None,
+        description="Databricks App name; defaults to the sanitized crew name.",
+    )
+    options: ExportOptions = Field(
+        default_factory=ExportOptions,
+        description="Export options controlling the generated app project.",
+    )
+    # Deploy-screen selections that flow into the deployed app.
+    model: Optional[str] = Field(
+        None, description="Model override for all agents in the deployed app"
+    )
+    catalog: Optional[str] = Field(
+        None, description="UC catalog the app uses for tools/memory"
+    )
+    schema_name: Optional[str] = Field(
+        None, description="UC schema the app uses for tools/memory"
+    )
+    experiment_name: Optional[str] = Field(
+        None,
+        description="MLflow experiment to create/reuse and link for tracing "
+        "(workspace path, or a name created under the user)",
+    )
+    lakebase_instance: Optional[str] = Field(
+        None, description="Existing Lakebase instance name for persistent memory"
+    )
+    create_lakebase: bool = Field(
+        False, description="Create a new Lakebase instance/database for the app"
+    )
+
+
+class AppDeploymentRequest(BaseModel):
+    """Request to deploy a crew as a Databricks App."""
+
+    config: AppDeploymentConfig = Field(default_factory=AppDeploymentConfig)
+
+
+class AppDeploymentResponse(BaseModel):
+    """Initial response when a Databricks Apps deployment is started."""
+
+    deployment_id: str
+    crew_id: str
+    app_name: str
+    status: str
+    message: Optional[str] = None
+
+
+class AppDeploymentStatusResponse(BaseModel):
+    """Status of an in-flight or completed Databricks Apps deployment."""
+
+    deployment_id: str
+    crew_id: str
+    app_name: str
+    status: str  # PENDING | RUNNING | SUCCEEDED | FAILED
+    step: Optional[str] = None
+    message: Optional[str] = None
+    app_url: Optional[str] = None
+    error: Optional[str] = None
+
+
 class DeploymentResponse(BaseModel):
     """Response from crew deployment"""
+
     crew_id: str
     crew_name: str
     deployment_target: DeploymentTarget
@@ -139,6 +250,7 @@ class DeploymentResponse(BaseModel):
 
 class DeploymentStatusResponse(BaseModel):
     """Response for deployment status check"""
+
     deployment_id: str
     endpoint_name: str
     endpoint_url: Optional[str] = None
@@ -159,6 +271,7 @@ class DeploymentStatusResponse(BaseModel):
 
 class EndpointInvokeRequest(BaseModel):
     """Request to invoke a deployed endpoint"""
+
     inputs: Dict[str, Any] = Field(..., description="Input parameters for the crew")
 
     # Optional overrides
@@ -168,6 +281,7 @@ class EndpointInvokeRequest(BaseModel):
 
 class EndpointInvokeResponse(BaseModel):
     """Response from endpoint invocation"""
+
     result: Any = Field(..., description="Crew execution result")
 
     # Execution metadata

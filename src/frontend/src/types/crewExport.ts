@@ -111,3 +111,41 @@ export interface DeploymentStatusResponse {
   creation_timestamp: number;
   last_updated_timestamp: number;
 }
+
+// ── Databricks Apps deployment (one-click from the UI) ──────────────────
+
+export type AppDeploymentStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+export interface AppDeploymentConfig {
+  app_name?: string;
+  options?: ExportOptions;
+  model?: string;
+  catalog?: string;
+  schema_name?: string;
+  experiment_name?: string;
+  lakebase_instance?: string;
+  create_lakebase?: boolean;
+}
+
+export interface AppDeploymentRequest {
+  config: AppDeploymentConfig;
+}
+
+export interface AppDeploymentResponse {
+  deployment_id: string;
+  crew_id: string;
+  app_name: string;
+  status: AppDeploymentStatus;
+  message?: string;
+}
+
+export interface AppDeploymentStatusResponse {
+  deployment_id: string;
+  crew_id: string;
+  app_name: string;
+  status: AppDeploymentStatus;
+  step?: string;
+  message?: string;
+  app_url?: string;
+  error?: string;
+}

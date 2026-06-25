@@ -49,6 +49,54 @@ Exports your crew as a single `.ipynb` notebook file compatible with Databricks,
 - Recommend using Databricks Runtime 14.3 LTS ML or higher for best compatibility
 - After installation, Python kernel will restart automatically
 
+#### 3. Databricks App Export
+
+Exports your crew as a **deployable Databricks App** — a CrewAI-adapted copy of Databricks'
+official agent-app template. The generated project wraps your crew behind MLflow's `AgentServer`
+(`ResponsesAgent` interface), so it gets a built-in chat UI and a queryable `/invocations` endpoint.
+
+Structure (faithful to the Databricks template):
+- **app.yaml** — runs the app via `uv run start-app`
+- **databricks.yml** — Databricks Asset Bundle (app + MLflow experiment resources)
+- **pyproject.toml** — uv project with CrewAI deps and script entrypoints
+- **manifest.yaml** — template metadata + resource specs
+- **agent_server/agent.py** — builds the crew from `config/*.yaml` and exposes `@invoke`/`@stream`
+- **agent_server/start_server.py**, **utils.py**, **evaluate_agent.py**
+- **config/agents.yaml**, **config/tasks.yaml** — your crew's agents and tasks
+- **scripts/** — `quickstart`, `preflight`, `start_app`, `discover_tools`, …
+- **.claude/skills/** — guidance skills (run-locally, add-tools, deploy, …)
+- **.github/workflows/deploy.yml**, **README.md**, **AGENTS.md**, **.env.example**
+
+**How the crew runs:** each chat turn maps the user's latest message to the crew's input key
+(auto-detected from `{placeholder}` tokens, default `topic`) and calls `crew.kickoff(inputs=...)`.
+Edit `MODEL_OVERRIDE`, `INPUT_KEY`, or `MCP_SERVERS` in `agent_server/agent.py` to tune behavior.
+
+**Best for:**
+- Shipping a crew as a standalone, queryable Databricks App with a chat UI
+- One-click deployment from the Kasal UI (see below)
+
+### Deploy to Databricks Apps (one-click)
+
+When the export format is **Databricks App**, the export dialog shows a **Deploy to Databricks Apps**
+button. This generates the project, creates the app, uploads the project to the workspace, deploys it,
+and starts it — no local CLI needed. The deploy runs in the background; the dialog polls progress
+(`CREATING_APP → UPLOADING → DEPLOYING → STARTING → SUCCEEDED`) and shows the live app URL when finished.
+
+**Authentication** follows Kasal's standard chain via `get_workspace_client`:
+1. **OBO** — the requesting user's forwarded token (`X-Forwarded-Access-Token`), preferred when Kasal is
+   opened from the Databricks workspace.
+2. **PAT** — the workspace personal access token stored for the group (used when no OBO token is
+   present, e.g. running the deploy locally).
+3. **Service principal** — Kasal's configured client credentials, as a last resort.
+
+The app is created under whichever identity authenticates. The deploy fails with a clear message only
+when none of the above can authenticate.
+
+**Prerequisites:**
+- A valid Databricks identity (OBO login, a configured workspace PAT, or service-principal credentials)
+  with permission to create Databricks Apps and write to the workspace.
+- Editor or Admin role in Kasal.
+
 ### Deployment to Databricks Model Serving
 
 Deploy your crew as an MLflow model behind a Databricks Model Serving endpoint for production use.
@@ -277,7 +325,31 @@ GET /api/crews/{crew_id}/export/download?format={format}
 
 Returns: File download (zip or ipynb)
 
-### Deploy Crew
+### Deploy as Databricks App (one-click)
+```
+POST /api/crews/{crew_id}/deploy-app
+```
+
+Request body:
+```json
+{
+  "config": {
+    "app_name": "my-crew",
+    "options": { "include_obo_auth": true, "include_custom_tools": true }
+  }
+}
+```
+
+Returns: `{ "deployment_id": "...", "app_name": "my-crew", "status": "PENDING" }`
+
+### Get App Deployment Status
+```
+GET /api/crews/{crew_id}/deploy-app/status?deployment_id={id}
+```
+
+Returns: `{ "status": "RUNNING|SUCCEEDED|FAILED", "step": "...", "message": "...", "app_url": "..." }`
+
+### Deploy Crew (Model Serving)
 ```
 POST /api/crews/{crew_id}/deploy
 ```

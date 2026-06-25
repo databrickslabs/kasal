@@ -232,13 +232,13 @@ class TestCrewExportService:
         assert len(result['files']) > 0
 
         file_paths = [f['path'] for f in result['files']]
+        # Template-driven Databricks App (MLflow AgentServer + ResponsesAgent).
         assert 'app.yaml' in file_paths
-        assert 'app.py' in file_paths
-        assert 'requirements.txt' in file_paths
+        assert 'pyproject.toml' in file_paths
+        assert 'agent_server/agent.py' in file_paths
+        assert 'agent_server/start_server.py' in file_paths
         assert 'config/agents.yaml' in file_paths
         assert 'config/tasks.yaml' in file_paths
-        assert 'services/crew_service.py' in file_paths
-        assert 'routes/v1/crew.py' in file_paths
 
 
 class TestGetCrewData:

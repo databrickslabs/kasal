@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -17,11 +17,24 @@ import {
   IconButton,
   ToggleButtonGroup,
   ToggleButton,
+  LinearProgress,
+  Link,
+  InputLabel,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
+import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { CrewExportService } from '../../api/CrewExportService';
-import { ExportFormat, ExportOptions } from '../../types/crewExport';
+import { ModelService } from '../../api/ModelService';
+import { Models } from '../../types/models';
+import {
+  ExportFormat,
+  ExportOptions,
+  AppDeploymentStatusResponse,
+} from '../../types/crewExport';
 
 interface ExportCrewDialogProps {
   open: boolean;
@@ -65,6 +78,97 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Databricks Apps deployment state
+  const defaultAppName = crewName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30) || 'agent-crew';
+  const [appName, setAppName] = useState<string>(defaultAppName);
+  const [deployCatalog, setDeployCatalog] = useState<string>('');
+  const [deploySchema, setDeploySchema] = useState<string>('');
+  const [deployExperiment, setDeployExperiment] = useState<string>('');
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deployStatus, setDeployStatus] =
+    useState<AppDeploymentStatusResponse | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Available LLM models (same enabled list the rest of the UI uses).
+  const [availableModels, setAvailableModels] = useState<Models>({});
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoadingModels(true);
+    ModelService.getInstance()
+      .getActiveModels()
+      .then((m) => setAvailableModels(m))
+      .catch((e) => console.error('Failed to load models:', e))
+      .finally(() => setLoadingModels(false));
+  }, [open]);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  // Clear any in-flight polling when the dialog unmounts.
+  useEffect(() => stopPolling, []);
+
+  const handleDeployApp = async () => {
+    setIsDeploying(true);
+    setError(null);
+    setSuccess(null);
+    setDeployStatus(null);
+    stopPolling();
+
+    try {
+      const started = await CrewExportService.deployApp(crewId, {
+        config: {
+          app_name: appName || undefined,
+          options,
+          model: options.model_override || undefined,
+          catalog: deployCatalog || undefined,
+          schema_name: deploySchema || undefined,
+          experiment_name: deployExperiment || undefined,
+        },
+      });
+      setDeployStatus({ ...started, step: 'QUEUED' });
+
+      // Poll until the deploy reaches a terminal state.
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await CrewExportService.getAppDeploymentStatus(
+            crewId,
+            started.deployment_id
+          );
+          setDeployStatus(status);
+          if (status.status === 'SUCCEEDED' || status.status === 'FAILED') {
+            stopPolling();
+            setIsDeploying(false);
+            if (status.status === 'SUCCEEDED') {
+              setSuccess(`App "${status.app_name}" deployed successfully.`);
+            } else {
+              setError(status.error || 'Deployment failed');
+            }
+          }
+        } catch (pollErr) {
+          console.error('Poll error:', pollErr);
+        }
+      }, 5000);
+    } catch (err) {
+      console.error('Deploy error:', err);
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ||
+        (err instanceof Error ? err.message : 'Failed to start deployment');
+      setError(message);
+      setIsDeploying(false);
+    }
+  };
+
   const handleFormatChange = (
     _event: React.MouseEvent<HTMLElement>,
     newFormat: ExportFormat | null
@@ -83,7 +187,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
     }));
   };
 
-  const handleModelOverrideChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleModelOverrideChange = (event: SelectChangeEvent<string>) => {
     setOptions(prev => ({
       ...prev,
       model_override: event.target.value || undefined
@@ -134,9 +238,11 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   };
 
   const handleClose = () => {
-    if (!isExporting) {
+    if (!isExporting && !isDeploying) {
+      stopPolling();
       setError(null);
       setSuccess(null);
+      setDeployStatus(null);
       onClose();
     }
   };
@@ -179,9 +285,11 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
               size="small"
               sx={{ mt: 1 }}
             >
-              <ToggleButton value={ExportFormat.DATABRICKS_NOTEBOOK}>
+              {/* Notebook export temporarily hidden from the UI — re-enable by
+                  uncommenting this ToggleButton. */}
+              {/* <ToggleButton value={ExportFormat.DATABRICKS_NOTEBOOK}>
                 Databricks Notebook
-              </ToggleButton>
+              </ToggleButton> */}
               <ToggleButton value={ExportFormat.DATABRICKS_APP}>
                 Databricks App
               </ToggleButton>
@@ -191,30 +299,8 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
             </Typography>
           </FormControl>
 
-          {/* Common Export Options */}
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Export Options</FormLabel>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={options.include_custom_tools}
-                    onChange={handleOptionChange('include_custom_tools')}
-                  />
-                }
-                label="Include custom tool implementations"
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={options.include_comments}
-                    onChange={handleOptionChange('include_comments')}
-                  />
-                }
-                label="Add explanatory comments"
-              />
-            </Box>
-          </FormControl>
+          {/* Custom tool implementations, comments, static UI and OBO auth are
+              always included for app exports — no toggles needed. */}
 
           {/* Notebook-specific Features */}
           {isNotebook && (
@@ -252,42 +338,118 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
             </FormControl>
           )}
 
-          {/* App-specific Features */}
+          {/* App deployment configuration */}
           {isApp && (
             <FormControl component="fieldset">
-              <FormLabel component="legend">App Features</FormLabel>
+              <FormLabel component="legend">Databricks App</FormLabel>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={options.include_static_frontend ?? true}
-                      onChange={handleOptionChange('include_static_frontend')}
-                    />
+                <TextField
+                  label="App name (for direct deploy)"
+                  value={appName}
+                  onChange={(e) =>
+                    setAppName(
+                      e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9-]/g, '-')
+                        .slice(0, 30)
+                    )
                   }
-                  label="Include static frontend UI"
+                  helperText="Lowercase letters, numbers and hyphens. Used when deploying to Databricks Apps."
+                  fullWidth
+                  size="small"
+                  sx={{ mt: 1 }}
+                  disabled={isDeploying}
                 />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={options.include_obo_auth ?? true}
-                      onChange={handleOptionChange('include_obo_auth')}
-                    />
-                  }
-                  label="Include OBO (on-behalf-of) authentication"
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    label="Catalog"
+                    value={deployCatalog}
+                    onChange={(e) => setDeployCatalog(e.target.value)}
+                    helperText="UC catalog for tools/memory"
+                    size="small"
+                    fullWidth
+                    disabled={isDeploying}
+                  />
+                  <TextField
+                    label="Schema"
+                    value={deploySchema}
+                    onChange={(e) => setDeploySchema(e.target.value)}
+                    helperText="UC schema for tools/memory"
+                    size="small"
+                    fullWidth
+                    disabled={isDeploying}
+                  />
+                </Box>
+                <TextField
+                  label="MLflow experiment (optional)"
+                  value={deployExperiment}
+                  onChange={(e) => setDeployExperiment(e.target.value)}
+                  helperText="Name or workspace path; created/reused and linked for tracing."
+                  fullWidth
+                  size="small"
+                  disabled={isDeploying}
                 />
               </Box>
             </FormControl>
           )}
 
-          {/* Model Override */}
-          <TextField
-            label="Model Override (optional)"
-            value={options.model_override || ''}
-            onChange={handleModelOverrideChange}
-            helperText="Override the LLM model for all agents"
-            fullWidth
-            placeholder="e.g., databricks-llama-4-maverick"
-          />
+          {/* App deployment progress */}
+          {isApp && deployStatus && (
+            <Box>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                {isDeploying ? 'Deploying to Databricks Apps…' : 'Deployment status'}
+                {deployStatus.step ? ` — ${deployStatus.step}` : ''}
+              </Typography>
+              {isDeploying && <LinearProgress sx={{ mb: 1 }} />}
+              {deployStatus.message && (
+                <Typography variant="caption" color="text.secondary">
+                  {deployStatus.message}
+                </Typography>
+              )}
+              {deployStatus.status === 'SUCCEEDED' && deployStatus.app_url && (
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  App URL:{' '}
+                  <Link
+                    href={deployStatus.app_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {deployStatus.app_url}
+                  </Link>
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {/* Model selection (uses the same enabled model list as the rest of the UI) */}
+          <FormControl fullWidth>
+            <InputLabel id="model-override-label">Model (optional)</InputLabel>
+            <Select
+              labelId="model-override-label"
+              label="Model (optional)"
+              value={options.model_override || ''}
+              onChange={handleModelOverrideChange}
+              disabled={loadingModels}
+            >
+              <MenuItem value="">
+                <em>Keep each agent&apos;s configured model</em>
+              </MenuItem>
+              {loadingModels ? (
+                <MenuItem disabled value="">
+                  <CircularProgress size={18} sx={{ mr: 1 }} /> Loading models...
+                </MenuItem>
+              ) : (
+                Object.entries(availableModels)
+                  .filter(([, model]) => model?.enabled === true)
+                  .map(([key, model]) => (
+                    <MenuItem key={key} value={key}>
+                      {model?.name || key}
+                      {model?.provider ? ` (${model.provider})` : ''}
+                    </MenuItem>
+                  ))
+              )}
+            </Select>
+          </FormControl>
 
           {/* Error/Success Messages */}
           {error && (
@@ -304,17 +466,29 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={handleClose} disabled={isExporting}>
+        <Button onClick={handleClose} disabled={isExporting || isDeploying}>
           Cancel
         </Button>
         <Button
           onClick={handleExport}
-          variant="contained"
-          disabled={isExporting}
+          variant="outlined"
+          disabled={isExporting || isDeploying}
           startIcon={isExporting ? <CircularProgress size={20} /> : <DownloadIcon />}
         >
           {isExporting ? 'Exporting...' : 'Export & Download'}
         </Button>
+        {isApp && (
+          <Button
+            onClick={handleDeployApp}
+            variant="contained"
+            disabled={isExporting || isDeploying}
+            startIcon={
+              isDeploying ? <CircularProgress size={20} /> : <RocketLaunchIcon />
+            }
+          >
+            {isDeploying ? 'Deploying...' : 'Deploy to Databricks Apps'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
