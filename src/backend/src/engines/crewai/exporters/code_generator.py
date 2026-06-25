@@ -3,9 +3,46 @@ Python code generator for CrewAI crew.py and main.py files.
 """
 
 from typing import Dict, Any, List, Optional
+import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_task_guardrail(task: Dict[str, Any]) -> Optional[tuple]:
+    """Classify a task's guardrail for export.
+
+    Mirrors the runtime detection in ``common/task_builder.py``:
+    - LLM guardrail (``llm_guardrail`` dict, or a ``guardrail`` carrying a
+      description / llm_model and no ``type``) → CrewAI-native ``LLMGuardrail``,
+      portable to a standalone notebook.
+    - Code/factory guardrail (a ``type`` string or bare function name) → a Kasal
+      built-in that can't be bundled; surfaced as a TODO.
+
+    Returns:
+        ('llm', description, llm_model) | ('code', name) | None
+    """
+    def _coerce(value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return value
+        return value
+
+    lg = _coerce(task.get('llm_guardrail'))
+    if isinstance(lg, dict) and (lg.get('description') or lg.get('llm_model')):
+        return ('llm', lg.get('description', 'Validate the task output'), lg.get('llm_model'))
+
+    g = _coerce(task.get('guardrail'))
+    if isinstance(g, dict):
+        if 'type' in g:
+            return ('code', str(g.get('type')))
+        if g.get('description') or g.get('llm_model'):
+            return ('llm', g.get('description', 'Validate the task output'), g.get('llm_model'))
+    elif isinstance(g, str) and g.strip():
+        return ('code', g.strip())
+    return None
 
 
 class CodeGenerator:
@@ -111,11 +148,12 @@ class CodeGenerator:
         process_type: str = "sequential",
         include_comments: bool = True,
         for_notebook: bool = False,
-        mcp_servers: Optional[List[Dict[str, Any]]] = None
+        mcp_servers: Optional[List[Dict[str, Any]]] = None,
+        crew_config: Optional[Dict[str, Any]] = None
     ) -> str:
         """Generate crew code - uses direct instantiation for notebooks, class-based for standalone"""
         if for_notebook:
-            return self._generate_notebook_crew_code(crew_name, agents, tasks, process_type, include_comments, mcp_servers)
+            return self._generate_notebook_crew_code(crew_name, agents, tasks, process_type, include_comments, mcp_servers, crew_config)
         else:
             return self._generate_class_based_crew_code(crew_name, agents, tasks, tools, process_type, include_comments)
 
@@ -433,6 +471,165 @@ class CodeGenerator:
 
         return ''.join(code_parts)
 
+    def generate_conversation_main_code(
+        self,
+        crew_name: str,
+        sample_inputs: Optional[Dict[str, Any]] = None,
+        has_mcp: bool = False,
+    ) -> str:
+        """Generate a generic multi-turn, info-gathering conversation layer.
+
+        Wraps the synthesized crew in a CrewAI ``Flow`` (modeled on CrewAI's
+        conversational template): each turn is classified as a pleasantry, a
+        request that still needs info (ask one clarifying question), or a request
+        that's ready to run the crew. ``@persist()`` keeps multi-turn state across
+        ``chat(...)`` calls. Flow methods are ``async`` and use ``kickoff_async`` so
+        they work inside Databricks' already-running notebook event loop.
+        """
+        sample = 'Artificial Intelligence trends in 2025'
+        if sample_inputs:
+            sample = str(next(iter(sample_inputs.values()), sample))
+
+        if has_mcp:
+            crew_run = (
+                "        # Run the synthesized crew with its MCP tools attached.\n"
+                "        with MCPServerAdapter(mcp_server_params) as mcp_tools:\n"
+                "            active_crew = create_crew(mcp_tools=mcp_tools)\n"
+                "            result = await active_crew.kickoff_async(inputs=inputs)\n"
+            )
+        else:
+            crew_run = "        result = await crew.kickoff_async(inputs=inputs)\n"
+
+        return (
+            '"""\n'
+            'Conversational Layer - multi-turn, info-gathering chat on top of the crew\n'
+            '\n'
+            'Call chat("your message") repeatedly; conversation state persists across\n'
+            'calls in this session. The layer classifies each message and either\n'
+            'replies (pleasantry), asks a clarifying question (when the request is\n'
+            'missing details), or runs the crew (when there is enough information).\n'
+            '"""\n'
+            'import asyncio\n'
+            'import json\n'
+            'from typing import List\n'
+            'from pydantic import BaseModel\n'
+            'from crewai import Agent\n'
+            'from crewai.flow import Flow, listen, or_, persist, router, start\n'
+            '\n'
+            '# Reuse the crew\'s primary LLM for the lightweight conversation agents.\n'
+            'try:\n'
+            '    _chat_llm = llm_1\n'
+            'except NameError:\n'
+            '    _chat_llm = LLM(model="databricks/databricks-llama-4-maverick")\n'
+            '\n'
+            'def _run_coro(coro):\n'
+            '    """Run a coroutine whether or not a notebook event loop is already running."""\n'
+            '    try:\n'
+            '        loop = asyncio.get_running_loop()\n'
+            '    except RuntimeError:\n'
+            '        loop = None\n'
+            '    if loop is not None:\n'
+            '        import nest_asyncio\n'
+            '        nest_asyncio.apply()\n'
+            '        return loop.run_until_complete(coro)\n'
+            '    return asyncio.run(coro)\n'
+            '\n'
+            'class ChatState(BaseModel):\n'
+            '    current_message: str = ""\n'
+            '    conversation_history: List[dict] = []\n'
+            '    current_response: str = ""\n'
+            '    classification: str = ""\n'
+            '\n'
+            '@persist()\n'
+            'class ChatFlow(Flow[ChatState]):\n'
+            '    @start()\n'
+            '    async def initial_processing(self):\n'
+            '        # Keep the last 10 messages so prompts stay bounded.\n'
+            '        self.state.conversation_history = self.state.conversation_history[-10:]\n'
+            '\n'
+            '    @router(initial_processing)\n'
+            '    async def classify_message(self):\n'
+            '        classifier = Agent(\n'
+            '            role="Conversation Router",\n'
+            '            goal="Decide how to handle the user\'s latest message.",\n'
+            '            backstory=(\n'
+            '                "You triage messages for an AI crew. Reply \'pleasantry\' for greetings or "\n'
+            '                "small talk; \'need_info\' when the request is missing details the crew needs "\n'
+            '                "to do a good job; \'ready\' when there is enough information to run the crew."\n'
+            '            ),\n'
+            '            llm=_chat_llm, verbose=False,\n'
+            '        )\n'
+            '        prompt = (\n'
+            '            "User message: \'" + self.state.current_message + "\'\\n"\n'
+            '            "Conversation so far: " + str(self.state.conversation_history) + "\\n"\n'
+            '            "Answer with exactly one word: pleasantry, need_info, or ready."\n'
+            '        )\n'
+            '        res = await classifier.kickoff_async(prompt)\n'
+            '        self.state.classification = (getattr(res, "raw", "") or "").strip().lower()\n'
+            '        if "pleasant" in self.state.classification:\n'
+            '            return "handle_pleasantry"\n'
+            '        if "need" in self.state.classification:\n'
+            '            return "handle_need_info"\n'
+            '        return "handle_ready"\n'
+            '\n'
+            '    @listen("handle_pleasantry")\n'
+            '    async def handle_pleasantry(self):\n'
+            '        agent = Agent(role="Assistant", goal="Reply warmly and briefly",\n'
+            '                      backstory="A friendly assistant.", llm=_chat_llm, verbose=False)\n'
+            '        res = await agent.kickoff_async("Reply briefly and warmly to: \'" + self.state.current_message + "\'")\n'
+            '        self.state.current_response = getattr(res, "raw", str(res))\n'
+            '\n'
+            '    @listen("handle_need_info")\n'
+            '    async def handle_need_info(self):\n'
+            '        agent = Agent(role="Requirements Gatherer",\n'
+            '                      goal="Ask one concise clarifying question to collect the missing details",\n'
+            '                      backstory="You gather requirements before the crew starts work.",\n'
+            '                      llm=_chat_llm, verbose=False)\n'
+            '        prompt = (\n'
+            '            "The request may be missing details needed to do it well.\\n"\n'
+            '            "Request: \'" + self.state.current_message + "\'\\n"\n'
+            '            "Conversation: " + str(self.state.conversation_history) + "\\n"\n'
+            '            "Ask ONE specific clarifying question to get what is needed."\n'
+            '        )\n'
+            '        res = await agent.kickoff_async(prompt)\n'
+            '        self.state.current_response = getattr(res, "raw", str(res))\n'
+            '\n'
+            '    @listen("handle_ready")\n'
+            '    async def handle_ready(self):\n'
+            '        inputs = {"topic": self.state.current_message, "conversation_history": self.state.conversation_history}\n'
+            + crew_run +
+            '        self.state.current_response = str(result)\n'
+            '\n'
+            '    @listen(or_(handle_pleasantry, handle_need_info, handle_ready))\n'
+            '    def send_response(self):\n'
+            '        self.state.conversation_history.append({"role": "user", "content": self.state.current_message})\n'
+            '        self.state.conversation_history.append({"role": "assistant", "content": self.state.current_response})\n'
+            '        return json.dumps({\n'
+            '            "id": self.state.id,\n'
+            '            "response": self.state.current_response,\n'
+            '            "classification": self.state.classification,\n'
+            '        })\n'
+            '\n'
+            '# Conversation id is reused across chat() calls so the dialogue is multi-turn.\n'
+            '_conversation_id = None\n'
+            '\n'
+            'def chat(message):\n'
+            '    """Send one message to the crew; multi-turn state persists across calls."""\n'
+            '    global _conversation_id\n'
+            '    inputs = {"current_message": message}\n'
+            '    if _conversation_id:\n'
+            '        inputs["id"] = _conversation_id\n'
+            '    result = _run_coro(ChatFlow().kickoff_async(inputs=inputs))\n'
+            '    data = json.loads(result)\n'
+            '    _conversation_id = data["id"]\n'
+            '    print("You: " + message)\n'
+            '    print("Assistant [" + data.get("classification", "") + "]: " + data["response"])\n'
+            '    return data\n'
+            '\n'
+            '# Example - call chat(...) again to continue the same conversation.\n'
+            'chat("' + sample.replace('"', '\\"') + '")\n'
+        )
+
     def _generate_crew_imports(self, tools: List[str], for_notebook: bool) -> str:
         """Generate import statements"""
         imports = []
@@ -552,7 +749,8 @@ class CodeGenerator:
         tasks: List[Dict[str, Any]],
         process_type: str = "sequential",
         include_comments: bool = True,
-        mcp_servers: Optional[List[Dict[str, Any]]] = None
+        mcp_servers: Optional[List[Dict[str, Any]]] = None,
+        crew_config: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Generate notebook-friendly crew code using direct instantiation (no decorators)
@@ -573,21 +771,36 @@ class CodeGenerator:
             Python code for direct crew instantiation
         """
         code_parts = []
+        crew_config = crew_config or {}
 
         if include_comments:
             code_parts.append('"""\n')
             code_parts.append('Create Crew with Agents and Tasks\n')
             code_parts.append('"""\n\n')
 
-        # Collect unique LLM models used
+        # Per-task guardrail classification (LLM guardrails are exportable).
+        task_guardrails = {id(t): _parse_task_guardrail(t) for t in tasks}
+        has_llm_guardrail = any(g and g[0] == 'llm' for g in task_guardrails.values())
+
+        # Collect unique LLM models used by agents, the crew (planning/reasoning/
+        # manager) and any LLM guardrails, so every one gets an LLM instance.
         llm_models = set()
         agent_llm_map = {}
+        agent_id_llm = {}
         for agent in agents:
             agent_name = agent.get('name', 'agent').lower().replace(' ', '_')
             llm = agent.get('llm')
             if llm:
                 llm_models.add(llm)
                 agent_llm_map[agent_name] = llm
+                if agent.get('id'):
+                    agent_id_llm[agent.get('id')] = llm
+        for key in ('planning_llm', 'manager_llm', 'reasoning_llm'):
+            if crew_config.get(key):
+                llm_models.add(crew_config[key])
+        for g in task_guardrails.values():
+            if g and g[0] == 'llm' and g[2]:
+                llm_models.add(g[2])
 
         # Create LLM instances
         llm_var_map = {}
@@ -611,6 +824,12 @@ class CodeGenerator:
                     code_parts.append(f'{var_name} = LLM(model="databricks/{llm_model}")\n')
 
             code_parts.append('\n')
+
+        if has_llm_guardrail:
+            code_parts.append('from crewai.tasks.llm_guardrail import LLMGuardrail\n\n')
+
+        if crew_config.get('reasoning'):
+            code_parts.append('from crewai.agent.planning_config import PlanningConfig\n\n')
 
         # MCP servers configured on the crew: emit the connection params and build
         # the crew inside a create_crew(mcp_tools=None) function so the MCP tools
@@ -640,6 +859,18 @@ class CodeGenerator:
 
             if llm_model and llm_model in llm_var_map:
                 body.append(f'{agent_name}_config["llm"] = {llm_var_map[llm_model]}\n')
+
+            # reasoning is an Agent-level capability in CrewAI (not Crew-level),
+            # configured via a bounded PlanningConfig. reasoning_llm (if set) drives
+            # the reasoning loop; otherwise it uses the agent's own LLM.
+            if crew_config.get('reasoning'):
+                _rvar = llm_var_map.get(crew_config.get('reasoning_llm'))
+                _llm_kw = f', llm={_rvar}' if _rvar else ''
+                body.append(
+                    f'{agent_name}_config["planning_config"] = PlanningConfig('
+                    f'reasoning_effort="low", max_attempts=1, max_steps=3, '
+                    f'max_step_iterations=3, step_timeout=20, max_replans=0{_llm_kw})\n'
+                )
 
             if has_mcp:
                 body.append('if mcp_tools:\n')
@@ -701,6 +932,23 @@ class CodeGenerator:
                 body.append(f'{task_name}_config["tools"] = {task_name}_tools\n')
                 body.append(f'\n')
 
+            # Guardrails: LLM guardrails map to CrewAI's LLMGuardrail; code/factory
+            # guardrails are Kasal built-ins that can't be bundled — surface a TODO.
+            guardrail = task_guardrails.get(id(task))
+            if guardrail and guardrail[0] == 'llm':
+                _desc = guardrail[1].replace('"', '\\"')
+                _gmodel = guardrail[2]
+                if _gmodel and _gmodel in llm_var_map:
+                    _gllm = llm_var_map[_gmodel]
+                else:
+                    _gllm = llm_var_map.get(agent_id_llm.get(task.get('agent_id')))
+                    if not _gllm and llm_var_map:
+                        _gllm = sorted(llm_var_map.values())[0]
+                if _gllm:
+                    body.append(f'{task_name}_config["guardrail"] = LLMGuardrail(description="{_desc}", llm={_gllm})\n')
+            elif guardrail and guardrail[0] == 'code':
+                body.append(f'# TODO: task \'{task_name}\' has a Kasal built-in guardrail \'{guardrail[1]}\' that is not bundled in this export.\n')
+
             body.append(f'{task_name} = Task(**{task_name}_config)\n')
             body.append(f'task_map[\'{task_name}\'] = {task_name}\n')
 
@@ -712,15 +960,27 @@ class CodeGenerator:
             'sequential': 'Process.sequential',
             'hierarchical': 'Process.hierarchical',
         }
-        process = process_map.get(process_type, 'Process.sequential')
-        crew_ctor = [
-            'Crew(\n',
+        effective_process = crew_config.get('process') or process_type
+        process = process_map.get(effective_process, 'Process.sequential')
+        crew_kwargs = [
             f'    agents=[{", ".join(agent_vars)}],\n',
             f'    tasks=[{", ".join(task_vars)}],\n',
             f'    process={process},\n',
-            '    verbose=True\n',
-            ')\n',
         ]
+        # Hierarchical process requires a manager LLM.
+        if effective_process == 'hierarchical' and crew_config.get('manager_llm') in llm_var_map:
+            crew_kwargs.append(f'    manager_llm={llm_var_map[crew_config["manager_llm"]]},\n')
+        if crew_config.get('planning'):
+            crew_kwargs.append('    planning=True,\n')
+            if crew_config.get('planning_llm') in llm_var_map:
+                crew_kwargs.append(f'    planning_llm={llm_var_map[crew_config["planning_llm"]]},\n')
+        # Memory defaults to enabled; backend uses CrewAI's default embedder.
+        if crew_config.get('memory', True):
+            crew_kwargs.append('    memory=True,  # TODO: uses CrewAI default storage/embedder; wire your memory backend if needed\n')
+        else:
+            crew_kwargs.append('    memory=False,\n')
+        crew_kwargs.append('    verbose=True\n')
+        crew_ctor = ['Crew(\n'] + crew_kwargs + [')\n']
 
         def _indent(line: str) -> str:
             return line if line.strip() == '' else '    ' + line

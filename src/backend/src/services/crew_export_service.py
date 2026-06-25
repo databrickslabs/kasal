@@ -44,7 +44,7 @@ class CrewExportService:
         crew_id: str,
         export_format: ExportFormat,
         options: Optional[ExportOptions] = None,
-        group_context: Optional[GroupContext] = None
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """
         Export crew to specified format
@@ -84,9 +84,7 @@ class CrewExportService:
         return result
 
     async def _get_crew_with_details(
-        self,
-        crew_id: str,
-        group_context: Optional[GroupContext] = None
+        self, crew_id: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
         """
         Get crew with all related agents and tasks
@@ -135,20 +133,29 @@ class CrewExportService:
         catalog, schema = await self._get_databricks_catalog_schema(group_context)
 
         return {
-            'id': str(crew.id),
-            'name': crew.name,
-            'agents': agents,
-            'tasks': tasks,
-            'nodes': crew.nodes or [],
-            'edges': crew.edges or [],
-            'mcp_servers': mcp_servers,
-            'databricks_catalog': catalog,
-            'databricks_schema': schema,
+            "id": str(crew.id),
+            "name": crew.name,
+            "agents": agents,
+            "tasks": tasks,
+            "nodes": crew.nodes or [],
+            "edges": crew.edges or [],
+            "mcp_servers": mcp_servers,
+            "databricks_catalog": catalog,
+            "databricks_schema": schema,
+            # Crew-level execution settings so exports match Kasal's runtime
+            # (process, planning, reasoning, manager, memory).
+            "process": crew.process or "sequential",
+            "planning": bool(crew.planning),
+            "planning_llm": crew.planning_llm,
+            "reasoning": bool(crew.reasoning),
+            "reasoning_llm": crew.reasoning_llm,
+            "reasoning_config": crew.reasoning_config,
+            "manager_llm": crew.manager_llm,
+            "memory": crew.memory if crew.memory is not None else True,
         }
 
     async def _get_databricks_catalog_schema(
-        self,
-        group_context: Optional[GroupContext] = None
+        self, group_context: Optional[GroupContext] = None
     ) -> tuple:
         """Return (catalog, schema) from the workspace's active Databricks config.
 
@@ -157,24 +164,28 @@ class CrewExportService:
         """
         try:
             from src.services.databricks_service import DatabricksService
+
             group_id = group_context.primary_group_id if group_context else None
             service = DatabricksService(self.session, group_id=group_id)
             config = await service.get_databricks_config()
             # NOTE: the schema field is `db_schema` (aliased to "schema") because
             # `schema` collides with pydantic's BaseModel.schema method — using
             # `config.schema` returns the bound method, not the value.
-            catalog = getattr(config, 'catalog', None) if config else None
-            schema = getattr(config, 'db_schema', None) if config else None
+            catalog = getattr(config, "catalog", None) if config else None
+            schema = getattr(config, "db_schema", None) if config else None
             if catalog and schema:
-                logger.info(f"Export: using Databricks catalog/schema {catalog}.{schema}")
+                logger.info(
+                    f"Export: using Databricks catalog/schema {catalog}.{schema}"
+                )
                 return catalog, schema
         except Exception as e:
-            logger.warning(f"Export: could not load Databricks catalog/schema, using defaults: {e}")
+            logger.warning(
+                f"Export: could not load Databricks catalog/schema, using defaults: {e}"
+            )
         return None, None
 
     async def _get_enabled_mcp_servers(
-        self,
-        group_context: Optional[GroupContext] = None
+        self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
         """Return the workspace's enabled MCP servers for export (group-aware).
 
@@ -183,21 +194,30 @@ class CrewExportService:
         """
         try:
             from src.services.mcp_service import MCPService
+
             mcp_service = MCPService(self.session)
             group_id = group_context.primary_group_id if group_context else None
-            response = await mcp_service.get_all_servers_effective(group_id, enabled_only=True)
+            response = await mcp_service.get_all_servers_effective(
+                group_id, enabled_only=True
+            )
             servers = []
             for server in response.servers:
-                servers.append({
-                    'name': server.name,
-                    'server_url': server.server_url,
-                    'server_type': getattr(server, 'server_type', 'streamable'),
-                    'auth_type': getattr(server, 'auth_type', 'api_key'),
-                })
-            logger.info(f"Export: found {len(servers)} enabled MCP server(s) for group {group_id}")
+                servers.append(
+                    {
+                        "name": server.name,
+                        "server_url": server.server_url,
+                        "server_type": getattr(server, "server_type", "streamable"),
+                        "auth_type": getattr(server, "auth_type", "api_key"),
+                    }
+                )
+            logger.info(
+                f"Export: found {len(servers)} enabled MCP server(s) for group {group_id}"
+            )
             return servers
         except Exception as e:
-            logger.warning(f"Export: could not load MCP servers, exporting without MCP: {e}")
+            logger.warning(
+                f"Export: could not load MCP servers, exporting without MCP: {e}"
+            )
             return []
 
     async def _convert_tool_ids_to_names(self, tool_ids: List[Any]) -> List[str]:
@@ -242,22 +262,22 @@ class CrewExportService:
         tool_names = await self._convert_tool_ids_to_names(agent.tools or [])
 
         return {
-            'id': str(agent.id),
-            'name': agent.name,
-            'role': agent.role,
-            'goal': agent.goal,
-            'backstory': agent.backstory,
-            'llm': agent.llm,
-            'tools': tool_names,
-            'max_iter': agent.max_iter,
-            'max_rpm': agent.max_rpm,
-            'max_execution_time': agent.max_execution_time,
-            'verbose': agent.verbose,
-            'allow_delegation': agent.allow_delegation,
-            'cache': agent.cache,
-            'system_template': agent.system_template,
-            'prompt_template': agent.prompt_template,
-            'response_template': agent.response_template,
+            "id": str(agent.id),
+            "name": agent.name,
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "llm": agent.llm,
+            "tools": tool_names,
+            "max_iter": agent.max_iter,
+            "max_rpm": agent.max_rpm,
+            "max_execution_time": agent.max_execution_time,
+            "verbose": agent.verbose,
+            "allow_delegation": agent.allow_delegation,
+            "cache": agent.cache,
+            "system_template": agent.system_template,
+            "prompt_template": agent.prompt_template,
+            "response_template": agent.response_template,
         }
 
     async def _task_to_dict(self, task) -> Dict[str, Any]:
@@ -266,16 +286,19 @@ class CrewExportService:
         tool_names = await self._convert_tool_ids_to_names(task.tools or [])
 
         return {
-            'id': str(task.id),
-            'name': task.name,
-            'description': task.description,
-            'expected_output': task.expected_output,
-            'agent_id': task.agent_id,
-            'tools': tool_names,
-            'async_execution': task.async_execution,
-            'context': task.context or [],
-            'output_file': task.output_file,
-            'output_json': task.output_json,
-            'callback': task.callback,
-            'human_input': task.human_input,
+            "id": str(task.id),
+            "name": task.name,
+            "description": task.description,
+            "expected_output": task.expected_output,
+            "agent_id": task.agent_id,
+            "tools": tool_names,
+            "async_execution": task.async_execution,
+            "context": task.context or [],
+            "output_file": task.output_file,
+            "output_json": task.output_json,
+            "callback": task.callback,
+            "human_input": task.human_input,
+            # Guardrails: code-based (function/factory name) and LLM-based config
+            "guardrail": task.guardrail,
+            "llm_guardrail": task.llm_guardrail,
         }
