@@ -202,6 +202,39 @@ class TaskGenerationService:
             return ""
     
     async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
+        """Public entrypoint — wraps task generation in an MLflow root trace so
+        it lands in the shared UC experiment (alongside dispatcher intent, crew
+        generation, agent generation and crew execution)."""
+        from contextlib import nullcontext
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            configure_parent_mlflow_tracing,
+            set_root_span_outputs,
+        )
+
+        mlflow_on = await configure_parent_mlflow_tracing(
+            self.session, group_context, label="TaskGeneration"
+        )
+        if mlflow_on:
+            from src.services.mlflow_tracing_service import start_root_trace
+            trace_ctx = start_root_trace(
+                "task_generation",
+                inputs={
+                    "prompt": getattr(request, "text", None)
+                    or getattr(request, "prompt", None),
+                    "model": getattr(request, "model", None) or "default",
+                },
+            )
+        else:
+            trace_ctx = nullcontext()
+
+        with trace_ctx as root_span:
+            result = await self._generate_task_impl(
+                request, group_context=group_context, fast_planning=fast_planning
+            )
+            set_root_span_outputs(root_span, result)
+            return result
+
+    async def _generate_task_impl(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
         """
         Generate a task based on the provided prompt and context.
 

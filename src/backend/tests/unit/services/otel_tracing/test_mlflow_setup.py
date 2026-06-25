@@ -21,8 +21,44 @@ from src.services.otel_tracing.mlflow_setup import (
     post_execution_mlflow_cleanup,
     _try_import_mlflow,
     _build_uc_trace_location,
+    _derive_trace_run_name,
     KASAL_TRACE_TABLE_PREFIX,
 )
+
+
+class TestDeriveTraceRunName:
+    """The MLflow root span must carry a meaningful run name, not 'Unnamed'.
+
+    run_name is frequently nested under inputs (or absent), so the derivation
+    must check several locations and fall back to the execution id before
+    'Unnamed'."""
+
+    def test_top_level_run_name_wins(self):
+        assert _derive_trace_run_name({"run_name": "My Crew"}) == "My Crew"
+
+    def test_nested_inputs_run_name(self):
+        cfg = {"inputs": {"run_name": "Nested Run"}}
+        assert _derive_trace_run_name(cfg) == "Nested Run"
+
+    def test_inputs_arg_run_name(self):
+        assert _derive_trace_run_name({}, inputs={"run_name": "Arg Run"}) == "Arg Run"
+
+    def test_crew_name_fallback(self):
+        assert _derive_trace_run_name({"crew_name": "Research Crew"}) == "Research Crew"
+
+    def test_execution_id_fallback_from_param(self):
+        assert _derive_trace_run_name({}, execution_id="exec-123") == "exec-123"
+
+    def test_execution_id_fallback_from_config(self):
+        assert _derive_trace_run_name({"execution_id": "cfg-exec-9"}) == "cfg-exec-9"
+
+    def test_unnamed_only_when_nothing_available(self):
+        assert _derive_trace_run_name({}) == "Unnamed"
+
+    def test_blank_run_name_is_skipped(self):
+        # Empty / whitespace run_name must not win over the execution id.
+        cfg = {"run_name": "   "}
+        assert _derive_trace_run_name(cfg, execution_id="exec-7") == "exec-7"
 
 
 class TestBuildUcTraceLocation:
@@ -927,6 +963,153 @@ class TestConfigureMlflowFullSPNPath:
         assert call() not in mock_mlflow.config.enable_async_logging.call_args_list
         assert call(True) not in mock_mlflow.config.enable_async_logging.call_args_list
         assert result.enabled is True
+
+    @pytest.mark.asyncio
+    async def test_uc_trace_storage_enables_autolog_without_otlp_or_dest_override(self, monkeypatch):
+        """When UC trace storage is active (catalog/schema/warehouse set):
+        - OTEL_TRACES_EXPORTER is forced to 'none' (no localhost OTLP sidecar);
+        - native MLflow autolog IS enabled (spans flow through MLflow's tracer so
+          DatabricksUCTableSpanExporter writes them to the UC Delta tables);
+        - the Databricks(experiment_id) destination is NOT set (that would route
+          to managed storage and skip UC auto-resolution)."""
+        for k, v in _make_full_spn_env().items():
+            monkeypatch.setenv(k, v)
+        # Baseline so monkeypatch restores it after the test (no leak).
+        monkeypatch.setenv("OTEL_TRACES_EXPORTER", "otlp")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4314")
+
+        import sys
+        mock_mlflow = MagicMock()
+        mock_exp = MagicMock()
+        mock_exp.experiment_id = "exp-uc"
+        mock_mlflow.set_experiment.return_value = mock_exp
+        mock_mlflow.tracing = MagicMock()
+        mock_mlflow.tracing.enable = MagicMock()
+        mock_mlflow.config = MagicMock()
+        mock_mlflow.get_tracking_uri.return_value = "databricks"
+
+        mock_wc_instance = MagicMock()
+        mock_wc_instance.config.authenticate.return_value = {
+            "Authorization": "Bearer uc-spn-token"
+        }
+        mock_databricks_sdk = MagicMock()
+        mock_databricks_sdk.WorkspaceClient = MagicMock(return_value=mock_wc_instance)
+
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        # Config with catalog/db_schema/warehouse_id -> UC trace location is built.
+        uc_cfg = MagicMock()
+        uc_cfg.mlflow_enabled = True
+        uc_cfg.catalog = "nemotemo_catalog"
+        uc_cfg.db_schema = "kasal"
+        uc_cfg.warehouse_id = "wh-1"
+        uc_cfg.mlflow_experiment_name = "kasal-crew-execution-traces"
+        mock_service_instance = MagicMock()
+        mock_service_instance.get_databricks_config = AsyncMock(return_value=uc_cfg)
+
+        mock_enable_autologs = MagicMock()
+
+        with patch.dict(sys.modules, {
+            "mlflow": mock_mlflow,
+            "databricks.sdk": mock_databricks_sdk,
+        }):
+            with (
+                patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
+                patch("src.services.databricks_service.DatabricksService",
+                      MagicMock(return_value=mock_service_instance)),
+                patch("src.engines.crewai.mlflow_integration.enable_autologs",
+                      mock_enable_autologs),
+                # UC trace location active (real builder needs MLflow >=3.11's
+                # UnityCatalog import, which the mocked mlflow breaks here).
+                patch("src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
+                      return_value=MagicMock()),
+            ):
+                await configure_mlflow_in_subprocess(
+                    db_config=uc_cfg,
+                    job_id="job-uc",
+                    execution_id="exec-uc",
+                    group_id="grp-1",
+                )
+
+        # OTLP traces export disabled (no localhost sidecar) ...
+        assert os.environ.get("OTEL_TRACES_EXPORTER") == "none"
+        assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in os.environ
+        # ... native autolog IS enabled (spans -> MLflow tracer -> UC exporter) ...
+        mock_enable_autologs.assert_called_once()
+        # ... and the experiment-id destination is NOT pinned (would skip UC).
+        mock_mlflow.tracing.set_destination.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_uc_trace_storage_uses_dedicated_uc_experiment(self, monkeypatch):
+        """UC trace storage must bind to a dedicated `-uc` experiment, never the
+        base experiment the parent-process dispatcher writes managed traces to.
+
+        Regression: a UC Trace Destination can only be linked to an experiment
+        that has NEVER contained a trace. The dispatcher (parent process, no DB
+        config -> managed traces) poisoned the shared experiment, so the crew's
+        UC bind was permanently rejected and the `<prefix>_otel_*` Delta tables
+        stayed empty. The crew must use an isolated experiment name."""
+        for k, v in _make_full_spn_env().items():
+            monkeypatch.setenv(k, v)
+
+        import sys
+        mock_mlflow = MagicMock()
+        mock_exp = MagicMock()
+        mock_exp.experiment_id = "exp-uc"
+        mock_mlflow.set_experiment.return_value = mock_exp
+        mock_mlflow.tracing = MagicMock()
+        mock_mlflow.get_tracking_uri.return_value = "databricks"
+
+        mock_wc_instance = MagicMock()
+        mock_wc_instance.config.authenticate.return_value = {
+            "Authorization": "Bearer uc-spn-token"
+        }
+        mock_databricks_sdk = MagicMock()
+        mock_databricks_sdk.WorkspaceClient = MagicMock(return_value=mock_wc_instance)
+
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        uc_cfg = MagicMock()
+        uc_cfg.mlflow_enabled = True
+        uc_cfg.catalog = "nemotemo_catalog"
+        uc_cfg.db_schema = "kasal"
+        uc_cfg.warehouse_id = "wh-1"
+        uc_cfg.mlflow_experiment_name = "kasal-crew-execution-traces"
+        mock_service_instance = MagicMock()
+        mock_service_instance.get_databricks_config = AsyncMock(return_value=uc_cfg)
+
+        with patch.dict(sys.modules, {
+            "mlflow": mock_mlflow,
+            "databricks.sdk": mock_databricks_sdk,
+        }):
+            with (
+                patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
+                patch("src.services.databricks_service.DatabricksService",
+                      MagicMock(return_value=mock_service_instance)),
+                patch("src.engines.crewai.mlflow_integration.enable_autologs",
+                      MagicMock()),
+                patch("src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
+                      return_value=MagicMock()),
+            ):
+                await configure_mlflow_in_subprocess(
+                    db_config=uc_cfg,
+                    job_id="job-uc",
+                    execution_id="exec-uc",
+                    group_id="grp-1",
+                )
+
+        # The experiment bound for UC traces must be the dedicated `-uc` name,
+        # isolated from the dispatcher's base `/Shared/kasal-crew-execution-traces`.
+        bound_names = [
+            (c.args[0] if c.args else c.kwargs.get("name"))
+            for c in mock_mlflow.set_experiment.call_args_list
+        ]
+        assert "/Shared/kasal-crew-execution-traces-uc" in bound_names
+        assert "/Shared/kasal-crew-execution-traces" not in bound_names
 
     @pytest.mark.asyncio
     async def test_configure_with_spn_bearer_extraction(self, monkeypatch):
