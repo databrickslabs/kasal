@@ -764,8 +764,20 @@ def run_crew_in_process(
                         KasalSSESpanProcessor(execution_id)
                     )
 
-                    # MLflow exporter (conditional on mlflow being ready)
-                    if mlflow_result and mlflow_result.tracing_ready:
+                    # MLflow exporter (conditional on mlflow being ready).
+                    # In UC trace-storage mode the imperative KasalMLflowSpanExporter
+                    # is NOT used: it writes via MlflowClient.start_trace/end_trace to
+                    # the managed artifact store (the unreachable blob), which cannot
+                    # populate the `<prefix>_otel_*` Delta tables. Instead native
+                    # autolog + the inline start_root_trace wrapper produce the spans
+                    # through MLflow's tracer, which DatabricksUCTableSpanExporter
+                    # writes to UC. Leaving otel_exporter_active=False here keeps the
+                    # inline wrapper enabled (execute_with_mlflow_trace).
+                    if (
+                        mlflow_result
+                        and mlflow_result.tracing_ready
+                        and not getattr(mlflow_result, "uc_trace_storage", False)
+                    ):
                         from src.services.otel_tracing.mlflow_exporter import (
                             KasalMLflowSpanExporter,
                         )
@@ -779,6 +791,11 @@ def run_crew_in_process(
                         mlflow_result.otel_exporter_active = True
                         async_logger.info(
                             f"[SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
+                        )
+                    elif mlflow_result and getattr(mlflow_result, "uc_trace_storage", False):
+                        async_logger.info(
+                            "[SUBPROCESS] UC trace storage active — native MLflow autolog writes "
+                            "the UC trace; imperative KasalMLflowSpanExporter not added"
                         )
 
                     _otel_trace.set_tracer_provider(otel_provider)
@@ -1336,6 +1353,7 @@ def run_crew_in_process(
                     inputs=inputs,
                     async_logger=async_logger,
                     trace_label="crew_kickoff",
+                    execution_id=execution_id,
                 )
                 async_logger.info(f"✅ Crew execution completed successfully")
 

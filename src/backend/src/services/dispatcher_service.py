@@ -456,262 +456,19 @@ class DispatcherService:
     async def _maybe_enable_mlflow_tracing(
         self, group_context: Optional[GroupContext]
     ) -> bool:
-        """Enable MLflow tracing for dispatcher/planner if workspace toggle is on.
-        - Uses the same experiment as Crew execution traces so UI can link consistently.
-        - Runs blocking MLflow setup in a background thread to keep API async.
+        """Enable MLflow tracing for dispatcher intent.
+
+        Delegates to the shared parent-process setup so dispatcher intent traces
+        land in the SAME Unity Catalog experiment as crew execution and the
+        crew/agent/task generation traces (``<base>-uc`` -> ``kasal_otel_*``).
         """
-        try:
-            group_id = (
-                getattr(group_context, "primary_group_id", None)
-                if group_context
-                else None
-            )
-            svc = MLflowService(self.session, group_id=group_id)
-            enabled = await svc.is_enabled()
-            if not enabled:
-                logger.info(
-                    "[Dispatcher] MLflow disabled for this workspace; skipping tracing setup"
-                )
-                _set_mlflow_tracing(False)
-                return False
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            configure_parent_mlflow_tracing,
+        )
 
-            def _setup_mlflow_sync():
-                import asyncio
-                import os
-
-                import mlflow
-
-                # MLflow auth: use SPN credentials (DATABRICKS_CLIENT_ID /
-                # DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by the
-                # Databricks Apps platform.  Extract a bearer token up-front
-                # so the MLflow exporter uses simple HOST + TOKEN auth.
-                #
-                # The platform also injects DATABRICKS_TOKEN (a PAT) which
-                # conflicts with SPN in the SDK ("more than one authorization
-                # method").  We strip PAT vars before the SDK call and
-                # restore them after.
-                try:
-                    host = os.environ.get("DATABRICKS_HOST", "")
-                    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
-                    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
-
-                    # NOTE: Databricks Apps proxy redacts log lines containing
-                    # words like SECRET/TOKEN/BEARER.  Use neutral wording.
-                    logger.info(
-                        "[Dispatcher] MLflow auth env — "
-                        "host=%s, spn_id=%s, spn_cred=%s",
-                        "yes" if host else "no",
-                        "yes" if client_id else "no",
-                        "yes" if client_secret else "no",
-                    )
-
-                    # SPN credentials are required — skip MLflow if absent
-                    if not (host and client_id and client_secret):
-                        logger.warning(
-                            "[Dispatcher] SPN credentials required for MLflow — skipping"
-                        )
-                        return False
-
-                    auth_method = None
-                    workspace_url = host.rstrip("/") if host else ""
-
-                    # Extract credential via SDK
-                    logger.info("[Dispatcher] Attempting SPN credential extraction")
-                    try:
-                        from databricks.sdk import WorkspaceClient as _WC
-
-                        logger.info("[Dispatcher] SDK imported OK")
-
-                        # Temporarily strip PAT/API-KEY from env to prevent
-                        # SDK dual-auth conflict (oauth + pat)
-                        _pat_backup = {}
-                        for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                            if _k in os.environ:
-                                _pat_backup[_k] = os.environ.pop(_k)
-                        try:
-                            w = _WC(
-                                host=host,
-                                client_id=client_id,
-                                client_secret=client_secret,
-                            )
-                            headers = w.config.authenticate()
-                        finally:
-                            os.environ.update(_pat_backup)
-
-                        logger.info("[Dispatcher] authenticate() returned OK")
-                        auth_header = headers.get("Authorization", "")
-                        logger.info(
-                            "[Dispatcher] auth header length=%d, prefix=%s",
-                            len(auth_header),
-                            auth_header[:7] if auth_header else "(empty)",
-                        )
-                        if auth_header.startswith("Bearer "):
-                            extracted = auth_header[len("Bearer "):]
-                            os.environ["DATABRICKS_TOKEN"] = extracted
-                            if not workspace_url.startswith("http"):
-                                workspace_url = f"https://{workspace_url}"
-                            os.environ["DATABRICKS_HOST"] = workspace_url
-                            # Main process keeps SPN vars (below), so the env
-                            # now holds oauth AND a token — any env-auth SDK
-                            # consumer would raise "more than one authorization
-                            # method configured". Pin the SDK preference to the
-                            # self-refreshing SPN oauth to disambiguate.
-                            os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-                            auth_method = "service_principal"
-                            logger.info(
-                                "[Dispatcher] SPN credential set (len=%d)",
-                                len(extracted),
-                            )
-
-                            # NOTE: Do NOT remove SPN vars here — this runs
-                            # in the main server process and must preserve
-                            # them for subsequent requests.
-                        else:
-                            logger.warning(
-                                "[Dispatcher] Unexpected auth header format"
-                            )
-                    except Exception as spn_err:
-                        logger.warning(
-                            "[Dispatcher] SPN extraction failed: %s: %s",
-                            type(spn_err).__name__, spn_err,
-                        )
-
-                    if not auth_method:
-                        logger.warning(
-                            "[Dispatcher] SPN credential extraction failed — MLflow cannot be configured"
-                        )
-                        return False
-
-                    mlflow.set_tracking_uri("databricks")
-
-                    # Get MLflow experiment name + UC trace storage from Databricks config
-                    exp_name = "/Shared/kasal-crew-execution-traces"  # Default fallback
-                    uc_catalog = None
-                    uc_schema = None
-                    warehouse_id = None
-                    try:
-                        from src.db.session import async_session_factory
-
-                        async def _fetch_experiment_name():
-                            async with async_session_factory() as sess:
-                                svc = DatabricksService(sess, group_id=group_id)
-                                return await svc.get_databricks_config()
-
-                        db_config = asyncio.run(_fetch_experiment_name())
-                        if db_config:
-                            if db_config.mlflow_experiment_name:
-                                # Ensure experiment name starts with /Shared/ for proper organization
-                                if not db_config.mlflow_experiment_name.startswith("/"):
-                                    exp_name = f"/Shared/{db_config.mlflow_experiment_name}"
-                                else:
-                                    exp_name = db_config.mlflow_experiment_name
-                            uc_catalog = getattr(db_config, "catalog", None)
-                            # schema field is `db_schema` (aliased "schema"); reading
-                            # "schema" returns BaseModel.schema (a method) -> MLflow
-                            # "bad argument type for built-in operation".
-                            uc_schema = getattr(db_config, "db_schema", None)
-                            warehouse_id = getattr(db_config, "warehouse_id", None)
-                    except Exception as config_err:
-                        logger.info(
-                            f"[Dispatcher] Could not fetch MLflow config: {config_err}, using default"
-                        )
-
-                    # In-network UC trace storage (MLflow >= 3.11): store spans in UC
-                    # Delta tables via the SQL warehouse instead of a traces.json blob
-                    # in workspace object storage (unreachable from a serverless App).
-                    from src.services.otel_tracing.mlflow_setup import (
-                        _build_uc_trace_location,
-                        KASAL_TRACE_TABLE_PREFIX,
-                    )
-                    if warehouse_id:
-                        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
-                    logger.info(
-                        f"[Dispatcher] MLflow trace storage config — catalog={uc_catalog!r}, "
-                        f"schema={uc_schema!r}, warehouse_id={warehouse_id!r}"
-                    )
-                    trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, logger)
-
-                    if trace_location is not None:
-                        exp = mlflow.set_experiment(exp_name, trace_location=trace_location)
-                        logger.info(
-                            f"[Dispatcher] MLflow trace storage: Unity Catalog "
-                            f"{uc_catalog}.{uc_schema}.{KASAL_TRACE_TABLE_PREFIX}_otel_* "
-                            f"(warehouse={warehouse_id})"
-                        )
-                    else:
-                        exp = mlflow.set_experiment(exp_name)
-                    logger.info(
-                        f"[Dispatcher] MLflow experiment set successfully with {auth_method}"
-                    )
-
-                except Exception as auth_e:
-                    logger.warning(
-                        f"[Dispatcher] Databricks auth setup failed: {auth_e}"
-                    )
-                    raise
-                try:
-                    logger.info(
-                        f"[Dispatcher] MLflow experiment set: {exp_name} (ID: {getattr(exp, 'experiment_id', '')})"
-                    )
-                except Exception:
-                    pass
-                # Ensure OpenTelemetry SDK is enabled; otherwise MLflow traces won't record
-                try:
-                    import os as _otel_env
-
-                    if _otel_env.environ.get("OTEL_SDK_DISABLED", "").lower() in (
-                        "",
-                        "true",
-                        "1",
-                    ):
-                        _otel_env.environ["OTEL_SDK_DISABLED"] = "false"
-                        logger.info(
-                            "[Dispatcher] Set OTEL_SDK_DISABLED=false for MLflow tracing"
-                        )
-                except Exception as _ote:
-                    logger.info(
-                        f"[Dispatcher] Could not adjust OTEL_SDK_DISABLED: {_ote}"
-                    )
-                # Route tracing to the experiment when available (MLflow 3.x)
-                try:
-                    from mlflow.tracing.destination import Databricks as _Dest
-
-                    mlflow.tracing.set_destination(
-                        _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))
-                    )
-                    mlflow.tracing.enable()
-                except Exception as te:
-                    # Older MLflow versions may not support tracing destination
-                    logger.info(
-                        f"[Dispatcher] MLflow tracing destination not set (version/availability): {te}"
-                    )
-                # Enable LiteLLM autolog to create child spans (not separate root traces)
-                # log_traces=False creates spans that nest under the parent "dispatcher" trace
-                try:
-                    mlflow.litellm.autolog(log_traces=False)
-                    logger.info(
-                        "[Dispatcher] MLflow LiteLLM autolog enabled (spans only)"
-                    )
-                except Exception as ae:
-                    logger.info(
-                        f"[Dispatcher] MLflow LiteLLM autolog not available: {ae}"
-                    )
-
-            # Run setup off the event loop
-            setup_ok = await asyncio.to_thread(_setup_mlflow_sync)
-            if setup_ok is False:
-                logger.info("[Dispatcher] MLflow setup returned False — tracing disabled")
-                _set_mlflow_tracing(False)
-                return False
-            logger.info(
-                "[Dispatcher] MLflow tracing configured (experiment and autolog)"
-            )
-            _set_mlflow_tracing(True)
-            return True
-        except Exception as e:
-            logger.warning(f"[Dispatcher] MLflow setup skipped: {e}")
-            _set_mlflow_tracing(False)
-            return False
+        return await configure_parent_mlflow_tracing(
+            self.session, group_context, label="Dispatcher"
+        )
 
     @staticmethod
     def _detect_slash_command(message: str) -> Optional[Dict[str, Any]]:
@@ -932,7 +689,7 @@ class DispatcherService:
 
     @staticmethod
     def _resolve_effective_tools(
-        requested: Optional[List[str]], enabled_titles: set
+        requested: Optional[List[str]], enabled_titles
     ) -> List[str]:
         """Restrict the tools available to generation to the workspace's ENABLED set.
 
@@ -1322,7 +1079,10 @@ Please analyze this message and provide your intent classification."""
             # stale or over-broad selection can't smuggle in a tool that isn't
             # enabled for this workspace (e.g. SerperDevTool/ScrapeWebsiteTool
             # leaking into generated crews when they were never enabled).
-            enabled_titles: set = set()
+            # Order-preserving (dict keys keep insertion order) with O(1)
+            # membership — a plain set made the resolved tool order depend on
+            # PYTHONHASHSEED, producing non-deterministic tool lists.
+            enabled_titles: dict = {}
             try:
                 from src.services.tool_service import ToolService
                 tool_svc = ToolService(self.session)
@@ -1330,7 +1090,7 @@ Please analyze this message and provide your intent classification."""
                     tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
                 else:
                     tools_resp = await tool_svc.get_enabled_tools()
-                enabled_titles = {t.title for t in tools_resp.tools}
+                enabled_titles = dict.fromkeys(t.title for t in tools_resp.tools)
             except Exception as e:
                 logger.warning(f"Failed to fetch enabled workspace tools: {e}")
 

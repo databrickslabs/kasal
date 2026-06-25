@@ -137,6 +137,42 @@ class AgentGenerationService:
     async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
                             group_context: Optional[GroupContext] = None, fast_planning: bool = True,
                             available_tools: Optional[List[Dict]] = None) -> Dict[str, Any]:
+        """Public entrypoint — wraps agent generation in an MLflow root trace so
+        it lands in the shared UC experiment (alongside dispatcher intent, crew
+        generation, task generation and crew execution)."""
+        from contextlib import nullcontext
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            configure_parent_mlflow_tracing,
+            set_root_span_outputs,
+        )
+
+        mlflow_on = await configure_parent_mlflow_tracing(
+            self.session, group_context, label="AgentGeneration"
+        )
+        if mlflow_on:
+            from src.services.mlflow_tracing_service import start_root_trace
+            trace_ctx = start_root_trace(
+                "agent_generation",
+                inputs={"prompt": prompt_text, "model": model or "default"},
+            )
+        else:
+            trace_ctx = nullcontext()
+
+        with trace_ctx as root_span:
+            result = await self._generate_agent_impl(
+                prompt_text,
+                model=model,
+                tools=tools,
+                group_context=group_context,
+                fast_planning=fast_planning,
+                available_tools=available_tools,
+            )
+            set_root_span_outputs(root_span, result)
+            return result
+
+    async def _generate_agent_impl(self, prompt_text: str, model: str = None, tools: List[str] = None,
+                            group_context: Optional[GroupContext] = None, fast_planning: bool = True,
+                            available_tools: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         Generate agent configuration from natural language description.
 

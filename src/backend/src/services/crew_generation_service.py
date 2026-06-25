@@ -494,6 +494,42 @@ class CrewGenerationService:
             return ""
 
     async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
+        """Public entrypoint — wraps crew generation in an MLflow root trace so
+        it lands in the shared UC experiment (alongside dispatcher intent, agent
+        generation, task generation and crew execution).
+
+        The dispatcher (chat) path uses ``create_crew_progressive`` and sets up
+        MLflow itself; this covers the direct ``generate-crew`` API call.
+        """
+        from contextlib import nullcontext
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            configure_parent_mlflow_tracing,
+            set_root_span_outputs,
+        )
+
+        mlflow_on = await configure_parent_mlflow_tracing(
+            self.session, group_context, label="CrewGeneration"
+        )
+        if mlflow_on:
+            from src.services.mlflow_tracing_service import start_root_trace
+            trace_ctx = start_root_trace(
+                "crew_generation",
+                inputs={
+                    "prompt": getattr(request, "prompt", None),
+                    "model": getattr(request, "model", None) or "default",
+                },
+            )
+        else:
+            trace_ctx = nullcontext()
+
+        with trace_ctx as root_span:
+            result = await self._create_crew_complete_impl(
+                request, group_context=group_context, fast_planning=fast_planning
+            )
+            set_root_span_outputs(root_span, result)
+            return result
+
+    async def _create_crew_complete_impl(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
         """
         Create a crew with agents and tasks.
 
@@ -1011,7 +1047,7 @@ class CrewGenerationService:
         else:
             trace_ctx = nullcontext()
 
-        with trace_ctx:
+        with trace_ctx as root_span:
             try:
                 model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
@@ -1685,6 +1721,15 @@ class CrewGenerationService:
                     event="generation_complete",
                 ))
                 logger.info(f"PROGRESSIVE [{generation_id}]: Generation complete")
+
+                # Populate the trace Response (otherwise it shows null).
+                try:
+                    from src.services.otel_tracing.mlflow_parent_setup import (
+                        set_root_span_outputs,
+                    )
+                    set_root_span_outputs(root_span, gen_complete_data)
+                except Exception:
+                    pass
 
             except Exception as e:
                 logger.error(f"PROGRESSIVE [{generation_id}]: Unexpected error: {e}")
