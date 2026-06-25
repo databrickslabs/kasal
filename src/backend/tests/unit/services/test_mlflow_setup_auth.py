@@ -8,12 +8,12 @@ from the subprocess env after extraction so the exporter only sees HOST+TOKEN.
 """
 
 import os
-import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.services.otel_tracing.mlflow_setup import (
-    MlflowSetupResult,
     configure_mlflow_in_subprocess,
 )
 
@@ -76,11 +76,14 @@ class TestSPNFromEnv:
 
         with (
             patch.dict(os.environ, _SPN_ENV, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -102,8 +105,12 @@ class TestSPNFromEnv:
 
         def _capturing_wc(*_args, **_kwargs):
             # Capture env state when WorkspaceClient is constructed
-            captured_env_during_call["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN")
-            captured_env_during_call["DATABRICKS_API_KEY"] = os.environ.get("DATABRICKS_API_KEY")
+            captured_env_during_call["DATABRICKS_TOKEN"] = os.environ.get(
+                "DATABRICKS_TOKEN"
+            )
+            captured_env_during_call["DATABRICKS_API_KEY"] = os.environ.get(
+                "DATABRICKS_API_KEY"
+            )
             return _mock_workspace_client()
 
         mock_wc_cls = MagicMock(side_effect=_capturing_wc)
@@ -117,11 +124,14 @@ class TestSPNFromEnv:
 
         with (
             patch.dict(os.environ, env_with_pat, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -150,10 +160,13 @@ class TestSPNFromEnv:
 
         with (
             patch.dict(os.environ, env_with_pat, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -167,22 +180,36 @@ class TestSPNFromEnv:
         assert result.tracing_ready is False
 
     @pytest.mark.asyncio
-    async def test_spn_removes_client_vars_after_extraction(self):
-        """After successful extraction in subprocess, SPN vars are removed from env."""
+    async def test_spn_keeps_client_vars_for_oauth_m2m(self):
+        """After extraction, SPN client vars are KEPT (unified OAuth M2M) and
+        static token vars are removed so oauth-m2m is the single auth method.
+
+        UC trace storage builds its own WorkspaceClient() for the SQL-warehouse
+        DDL, so the SDK must retain DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET
+        to mint and refresh tokens itself — we do NOT downgrade to a static PAT.
+        """
         import sys
+
+        # Both SPN and a static token present (Databricks Apps runtime).
+        env = {
+            **_SPN_ENV,
+            "DATABRICKS_TOKEN": "dapi-old-pat",
+            "DATABRICKS_API_KEY": "dapi-key",
+        }
 
         mock_mlflow_mod = _mlflow_mock()
         mock_wc_cls = MagicMock(return_value=_mock_workspace_client())
 
-        env = {**_SPN_ENV}
-
         with (
             patch.dict(os.environ, env, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -190,9 +217,13 @@ class TestSPNFromEnv:
                 execution_id="exec-1",
                 group_id="grp-1",
             )
-            # After extraction, SPN vars should be removed (subprocess only)
-            assert "DATABRICKS_CLIENT_ID" not in os.environ
-            assert "DATABRICKS_CLIENT_SECRET" not in os.environ
+            # SPN client vars are retained for unified OAuth M2M (SDK refreshes tokens).
+            assert os.environ.get("DATABRICKS_CLIENT_ID") == "test-client-id"
+            assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "test-secret"
+            assert os.environ.get("DATABRICKS_AUTH_TYPE") == "oauth-m2m"
+            # Static token vars are removed so oauth-m2m is the SINGLE auth method.
+            assert "DATABRICKS_TOKEN" not in os.environ
+            assert "DATABRICKS_API_KEY" not in os.environ
 
         assert result.auth_method == "service_principal"
 
@@ -206,10 +237,13 @@ class TestSPNFromEnv:
 
         with (
             patch.dict(os.environ, _SPN_ENV, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -237,9 +271,17 @@ class TestMissingSPNCredentials:
 
         mock_mlflow_mod = _mlflow_mock()
 
-        clean = {k: v for k, v in os.environ.items()
-                 if k not in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET",
-                              "DATABRICKS_HOST", "DATABRICKS_TOKEN")}
+        clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in (
+                "DATABRICKS_CLIENT_ID",
+                "DATABRICKS_CLIENT_SECRET",
+                "DATABRICKS_HOST",
+                "DATABRICKS_TOKEN",
+            )
+        }
 
         with (
             patch.dict(os.environ, clean, clear=True),
@@ -263,9 +305,16 @@ class TestMissingSPNCredentials:
 
         mock_mlflow_mod = _mlflow_mock()
 
-        clean = {k: v for k, v in os.environ.items()
-                 if k not in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET",
-                              "DATABRICKS_TOKEN")}
+        clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in (
+                "DATABRICKS_CLIENT_ID",
+                "DATABRICKS_CLIENT_SECRET",
+                "DATABRICKS_TOKEN",
+            )
+        }
         clean["DATABRICKS_HOST"] = "https://example.com"
 
         with (
@@ -301,12 +350,17 @@ class TestUserContextSetup:
 
         with (
             patch.dict(os.environ, _SPN_ENV, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
-            patch("src.utils.user_context.UserContext.set_group_context") as mock_set_gc,
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
+            patch(
+                "src.utils.user_context.UserContext.set_group_context"
+            ) as mock_set_gc,
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),
@@ -330,11 +384,14 @@ class TestUserContextSetup:
 
         with (
             patch.dict(os.environ, _SPN_ENV, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
             patch(
                 "src.utils.user_context.UserContext.set_group_context",
                 side_effect=RuntimeError("context error"),
@@ -361,12 +418,17 @@ class TestUserContextSetup:
 
         with (
             patch.dict(os.environ, _SPN_ENV, clear=False),
-            patch.dict(sys.modules, {
-                "mlflow": mock_mlflow_mod,
-                "mlflow.tracing.destination": MagicMock(),
-                "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
-            }),
-            patch("src.utils.user_context.UserContext.set_group_context") as mock_set_gc,
+            patch.dict(
+                sys.modules,
+                {
+                    "mlflow": mock_mlflow_mod,
+                    "mlflow.tracing.destination": MagicMock(),
+                    "databricks.sdk": MagicMock(WorkspaceClient=mock_wc_cls),
+                },
+            ),
+            patch(
+                "src.utils.user_context.UserContext.set_group_context"
+            ) as mock_set_gc,
         ):
             result = await configure_mlflow_in_subprocess(
                 db_config=_make_db_config(),

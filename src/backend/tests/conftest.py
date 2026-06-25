@@ -4,13 +4,15 @@ Global test configuration for pytest.
 This file is automatically loaded by pytest and contains global fixtures
 and configuration settings that apply to all tests.
 """
+
+import asyncio
 import os
 import sys
 import warnings
-import pytest
-import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, UTC
+
+import pytest
 
 # Import numpy (and its lazy submodules) to completion BEFORE pytest collection
 # imports any test module. During collection, a half-finished numpy import
@@ -30,16 +32,25 @@ except Exception:
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pyspark\..*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"distutils\..*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"pydantic\..*")
-warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module=r"starlette\..*")
-warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module=r"multipart\..*")
-warnings.filterwarnings("ignore", message=r".*type hints.*predict.*", category=UserWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"multiprocessing\..*")
+warnings.filterwarnings(
+    "ignore", category=PendingDeprecationWarning, module=r"starlette\..*"
+)
+warnings.filterwarnings(
+    "ignore", category=PendingDeprecationWarning, module=r"multipart\..*"
+)
+warnings.filterwarnings(
+    "ignore", message=r".*type hints.*predict.*", category=UserWarning
+)
+warnings.filterwarnings(
+    "ignore", category=RuntimeWarning, module=r"multiprocessing\..*"
+)
 warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"asyncio\..*")
 
 # Add the backend directory to the Python path so that 'src' can be imported
 backend_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
+
 
 # Configure asyncio for pytest
 @pytest.fixture(scope="session")
@@ -50,6 +61,7 @@ def event_loop():
     yield loop
     loop.close()
 
+
 # Global test database configuration
 @pytest.fixture
 def test_db_config():
@@ -57,8 +69,9 @@ def test_db_config():
     return {
         "DATABASE_URI": "sqlite+aiosqlite:///:memory:",
         "DATABASE_TYPE": "sqlite",
-        "SQLITE_DB_PATH": ":memory:"
+        "SQLITE_DB_PATH": ":memory:",
     }
+
 
 # Mock logger for testing
 @pytest.fixture
@@ -71,17 +84,20 @@ def mock_logger():
     logger.debug = MagicMock()
     return logger
 
+
 # Mock datetime for consistent testing
 @pytest.fixture
 def fixed_datetime():
     """Return a fixed datetime for consistent testing."""
     return datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
+
 # Common test data fixtures
 @pytest.fixture
 def sample_uuid():
     """Return a sample UUID string for testing."""
     return "12345678-1234-5678-9012-123456789012"
+
 
 @pytest.fixture
 def sample_execution_data():
@@ -92,8 +108,9 @@ def sample_execution_data():
         "run_name": "Test Execution",
         "inputs": {"key": "value"},
         "planning": True,
-        "created_at": datetime.now(UTC)
+        "created_at": datetime.now(UTC),
     }
+
 
 @pytest.fixture
 def sample_crew_data():
@@ -102,8 +119,9 @@ def sample_crew_data():
         "name": "Test Crew",
         "description": "A test crew",
         "agents_yaml": {"agent1": {"role": "researcher"}},
-        "tasks_yaml": {"task1": {"description": "research task"}}
+        "tasks_yaml": {"task1": {"description": "research task"}},
     }
+
 
 @pytest.fixture
 def sample_flow_data():
@@ -113,14 +131,16 @@ def sample_flow_data():
         "description": "A test flow",
         "nodes": [{"id": "node1", "type": "agent"}],
         "edges": [{"source": "node1", "target": "node2"}],
-        "flow_config": {"setting": "value"}
+        "flow_config": {"setting": "value"},
     }
+
 
 # Async mock helpers
 @pytest.fixture
 def async_mock():
     """Create an AsyncMock for testing async functions."""
     return AsyncMock()
+
 
 @pytest.fixture
 def mock_async_session():
@@ -134,6 +154,7 @@ def mock_async_session():
     session.execute = AsyncMock()
     return session
 
+
 # Test environment setup
 @pytest.fixture(autouse=True)
 def setup_test_env(monkeypatch):
@@ -143,26 +164,43 @@ def setup_test_env(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("DEBUG_MODE", "true")
 
+
 # Cleanup fixtures
 @pytest.fixture(autouse=True)
 def cleanup_after_test():
-    """Cleanup after each test."""
-    yield
-    # Clean up any global state if needed
-    # For example, clear in-memory caches, reset singletons, etc.
+    """Cleanup after each test.
+
+    Snapshot every existing logger's handler list before the test and restore
+    it afterwards. Without this, a test that attaches a unittest.mock handler to
+    a real logger (root or any `src.*` logger) and forgets to remove it poisons
+    the whole suite: Python's logging.callHandlers does
+    ``record.levelno >= hdlr.level`` and a Mock's ``.level`` is not comparable to
+    an int, so EVERY later test that emits a log record up that hierarchy dies
+    with ``TypeError: '>=' not supported between instances of 'int' and
+    'MagicMock'``. Restoring handler lists keeps such leaks contained to the
+    test that caused them.
+    """
+    import logging
+
+    saved = {logging.getLogger(): logging.getLogger().handlers[:]}
+    for name in list(logging.root.manager.loggerDict):
+        lg = logging.getLogger(name)
+        if isinstance(lg, logging.Logger):
+            saved[lg] = lg.handlers[:]
+    try:
+        yield
+    finally:
+        for lg, handlers in saved.items():
+            lg.handlers[:] = handlers
+
 
 # Skip integration tests marker
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test"
-    )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "unit: mark test as unit test"
-    )
+    config.addinivalue_line("markers", "integration: mark test as integration test")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "unit: mark test as unit test")
+
 
 # Test files with broken imports (stale references to renamed/removed source
 # functions).  These are pre-existing issues and must be skipped so the rest of
@@ -237,11 +275,13 @@ def pytest_ignore_collect(collection_path, config):
 
     return False
 
+
 # Test collection modifiers
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to add markers and filter out non-test items."""
     # Temporarily disabled custom marking logic to resolve indentation issues
     return
+
 
 # Guardrail test fixtures
 @pytest.fixture
@@ -250,11 +290,24 @@ def mock_uow(monkeypatch):
     The returned object can be configured in tests (e.g., get_instance.return_value).
     """
     from unittest.mock import MagicMock
+
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference SyncUnitOfWork
-    monkeypatch.setattr('src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork', mock_cls, raising=False)
-    monkeypatch.setattr('src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork', mock_cls, raising=False)
-    monkeypatch.setattr('src.engines.crewai.guardrails.data_processing_count_guardrail.SyncUnitOfWork', mock_cls, raising=False)
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork",
+        mock_cls,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork",
+        mock_cls,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.data_processing_count_guardrail.SyncUnitOfWork",
+        mock_cls,
+        raising=False,
+    )
     return mock_cls
 
 
@@ -262,65 +315,88 @@ def mock_uow(monkeypatch):
 def mock_repo_class(monkeypatch):
     """Patch DataProcessingRepository in guardrail modules and return the mock class."""
     from unittest.mock import MagicMock
+
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference DataProcessingRepository
-    monkeypatch.setattr('src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository', mock_cls, raising=False)
-    monkeypatch.setattr('src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository', mock_cls, raising=False)
-    monkeypatch.setattr('src.engines.crewai.guardrails.data_processing_count_guardrail.DataProcessingRepository', mock_cls, raising=False)
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository",
+        mock_cls,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository",
+        mock_cls,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.engines.crewai.guardrails.data_processing_count_guardrail.DataProcessingRepository",
+        mock_cls,
+        raising=False,
+    )
     return mock_cls
+
 
 """
 
             item.add_marker(pytest.mark.integration)
 """
 
+
 # Ensure tests that reference mock_repo_class without requesting the fixture get a valid symbol
 # and patch guardrail modules to use that mock repository.
 def pytest_runtest_setup(item):
     try:
         from unittest.mock import MagicMock
-        mod = getattr(item, 'module', None)
+
+        mod = getattr(item, "module", None)
         if mod is None:
             return
-        if not hasattr(mod, 'mock_repo_class'):
-            mock_cls = MagicMock(name='DataProcessingRepository')
+        if not hasattr(mod, "mock_repo_class"):
+            mock_cls = MagicMock(name="DataProcessingRepository")
             # Provide a default repo instance; tests can override via mock_repo_class.return_value
-            default_repo = MagicMock(name='DataProcessingRepositoryInstance')
+            default_repo = MagicMock(name="DataProcessingRepositoryInstance")
             # Configure default behavior per-test: skip unless an exception test
-            if 'general_exception_handling' in getattr(item, 'name', '') or 'exception_traceback' in getattr(item, 'name', ''):
-                default_repo.count_total_records_sync.side_effect = Exception("General error")
+            if "general_exception_handling" in getattr(
+                item, "name", ""
+            ) or "exception_traceback" in getattr(item, "name", ""):
+                default_repo.count_total_records_sync.side_effect = Exception(
+                    "General error"
+                )
             mock_cls.return_value = default_repo
 
             # Also patch SyncUnitOfWork so guardrails don't touch real DB/session
-            uow_mock_cls = MagicMock(name='SyncUnitOfWork')
-            uow_instance = MagicMock(name='SyncUnitOfWorkInstance')
+            uow_mock_cls = MagicMock(name="SyncUnitOfWork")
+            uow_instance = MagicMock(name="SyncUnitOfWorkInstance")
             uow_instance._initialized = True
-            uow_instance._session = MagicMock(name='Session')
+            uow_instance._session = MagicMock(name="Session")
             uow_mock_cls.get_instance.return_value = uow_instance
 
             # Patch guardrail modules to use these mocks
             try:
                 import src.engines.crewai.guardrails.data_processing_count_guardrail as m1
+
                 m1.DataProcessingRepository = mock_cls
                 m1.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
                 import src.engines.crewai.guardrails.data_processing_guardrail as m2
+
                 m2.DataProcessingRepository = mock_cls
                 m2.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
                 import src.engines.crewai.guardrails.empty_data_processing_guardrail as m3
+
                 m3.DataProcessingRepository = mock_cls
                 m3.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
 
             # Expose mocks in module namespace for tests that reference them as bare names
-            setattr(mod, 'mock_repo_class', mock_cls)
-            setattr(mod, 'mock_uow', uow_mock_cls)
+            setattr(mod, "mock_repo_class", mock_cls)
+            setattr(mod, "mock_uow", uow_mock_cls)
     except Exception:
         # Never block test collection on setup utilities
         pass

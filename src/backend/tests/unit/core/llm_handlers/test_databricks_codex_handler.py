@@ -6,11 +6,10 @@ the Responses API with phase preservation, stop-word suppression, and
 diagnostic logging.
 """
 
-import json
 import logging
-import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Mocks for crewai internals that may not be installed in test environments
@@ -55,11 +54,13 @@ class _FakeOpenAICompletion:
         if hasattr(response, "output") and response.output:
             for item in response.output:
                 if getattr(item, "type", None) == "function_call":
-                    calls.append({
-                        "id": getattr(item, "id", ""),
-                        "name": getattr(item, "name", ""),
-                        "arguments": getattr(item, "arguments", "{}"),
-                    })
+                    calls.append(
+                        {
+                            "id": getattr(item, "id", ""),
+                            "name": getattr(item, "name", ""),
+                            "arguments": getattr(item, "arguments", "{}"),
+                        }
+                    )
         return calls
 
     def _extract_responses_token_usage(self, response):
@@ -82,7 +83,9 @@ class _FakeOpenAICompletion:
     def _validate_structured_output(self, content, response_model):
         return content
 
-    def _handle_tool_execution(self, function_name, function_args, available_functions, from_task, from_agent):
+    def _handle_tool_execution(
+        self, function_name, function_args, available_functions, from_task, from_agent
+    ):
         if function_name in (available_functions or {}):
             return f"result_{function_name}"
         return None
@@ -100,12 +103,13 @@ class _FakeOpenAICompletion:
         return True
 
 
+import importlib
+import importlib.util
+
 # Patch the imports before loading the handler module.
 # We must use importlib to load the single file directly, avoiding __init__.py
 # which would trigger heavy dependency chains (litellm, openai, etc.)
 import sys
-import importlib
-import importlib.util
 
 # ---------------------------------------------------------------------------
 # Isolated module loading: force-install our mocks so the handler file sees
@@ -161,6 +165,7 @@ for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def handler():
     """Create a DatabricksCodexCompletion instance for testing."""
@@ -177,7 +182,9 @@ def handler():
 def make_response():
     """Factory for creating mock Responses API responses."""
 
-    def _make(output_items=None, output_text="", status="completed", response_id="resp-123"):
+    def _make(
+        output_items=None, output_text="", status="completed", response_id="resp-123"
+    ):
         resp = MagicMock()
         resp.id = response_id
         resp.status = status
@@ -216,6 +223,7 @@ def make_response():
 # TestInit
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     """Test __init__ configuration."""
 
@@ -250,6 +258,7 @@ class TestInit:
 # TestCapabilityOverrides
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityOverrides:
     """Test capability method overrides."""
 
@@ -265,6 +274,7 @@ class TestCapabilityOverrides:
 # ---------------------------------------------------------------------------
 # TestPrepareResponsesParams
 # ---------------------------------------------------------------------------
+
 
 class TestPrepareResponsesParams:
     """Test _prepare_responses_params method."""
@@ -283,7 +293,11 @@ class TestPrepareResponsesParams:
         ]
         params = handler._prepare_responses_params(messages)
         # Find the converted item
-        fco_items = [it for it in params["input"] if isinstance(it, dict) and it.get("type") == "function_call_output"]
+        fco_items = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call_output"
+        ]
         assert len(fco_items) == 1
         assert fco_items[0]["call_id"] == "call-1"
         assert fco_items[0]["output"] == "tool result here"
@@ -295,12 +309,19 @@ class TestPrepareResponsesParams:
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [
-                    {"id": "tc-1", "function": {"name": "my_tool", "arguments": '{"a": 1}'}},
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "my_tool", "arguments": '{"a": 1}'},
+                    },
                 ],
             },
         ]
         params = handler._prepare_responses_params(messages)
-        fc_items = [it for it in params["input"] if isinstance(it, dict) and it.get("type") == "function_call"]
+        fc_items = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call"
+        ]
         assert len(fc_items) == 1
         assert fc_items[0]["name"] == "my_tool"
         assert fc_items[0]["call_id"] == "tc-1"
@@ -309,7 +330,11 @@ class TestPrepareResponsesParams:
         """Messages with content: null should get content: '' instead."""
         messages = [{"role": "user", "content": None}]
         params = handler._prepare_responses_params(messages)
-        user_items = [it for it in params["input"] if isinstance(it, dict) and it.get("role") == "user"]
+        user_items = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("role") == "user"
+        ]
         for item in user_items:
             assert item.get("content") is not None
 
@@ -356,7 +381,11 @@ class TestPrepareResponsesParams:
         """role:tool with content=None should output empty string."""
         messages = [{"role": "tool", "tool_call_id": "call-1", "content": None}]
         params = handler._prepare_responses_params(messages)
-        fco_items = [it for it in params["input"] if isinstance(it, dict) and it.get("type") == "function_call_output"]
+        fco_items = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call_output"
+        ]
         assert fco_items[0]["output"] == ""
 
 
@@ -364,14 +393,22 @@ class TestPrepareResponsesParams:
 # TestCaptureOutputItems
 # ---------------------------------------------------------------------------
 
+
 class TestCaptureOutputItems:
     """Test _capture_output_items method."""
 
     def test_capture_with_model_dump(self, handler, make_response):
         """Should capture items using model_dump."""
-        response = make_response([
-            {"type": "message", "role": "assistant", "content": [], "phase": "commentary"},
-        ])
+        response = make_response(
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "phase": "commentary",
+                },
+            ]
+        )
         handler._capture_output_items(response)
         assert len(handler._last_output_items) == 1
         assert handler._last_output_items[0].get("phase") == "commentary"
@@ -453,13 +490,16 @@ class TestCaptureOutputItems:
 # TestHandleResponses
 # ---------------------------------------------------------------------------
 
+
 class TestHandleResponses:
     """Test _handle_responses method."""
 
     def test_text_response(self, handler, make_response):
         """Should return text content from response."""
         response = make_response(
-            output_items=[{"type": "message", "role": "assistant", "phase": "final_answer"}],
+            output_items=[
+                {"type": "message", "role": "assistant", "phase": "final_answer"}
+            ],
             output_text="Hello world!",
         )
         handler.client.responses.create.return_value = response
@@ -468,15 +508,19 @@ class TestHandleResponses:
         result = handler._handle_responses(params)
         assert result == "Hello world!"
 
-    def test_function_call_response_without_available_functions(self, handler, make_response):
+    def test_function_call_response_without_available_functions(
+        self, handler, make_response
+    ):
         """Function calls without available_functions should return wrapped calls."""
         response = make_response(
-            output_items=[{
-                "type": "function_call",
-                "id": "fc-1",
-                "name": "search_tool",
-                "arguments": '{"query": "test"}',
-            }],
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "name": "search_tool",
+                    "arguments": '{"query": "test"}',
+                }
+            ],
             output_text="",
         )
         handler.client.responses.create.return_value = response
@@ -492,12 +536,14 @@ class TestHandleResponses:
     def test_function_call_with_available_functions(self, handler, make_response):
         """Function calls with available_functions should execute them."""
         response = make_response(
-            output_items=[{
-                "type": "function_call",
-                "id": "fc-1",
-                "name": "my_tool",
-                "arguments": '{"key": "val"}',
-            }],
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "name": "my_tool",
+                    "arguments": '{"key": "val"}',
+                }
+            ],
             output_text="",
         )
         handler.client.responses.create.return_value = response
@@ -512,12 +558,14 @@ class TestHandleResponses:
     def test_function_call_with_bad_json_arguments(self, handler, make_response):
         """Function calls with invalid JSON arguments should use empty dict."""
         response = make_response(
-            output_items=[{
-                "type": "function_call",
-                "id": "fc-1",
-                "name": "my_tool",
-                "arguments": "not valid json",
-            }],
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "name": "my_tool",
+                    "arguments": "not valid json",
+                }
+            ],
             output_text="",
         )
         handler.client.responses.create.return_value = response
@@ -556,7 +604,9 @@ class TestHandleResponses:
         # _validate_structured_output returns content as-is in our mock
         assert result is not None
 
-    def test_structured_output_validation_failure_falls_through(self, handler, make_response):
+    def test_structured_output_validation_failure_falls_through(
+        self, handler, make_response
+    ):
         """Failed structured output validation should fall through to text."""
         response = make_response(output_items=[], output_text="plain text")
         handler.client.responses.create.return_value = response
@@ -584,6 +634,7 @@ class TestHandleResponses:
 # TestLogRequestParams
 # ---------------------------------------------------------------------------
 
+
 class TestLogRequestParams:
     """Test _log_request_params method."""
 
@@ -603,7 +654,9 @@ class TestLogRequestParams:
         params = {
             "model": "test-model",
             "input": [],
-            "tools": [{"name": "my_tool", "type": "function", "parameters": {"a": "string"}}],
+            "tools": [
+                {"name": "my_tool", "type": "function", "parameters": {"a": "string"}}
+            ],
         }
         with caplog.at_level(logging.INFO, logger="crew"):
             handler._log_request_params(params)
@@ -629,6 +682,7 @@ class TestLogRequestParams:
 # TestLogResponse
 # ---------------------------------------------------------------------------
 
+
 class TestLogResponse:
     """Test _log_response method."""
 
@@ -644,7 +698,9 @@ class TestLogResponse:
     def test_logs_function_call_response(self, handler, make_response, caplog):
         """Should log response with function calls."""
         response = make_response(
-            output_items=[{"type": "function_call", "name": "search", "arguments": '{}'}],
+            output_items=[
+                {"type": "function_call", "name": "search", "arguments": "{}"}
+            ],
             output_text="",
         )
         with caplog.at_level(logging.INFO, logger="crew"):
@@ -675,20 +731,36 @@ class TestLogResponse:
 # TestMultiTurnPhasePreservation
 # ---------------------------------------------------------------------------
 
+
 class TestMultiTurnPhasePreservation:
     """Integration-style tests verifying phase is preserved across turns."""
 
     def test_output_items_captured_with_phase(self, handler, make_response):
         """Output items with phase should be captured for next turn."""
-        response = make_response([
-            {"type": "message", "role": "assistant", "phase": "commentary", "content": [{"type": "text", "text": "thinking..."}]},
-            {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "text", "text": "done"}]},
-        ], output_text="done")
+        response = make_response(
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "commentary",
+                    "content": [{"type": "text", "text": "thinking..."}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "text", "text": "done"}],
+                },
+            ],
+            output_text="done",
+        )
 
         handler._capture_output_items(response)
 
         assert len(handler._last_output_items) == 2
-        phases = [it.get("phase") for it in handler._last_output_items if it.get("phase")]
+        phases = [
+            it.get("phase") for it in handler._last_output_items if it.get("phase")
+        ]
         assert "commentary" in phases
         assert "final_answer" in phases
 
@@ -697,9 +769,17 @@ class TestMultiTurnPhasePreservation:
         assert handler._tool_call_count == 0
 
         # Simulate a response with function calls (no available_functions)
-        response = make_response([
-            {"type": "function_call", "id": "fc-1", "name": "search", "arguments": "{}"},
-        ], output_text="")
+        response = make_response(
+            [
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "name": "search",
+                    "arguments": "{}",
+                },
+            ],
+            output_text="",
+        )
         handler.client.responses.create.return_value = response
 
         params = {"model": "test", "input": []}
@@ -728,6 +808,7 @@ class TestMultiTurnPhasePreservation:
 # TestEdgeCases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     """Test edge cases and error boundaries."""
 
@@ -741,15 +822,23 @@ class TestEdgeCases:
         messages = [
             {"role": "system", "content": "You are helpful"},
             {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_data", "arguments": "{}"}}
-            ]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_data", "arguments": "{}"}}
+                ],
+            },
             {"role": "tool", "tool_call_id": "tc-1", "content": "data result"},
             {"role": "user", "content": "Thanks"},
         ]
         params = handler._prepare_responses_params(messages)
         # Should have converted tool and assistant tool_calls
-        types_in_input = [it.get("type") for it in params["input"] if isinstance(it, dict) and "type" in it]
+        types_in_input = [
+            it.get("type")
+            for it in params["input"]
+            if isinstance(it, dict) and "type" in it
+        ]
         assert "function_call" in types_in_input
         assert "function_call_output" in types_in_input
 
@@ -761,12 +850,19 @@ class TestEdgeCases:
                 "content": None,
                 "tool_calls": [
                     {"id": "tc-1", "function": {"name": "tool_a", "arguments": "{}"}},
-                    {"id": "tc-2", "function": {"name": "tool_b", "arguments": '{"x":1}'}},
+                    {
+                        "id": "tc-2",
+                        "function": {"name": "tool_b", "arguments": '{"x":1}'},
+                    },
                 ],
             },
         ]
         params = handler._prepare_responses_params(messages)
-        fc_items = [it for it in params["input"] if isinstance(it, dict) and it.get("type") == "function_call"]
+        fc_items = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call"
+        ]
         assert len(fc_items) == 2
         assert fc_items[0]["name"] == "tool_a"
         assert fc_items[1]["name"] == "tool_b"
@@ -776,13 +872,16 @@ class TestEdgeCases:
 # TestMinRequiredToolCalls
 # ---------------------------------------------------------------------------
 
+
 class TestMinRequiredToolCalls:
     """Test the dynamic min_required_tool_calls computation."""
 
     def test_min_computed_from_few_tools(self, handler):
         """With few tools, min should be floor of 2."""
         messages = [{"role": "user", "content": "test"}]
-        tools = [{"name": f"tool{i}"} for i in range(4)]  # 4 tools -> max(2, min(10, 4//4+1)) = max(2, 2) = 2
+        tools = [
+            {"name": f"tool{i}"} for i in range(4)
+        ]  # 4 tools -> max(2, min(10, 4//4+1)) = max(2, 2) = 2
         handler._prepare_responses_params(messages, tools=tools)
         assert handler._min_required_tool_calls == 2
 
@@ -796,7 +895,9 @@ class TestMinRequiredToolCalls:
     def test_min_capped_at_10(self, handler):
         """With 40+ tools, min should be capped at 10."""
         messages = [{"role": "user", "content": "test"}]
-        tools = [{"name": f"tool{i}"} for i in range(40)]  # 40//4+1 = 11 -> min(10,11) = 10
+        tools = [
+            {"name": f"tool{i}"} for i in range(40)
+        ]  # 40//4+1 = 11 -> min(10,11) = 10
         handler._prepare_responses_params(messages, tools=tools)
         assert handler._min_required_tool_calls == 10
 
@@ -815,8 +916,18 @@ class TestMinRequiredToolCalls:
         """Multiple function calls in one response should increment by count."""
         response = make_response(
             output_items=[
-                {"type": "function_call", "id": "fc-1", "name": "tool_a", "arguments": "{}"},
-                {"type": "function_call", "id": "fc-2", "name": "tool_b", "arguments": "{}"},
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "name": "tool_a",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc-2",
+                    "name": "tool_b",
+                    "arguments": "{}",
+                },
             ],
             output_text="",
         )
@@ -829,6 +940,7 @@ class TestMinRequiredToolCalls:
 # ---------------------------------------------------------------------------
 # TestResponsesCache — litellm response cache reused for the Responses API
 # ---------------------------------------------------------------------------
+
 
 class TestResponsesCache:
     """codex bypasses litellm.completion, so it reuses the litellm.cache object
@@ -844,6 +956,7 @@ class TestResponsesCache:
 
     def test_no_cache_configured_calls_live(self, handler):
         import litellm
+
         resp = MagicMock()
         handler.client.responses.create.reset_mock()
         handler.client.responses.create.return_value = resp
@@ -852,21 +965,30 @@ class TestResponsesCache:
         assert out is resp
         handler.client.responses.create.assert_called_once()
 
-    def test_miss_then_hit(self, handler, tmp_path):
+    def test_miss_then_hit(self, handler):
         import litellm
         from openai.types.responses import Response
 
-        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
-        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        # In-memory cache backend: exercises the same get_cache/add_cache
+        # key/value interface the handler uses, without the optional
+        # ``diskcache`` dependency that the disk backend requires.
+        cache = litellm.Cache(type="local")
+        params = {
+            "model": "databricks-gpt-5-3-codex",
+            "input": [{"role": "user", "content": "hi"}],
+        }
         resp = MagicMock()
         resp.model_dump.return_value = {"stored": True}
         handler.client.responses.create.reset_mock()
         handler.client.responses.create.return_value = resp
         sentinel = object()
 
-        with patch.object(litellm, "cache", cache), patch.object(
-            Response, "construct", return_value=sentinel
-        ) as mock_construct:
+        with (
+            patch.object(litellm, "cache", cache),
+            patch.object(
+                Response, "construct", return_value=sentinel
+            ) as mock_construct,
+        ):
             # First call: cache miss -> live request + stored.
             out1 = handler._cached_responses_create(params)
             assert out1 is resp
@@ -878,7 +1000,7 @@ class TestResponsesCache:
             assert out2 is sentinel
             mock_construct.assert_called_once_with(stored=True)
 
-    def test_hit_reconstructs_databricks_specific_fields(self, handler, tmp_path):
+    def test_hit_reconstructs_databricks_specific_fields(self, handler):
         """Regression: Databricks returns ``prompt_cache_retention='in_memory'``,
         which is NOT one of the OpenAI SDK ``Response`` literals. Strict
         ``model_validate`` raises on it, so every cache hit silently fell through
@@ -887,19 +1009,38 @@ class TestResponsesCache:
         import litellm
         from openai.types.responses import Response
 
-        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
-        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        cache = litellm.Cache(type="local")
+        params = {
+            "model": "databricks-gpt-5-3-codex",
+            "input": [{"role": "user", "content": "hi"}],
+        }
         # A realistic Databricks codex response dump, including the field that
         # breaks strict validation.
         stored_dump = {
-            "id": "resp_x", "object": "response", "created_at": 1.0,
-            "model": "databricks-gpt-5-3-codex", "status": "completed",
-            "parallel_tool_calls": False, "tool_choice": "auto", "tools": [],
+            "id": "resp_x",
+            "object": "response",
+            "created_at": 1.0,
+            "model": "databricks-gpt-5-3-codex",
+            "status": "completed",
+            "parallel_tool_calls": False,
+            "tool_choice": "auto",
+            "tools": [],
             "prompt_cache_retention": "in_memory",  # <-- breaks strict model_validate
-            "output": [{
-                "type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
-                "content": [{"type": "output_text", "text": "cached answer", "annotations": []}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "cached answer",
+                            "annotations": [],
+                        }
+                    ],
+                }
+            ],
         }
         # Note: newer openai SDK accepts prompt_cache_retention natively.
         # The cache reconstruct path must still work regardless.
@@ -920,6 +1061,7 @@ class TestResponsesCache:
 
     def test_cache_error_falls_through_to_live(self, handler):
         import litellm
+
         broken = MagicMock()
         broken.get_cache.side_effect = RuntimeError("cache down")
         resp = MagicMock()
@@ -937,20 +1079,25 @@ class TestResponsesCache:
 # the crew's total_tokens aggregate, inflating it by ~ the cache hit rate)
 # ---------------------------------------------------------------------------
 
+
 class TestCacheHitTokenAccounting:
-    def test_flag_false_on_miss_true_on_hit(self, handler, tmp_path):
+    def test_flag_false_on_miss_true_on_hit(self, handler):
         import litellm
         from openai.types.responses import Response
 
-        cache = litellm.Cache(type="disk", disk_cache_dir=str(tmp_path / "c"), ttl=600)
-        params = {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "hi"}]}
+        cache = litellm.Cache(type="local")
+        params = {
+            "model": "databricks-gpt-5-3-codex",
+            "input": [{"role": "user", "content": "hi"}],
+        }
         resp = MagicMock()
         resp.model_dump.return_value = {"stored": True}
         handler.client.responses.create.reset_mock()
         handler.client.responses.create.return_value = resp
 
-        with patch.object(litellm, "cache", cache), patch.object(
-            Response, "construct", return_value=MagicMock()
+        with (
+            patch.object(litellm, "cache", cache),
+            patch.object(Response, "construct", return_value=MagicMock()),
         ):
             handler._cached_responses_create(params)  # miss
             assert handler._last_response_from_cache is False
@@ -958,29 +1105,46 @@ class TestCacheHitTokenAccounting:
             assert handler._last_response_from_cache is True
             # A subsequent miss must reset the flag.
             handler._cached_responses_create(
-                {"model": "databricks-gpt-5-3-codex", "input": [{"role": "user", "content": "other"}]}
+                {
+                    "model": "databricks-gpt-5-3-codex",
+                    "input": [{"role": "user", "content": "other"}],
+                }
             )
             assert handler._last_response_from_cache is False
 
     def test_handle_responses_skips_tracking_on_cache_hit(self, handler, make_response):
         resp = make_response(output_text="cached answer")
-        with patch.object(handler, "_cached_responses_create", return_value=resp), \
-             patch.object(handler, "_track_token_usage_internal") as mock_track, \
-             patch.object(handler, "_extract_responses_token_usage", return_value={"total_tokens": 123}), \
-             patch.object(handler, "_emit_call_completed_event"), \
-             patch.object(handler, "_log_response"):
+        with (
+            patch.object(handler, "_cached_responses_create", return_value=resp),
+            patch.object(handler, "_track_token_usage_internal") as mock_track,
+            patch.object(
+                handler,
+                "_extract_responses_token_usage",
+                return_value={"total_tokens": 123},
+            ),
+            patch.object(handler, "_emit_call_completed_event"),
+            patch.object(handler, "_log_response"),
+        ):
             handler._last_response_from_cache = True
             handler._handle_responses({"model": "m", "input": []})
 
         mock_track.assert_not_called()
 
-    def test_handle_responses_tracks_usage_on_live_response(self, handler, make_response):
+    def test_handle_responses_tracks_usage_on_live_response(
+        self, handler, make_response
+    ):
         resp = make_response(output_text="live answer")
-        with patch.object(handler, "_cached_responses_create", return_value=resp), \
-             patch.object(handler, "_track_token_usage_internal") as mock_track, \
-             patch.object(handler, "_extract_responses_token_usage", return_value={"total_tokens": 123}), \
-             patch.object(handler, "_emit_call_completed_event"), \
-             patch.object(handler, "_log_response"):
+        with (
+            patch.object(handler, "_cached_responses_create", return_value=resp),
+            patch.object(handler, "_track_token_usage_internal") as mock_track,
+            patch.object(
+                handler,
+                "_extract_responses_token_usage",
+                return_value={"total_tokens": 123},
+            ),
+            patch.object(handler, "_emit_call_completed_event"),
+            patch.object(handler, "_log_response"),
+        ):
             handler._last_response_from_cache = False
             handler._handle_responses({"model": "m", "input": []})
 
@@ -992,17 +1156,25 @@ class TestCacheHitTokenAccounting:
 # without usage on LLMCallCompletedEvent it recorded zero token usage anywhere)
 # ---------------------------------------------------------------------------
 
+
 class TestUsageEmission:
     def _run_handle(self, handler, make_response, from_cache):
         resp = make_response(output_text="answer")
-        with patch.object(handler, "_cached_responses_create", return_value=resp), \
-             patch.object(handler, "_track_token_usage_internal"), \
-             patch.object(
-                 handler, "_extract_responses_token_usage",
-                 return_value={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
-             ), \
-             patch.object(handler, "_emit_call_completed_event") as mock_emit, \
-             patch.object(handler, "_log_response"):
+        with (
+            patch.object(handler, "_cached_responses_create", return_value=resp),
+            patch.object(handler, "_track_token_usage_internal"),
+            patch.object(
+                handler,
+                "_extract_responses_token_usage",
+                return_value={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                },
+            ),
+            patch.object(handler, "_emit_call_completed_event") as mock_emit,
+            patch.object(handler, "_log_response"),
+        ):
             handler._last_response_from_cache = from_cache
             handler._handle_responses({"model": "m", "input": []})
         return mock_emit
@@ -1010,7 +1182,9 @@ class TestUsageEmission:
     def test_live_response_emits_usage(self, handler, make_response):
         mock_emit = self._run_handle(handler, make_response, from_cache=False)
         assert mock_emit.call_args.kwargs["usage"] == {
-            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
         }
 
     def test_cache_hit_emits_no_usage(self, handler, make_response):
@@ -1023,6 +1197,7 @@ class TestUsageEmission:
 # (128k output tokens) which used to ship on every request — ~30x the largest
 # observed response and unbounded exposure to runaway generations.
 # ---------------------------------------------------------------------------
+
 
 class TestMaxOutputTokensCap:
     def _params(self, handler):
@@ -1057,14 +1232,19 @@ class TestSchemaLoggingOnce:
     request iteration (incl. cache hits); now once per handler instance."""
 
     def test_schemas_logged_only_on_first_call(self, handler):
-        params = {"model": "m", "input": [], "tools": [{"name": "genie_tool", "parameters": {}}]}
+        params = {
+            "model": "m",
+            "input": [],
+            "tools": [{"name": "genie_tool", "parameters": {}}],
+        }
         with patch.object(_mod, "logger") as mock_logger:
             handler._log_request_params(params)
             handler._log_request_params(params)
             handler._log_request_params(params)
 
         schema_lines = [
-            c for c in mock_logger.info.call_args_list
+            c
+            for c in mock_logger.info.call_args_list
             if "Tool[%d] schema" in str(c.args[0])
         ]
         assert len(schema_lines) == 1  # once, not three times

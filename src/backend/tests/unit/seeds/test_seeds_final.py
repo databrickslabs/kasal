@@ -4,10 +4,12 @@ Unit tests for seed runner module and seed data integrity.
 Tests seed runner functions, seeder registration, and data validation
 across all seed modules.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.seeds import seed_runner, model_configs, prompt_templates
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.seeds import model_configs, prompt_templates, seed_runner
 
 
 class TestSeedRunnerModuleAttributes:
@@ -33,11 +35,22 @@ class TestSeedRunnerModuleAttributes:
     def test_expected_seeders_registered(self):
         """Test that core seeders are registered."""
         expected = [
-            "tools", "schemas", "prompt_templates",
-            "model_configs", "documentation", "groups", "api_keys",
+            "tools",
+            "schemas",
+            "prompt_templates",
+            "model_configs",
+            "groups",
+            "api_keys",
         ]
         for name in expected:
             assert name in seed_runner.SEEDERS, f"Missing seeder: {name}"
+
+    def test_documentation_seeder_intentionally_disabled(self):
+        """The documentation embeddings seeder is intentionally NOT registered:
+        it is no longer read during generation and its append-only re-seed (with
+        an idempotency guard that checked the wrong store) bloated the table on
+        every restart. It must stay unregistered until that is fixed."""
+        assert "documentation" not in seed_runner.SEEDERS
 
     def test_all_seeders_are_callable(self):
         """Test that all registered seeders are callable."""
@@ -69,7 +82,8 @@ class TestRunSeedersFunction:
         failing_seeder = AsyncMock(side_effect=Exception("fail"))
         passing_seeder = AsyncMock()
         with patch.object(
-            seed_runner, "SEEDERS",
+            seed_runner,
+            "SEEDERS",
             {"fail_seeder": failing_seeder, "pass_seeder": passing_seeder},
         ):
             await seed_runner.run_seeders(["fail_seeder", "pass_seeder"])
@@ -169,6 +183,7 @@ class TestModelConfigsDataIntegrity:
     def test_model_configs_logger(self):
         """Test that model_configs has a logger."""
         import logging
+
         assert hasattr(model_configs, "logger")
         assert isinstance(model_configs.logger, logging.Logger)
 
@@ -190,12 +205,8 @@ class TestPromptTemplatesDataIntegrity:
         """Test that template content has no TODO or FIXME markers."""
         for tpl in prompt_templates.DEFAULT_TEMPLATES:
             content = tpl["template"]
-            assert "TODO" not in content, (
-                f"Template '{tpl['name']}' contains TODO"
-            )
-            assert "FIXME" not in content, (
-                f"Template '{tpl['name']}' contains FIXME"
-            )
+            assert "TODO" not in content, f"Template '{tpl['name']}' contains TODO"
+            assert "FIXME" not in content, f"Template '{tpl['name']}' contains FIXME"
 
 
 class TestAllSeedModuleFunctions:
