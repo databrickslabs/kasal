@@ -3,20 +3,22 @@ Unit tests for prompt templates seed module.
 
 Tests the DEFAULT_TEMPLATES data structure, template constants, and seed functions.
 """
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.seeds.prompt_templates import (
     DEFAULT_TEMPLATES,
+    DETECT_INTENT_TEMPLATE,
     GENERATE_AGENT_TEMPLATE,
     GENERATE_CONNECTIONS_TEMPLATE,
+    GENERATE_CREW_TEMPLATE,
     GENERATE_JOB_NAME_TEMPLATE,
     GENERATE_TASK_TEMPLATE,
     GENERATE_TEMPLATES_TEMPLATE,
-    GENERATE_CREW_TEMPLATE,
-    DETECT_INTENT_TEMPLATE,
-    seed_async,
     seed,
+    seed_async,
     seed_sync,
 )
 
@@ -37,9 +39,9 @@ class TestDefaultTemplatesDataStructure:
         required_fields = ["name", "description", "template", "is_active"]
         for tpl in DEFAULT_TEMPLATES:
             for field in required_fields:
-                assert field in tpl, (
-                    f"Template '{tpl.get('name', 'unknown')}' missing field '{field}'"
-                )
+                assert (
+                    field in tpl
+                ), f"Template '{tpl.get('name', 'unknown')}' missing field '{field}'"
 
     def test_field_types(self):
         """Test that template field types are correct."""
@@ -72,23 +74,23 @@ class TestDefaultTemplatesDataStructure:
     def test_all_active_by_default(self):
         """Test that all default templates are active."""
         for tpl in DEFAULT_TEMPLATES:
-            assert tpl["is_active"] is True, (
-                f"Template '{tpl['name']}' should be active"
-            )
+            assert (
+                tpl["is_active"] is True
+            ), f"Template '{tpl['name']}' should be active"
 
     def test_descriptions_not_empty(self):
         """Test that all templates have non-empty descriptions."""
         for tpl in DEFAULT_TEMPLATES:
-            assert len(tpl["description"].strip()) > 0, (
-                f"Template '{tpl['name']}' has empty description"
-            )
+            assert (
+                len(tpl["description"].strip()) > 0
+            ), f"Template '{tpl['name']}' has empty description"
 
     def test_template_content_not_empty(self):
         """Test that all template content strings are non-trivial."""
         for tpl in DEFAULT_TEMPLATES:
-            assert len(tpl["template"].strip()) > 50, (
-                f"Template '{tpl['name']}' has suspiciously short content"
-            )
+            assert (
+                len(tpl["template"].strip()) > 50
+            ), f"Template '{tpl['name']}' has suspiciously short content"
 
 
 class TestTemplateConstants:
@@ -110,8 +112,10 @@ class TestTemplateConstants:
             assert len(const.strip()) > 0
 
     def test_agent_template_has_json_instructions(self):
-        """Test generate agent template contains JSON instructions."""
-        assert "CRITICAL OUTPUT INSTRUCTIONS" in GENERATE_AGENT_TEMPLATE
+        """Test generate agent template instructs single valid-JSON output."""
+        # The slimmed template folds the old "CRITICAL OUTPUT INSTRUCTIONS"
+        # block into an inline "single valid JSON object — no markdown" directive.
+        assert "valid JSON" in GENERATE_AGENT_TEMPLATE
         assert "JSON" in GENERATE_AGENT_TEMPLATE
 
     def test_connections_template_structure(self):
@@ -125,9 +129,11 @@ class TestTemplateConstants:
         assert "2-4 words" in GENERATE_JOB_NAME_TEMPLATE
 
     def test_task_template_has_json_schema(self):
-        """Test generate task template includes JSON schema."""
+        """Test generate task template includes its JSON schema fields."""
+        # The slimmed template drops the "advanced_config" mention (the platform
+        # now fills those defaults) but still pins the core task schema fields.
         assert "expected_output" in GENERATE_TASK_TEMPLATE
-        assert "advanced_config" in GENERATE_TASK_TEMPLATE
+        assert "llm_guardrail" in GENERATE_TASK_TEMPLATE
 
     def test_templates_template_has_parameters(self):
         """Test generate templates template contains placeholder parameters."""
@@ -141,7 +147,9 @@ class TestTemplateConstants:
         """Test generate crew template contains agents and tasks structures."""
         assert "agents" in GENERATE_CREW_TEMPLATE
         assert "tasks" in GENERATE_CREW_TEMPLATE
-        assert "CRITICAL OUTPUT INSTRUCTIONS" in GENERATE_CREW_TEMPLATE
+        # Slimmed template states the JSON-only contract inline rather than under
+        # a "CRITICAL OUTPUT INSTRUCTIONS" header.
+        assert "valid JSON" in GENERATE_CREW_TEMPLATE
 
     def test_detect_intent_template_has_categories(self):
         """Test detect intent template contains all intent categories."""
@@ -201,7 +209,10 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.prompt_templates.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            return_value=mock_context,
+        ):
             await seed_async()
 
         # Should have added templates
@@ -215,14 +226,18 @@ class TestSeedEntryPoint:
     @pytest.mark.asyncio
     async def test_seed_calls_seed_async(self):
         """Test that seed() delegates to seed_async()."""
-        with patch("src.seeds.prompt_templates.seed_async", new_callable=AsyncMock) as mock:
+        with patch(
+            "src.seeds.prompt_templates.seed_async", new_callable=AsyncMock
+        ) as mock:
             await seed()
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_seed_does_not_raise_on_error(self):
         """Test that seed() suppresses exceptions and logs them."""
-        with patch("src.seeds.prompt_templates.seed_async", new_callable=AsyncMock) as mock:
+        with patch(
+            "src.seeds.prompt_templates.seed_async", new_callable=AsyncMock
+        ) as mock:
             mock.side_effect = Exception("Seed failure")
             await seed()
             mock.assert_awaited_once()
@@ -230,7 +245,9 @@ class TestSeedEntryPoint:
     @pytest.mark.asyncio
     async def test_seed_logs_traceback_on_error(self):
         """Test that seed() logs traceback information on error."""
-        with patch("src.seeds.prompt_templates.seed_async", new_callable=AsyncMock) as mock_async:
+        with patch(
+            "src.seeds.prompt_templates.seed_async", new_callable=AsyncMock
+        ) as mock_async:
             with patch("src.seeds.prompt_templates.logger") as mock_logger:
                 mock_async.side_effect = Exception("Test error")
                 await seed()
@@ -296,7 +313,10 @@ class TestSeedAsyncRaceConditionUpdate:
                 ctx.__aenter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.async_session_factory", side_effect=session_factory):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            side_effect=session_factory,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 await seed_async()
 
@@ -343,7 +363,10 @@ class TestSeedAsyncUpdateExistingNames:
                 ctx.__aenter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.async_session_factory", side_effect=session_factory):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            side_effect=session_factory,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 await seed_async()
 
@@ -387,7 +410,10 @@ class TestSeedAsyncCommitExceptions:
                 ctx.__aenter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.async_session_factory", side_effect=session_factory):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            side_effect=session_factory,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     await seed_async()
@@ -426,7 +452,10 @@ class TestSeedAsyncCommitExceptions:
                 ctx.__aenter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.async_session_factory", side_effect=session_factory):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            side_effect=session_factory,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     await seed_async()
@@ -468,7 +497,10 @@ class TestSeedAsyncCommitExceptions:
         # bound. But Python's `with` will raise before binding. The except block
         # references `session` which would be the mock_initial_session from the
         # prior `async with` (the initial query). Let's just verify no crash.
-        with patch("src.seeds.prompt_templates.async_session_factory", side_effect=session_factory):
+        with patch(
+            "src.seeds.prompt_templates.async_session_factory",
+            side_effect=session_factory,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     await seed_async()
@@ -504,7 +536,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 seed_sync()
 
@@ -537,7 +573,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 seed_sync()
 
@@ -571,7 +611,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 seed_sync()
 
@@ -607,7 +651,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     seed_sync()
@@ -641,7 +689,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_template_session
             return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     seed_sync()
@@ -674,7 +726,11 @@ class TestSeedSyncFunction:
                 ctx.__enter__.return_value = mock_inner_session
                 return ctx
 
-        with patch("src.seeds.prompt_templates.SessionLocal", side_effect=session_factory, create=True):
+        with patch(
+            "src.seeds.prompt_templates.SessionLocal",
+            side_effect=session_factory,
+            create=True,
+        ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
                     seed_sync()
@@ -689,7 +745,9 @@ class TestMainBlock:
         """Lines 974-975: __main__ block calls asyncio.run(seed())."""
         import runpy
 
-        with patch("src.seeds.prompt_templates.seed", new_callable=AsyncMock) as mock_seed:
+        with patch(
+            "src.seeds.prompt_templates.seed", new_callable=AsyncMock
+        ) as mock_seed:
             with patch("asyncio.run") as mock_asyncio_run:
                 runpy.run_module(
                     "src.seeds.prompt_templates",

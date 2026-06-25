@@ -3,31 +3,33 @@ Comprehensive unit tests for CrewGenerationService.
 
 Targets 100% code coverage of src/services/crew_generation_service.py.
 """
-import json
-import logging
+
 import os
 import sys
-import traceback
-import uuid
-from typing import Dict, Any, List, Optional
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
 import src.services.crew_generation_service as _mod
 from src.services.crew_generation_service import CrewGenerationService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_service():
     """Build a CrewGenerationService with all external deps mocked out."""
     mock_session = Mock()
-    with patch("src.services.crew_generation_service.LLMLogService") as mock_log_svc_cls, \
-         patch("src.services.crew_generation_service.LLMLogRepository") as mock_log_repo_cls, \
-         patch("src.services.crew_generation_service.CrewGeneratorRepository") as mock_crew_repo_cls:
+    with (
+        patch("src.services.crew_generation_service.LLMLogService") as mock_log_svc_cls,
+        patch(
+            "src.services.crew_generation_service.LLMLogRepository"
+        ) as mock_log_repo_cls,
+        patch(
+            "src.services.crew_generation_service.CrewGeneratorRepository"
+        ) as mock_crew_repo_cls,
+    ):
         mock_log_svc = Mock()
         mock_log_repo = Mock()
         mock_crew_repo = Mock()
@@ -44,11 +46,22 @@ def _minimal_setup(agents=None, tasks=None):
     """Return a minimal valid crew setup dict."""
     if agents is None:
         agents = [
-            {"name": "Agent1", "role": "r1", "goal": "g1", "backstory": "b1", "tools": ["ToolA"]},
+            {
+                "name": "Agent1",
+                "role": "r1",
+                "goal": "g1",
+                "backstory": "b1",
+                "tools": ["ToolA"],
+            },
         ]
     if tasks is None:
         tasks = [
-            {"name": "Task1", "description": "d1", "agent": "Agent1", "tools": ["ToolA"]},
+            {
+                "name": "Task1",
+                "description": "d1",
+                "agent": "Agent1",
+                "tools": ["ToolA"],
+            },
         ]
     return {"agents": agents, "tasks": tasks}
 
@@ -61,9 +74,17 @@ def _tool_id_map():
     return {"ToolA": "id-a", "ToolB": "id-b"}
 
 
-def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_return=None,
-                           model_params=None, llm_content="{}", rjp_return=None,
-                           completion_side_effect=None, crew_repo_return=None):
+def _crew_complete_patches(
+    service,
+    gtd_return=None,
+    ppt_return="sys",
+    pcs_return=None,
+    model_params=None,
+    llm_content="{}",
+    rjp_return=None,
+    completion_side_effect=None,
+    crew_repo_return=None,
+):
     """Return a context-manager style set of patches for create_crew_complete tests.
 
     Returns a dict of mock objects after entering all patches.
@@ -90,7 +111,9 @@ def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_retur
         def __enter__(self):
             p1 = patch("src.services.crew_generation_service.ToolService")
             p2 = patch.object(service, "_get_tool_details", new_callable=AsyncMock)
-            p3 = patch.object(service, "_prepare_prompt_template", new_callable=AsyncMock)
+            p3 = patch.object(
+                service, "_prepare_prompt_template", new_callable=AsyncMock
+            )
             p4 = patch("src.services.crew_generation_service.LLMManager")
             p5 = patch("src.services.crew_generation_service.robust_json_parser")
             p6 = patch.object(service, "_process_crew_setup")
@@ -98,18 +121,22 @@ def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_retur
             self._patches = [p1, p2, p3, p4, p5, p6]
             ms = [p.start() for p in self._patches]
 
-            ms[1].return_value = gtd_return          # _get_tool_details
-            ms[2].return_value = ppt_return           # _prepare_prompt_template
+            ms[1].return_value = gtd_return  # _get_tool_details
+            ms[2].return_value = ppt_return  # _prepare_prompt_template
             if completion_side_effect:
                 ms[3].completion = AsyncMock(side_effect=completion_side_effect)
             else:
                 ms[3].completion = AsyncMock(return_value=llm_content)
-            ms[4].return_value = rjp_return           # robust_json_parser
-            ms[5].return_value = pcs_return            # _process_crew_setup
+            ms[4].return_value = rjp_return  # robust_json_parser
+            ms[5].return_value = pcs_return  # _process_crew_setup
 
             self.mocks = {
-                "ts_cls": ms[0], "gtd": ms[1], "ppt": ms[2],
-                "lm": ms[3], "rjp": ms[4], "pcs": ms[5],
+                "ts_cls": ms[0],
+                "gtd": ms[1],
+                "ppt": ms[2],
+                "lm": ms[3],
+                "rjp": ms[4],
+                "pcs": ms[5],
             }
             return self.mocks
 
@@ -124,12 +151,17 @@ def _crew_complete_patches(service, gtd_return=None, ppt_return="sys", pcs_retur
 # __init__
 # ===========================================================================
 
+
 class TestInit:
     def test_init_creates_all_dependencies(self):
         mock_session = Mock()
-        with patch("src.services.crew_generation_service.LLMLogService") as log_svc, \
-             patch("src.services.crew_generation_service.LLMLogRepository") as log_repo, \
-             patch("src.services.crew_generation_service.CrewGeneratorRepository") as crew_repo:
+        with (
+            patch("src.services.crew_generation_service.LLMLogService") as log_svc,
+            patch("src.services.crew_generation_service.LLMLogRepository") as log_repo,
+            patch(
+                "src.services.crew_generation_service.CrewGeneratorRepository"
+            ) as crew_repo,
+        ):
             svc = CrewGenerationService(mock_session)
 
             log_repo.assert_called_once_with(mock_session)
@@ -146,6 +178,7 @@ class TestInit:
 # _log_llm_interaction
 # ===========================================================================
 
+
 class TestLogLlmInteraction:
     def setup_method(self):
         self.service, self.session, self.log_svc, _ = _build_service()
@@ -154,12 +187,22 @@ class TestLogLlmInteraction:
     async def test_log_success(self):
         self.log_svc.create_log = AsyncMock()
         await self.service._log_llm_interaction(
-            endpoint="ep", prompt="p", response="r", model="m",
-            status="success", error_message=None, group_context=None,
+            endpoint="ep",
+            prompt="p",
+            response="r",
+            model="m",
+            status="success",
+            error_message=None,
+            group_context=None,
         )
         self.log_svc.create_log.assert_awaited_once_with(
-            endpoint="ep", prompt="p", response="r", model="m",
-            status="success", error_message=None, group_context=None,
+            endpoint="ep",
+            prompt="p",
+            response="r",
+            model="m",
+            status="success",
+            error_message=None,
+            group_context=None,
         )
 
     @pytest.mark.asyncio
@@ -167,7 +210,10 @@ class TestLogLlmInteraction:
         gc = Mock()
         self.log_svc.create_log = AsyncMock()
         await self.service._log_llm_interaction(
-            endpoint="ep", prompt="p", response="r", model="m",
+            endpoint="ep",
+            prompt="p",
+            response="r",
+            model="m",
             group_context=gc,
         )
         self.log_svc.create_log.assert_awaited_once()
@@ -179,13 +225,17 @@ class TestLogLlmInteraction:
         self.log_svc.create_log = AsyncMock(side_effect=RuntimeError("db down"))
         # Should NOT raise -- exception is swallowed and logged
         await self.service._log_llm_interaction(
-            endpoint="ep", prompt="p", response="r", model="m",
+            endpoint="ep",
+            prompt="p",
+            response="r",
+            model="m",
         )
 
 
 # ===========================================================================
 # _prepare_prompt_template
 # ===========================================================================
+
 
 class TestPreparePromptTemplate:
     def setup_method(self):
@@ -216,13 +266,20 @@ class TestPreparePromptTemplate:
     async def test_tools_without_nl2sql(self):
         with patch("src.services.crew_generation_service.TemplateService") as ts:
             ts.get_effective_template_content = AsyncMock(return_value="BASE")
-            tools = [{"name": "MyTool", "description": "desc", "parameters": {
-                "p1": {"description": "pd", "type": "str"}
-            }}]
+            tools = [
+                {
+                    "name": "MyTool",
+                    "description": "desc",
+                    "parameters": {"p1": {"description": "pd", "type": "str"}},
+                }
+            ]
             result = await self.service._prepare_prompt_template(tools, None)
             assert "Available tools:" in result
-            assert "MyTool" in result
-            assert "p1 (str): pd" in result
+            assert "- MyTool: desc" in result
+            # The trimmed catalog lists tool name + description only — per-parameter
+            # schemas are intentionally omitted from the generation prompt
+            # (they matter at execution, not when picking tool assignments).
+            assert "p1 (str): pd" not in result
             assert "NL2SQLTool" not in result
 
     @pytest.mark.asyncio
@@ -244,15 +301,24 @@ class TestPreparePromptTemplate:
             assert "No description available" in result
 
     @pytest.mark.asyncio
-    async def test_tool_parameter_missing_fields(self):
+    async def test_tool_parameters_are_omitted(self):
+        """The trimmed catalog renders name + description only; per-parameter
+        details (and their missing-field fallbacks) are no longer emitted."""
         with patch("src.services.crew_generation_service.TemplateService") as ts:
             ts.get_effective_template_content = AsyncMock(return_value="BASE")
-            tools = [{"name": "T", "description": "d", "parameters": {
-                "x": {}  # missing description and type
-            }}]
+            tools = [
+                {
+                    "name": "T",
+                    "description": "d",
+                    "parameters": {
+                        "x": {}  # parameters are ignored by the trimmed catalog
+                    },
+                }
+            ]
             result = await self.service._prepare_prompt_template(tools, None)
-            assert "No description" in result
-            assert "(any)" in result
+            assert "- T: d" in result
+            assert "No description" not in result
+            assert "(any)" not in result
 
     @pytest.mark.asyncio
     async def test_tool_without_parameters(self):
@@ -277,12 +343,15 @@ class TestPreparePromptTemplate:
         with patch("src.services.crew_generation_service.TemplateService") as ts:
             ts.get_effective_template_content = AsyncMock(return_value="BASE")
             await self.service._prepare_prompt_template([], gc)
-            ts.get_effective_template_content.assert_awaited_once_with("generate_crew", gc)
+            ts.get_effective_template_content.assert_awaited_once_with(
+                "generate_crew", gc
+            )
 
 
 # ===========================================================================
 # _process_crew_setup
 # ===========================================================================
+
 
 class TestProcessCrewSetup:
     def setup_method(self):
@@ -296,71 +365,115 @@ class TestProcessCrewSetup:
 
     def test_empty_agents_raises(self):
         with pytest.raises(ValueError, match="agents"):
-            self.service._process_crew_setup({"agents": [], "tasks": [{"name": "t"}]}, [], {})
+            self.service._process_crew_setup(
+                {"agents": [], "tasks": [{"name": "t"}]}, [], {}
+            )
 
     def test_agents_not_list_raises(self):
         """When agents is a tuple (iterable but not list), isinstance check catches it."""
         with pytest.raises(ValueError, match="agents"):
-            self.service._process_crew_setup({"agents": ({"name": "a"},), "tasks": [{"name": "t"}]}, [], {})
+            self.service._process_crew_setup(
+                {"agents": ({"name": "a"},), "tasks": [{"name": "t"}]}, [], {}
+            )
 
     def test_missing_tasks_key_raises(self):
         with pytest.raises(ValueError, match="tasks"):
             self.service._process_crew_setup(
                 {"agents": [{"name": "a", "role": "r", "goal": "g", "backstory": "b"}]},
-                [], {}
+                [],
+                {},
             )
 
     def test_empty_tasks_raises(self):
         with pytest.raises(ValueError, match="tasks"):
             self.service._process_crew_setup(
-                {"agents": [{"name": "a", "role": "r", "goal": "g", "backstory": "b"}], "tasks": []},
-                [], {}
+                {
+                    "agents": [
+                        {"name": "a", "role": "r", "goal": "g", "backstory": "b"}
+                    ],
+                    "tasks": [],
+                },
+                [],
+                {},
             )
 
     def test_tasks_not_list_raises(self):
         with pytest.raises(ValueError, match="tasks"):
             self.service._process_crew_setup(
-                {"agents": [{"name": "a", "role": "r", "goal": "g", "backstory": "b"}], "tasks": ({"name": "t"},)},
-                [], {}
+                {
+                    "agents": [
+                        {"name": "a", "role": "r", "goal": "g", "backstory": "b"}
+                    ],
+                    "tasks": ({"name": "t"},),
+                },
+                [],
+                {},
             )
 
     def test_agent_missing_required_field_raises(self):
-        setup = {"agents": [{"name": "a", "role": "r"}], "tasks": [{"name": "t", "agent": "a"}]}
+        setup = {
+            "agents": [{"name": "a", "role": "r"}],
+            "tasks": [{"name": "t", "agent": "a"}],
+        }
         with pytest.raises(ValueError, match="Missing required field"):
             self.service._process_crew_setup(setup, [], {})
 
     # --- Model assignment ---
     def test_model_assigned_to_agents_when_provided(self):
         setup = _minimal_setup()
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map(), model="gpt-4")
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map(), model="gpt-4"
+        )
         for agent in result["agents"]:
             assert agent["llm"] == "gpt-4"
 
     def test_model_not_assigned_when_none(self):
         setup = _minimal_setup()
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map(), model=None)
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map(), model=None
+        )
         for agent in result["agents"]:
             assert "llm" not in agent
 
     def test_model_empty_string_not_assigned(self):
         """Empty string is falsy, so model should not be assigned."""
         setup = _minimal_setup()
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map(), model="")
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map(), model=""
+        )
         for agent in result["agents"]:
             assert "llm" not in agent
 
     # --- Agent tool filtering ---
     def test_agent_tools_filtered_to_allowed(self):
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA", "Bad"]}],
+            agents=[
+                {
+                    "name": "A",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "tools": ["ToolA", "Bad"],
+                }
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["agents"][0]["tools"] == ["id-a"]
 
     def test_agent_tool_id_not_in_map_keeps_name(self):
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
+            agents=[
+                {
+                    "name": "A",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "tools": ["ToolA"],
+                }
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
         result = self.service._process_crew_setup(setup, _allowed_tools(), {})
@@ -368,18 +481,38 @@ class TestProcessCrewSetup:
 
     def test_agent_existing_id_removed(self):
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "id": "old-id"}],
+            agents=[
+                {
+                    "name": "A",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "id": "old-id",
+                }
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert "id" not in result["agents"][0]
 
     def test_agent_non_list_tools_initialized(self):
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": "invalid"}],
+            agents=[
+                {
+                    "name": "A",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "tools": "invalid",
+                }
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["agents"][0]["tools"] == []
 
     def test_agent_no_tools_key_initialized(self):
@@ -387,15 +520,21 @@ class TestProcessCrewSetup:
             agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b"}],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["agents"][0]["tools"] == []
 
     def test_agent_tools_none_initialized(self):
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": None}],
+            agents=[
+                {"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": None}
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["agents"][0]["tools"] == []
 
     # --- Task tool filtering ---
@@ -403,7 +542,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": ["ToolA", "Unknown"]}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["tools"] == ["id-a"]
 
     def test_task_tool_id_not_in_map_keeps_name(self):
@@ -417,21 +558,27 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": "bad"}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["tools"] == []
 
     def test_task_no_tools_key_initialized(self):
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A"}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["tools"] == []
 
     def test_task_existing_id_removed(self):
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "id": "old-id", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert "id" not in result["tasks"][0]
 
     # --- Task context ---
@@ -439,22 +586,36 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": [], "context": ["dep1"]}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["_context_refs"] == ["dep1"]
         assert result["tasks"][0]["context"] == []
 
     def test_task_context_empty_list_clears_refs(self):
         setup = _minimal_setup(
-            tasks=[{"name": "T", "agent": "A", "tools": [], "context": [], "_context_refs": ["old"]}],
+            tasks=[
+                {
+                    "name": "T",
+                    "agent": "A",
+                    "tools": [],
+                    "context": [],
+                    "_context_refs": ["old"],
+                }
+            ],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert "_context_refs" not in result["tasks"][0]
 
     def test_task_context_none_no_refs(self):
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": [], "context": None}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert "_context_refs" not in result["tasks"][0]
 
     def test_task_context_invalid_type_no_refs_noop(self):
@@ -462,7 +623,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": [], "context": "invalid"}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert "_context_refs" not in result["tasks"][0]
 
     # --- Task agent assignment ---
@@ -470,7 +633,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["agent"] == "A"
         assert result["tasks"][0]["assigned_agent"] == "A"
 
@@ -478,7 +643,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "assigned_agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["agent"] == "A"
         assert result["tasks"][0]["assigned_agent"] == "A"
 
@@ -486,7 +653,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         # No agent assigned, so task should not get agent/assigned_agent set
         assert result["tasks"][0].get("agent") is None
 
@@ -494,13 +663,18 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": ["ToolA", "NotAllowed"]}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["tools"] == ["id-a"]
 
     def test_agent_missing_name_uses_index(self):
         """Agent without 'name' is removed as orphan (no name -> can't match task assignment).
         The method proceeds with an empty agents list after orphan removal."""
-        setup = {"agents": [{"role": "r", "goal": "g", "backstory": "b"}], "tasks": [{"name": "t", "agent": "nonexistent"}]}
+        setup = {
+            "agents": [{"role": "r", "goal": "g", "backstory": "b"}],
+            "tasks": [{"name": "t", "agent": "nonexistent"}],
+        }
         # Agent has no name -> not in assigned_agent_names -> removed as orphan
         # After orphan removal, agents list is empty but validation already passed
         result = self.service._process_crew_setup(setup, [], {})
@@ -517,24 +691,38 @@ class TestProcessCrewSetup:
                 {"name": "T2", "agent": "A2", "tools": []},
             ],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map(), model="some-model")
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map(), model="some-model"
+        )
         assert result["agents"][0]["llm"] == "some-model"
         assert result["agents"][1]["llm"] == "some-model"
 
     def test_agent_tools_all_allowed(self):
         """When no tools are removed, the removed-tools log branch is skipped."""
         setup = _minimal_setup(
-            agents=[{"name": "A", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
+            agents=[
+                {
+                    "name": "A",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "tools": ["ToolA"],
+                }
+            ],
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["agents"][0]["tools"] == ["id-a"]
 
     def test_task_all_tools_allowed_no_removal_log(self):
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": ["ToolA"]}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["tools"] == ["id-a"]
 
     def test_task_with_assigned_agent_not_in_task_sets_assigned_agent(self):
@@ -542,7 +730,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         assert result["tasks"][0]["assigned_agent"] == "A"
 
     def test_task_with_both_agent_and_assigned_agent(self):
@@ -550,7 +740,9 @@ class TestProcessCrewSetup:
         setup = _minimal_setup(
             tasks=[{"name": "T", "agent": "A", "assigned_agent": "B", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         # The first loop sets task['agent'] = 'A' and doesn't overwrite assigned_agent since it exists
         # The final loop sets both to 'A' (because agent='A')
         assert result["tasks"][0]["agent"] == "A"
@@ -576,10 +768,14 @@ class TestProcessCrewSetup:
     def test_disable_memory_default_does_not_add_memory(self):
         """Default (disable_memory=False) does NOT add a memory key to agents."""
         setup = _minimal_setup(
-            agents=[{"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": []}],
+            agents=[
+                {"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": []}
+            ],
             tasks=[{"name": "T1", "agent": "A1", "tools": []}],
         )
-        result = self.service._process_crew_setup(setup, _allowed_tools(), _tool_id_map())
+        result = self.service._process_crew_setup(
+            setup, _allowed_tools(), _tool_id_map()
+        )
         for agent in result["agents"]:
             assert "memory" not in agent
 
@@ -587,6 +783,7 @@ class TestProcessCrewSetup:
 # ===========================================================================
 # _has_persistent_memory_backend
 # ===========================================================================
+
 
 class TestHasPersistentMemoryBackend:
     def setup_method(self):
@@ -600,10 +797,13 @@ class TestHasPersistentMemoryBackend:
         mock_repo = Mock()
         mock_repo.get_by_type = get_by_type
         mock_repo_cls = Mock(return_value=mock_repo)
-        return patch(
-            "src.repositories.memory_backend_repository.MemoryBackendRepository",
-            mock_repo_cls,
-        ), mock_repo
+        return (
+            patch(
+                "src.repositories.memory_backend_repository.MemoryBackendRepository",
+                mock_repo_cls,
+            ),
+            mock_repo,
+        )
 
     @pytest.mark.asyncio
     async def test_returns_true_when_databricks_backend_exists(self):
@@ -620,9 +820,7 @@ class TestHasPersistentMemoryBackend:
         gc = Mock()
         gc.primary_group_id = "grp1"
         # DATABRICKS -> empty, LAKEBASE -> backend present
-        patcher, mock_repo = self._patch_repo(
-            AsyncMock(side_effect=[[], [Mock()]])
-        )
+        patcher, mock_repo = self._patch_repo(AsyncMock(side_effect=[[], [Mock()]]))
         with patcher:
             result = await self.service._has_persistent_memory_backend(self.session, gc)
         assert result is True
@@ -668,6 +866,7 @@ class TestHasPersistentMemoryBackend:
 # _safe_get_attr
 # ===========================================================================
 
+
 class TestSafeGetAttr:
     def setup_method(self):
         self.service, *_ = _build_service()
@@ -684,16 +883,19 @@ class TestSafeGetAttr:
     def test_object_existing(self):
         class O:
             x = 5
+
         assert self.service._safe_get_attr(O(), "x") == 5
 
     def test_object_missing_default(self):
         class O:
             pass
+
         assert self.service._safe_get_attr(O(), "y", "d") == "d"
 
     def test_object_missing_no_default(self):
         class O:
             pass
+
         assert self.service._safe_get_attr(O(), "y") is None
 
     def test_none_object(self):
@@ -706,6 +908,7 @@ class TestSafeGetAttr:
 # ===========================================================================
 # _get_relevant_documentation
 # ===========================================================================
+
 
 class TestGetRelevantDocumentation:
     """Tests for _get_relevant_documentation.
@@ -768,7 +971,9 @@ class TestGetRelevantDocumentation:
                 lm_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2])
                 lm.get_embedding = AsyncMock(return_value=[0.3, 0.4])
 
-                result = await self.service._get_relevant_documentation("use genie tool")
+                result = await self.service._get_relevant_documentation(
+                    "use genie tool"
+                )
                 assert "[GENIE TOOL]" in result
         finally:
             delattr(_mod, "DocumentationEmbeddingService")
@@ -794,7 +999,9 @@ class TestGetRelevantDocumentation:
                 lm_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2])
                 lm.get_embedding = AsyncMock(return_value=[0.3, 0.4])
 
-                result = await self.service._get_relevant_documentation("make a reveal slide")
+                result = await self.service._get_relevant_documentation(
+                    "make a reveal slide"
+                )
                 assert "[REVEAL.JS]" in result
         finally:
             delattr(_mod, "DocumentationEmbeddingService")
@@ -820,7 +1027,9 @@ class TestGetRelevantDocumentation:
                 lm_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2])
                 lm.get_embedding = AsyncMock(return_value=[0.3, 0.4])
 
-                result = await self.service._get_relevant_documentation("create a presentation")
+                result = await self.service._get_relevant_documentation(
+                    "create a presentation"
+                )
                 assert "[REVEAL.JS]" in result
         finally:
             delattr(_mod, "DocumentationEmbeddingService")
@@ -846,8 +1055,16 @@ class TestGetRelevantDocumentation:
 
     @pytest.mark.asyncio
     async def test_deduplicate_docs(self):
-        doc1 = Mock(); doc1.id = "same-id"; doc1.title = "Genie Stuff"; doc1.source = "docs/genie"; doc1.content = "c1"
-        doc2 = Mock(); doc2.id = "same-id"; doc2.title = "Genie Stuff"; doc2.source = "docs/genie"; doc2.content = "c1"
+        doc1 = Mock()
+        doc1.id = "same-id"
+        doc1.title = "Genie Stuff"
+        doc1.source = "docs/genie"
+        doc1.content = "c1"
+        doc2 = Mock()
+        doc2.id = "same-id"
+        doc2.title = "Genie Stuff"
+        doc2.source = "docs/genie"
+        doc2.content = "c1"
 
         mock_des_cls = Mock()
         des_instance = Mock()
@@ -869,7 +1086,11 @@ class TestGetRelevantDocumentation:
 
     @pytest.mark.asyncio
     async def test_generic_doc_formatting(self):
-        doc = Mock(); doc.id = "d1"; doc.title = "General"; doc.source = "docs/general"; doc.content = "body"
+        doc = Mock()
+        doc.id = "d1"
+        doc.title = "General"
+        doc.source = "docs/general"
+        doc.content = "body"
 
         mock_des_cls = Mock()
         des_instance = Mock()
@@ -893,7 +1114,11 @@ class TestGetRelevantDocumentation:
 
     @pytest.mark.asyncio
     async def test_genie_embedding_returns_none(self):
-        doc = Mock(); doc.id = "d1"; doc.title = "Normal Doc"; doc.source = "docs/normal"; doc.content = "c"
+        doc = Mock()
+        doc.id = "d1"
+        doc.title = "Normal Doc"
+        doc.source = "docs/normal"
+        doc.content = "c"
 
         mock_des_cls = Mock()
         des_instance = Mock()
@@ -915,7 +1140,11 @@ class TestGetRelevantDocumentation:
 
     @pytest.mark.asyncio
     async def test_reveal_embedding_returns_none(self):
-        doc = Mock(); doc.id = "d1"; doc.title = "Normal Doc"; doc.source = "docs/normal"; doc.content = "c"
+        doc = Mock()
+        doc.id = "d1"
+        doc.title = "Normal Doc"
+        doc.source = "docs/normal"
+        doc.content = "c"
 
         mock_des_cls = Mock()
         des_instance = Mock()
@@ -930,14 +1159,20 @@ class TestGetRelevantDocumentation:
                 lm_instance.get_embedding = AsyncMock(return_value=[0.1])
                 lm.get_embedding = AsyncMock(return_value=None)
 
-                result = await self.service._get_relevant_documentation("reveal presentation")
+                result = await self.service._get_relevant_documentation(
+                    "reveal presentation"
+                )
                 assert "Normal Doc" in result
         finally:
             delattr(_mod, "DocumentationEmbeddingService")
 
     @pytest.mark.asyncio
     async def test_doc_source_none(self):
-        doc = Mock(); doc.id = "d1"; doc.title = "No Source Doc"; doc.source = None; doc.content = "c"
+        doc = Mock()
+        doc.id = "d1"
+        doc.title = "No Source Doc"
+        doc.source = None
+        doc.content = "c"
 
         mock_des_cls = Mock()
         des_instance = Mock()
@@ -962,7 +1197,11 @@ class TestGetRelevantDocumentation:
     async def test_limit_caps_general_docs(self):
         docs = []
         for i in range(10):
-            d = Mock(); d.id = f"d{i}"; d.title = f"Doc {i}"; d.source = "docs/src"; d.content = f"c{i}"
+            d = Mock()
+            d.id = f"d{i}"
+            d.title = f"Doc {i}"
+            d.source = "docs/src"
+            d.content = f"c{i}"
             docs.append(d)
 
         mock_des_cls = Mock()
@@ -977,7 +1216,9 @@ class TestGetRelevantDocumentation:
                 lm.return_value = lm_instance
                 lm_instance.get_embedding = AsyncMock(return_value=[0.1])
 
-                result = await self.service._get_relevant_documentation("query", limit=3)
+                result = await self.service._get_relevant_documentation(
+                    "query", limit=3
+                )
                 assert result.count("###") == 3
         finally:
             delattr(_mod, "DocumentationEmbeddingService")
@@ -986,6 +1227,7 @@ class TestGetRelevantDocumentation:
 # ===========================================================================
 # _create_tool_name_to_id_map
 # ===========================================================================
+
 
 class TestCreateToolNameToIdMap:
     def setup_method(self):
@@ -1028,6 +1270,7 @@ class TestCreateToolNameToIdMap:
 # _get_tool_details
 # ===========================================================================
 
+
 class TestGetToolDetails:
     def setup_method(self):
         self.service, *_ = _build_service()
@@ -1037,7 +1280,13 @@ class TestGetToolDetails:
         tool.title = title
         tool.id = id_val
         if has_model_dump:
-            tool.model_dump = Mock(return_value={"name": title, "description": f"desc-{title}", "id": id_val})
+            tool.model_dump = Mock(
+                return_value={
+                    "name": title,
+                    "description": f"desc-{title}",
+                    "id": id_val,
+                }
+            )
         else:
             # Remove model_dump so hasattr returns False
             del tool.model_dump
@@ -1090,7 +1339,9 @@ class TestGetToolDetails:
     @pytest.mark.asyncio
     async def test_dict_identifier_name_no_match_placeholder(self):
         ts = self._make_tool_service([])
-        result = await self.service._get_tool_details([{"name": "NoMatch", "id": "noid"}], ts)
+        result = await self.service._get_tool_details(
+            [{"name": "NoMatch", "id": "noid"}], ts
+        )
         assert len(result) == 1
         assert result[0]["name"] == "NoMatch"
         assert result[0]["id"] == "noid"
@@ -1145,7 +1396,9 @@ class TestGetToolDetails:
         t.title = "DescFallback"
         t.id = "700"
         t.description = "attr_desc"
-        t.model_dump = Mock(return_value={"name": "DescFallback", "id": "700"})  # No 'description'
+        t.model_dump = Mock(
+            return_value={"name": "DescFallback", "id": "700"}
+        )  # No 'description'
         ts = self._make_tool_service([t])
         result = await self.service._get_tool_details(["DescFallback"], ts)
         assert result[0]["description"] == "attr_desc"
@@ -1162,7 +1415,9 @@ class TestGetToolDetails:
     async def test_exception_fallback_dict_identifiers(self):
         ts = Mock()
         ts.get_all_tools = AsyncMock(side_effect=RuntimeError("service down"))
-        result = await self.service._get_tool_details([{"name": "DictTool", "id": "did"}], ts)
+        result = await self.service._get_tool_details(
+            [{"name": "DictTool", "id": "did"}], ts
+        )
         assert len(result) == 1
         assert result[0]["name"] == "DictTool"
         assert result[0]["id"] == "did"
@@ -1186,9 +1441,7 @@ class TestGetToolDetails:
     @pytest.mark.asyncio
     async def test_dict_identifier_without_description(self):
         ts = self._make_tool_service([])
-        result = await self.service._get_tool_details(
-            [{"name": "X"}], ts
-        )
+        result = await self.service._get_tool_details([{"name": "X"}], ts)
         assert "A tool named X" in result[0]["description"]
 
     @pytest.mark.asyncio
@@ -1196,13 +1449,16 @@ class TestGetToolDetails:
         """Dict with id matching but name not matching uses id lookup."""
         t = self._make_tool_obj(title="RealName", id_val="300")
         ts = self._make_tool_service([t])
-        result = await self.service._get_tool_details([{"name": "WrongName", "id": "300"}], ts)
+        result = await self.service._get_tool_details(
+            [{"name": "WrongName", "id": "300"}], ts
+        )
         assert len(result) == 1
 
 
 # ===========================================================================
 # create_crew_complete
 # ===========================================================================
+
 
 class TestCreateCrewComplete:
     def setup_method(self):
@@ -1224,32 +1480,62 @@ class TestCreateCrewComplete:
 
         tool_detail = {"name": "ToolA", "id": "id-a", "title": "ToolA"}
 
-        with patch("src.services.crew_generation_service.ToolService"), \
-             patch.object(self.service, "_get_tool_details", new_callable=AsyncMock) as gtd, \
-             patch.object(self.service, "_prepare_prompt_template", new_callable=AsyncMock) as ppt, \
-             patch("src.services.crew_generation_service.LLMManager") as lm, \
-             patch("src.services.crew_generation_service.robust_json_parser") as rjp, \
-             patch.object(self.service, "_process_crew_setup") as pcs:
+        with (
+            patch("src.services.crew_generation_service.ToolService"),
+            patch.object(
+                self.service, "_get_tool_details", new_callable=AsyncMock
+            ) as gtd,
+            patch.object(
+                self.service, "_prepare_prompt_template", new_callable=AsyncMock
+            ) as ppt,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch.object(self.service, "_process_crew_setup") as pcs,
+        ):
 
             gtd.return_value = [tool_detail]
             ppt.return_value = "system prompt"
             lm.completion = AsyncMock(return_value='{"agents":[],"tasks":[]}')
             rjp.return_value = {
-                "agents": [{"name": "A1", "role": "r", "goal": "g", "backstory": "b", "tools": ["ToolA"]}],
-                "tasks": [{"name": "T1", "description": "d", "agent": "A1", "tools": ["ToolA"]}],
+                "agents": [
+                    {
+                        "name": "A1",
+                        "role": "r",
+                        "goal": "g",
+                        "backstory": "b",
+                        "tools": ["ToolA"],
+                    }
+                ],
+                "tasks": [
+                    {
+                        "name": "T1",
+                        "description": "d",
+                        "agent": "A1",
+                        "tools": ["ToolA"],
+                    }
+                ],
             }
             pcs.return_value = {
                 "agents": [{"name": "A1", "role": "r", "tools": ["id-a"]}],
                 "tasks": [{"name": "T1", "agent": "A1", "tools": ["id-a"]}],
             }
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
 
             mock_mem_repo_cls = Mock()
             mock_mem_repo_cls.return_value.get_by_type = AsyncMock(return_value=[])
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": Mock(MemoryBackendRepository=mock_mem_repo_cls),
-                "src.models.memory_backend": Mock(MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": Mock(
+                        MemoryBackendRepository=mock_mem_repo_cls
+                    ),
+                    "src.models.memory_backend": Mock(
+                        MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")
+                    ),
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert result == {"agents": [], "tasks": []}
 
@@ -1258,7 +1544,9 @@ class TestCreateCrewComplete:
         req = self._make_request(model="m")
 
         with _crew_complete_patches(self.service) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req, group_context=None)
             assert "agents" in result
 
@@ -1266,9 +1554,13 @@ class TestCreateCrewComplete:
     async def test_model_from_env_var(self):
         req = self._make_request(model=None)
 
-        with _crew_complete_patches(self.service) as m, \
-             patch.dict(os.environ, {"CREW_MODEL": "env-model"}):
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+        with (
+            _crew_complete_patches(self.service) as m,
+            patch.dict(os.environ, {"CREW_MODEL": "env-model"}),
+        ):
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             await self.service.create_crew_complete(req)
             m["lm"].completion.assert_awaited_once()
 
@@ -1278,7 +1570,9 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(self.service) as m:
             os.environ.pop("CREW_MODEL", None)
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             await self.service.create_crew_complete(req)
             m["lm"].completion.assert_awaited_once()
 
@@ -1286,10 +1580,16 @@ class TestCreateCrewComplete:
     async def test_llm_call_exception_raises_valueerror(self):
         req = self._make_request(model="m")
 
-        with patch("src.services.crew_generation_service.ToolService"), \
-             patch.object(self.service, "_get_tool_details", new_callable=AsyncMock) as gtd, \
-             patch.object(self.service, "_prepare_prompt_template", new_callable=AsyncMock) as ppt, \
-             patch("src.services.crew_generation_service.LLMManager") as lm:
+        with (
+            patch("src.services.crew_generation_service.ToolService"),
+            patch.object(
+                self.service, "_get_tool_details", new_callable=AsyncMock
+            ) as gtd,
+            patch.object(
+                self.service, "_prepare_prompt_template", new_callable=AsyncMock
+            ) as ppt,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+        ):
             gtd.return_value = []
             ppt.return_value = "sys"
             lm.completion = AsyncMock(side_effect=RuntimeError("api error"))
@@ -1300,7 +1600,10 @@ class TestCreateCrewComplete:
     @pytest.mark.asyncio
     async def test_outer_exception_reraises(self):
         req = self._make_request()
-        with patch("src.services.crew_generation_service.ToolService", side_effect=RuntimeError("outer")):
+        with patch(
+            "src.services.crew_generation_service.ToolService",
+            side_effect=RuntimeError("outer"),
+        ):
             with pytest.raises(RuntimeError, match="outer"):
                 await self.service.create_crew_complete(req)
 
@@ -1310,9 +1613,14 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(
             self.service,
-            pcs_return={"agents": [{"name": "A"}], "tasks": [{"name": "T", "agent": "A"}]},
+            pcs_return={
+                "agents": [{"name": "A"}],
+                "tasks": [{"name": "T", "agent": "A"}],
+            },
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
@@ -1322,9 +1630,14 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(
             self.service,
-            pcs_return={"agents": [{"name": "A"}], "tasks": [{"name": "T", "assigned_agent": "A"}]},
+            pcs_return={
+                "agents": [{"name": "A"}],
+                "tasks": [{"name": "T", "assigned_agent": "A"}],
+            },
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
@@ -1336,7 +1649,9 @@ class TestCreateCrewComplete:
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [{"name": "T"}]},
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
@@ -1351,7 +1666,9 @@ class TestCreateCrewComplete:
             self.service,
             pcs_return={"agents": [mock_agent], "tasks": [{"name": "T", "agent": "A"}]},
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             mock_agent.model_dump.assert_called_once()
 
@@ -1361,9 +1678,14 @@ class TestCreateCrewComplete:
 
         with _crew_complete_patches(
             self.service,
-            pcs_return={"agents": [{"name": "A", "role": "r"}], "tasks": [{"name": "T"}]},
+            pcs_return={
+                "agents": [{"name": "A", "role": "r"}],
+                "tasks": [{"name": "T"}],
+            },
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
@@ -1379,6 +1701,7 @@ class TestCreateCrewComplete:
                 self.name = "A"
                 self.role = "r"
                 self.tools = []
+
             def get(self, key, default=None):
                 return getattr(self, key, default)
 
@@ -1391,7 +1714,9 @@ class TestCreateCrewComplete:
             self.service,
             pcs_return={"agents": [plain_agent], "tasks": [{"name": "T"}]},
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
@@ -1400,13 +1725,17 @@ class TestCreateCrewComplete:
         req = self._make_request(model="m")
         mock_task = Mock()
         mock_task.model_dump = Mock(return_value={"name": "T"})
-        mock_task.get = Mock(side_effect=lambda k, d=None: {"name": "T", "agent": "A"}.get(k, d))
+        mock_task.get = Mock(
+            side_effect=lambda k, d=None: {"name": "T", "agent": "A"}.get(k, d)
+        )
 
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [mock_task]},
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             mock_task.model_dump.assert_called_once()
 
@@ -1422,8 +1751,10 @@ class TestCreateCrewComplete:
 
         class FakeTask:
             """Not a dict, no model_dump, but supports .get() and item assignment."""
+
             def __init__(self):
                 self._data = {"name": "T"}
+
             def get(self, key, default=None):
                 # Used in task.get('agent') / task.get('assigned_agent') lookups
                 return {"name": "T"}.get(key, default)
@@ -1439,57 +1770,95 @@ class TestCreateCrewComplete:
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [ft]},
         ) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             assert "agents" in result
 
     @pytest.mark.asyncio
     async def test_databricks_tool_filtering_with_backends_present(self):
         req = self._make_request(model="m", tools=["DatabricksKnowledgeSearchTool"])
-        gc = Mock(); gc.primary_group_id = "grp1"
-        dk_tool = {"name": "DatabricksKnowledgeSearchTool", "id": "dk-id", "title": "DatabricksKnowledgeSearchTool"}
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        dk_tool = {
+            "name": "DatabricksKnowledgeSearchTool",
+            "id": "dk-id",
+            "title": "DatabricksKnowledgeSearchTool",
+        }
 
         with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             mock_mem_repo_cls = Mock()
-            mock_mem_repo_cls.return_value.get_by_type = AsyncMock(return_value=[Mock()])
+            mock_mem_repo_cls.return_value.get_by_type = AsyncMock(
+                return_value=[Mock()]
+            )
 
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": Mock(MemoryBackendRepository=mock_mem_repo_cls),
-                "src.models.memory_backend": Mock(MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": Mock(
+                        MemoryBackendRepository=mock_mem_repo_cls
+                    ),
+                    "src.models.memory_backend": Mock(
+                        MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")
+                    ),
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert "agents" in result
 
     @pytest.mark.asyncio
     async def test_databricks_tool_filtering_without_backends(self):
         req = self._make_request(model="m", tools=["DatabricksKnowledgeSearchTool"])
-        gc = Mock(); gc.primary_group_id = "grp1"
-        dk_tool = {"name": "DatabricksKnowledgeSearchTool", "id": "dk-id", "title": "DatabricksKnowledgeSearchTool"}
+        gc = Mock()
+        gc.primary_group_id = "grp1"
+        dk_tool = {
+            "name": "DatabricksKnowledgeSearchTool",
+            "id": "dk-id",
+            "title": "DatabricksKnowledgeSearchTool",
+        }
 
         with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             mock_mem_repo_cls = Mock()
             mock_mem_repo_cls.return_value.get_by_type = AsyncMock(return_value=[])
 
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": Mock(MemoryBackendRepository=mock_mem_repo_cls),
-                "src.models.memory_backend": Mock(MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": Mock(
+                        MemoryBackendRepository=mock_mem_repo_cls
+                    ),
+                    "src.models.memory_backend": Mock(
+                        MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")
+                    ),
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert "agents" in result
 
     @pytest.mark.asyncio
     async def test_tool_filtering_exception_warning(self):
         req = self._make_request(model="m")
-        gc = Mock(); gc.primary_group_id = "grp1"
+        gc = Mock()
+        gc.primary_group_id = "grp1"
 
         with _crew_complete_patches(self.service) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             # Force the import inside the try block to fail
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": None,
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": None,
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert "agents" in result
 
@@ -1497,8 +1866,12 @@ class TestCreateCrewComplete:
     async def test_process_crew_setup_called_with_model(self):
         req = self._make_request(model="my-model")
 
-        with _crew_complete_patches(self.service, model_params={"model": "my-model"}) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+        with _crew_complete_patches(
+            self.service, model_params={"model": "my-model"}
+        ) as m:
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             await self.service.create_crew_complete(req)
             m["pcs"].assert_called_once()
             # Verify model= kwarg was passed
@@ -1507,18 +1880,28 @@ class TestCreateCrewComplete:
     @pytest.mark.asyncio
     async def test_databricks_filtering_with_title_field(self):
         req = self._make_request(model="m")
-        gc = Mock(); gc.primary_group_id = "grp1"
+        gc = Mock()
+        gc.primary_group_id = "grp1"
         dk_tool = {"title": "DatabricksKnowledgeSearchTool", "id": "dk-id"}
 
         with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             mock_mem_repo_cls = Mock()
             mock_mem_repo_cls.return_value.get_by_type = AsyncMock(return_value=[])
 
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": Mock(MemoryBackendRepository=mock_mem_repo_cls),
-                "src.models.memory_backend": Mock(MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": Mock(
+                        MemoryBackendRepository=mock_mem_repo_cls
+                    ),
+                    "src.models.memory_backend": Mock(
+                        MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")
+                    ),
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert "agents" in result
 
@@ -1530,7 +1913,9 @@ class TestCreateCrewComplete:
         req.tools = None
 
         with _crew_complete_patches(self.service) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req)
             # _get_tool_details should be called with [] (not None)
             m["gtd"].assert_awaited_once()
@@ -1545,7 +1930,9 @@ class TestCreateCrewComplete:
         gc.primary_group_id = None
 
         with _crew_complete_patches(self.service) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             result = await self.service.create_crew_complete(req, group_context=gc)
             assert "agents" in result
 
@@ -1553,19 +1940,29 @@ class TestCreateCrewComplete:
     async def test_databricks_filtering_count_unchanged(self):
         """When before_count == after_count, the log message is not emitted."""
         req = self._make_request(model="m")
-        gc = Mock(); gc.primary_group_id = "grp1"
+        gc = Mock()
+        gc.primary_group_id = "grp1"
         # Tool that is NOT DatabricksKnowledgeSearchTool
         normal_tool = {"name": "NormalTool", "id": "n-id"}
 
         with _crew_complete_patches(self.service, gtd_return=[normal_tool]) as m:
-            self.crew_repo.create_crew_entities = AsyncMock(return_value={"agents": [], "tasks": []})
+            self.crew_repo.create_crew_entities = AsyncMock(
+                return_value={"agents": [], "tasks": []}
+            )
             mock_mem_repo_cls = Mock()
             mock_mem_repo_cls.return_value.get_by_type = AsyncMock(return_value=[])
 
-            with patch.dict("sys.modules", {
-                "src.repositories.memory_backend_repository": Mock(MemoryBackendRepository=mock_mem_repo_cls),
-                "src.models.memory_backend": Mock(MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.repositories.memory_backend_repository": Mock(
+                        MemoryBackendRepository=mock_mem_repo_cls
+                    ),
+                    "src.models.memory_backend": Mock(
+                        MemoryBackendTypeEnum=Mock(DATABRICKS="DATABRICKS")
+                    ),
+                },
+            ):
                 result = await self.service.create_crew_complete(req, group_context=gc)
                 assert "agents" in result
 
@@ -1574,9 +1971,8 @@ class TestCreateCrewComplete:
 # Progressive / Streaming crew generation
 # ===========================================================================
 
-from src.core.exceptions import KasalError, BadRequestError
+from src.core.exceptions import BadRequestError, KasalError
 from src.schemas.task_generation import Agent as TaskGenAgent
-from src.core.sse_manager import SSEEvent
 
 
 class TestProgressiveGeneration:
@@ -1642,9 +2038,11 @@ class TestProgressiveGeneration:
             "complexity": "standard",
         }
 
-        with patch("src.services.crew_generation_service.TemplateService") as ts, \
-             patch("src.services.crew_generation_service.LLMManager") as lm, \
-             patch("src.services.crew_generation_service.robust_json_parser") as rjp:
+        with (
+            patch("src.services.crew_generation_service.TemplateService") as ts,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+        ):
             ts.get_effective_template_content = AsyncMock(return_value="system prompt")
             lm.completion = AsyncMock(return_value='{"agents":[]}')
             rjp.return_value = plan_dict
@@ -1663,9 +2061,11 @@ class TestProgressiveGeneration:
         request.prompt = "empty crew"
         plan_dict = {"agents": [], "tasks": [{"name": "T"}]}
 
-        with patch("src.services.crew_generation_service.TemplateService") as ts, \
-             patch("src.services.crew_generation_service.LLMManager") as lm, \
-             patch("src.services.crew_generation_service.robust_json_parser") as rjp:
+        with (
+            patch("src.services.crew_generation_service.TemplateService") as ts,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+        ):
             ts.get_effective_template_content = AsyncMock(return_value="sys")
             lm.completion = AsyncMock(return_value="{}")
             rjp.return_value = plan_dict
@@ -1684,9 +2084,11 @@ class TestProgressiveGeneration:
             "tasks": [],
         }
 
-        with patch("src.services.crew_generation_service.TemplateService") as ts, \
-             patch("src.services.crew_generation_service.LLMManager") as lm, \
-             patch("src.services.crew_generation_service.robust_json_parser") as rjp:
+        with (
+            patch("src.services.crew_generation_service.TemplateService") as ts,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+        ):
             ts.get_effective_template_content = AsyncMock(return_value="sys")
             lm.completion = AsyncMock(return_value="{}")
             rjp.return_value = plan_dict
@@ -1715,7 +2117,12 @@ class TestProgressiveGeneration:
         """Returns TaskGenAgent when name matches."""
         task_plan = {"assigned_agent": "Researcher"}
         agent_results = [
-            {"name": "Researcher", "role": "Research", "goal": "Find data", "backstory": "Expert"},
+            {
+                "name": "Researcher",
+                "role": "Research",
+                "goal": "Find data",
+                "backstory": "Expert",
+            },
         ]
         result = CrewGenerationService._find_agent_context(task_plan, agent_results)
         assert result is not None
@@ -1737,7 +2144,12 @@ class TestProgressiveGeneration:
         """Matches regardless of case."""
         task_plan = {"assigned_agent": "DATA ANALYST"}
         agent_results = [
-            {"name": "data analyst", "role": "Analysis", "goal": "Analyze", "backstory": "Pro"},
+            {
+                "name": "data analyst",
+                "role": "Analysis",
+                "goal": "Analyze",
+                "backstory": "Pro",
+            },
         ]
         result = CrewGenerationService._find_agent_context(task_plan, agent_results)
         assert result is not None
@@ -1897,15 +2309,18 @@ class TestProgressiveGeneration:
         mock_response = Mock()
         mock_response.spaces = [mock_space]
 
-        import sys
         mock_genie_repo = Mock()
         mock_genie_repo.get_spaces = AsyncMock(return_value=mock_response)
 
         mock_genie_module = Mock()
         mock_genie_module.GenieRepository = Mock(return_value=mock_genie_repo)
 
-        with patch.dict(sys.modules, {"src.repositories.genie_repository": mock_genie_module}):
-            result = await self.service._suggest_genie_space("sales analysis", "analyze sales")
+        with patch.dict(
+            sys.modules, {"src.repositories.genie_repository": mock_genie_module}
+        ):
+            result = await self.service._suggest_genie_space(
+                "sales analysis", "analyze sales"
+            )
 
         assert result is not None
         assert result["id"] == "space-1"
@@ -1924,7 +2339,6 @@ class TestProgressiveGeneration:
         fallback_response = Mock()
         fallback_response.spaces = [mock_space]
 
-        import sys
         mock_genie_repo = Mock()
         mock_genie_repo.get_spaces = AsyncMock(
             side_effect=[empty_response, fallback_response]
@@ -1932,7 +2346,9 @@ class TestProgressiveGeneration:
         mock_genie_module = Mock()
         mock_genie_module.GenieRepository = Mock(return_value=mock_genie_repo)
 
-        with patch.dict(sys.modules, {"src.repositories.genie_repository": mock_genie_module}):
+        with patch.dict(
+            sys.modules, {"src.repositories.genie_repository": mock_genie_module}
+        ):
             result = await self.service._suggest_genie_space("test", "desc")
 
         assert result is not None
@@ -1944,13 +2360,14 @@ class TestProgressiveGeneration:
         empty_response = Mock()
         empty_response.spaces = []
 
-        import sys
         mock_genie_repo = Mock()
         mock_genie_repo.get_spaces = AsyncMock(return_value=empty_response)
         mock_genie_module = Mock()
         mock_genie_module.GenieRepository = Mock(return_value=mock_genie_repo)
 
-        with patch.dict(sys.modules, {"src.repositories.genie_repository": mock_genie_module}):
+        with patch.dict(
+            sys.modules, {"src.repositories.genie_repository": mock_genie_module}
+        ):
             result = await self.service._suggest_genie_space("test", "desc")
 
         assert result is None
@@ -1958,13 +2375,14 @@ class TestProgressiveGeneration:
     @pytest.mark.asyncio
     async def test_suggest_genie_space_exception(self):
         """Returns None on exception."""
-        import sys
         mock_genie_module = Mock()
         mock_genie_module.GenieRepository = Mock(
             side_effect=RuntimeError("connection failed")
         )
 
-        with patch.dict(sys.modules, {"src.repositories.genie_repository": mock_genie_module}):
+        with patch.dict(
+            sys.modules, {"src.repositories.genie_repository": mock_genie_module}
+        ):
             result = await self.service._suggest_genie_space("test", "desc")
 
         assert result is None
@@ -1973,10 +2391,18 @@ class TestProgressiveGeneration:
     # create_crew_progressive -- integration-level with mocks
     # ------------------------------------------------------------------
 
-    def _make_progressive_request(self, prompt="build a crew", model="test-model", tools=None,
-                                  auto_execute=False, session_id=None,
-                                  memory_workspace_scope=True, disable_memory=False,
-                                  mcp_servers=None, agentbricks_endpoints=None):
+    def _make_progressive_request(
+        self,
+        prompt="build a crew",
+        model="test-model",
+        tools=None,
+        auto_execute=False,
+        session_id=None,
+        memory_workspace_scope=True,
+        disable_memory=False,
+        mcp_servers=None,
+        agentbricks_endpoints=None,
+    ):
         """Create a mock CrewStreamingRequest.
 
         auto_execute defaults to False (AgentBuilder: generate-only) so the
@@ -1998,7 +2424,9 @@ class TestProgressiveGeneration:
         req.agentbricks_endpoints = agentbricks_endpoints or []
         return req
 
-    def _make_plan(self, agents=None, tasks=None, process_type="sequential", complexity="standard"):
+    def _make_plan(
+        self, agents=None, tasks=None, process_type="sequential", complexity="standard"
+    ):
         """Build a plan dict for _generate_crew_plan mock return."""
         if agents is None:
             agents = [{"name": "Agent1", "role": "Specialist"}]
@@ -2011,16 +2439,25 @@ class TestProgressiveGeneration:
             "complexity": complexity,
         }
 
-    def _progressive_patches(self, plan=None, agent_gen_return=None, task_gen_response=None,
-                             agent_saved=None, task_saved=None, tool_details=None):
+    def _progressive_patches(
+        self,
+        plan=None,
+        agent_gen_return=None,
+        task_gen_response=None,
+        agent_saved=None,
+        task_saved=None,
+        tool_details=None,
+    ):
         """Build a context manager with all patches needed for create_crew_progressive."""
 
         if plan is None:
             plan = self._make_plan()
         if agent_gen_return is None:
             agent_gen_return = {
-                "name": "Agent1", "role": "Specialist",
-                "goal": "Do work", "backstory": "Expert",
+                "name": "Agent1",
+                "role": "Specialist",
+                "goal": "Do work",
+                "backstory": "Expert",
                 "advanced_config": {},
             }
         if task_gen_response is None:
@@ -2033,7 +2470,11 @@ class TestProgressiveGeneration:
         if agent_saved is None:
             agent_saved = {"id": "agent-id-1", "name": "Agent1", "role": "Specialist"}
         if task_saved is None:
-            task_saved = {"id": "task-id-1", "name": "Task1", "description": "Do something"}
+            task_saved = {
+                "id": "task-id-1",
+                "name": "Task1",
+                "description": "Do something",
+            }
 
         service = self.service
 
@@ -2058,20 +2499,39 @@ class TestProgressiveGeneration:
                     return_value=False,
                 )
                 # Patch the plan generation
-                p_plan = patch.object(service, "_generate_crew_plan", new_callable=AsyncMock)
+                p_plan = patch.object(
+                    service, "_generate_crew_plan", new_callable=AsyncMock
+                )
                 # Patch AgentGenerationService
-                p_agent_svc = patch("src.services.crew_generation_service.AgentGenerationService")
+                p_agent_svc = patch(
+                    "src.services.crew_generation_service.AgentGenerationService"
+                )
                 # Patch TaskGenerationService
-                p_task_svc = patch("src.services.crew_generation_service.TaskGenerationService")
+                p_task_svc = patch(
+                    "src.services.crew_generation_service.TaskGenerationService"
+                )
                 # Patch CrewGeneratorRepository
-                p_repo = patch("src.services.crew_generation_service.CrewGeneratorRepository")
+                p_repo = patch(
+                    "src.services.crew_generation_service.CrewGeneratorRepository"
+                )
                 # Patch ToolService
                 p_tool_svc = patch("src.services.crew_generation_service.ToolService")
                 # Patch _get_tool_details
-                p_gtd = patch.object(service, "_get_tool_details", new_callable=AsyncMock)
+                p_gtd = patch.object(
+                    service, "_get_tool_details", new_callable=AsyncMock
+                )
 
-                self._patches = [p_sse, p_session, p_lakebase, p_plan, p_agent_svc,
-                                 p_task_svc, p_repo, p_tool_svc, p_gtd]
+                self._patches = [
+                    p_sse,
+                    p_session,
+                    p_lakebase,
+                    p_plan,
+                    p_agent_svc,
+                    p_task_svc,
+                    p_repo,
+                    p_tool_svc,
+                    p_gtd,
+                ]
                 ms = [p.start() for p in self._patches]
 
                 mock_sse = ms[0]
@@ -2161,7 +2621,9 @@ class TestProgressiveGeneration:
             # plan_ready should come first
             assert event_types.index("plan_ready") < event_types.index("agent_detail")
             assert event_types.index("agent_detail") < event_types.index("task_detail")
-            assert event_types.index("task_detail") < event_types.index("generation_complete")
+            assert event_types.index("task_detail") < event_types.index(
+                "generation_complete"
+            )
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_persists_via_isolated_session(self):
@@ -2194,7 +2656,9 @@ class TestProgressiveGeneration:
         gen_id = "gen-auto"
 
         with self._progressive_patches() as m:
-            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+            with patch(
+                "src.services.execution_service.ExecutionService"
+            ) as mock_exec_cls:
                 mock_exec = Mock()
                 mock_exec.create_execution = AsyncMock(
                     return_value={
@@ -2213,7 +2677,9 @@ class TestProgressiveGeneration:
             # No separate execution_started event — it's folded in.
             assert "execution_started" not in event_types
 
-            complete = next(c for c in calls if c.args[1].data["type"] == "generation_complete")
+            complete = next(
+                c for c in calls if c.args[1].data["type"] == "generation_complete"
+            )
             assert complete.args[1].data["execution_id"] == "job-auto-1"
             assert complete.args[1].data["run_name"] == "Auto Run"
 
@@ -2223,7 +2689,9 @@ class TestProgressiveGeneration:
             assert cfg.session_id == "chat-1"
             assert any(k.startswith("agent_") for k in cfg.agents_yaml)
             # Not launched via FastAPI BackgroundTasks (none in this context).
-            assert mock_exec.create_execution.call_args.kwargs["background_tasks"] is None
+            assert (
+                mock_exec.create_execution.call_args.kwargs["background_tasks"] is None
+            )
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_no_auto_execute_for_agentbuilder(self):
@@ -2233,12 +2701,15 @@ class TestProgressiveGeneration:
         gen_id = "gen-no-auto"
 
         with self._progressive_patches() as m:
-            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+            with patch(
+                "src.services.execution_service.ExecutionService"
+            ) as mock_exec_cls:
                 await self.service.create_crew_progressive(request, None, gen_id)
                 mock_exec_cls.assert_not_called()
 
             complete = next(
-                c for c in m["sse"].broadcast_to_job.call_args_list
+                c
+                for c in m["sse"].broadcast_to_job.call_args_list
                 if c.args[1].data["type"] == "generation_complete"
             )
             assert "execution_id" not in complete.args[1].data
@@ -2251,9 +2722,13 @@ class TestProgressiveGeneration:
         gen_id = "gen-auto-fail"
 
         with self._progressive_patches() as m:
-            with patch("src.services.execution_service.ExecutionService") as mock_exec_cls:
+            with patch(
+                "src.services.execution_service.ExecutionService"
+            ) as mock_exec_cls:
                 mock_exec = Mock()
-                mock_exec.create_execution = AsyncMock(side_effect=RuntimeError("no capacity"))
+                mock_exec.create_execution = AsyncMock(
+                    side_effect=RuntimeError("no capacity")
+                )
                 mock_exec_cls.return_value = mock_exec
 
                 await self.service.create_crew_progressive(request, None, gen_id)
@@ -2262,7 +2737,9 @@ class TestProgressiveGeneration:
             event_types = [c.args[1].data["type"] for c in calls]
             assert "generation_complete" in event_types
             assert "generation_failed" not in event_types
-            complete = next(c for c in calls if c.args[1].data["type"] == "generation_complete")
+            complete = next(
+                c for c in calls if c.args[1].data["type"] == "generation_complete"
+            )
             assert "execution_id" not in complete.args[1].data
             assert "no capacity" in complete.args[1].data["execution_error"]
 
@@ -2280,7 +2757,9 @@ class TestProgressiveGeneration:
             calls = m["sse"].broadcast_to_job.call_args_list
             event_types = [c.args[1].data["type"] for c in calls]
             assert "generation_failed" in event_types
-            fail_event = next(c for c in calls if c.args[1].data["type"] == "generation_failed")
+            fail_event = next(
+                c for c in calls if c.args[1].data["type"] == "generation_failed"
+            )
             assert "LLM timeout" in fail_event.args[1].data["error"]
 
     @pytest.mark.asyncio
@@ -2289,7 +2768,11 @@ class TestProgressiveGeneration:
         request = self._make_progressive_request()
         gen_id = "gen-empty"
 
-        empty_plan = {"agents": [], "tasks": [{"name": "T1"}], "process_type": "sequential"}
+        empty_plan = {
+            "agents": [],
+            "tasks": [{"name": "T1"}],
+            "process_type": "sequential",
+        }
 
         with self._progressive_patches(plan=empty_plan) as m:
             await self.service.create_crew_progressive(request, None, gen_id)
@@ -2297,7 +2780,9 @@ class TestProgressiveGeneration:
             calls = m["sse"].broadcast_to_job.call_args_list
             event_types = [c.args[1].data["type"] for c in calls]
             assert "generation_failed" in event_types
-            fail_event = next(c for c in calls if c.args[1].data["type"] == "generation_failed")
+            fail_event = next(
+                c for c in calls if c.args[1].data["type"] == "generation_failed"
+            )
             assert "no agents" in fail_event.args[1].data["error"].lower()
 
     @pytest.mark.asyncio
@@ -2316,10 +2801,14 @@ class TestProgressiveGeneration:
         agent_saved_2 = {"id": "agent-id-2", "name": "Agent2", "role": "R2"}
         task_saved = {"id": "task-id-1", "name": "Task2", "description": "desc"}
 
-        request = self._make_progressive_request(prompt="build a crew with 2 agents and 2 tasks")
+        request = self._make_progressive_request(
+            prompt="build a crew with 2 agents and 2 tasks"
+        )
         gen_id = "gen-agent-err"
 
-        with self._progressive_patches(plan=plan, agent_saved=agent_saved_2, task_saved=task_saved) as m:
+        with self._progressive_patches(
+            plan=plan, agent_saved=agent_saved_2, task_saved=task_saved
+        ) as m:
             # First agent generation fails, second succeeds
             call_count = [0]
 
@@ -2328,8 +2817,10 @@ class TestProgressiveGeneration:
                 if call_count[0] == 1:
                     raise RuntimeError("agent generation failed")
                 return {
-                    "name": "Agent2", "role": "R2",
-                    "goal": "G2", "backstory": "B2",
+                    "name": "Agent2",
+                    "role": "R2",
+                    "goal": "G2",
+                    "backstory": "B2",
                     "advanced_config": {},
                 }
 
@@ -2344,7 +2835,9 @@ class TestProgressiveGeneration:
             assert "generation_complete" in event_types
 
             # Verify entity_error is for agent
-            error_event = next(c for c in calls if c.args[1].data["type"] == "entity_error")
+            error_event = next(
+                c for c in calls if c.args[1].data["type"] == "entity_error"
+            )
             assert error_event.args[1].data["entity_type"] == "agent"
             assert error_event.args[1].data["name"] == "Agent1"
 
@@ -2396,11 +2889,15 @@ class TestProgressiveGeneration:
             assert "entity_error" in event_types
             assert "generation_complete" in event_types
 
-            error_event = next(c for c in calls if c.args[1].data["type"] == "entity_error")
+            error_event = next(
+                c for c in calls if c.args[1].data["type"] == "entity_error"
+            )
             assert error_event.args[1].data["entity_type"] == "task"
 
     @pytest.mark.asyncio
-    async def test_create_crew_progressive_synthesizes_tasks_when_all_task_gen_fails(self):
+    async def test_create_crew_progressive_synthesizes_tasks_when_all_task_gen_fails(
+        self,
+    ):
         """Regression: when EVERY per-task LLM generation fails (common with small
         models that occasionally return malformed JSON), the crew would otherwise
         reach auto-execute with agents but ZERO tasks and die in crew preparation
@@ -2418,7 +2915,9 @@ class TestProgressiveGeneration:
         gen_id = "gen-task-synth"
 
         with self._progressive_patches(
-            plan=plan, agent_saved=agent_saved, task_saved=task_saved,
+            plan=plan,
+            agent_saved=agent_saved,
+            task_saved=task_saved,
         ) as m:
             # EVERY task generation fails — the normal path produces no tasks.
             m["task_gen"].generate_task = AsyncMock(
@@ -2492,7 +2991,9 @@ class TestProgressiveGeneration:
             ],
         )
 
-        request = self._make_progressive_request(prompt="build a crew with 2 agents and 2 tasks")
+        request = self._make_progressive_request(
+            prompt="build a crew with 2 agents and 2 tasks"
+        )
         gen_id = "gen-interleaved"
 
         agent_saves = [
@@ -2505,8 +3006,20 @@ class TestProgressiveGeneration:
         ]
 
         agent_configs = [
-            {"name": "Alpha", "role": "R1", "goal": "G1", "backstory": "B1", "advanced_config": {}},
-            {"name": "Beta", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+            {
+                "name": "Alpha",
+                "role": "R1",
+                "goal": "G1",
+                "backstory": "B1",
+                "advanced_config": {},
+            },
+            {
+                "name": "Beta",
+                "role": "R2",
+                "goal": "G2",
+                "backstory": "B2",
+                "advanced_config": {},
+            },
         ]
 
         task_responses = []
@@ -2558,9 +3071,16 @@ class TestProgressiveGeneration:
             event_types = [c.args[1].data["type"] for c in calls]
 
             # Filter to agent_detail and task_detail only
-            interleaved = [e for e in event_types if e in ("agent_detail", "task_detail")]
+            interleaved = [
+                e for e in event_types if e in ("agent_detail", "task_detail")
+            ]
             # Expected: agent_detail, task_detail, agent_detail, task_detail
-            assert interleaved == ["agent_detail", "task_detail", "agent_detail", "task_detail"]
+            assert interleaved == [
+                "agent_detail",
+                "task_detail",
+                "agent_detail",
+                "task_detail",
+            ]
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_sequential_dependency_chain(self):
@@ -2630,7 +3150,12 @@ class TestProgressiveGeneration:
         """Broadcasts tool_config_needed when GenieTool found in task tools."""
         genie_tool_id = "genie-tool-id"
         tool_details = [
-            {"title": "GenieTool", "name": "GenieTool", "description": "Genie", "id": genie_tool_id},
+            {
+                "title": "GenieTool",
+                "name": "GenieTool",
+                "description": "Genie",
+                "id": genie_tool_id,
+            },
         ]
 
         plan = self._make_plan(
@@ -2647,7 +3172,11 @@ class TestProgressiveGeneration:
         task_response.tools = [{"name": "GenieTool"}]
         task_response.llm_guardrail = None
 
-        task_saved = {"id": "tid-1", "name": "Query Data", "description": "Query the database"}
+        task_saved = {
+            "id": "tid-1",
+            "name": "Query Data",
+            "description": "Query the database",
+        }
 
         request = self._make_progressive_request(tools=["genie-tool-id"])
         gen_id = "gen-genie"
@@ -2661,12 +3190,14 @@ class TestProgressiveGeneration:
         ) as m:
             # We need _create_tool_name_to_id_map to return correct mapping
             with patch.object(
-                self.service, "_create_tool_name_to_id_map",
+                self.service,
+                "_create_tool_name_to_id_map",
                 return_value={"GenieTool": genie_tool_id},
             ):
                 # Also mock _suggest_genie_space
                 with patch.object(
-                    self.service, "_suggest_genie_space",
+                    self.service,
+                    "_suggest_genie_space",
                     new_callable=AsyncMock,
                     return_value={"id": "space-1", "name": "Sales"},
                 ):
@@ -2676,7 +3207,9 @@ class TestProgressiveGeneration:
             event_types = [c.args[1].data["type"] for c in calls]
             assert "tool_config_needed" in event_types
 
-            config_event = next(c for c in calls if c.args[1].data["type"] == "tool_config_needed")
+            config_event = next(
+                c for c in calls if c.args[1].data["type"] == "tool_config_needed"
+            )
             assert config_event.args[1].data["tool_name"] == "GenieTool"
             assert config_event.args[1].data["task_id"] == "tid-1"
             assert config_event.args[1].data["suggested_space"]["id"] == "space-1"
@@ -2822,11 +3355,14 @@ class TestProgressiveGeneration:
             mock_trace_ctx.__enter__ = Mock(return_value=None)
             mock_trace_ctx.__exit__ = Mock(return_value=False)
 
-            with patch.dict("sys.modules", {
-                "src.services.mlflow_tracing_service": Mock(
-                    start_root_trace=Mock(return_value=mock_trace_ctx)
-                ),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.services.mlflow_tracing_service": Mock(
+                        start_root_trace=Mock(return_value=mock_trace_ctx)
+                    ),
+                },
+            ):
                 await self.service.create_crew_progressive(
                     request, None, gen_id, mlflow_enabled=True
                 )
@@ -2843,11 +3379,14 @@ class TestProgressiveGeneration:
 
         with self._progressive_patches() as m:
             # Make start_root_trace raise an exception
-            with patch.dict("sys.modules", {
-                "src.services.mlflow_tracing_service": Mock(
-                    start_root_trace=Mock(side_effect=ImportError("no mlflow"))
-                ),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.services.mlflow_tracing_service": Mock(
+                        start_root_trace=Mock(side_effect=ImportError("no mlflow"))
+                    ),
+                },
+            ):
                 await self.service.create_crew_progressive(
                     request, None, gen_id, mlflow_enabled=True
                 )
@@ -2996,7 +3535,11 @@ class TestProgressiveGeneration:
             agents=[{"name": "Agent1", "role": "R1"}],
             tasks=[
                 {"name": "Task1", "assigned_agent": "Agent1", "context": []},
-                {"name": "Task2", "assigned_agent": "Agent1", "context": ["Task1", "Task3"]},
+                {
+                    "name": "Task2",
+                    "assigned_agent": "Agent1",
+                    "context": ["Task1", "Task3"],
+                },
                 {"name": "Task3", "assigned_agent": "Agent1", "context": ["Task1"]},
             ],
             process_type="parallel",
@@ -3032,7 +3575,9 @@ class TestProgressiveGeneration:
                 {"name": "Task1", "assigned_agent": "Worker"},
             ],
         )
-        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request = self._make_progressive_request(
+            prompt="find and analyze data with 2 agents"
+        )
         request.original_prompt = None
         gen_id = "gen-orphan"
 
@@ -3073,16 +3618,18 @@ class TestProgressiveGeneration:
                     return_value={"instance_name": "test-lakebase"},
                 ):
                     mock_lb_session = AsyncMock()
-                    mock_lb_session.__aenter__ = AsyncMock(return_value=AsyncMock(
-                        commit=AsyncMock(), rollback=AsyncMock()
-                    ))
+                    mock_lb_session.__aenter__ = AsyncMock(
+                        return_value=AsyncMock(commit=AsyncMock(), rollback=AsyncMock())
+                    )
                     mock_lb_session.__aexit__ = AsyncMock(return_value=False)
 
                     with patch(
                         "src.db.lakebase_session.get_lakebase_session",
                         return_value=mock_lb_session,
                     ):
-                        await self.service.create_crew_progressive(request, None, gen_id)
+                        await self.service.create_crew_progressive(
+                            request, None, gen_id
+                        )
 
             calls = m["sse"].broadcast_to_job.call_args_list
             event_types = [c.args[1].data["type"] for c in calls]
@@ -3106,16 +3653,18 @@ class TestProgressiveGeneration:
                     return_value=None,
                 ):
                     mock_lb_session = AsyncMock()
-                    mock_lb_session.__aenter__ = AsyncMock(return_value=AsyncMock(
-                        commit=AsyncMock(), rollback=AsyncMock()
-                    ))
+                    mock_lb_session.__aenter__ = AsyncMock(
+                        return_value=AsyncMock(commit=AsyncMock(), rollback=AsyncMock())
+                    )
                     mock_lb_session.__aexit__ = AsyncMock(return_value=False)
 
                     with patch(
                         "src.db.lakebase_session.get_lakebase_session",
                         return_value=mock_lb_session,
                     ) as mock_get_lb:
-                        await self.service.create_crew_progressive(request, None, gen_id)
+                        await self.service.create_crew_progressive(
+                            request, None, gen_id
+                        )
                         # Should fall back to env var or "kasal-lakebase"
                         mock_get_lb.assert_called_once()
 
@@ -3162,7 +3711,10 @@ class TestProgressiveGeneration:
             ],
             tasks=[
                 {"name": "Task1", "assigned_agent": "Agent2"},
-                {"name": "Task2", "assigned_agent": "NonExistent"},  # Will be reassigned to ""
+                {
+                    "name": "Task2",
+                    "assigned_agent": "NonExistent",
+                },  # Will be reassigned to ""
             ],
         )
         agent_saves = [
@@ -3185,11 +3737,25 @@ class TestProgressiveGeneration:
             task_responses.append(tr)
 
         agent_configs = [
-            {"name": "", "role": "Worker", "goal": "G1", "backstory": "B1", "advanced_config": {}},
-            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+            {
+                "name": "",
+                "role": "Worker",
+                "goal": "G1",
+                "backstory": "B1",
+                "advanced_config": {},
+            },
+            {
+                "name": "Agent2",
+                "role": "R2",
+                "goal": "G2",
+                "backstory": "B2",
+                "advanced_config": {},
+            },
         ]
 
-        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request = self._make_progressive_request(
+            prompt="find and analyze data with 2 agents"
+        )
         request.original_prompt = None
         gen_id = "gen-empty-assigned"
 
@@ -3237,8 +3803,10 @@ class TestProgressiveGeneration:
     async def test_create_crew_progressive_advanced_config_applied(self):
         """Agent advanced_config keys are copied to agent_data."""
         agent_gen_return = {
-            "name": "Agent1", "role": "Specialist",
-            "goal": "Do work", "backstory": "Expert",
+            "name": "Agent1",
+            "role": "Specialist",
+            "goal": "Do work",
+            "backstory": "Expert",
             "advanced_config": {
                 "max_iter": 5,
                 "verbose": True,
@@ -3272,7 +3840,12 @@ class TestProgressiveGeneration:
         """
         genie_tool_id = "genie-id"
         tool_details = [
-            {"title": "GenieTool", "name": "GenieTool", "description": "Genie", "id": genie_tool_id},
+            {
+                "title": "GenieTool",
+                "name": "GenieTool",
+                "description": "Genie",
+                "id": genie_tool_id,
+            },
         ]
 
         plan = self._make_plan(
@@ -3307,12 +3880,28 @@ class TestProgressiveGeneration:
 
         task_saves = [
             {"id": "tid-1", "name": "Task1", "description": "Normal task"},
-            {"id": "tid-2", "name": "Unassigned Genie Task", "description": "Query with genie"},
+            {
+                "id": "tid-2",
+                "name": "Unassigned Genie Task",
+                "description": "Query with genie",
+            },
         ]
 
         agent_configs = [
-            {"name": "", "role": "Worker", "goal": "G", "backstory": "B", "advanced_config": {}},
-            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+            {
+                "name": "",
+                "role": "Worker",
+                "goal": "G",
+                "backstory": "B",
+                "advanced_config": {},
+            },
+            {
+                "name": "Agent2",
+                "role": "R2",
+                "goal": "G2",
+                "backstory": "B2",
+                "advanced_config": {},
+            },
         ]
 
         request = self._make_progressive_request(
@@ -3321,9 +3910,7 @@ class TestProgressiveGeneration:
         request.original_prompt = None
         gen_id = "gen-unassigned-genie"
 
-        with self._progressive_patches(
-            plan=plan, tool_details=tool_details
-        ) as m:
+        with self._progressive_patches(plan=plan, tool_details=tool_details) as m:
             agent_call_idx = [0]
             task_call_idx = [0]
 
@@ -3356,11 +3943,13 @@ class TestProgressiveGeneration:
             m["repo"].create_single_task = AsyncMock(side_effect=task_save_se)
 
             with patch.object(
-                self.service, "_create_tool_name_to_id_map",
+                self.service,
+                "_create_tool_name_to_id_map",
                 return_value={"GenieTool": genie_tool_id},
             ):
                 with patch.object(
-                    self.service, "_suggest_genie_space",
+                    self.service,
+                    "_suggest_genie_space",
                     new_callable=AsyncMock,
                     return_value={"id": "space-1", "name": "Sales"},
                 ):
@@ -3403,19 +3992,39 @@ class TestProgressiveGeneration:
         task_response_ok.tools = []
         task_response_ok.llm_guardrail = None
 
-        task_saved_ok = {"id": "tid-1", "name": "Assigned Task", "description": "OK task"}
+        task_saved_ok = {
+            "id": "tid-1",
+            "name": "Assigned Task",
+            "description": "OK task",
+        }
 
         agent_configs = [
-            {"name": "", "role": "Worker", "goal": "G", "backstory": "B", "advanced_config": {}},
-            {"name": "Agent2", "role": "R2", "goal": "G2", "backstory": "B2", "advanced_config": {}},
+            {
+                "name": "",
+                "role": "Worker",
+                "goal": "G",
+                "backstory": "B",
+                "advanced_config": {},
+            },
+            {
+                "name": "Agent2",
+                "role": "R2",
+                "goal": "G2",
+                "backstory": "B2",
+                "advanced_config": {},
+            },
         ]
 
-        request = self._make_progressive_request(prompt="find and analyze data with 2 agents")
+        request = self._make_progressive_request(
+            prompt="find and analyze data with 2 agents"
+        )
         request.original_prompt = None
         gen_id = "gen-unassigned-err"
 
         with self._progressive_patches(
-            plan=plan, task_gen_response=task_response_ok, task_saved=task_saved_ok,
+            plan=plan,
+            task_gen_response=task_response_ok,
+            task_saved=task_saved_ok,
         ) as m:
             agent_call_idx = [0]
             call_count = [0]
@@ -3450,8 +4059,7 @@ class TestProgressiveGeneration:
                 c for c in calls if c.args[1].data.get("type") == "entity_error"
             ]
             unassigned_errors = [
-                e for e in error_events
-                if e.args[1].data.get("entity_type") == "task"
+                e for e in error_events if e.args[1].data.get("entity_type") == "task"
             ]
             assert len(unassigned_errors) >= 1
 
@@ -3469,9 +4077,11 @@ class TestProgressiveGeneration:
             "tasks": [{"name": "T", "assigned_agent": "A"}],
         }
 
-        with patch("src.services.crew_generation_service.TemplateService") as ts, \
-             patch("src.services.crew_generation_service.LLMManager") as lm, \
-             patch("src.services.crew_generation_service.robust_json_parser") as rjp:
+        with (
+            patch("src.services.crew_generation_service.TemplateService") as ts,
+            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+        ):
             ts.get_effective_template_content = AsyncMock(return_value="sys prompt")
             lm.completion = AsyncMock(return_value='{"agents":[{"name":"A"}]}')
             rjp.return_value = plan_dict
@@ -3500,14 +4110,35 @@ class TestBuildCrewConfigFromGenerated:
     @staticmethod
     def _req(**kw):
         from src.schemas.crew import CrewStreamingRequest
+
         return CrewStreamingRequest(prompt="p", **kw)
 
     def test_keys_links_and_top_level(self):
-        req = self._req(original_prompt="find swiss poets", model="m1", session_id="s1",
-                        memory_workspace_scope=False)
-        agents = [{"id": "a1", "role": "Researcher", "goal": "g", "backstory": "b", "tools": ["x"]}]
-        tasks = [{"id": "t1", "description": "do it", "expected_output": "out",
-                  "agent_id": "a1", "context": ["t0"], "tools": []}]
+        req = self._req(
+            original_prompt="find swiss poets",
+            model="m1",
+            session_id="s1",
+            memory_workspace_scope=False,
+        )
+        agents = [
+            {
+                "id": "a1",
+                "role": "Researcher",
+                "goal": "g",
+                "backstory": "b",
+                "tools": ["x"],
+            }
+        ]
+        tasks = [
+            {
+                "id": "t1",
+                "description": "do it",
+                "expected_output": "out",
+                "agent_id": "a1",
+                "context": ["t0"],
+                "tools": [],
+            }
+        ]
         cfg = CrewGenerationService.build_crew_config_from_generated(req, agents, tasks)
         # agent_<id> / task_<id> keys, role copied, task→agent + task→task links resolved
         assert cfg["agents_yaml"]["agent_a1"]["role"] == "Researcher"
@@ -3535,14 +4166,17 @@ class TestBuildCrewConfigFromGenerated:
     def test_disable_memory_forces_agent_memory_false(self):
         req = self._req(disable_memory=True)
         cfg = CrewGenerationService.build_crew_config_from_generated(
-            req, [{"id": "a1", "role": "r"}], [])
+            req, [{"id": "a1", "role": "r"}], []
+        )
         assert cfg["agents_yaml"]["agent_a1"]["memory"] is False
 
     def test_no_mcp_leaves_no_tool_configs(self):
         req = self._req()  # prompt="p" → grounds with the user request, no MCP
         cfg = CrewGenerationService.build_crew_config_from_generated(
-            req, [{"id": "a1", "role": "r"}],
-            [{"id": "t1", "description": "d", "agent_id": "a1"}])
+            req,
+            [{"id": "a1", "role": "r"}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
         assert "tool_configs" not in cfg["agents_yaml"]["agent_a1"]
         assert "tool_configs" not in cfg["tasks_yaml"]["task_t1"]
         desc = cfg["tasks_yaml"]["task_t1"]["description"]
@@ -3578,12 +4212,22 @@ class TestBuildCrewConfigFromGenerated:
         cfg = CrewGenerationService.build_crew_config_from_generated(
             req,
             [{"id": "a1", "role": "r", "tools": ["71"]}],
-            [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["71", "AgentBricksTool"]}],
+            [
+                {
+                    "id": "t1",
+                    "description": "d",
+                    "agent_id": "a1",
+                    "tools": ["71", "AgentBricksTool"],
+                }
+            ],
         )
         assert cfg["agents_yaml"]["agent_a1"]["tools"] == []
         assert cfg["tasks_yaml"]["task_t1"]["tools"] == []
         assert "tool_configs" not in cfg["tasks_yaml"]["task_t1"]
-        assert "Agent Bricks agent is assigned" not in cfg["tasks_yaml"]["task_t1"]["description"]
+        assert (
+            "Agent Bricks agent is assigned"
+            not in cfg["tasks_yaml"]["task_t1"]["description"]
+        )
 
     def test_agentbricks_filter_preserves_other_tools(self):
         # The equip/strip helper must touch ONLY the AgentBricksTool reference
@@ -3595,7 +4239,11 @@ class TestBuildCrewConfigFromGenerated:
             [{"id": "t1", "description": "d", "agent_id": "a1", "tools": ["35"]}],
         )
         # Other tools kept; AgentBricksTool appended.
-        assert with_ep["agents_yaml"]["agent_a1"]["tools"] == ["35", "SerperDevTool", "71"]
+        assert with_ep["agents_yaml"]["agent_a1"]["tools"] == [
+            "35",
+            "SerperDevTool",
+            "71",
+        ]
         assert with_ep["tasks_yaml"]["task_t1"]["tools"] == ["35", "71"]
 
         without_ep = CrewGenerationService.build_crew_config_from_generated(
