@@ -22,6 +22,7 @@ from src.schemas.crew_export import (
     DeploymentRequest,
     DeploymentResponse,
     ExportFormat,
+    LakebaseInstancesResponse,
 )
 from src.services.crew_app_deployment_service import CrewAppDeploymentService
 from src.services.crew_deployment_service import CrewDeploymentService
@@ -339,6 +340,31 @@ async def get_app_deployment_status(
     if result is None:
         raise NotFoundError(f"Deployment {deployment_id} not found")
     return result
+
+
+@router.get(
+    "/deploy-app/lakebase-instances",
+    response_model=LakebaseInstancesResponse,
+)
+async def list_lakebase_instances(
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+):
+    """List the workspace's Lakebase instances for the deploy screen.
+
+    Lets the user pick an existing Lakebase instance to attach to the app (or
+    choose to create a new one). Only editors and admins may list them.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can list Lakebase instances")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        instances = await service.list_lakebase_instances(group_context=group_context)
+        return LakebaseInstancesResponse(instances=instances)
+    except PermissionError as e:
+        raise ForbiddenError(str(e))
 
 
 @router.post(

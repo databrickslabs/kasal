@@ -71,6 +71,26 @@ Structure (faithful to the Databricks template):
 (auto-detected from `{placeholder}` tokens, default `topic`) and calls `crew.kickoff(inputs=...)`.
 Edit `MODEL_OVERRIDE`, `INPUT_KEY`, or `MCP_SERVERS` in `agent_server/agent.py` to tune behavior.
 
+**Tools & MCP fidelity:** the export equips the crew with the tools and MCP servers configured in
+Kasal:
+- **MCP servers** enabled for the workspace are auto-attached to every agent and authenticated with
+  the requesting user's OBO token (falling back to the app service principal).
+- **Tools** are pre-wired into `TOOL_MAP` keyed by each tool's title, with their non-secret config
+  baked in (e.g. the Genie space id, Serper result count); secrets are read from env vars
+  (`.env.example`), never embedded. Self-contained tools — **GenieTool** (Databricks Genie via the
+  SDK) and **PerplexityTool** — are bundled under `tools/`, plus the standard `crewai_tools`
+  (Serper, Scrape, DALL·E).
+- Tools that depend on Kasal's runtime (most Power BI / Databricks-internal tools) can't run
+  standalone; they're listed in the export metadata (`unsupported_tools`) and left as commented
+  `# unsupported` entries in `TOOL_MAP`. Attach those capabilities over **MCP** instead, or add your
+  own implementation under `tools/`.
+
+**Task guardrails:** guardrails configured on a task are carried into the app's `TASK_GUARDRAILS`
+map (`agent_server/agent.py`). **LLM guardrails** are reproduced with CrewAI's native
+`LLMGuardrail` (using the guardrail's model, or the crew's default) and applied to the matching
+`Task`. Kasal **built-in code/factory guardrails** can't be bundled standalone, so they're carried
+as `{"type": "code"}` and flagged at runtime — re-implement them under `tools/` if you need them.
+
 **Best for:**
 - Shipping a crew as a standalone, queryable Databricks App with a chat UI
 - One-click deployment from the Kasal UI (see below)
@@ -80,7 +100,37 @@ Edit `MODEL_OVERRIDE`, `INPUT_KEY`, or `MCP_SERVERS` in `agent_server/agent.py` 
 When the export format is **Databricks App**, the export dialog shows a **Deploy to Databricks Apps**
 button. This generates the project, creates the app, uploads the project to the workspace, deploys it,
 and starts it — no local CLI needed. The deploy runs in the background; the dialog polls progress
-(`CREATING_APP → UPLOADING → DEPLOYING → STARTING → SUCCEEDED`) and shows the live app URL when finished.
+(`CREATING_APP → CREATING_LAKEBASE → CONFIGURING_APP → UPLOADING → DEPLOYING → STARTING → SUCCEEDED`)
+and shows the live app URL when finished.
+
+**Deploy-screen options.** Besides the app name, you can pick the model (from the workspace's enabled
+models), the UC catalog/schema (used for tools/memory and the OTel telemetry tables), an MLflow
+experiment name + **SQL Warehouse ID** (for Unity Catalog tracing — see below), and a **Lakebase
+instance** for persistent memory:
+- **None** — no database attached.
+- **An existing instance** — chosen from the workspace's Lakebase instances; it's attached to the app
+  as a `database` resource (the app's identity gets connect+create on it).
+- **Create new** — Kasal creates a new Lakebase instance and then attaches it to the app.
+
+The attached instance is surfaced to the app as `LAKEBASE_INSTANCE_NAME` (and `LAKEBASE_DATABASE_NAME`)
+so the crew can connect to it. `postgres` is included in the app's OAuth scopes.
+
+**MLflow tracing → Unity Catalog.** Each conversation turn is traced (`mlflow.crewai.autolog()` +
+`@mlflow.trace`). Per the
+[traces-in-UC docs](https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog), a UC
+trace location **can only be bound to an experiment at creation time** — it cannot be added to an
+existing experiment. So **the deployed app owns and creates its own experiment** at startup
+(`mlflow.set_experiment(name, trace_location=UnityCatalog(catalog, schema, table_prefix="agent"))`),
+which provisions the UC Delta tables (`<catalog>.<schema>.agent_otel_*`) through the SQL warehouse and
+stores traces there — unlimited storage, fine-grained access, queryable from SQL/notebooks/dashboards.
+Requirements: a **SQL warehouse** (`MLFLOW_TRACING_SQL_WAREHOUSE_ID`, runs the table DDL — a deploy-screen
+field defaulting to the workspace's configured warehouse), the catalog + schema, MLflow ≥ 3.11, the
+workspace UC-tracing previews, and **MODIFY + SELECT** grants on the `<prefix>_otel_*` tables. Because the
+app creates the experiment under its own service principal, that experiment is **not** attached as an app
+*resource* (and the deploy must not pre-create it — a plain experiment can never be made UC-backed). The
+app creates it under `/Shared/<name>` and logs the resolved trace location at startup. This is separate
+from the app's OTel telemetry export (the `otel_logs`/`otel_metrics`/`otel_spans` tables), which works
+regardless.
 
 **Authentication** follows Kasal's standard chain via `get_workspace_client`:
 1. **OBO** — the requesting user's forwarded token (`X-Forwarded-Access-Token`), preferred when Kasal is

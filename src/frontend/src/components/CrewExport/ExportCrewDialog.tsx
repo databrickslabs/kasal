@@ -34,6 +34,7 @@ import {
   ExportFormat,
   ExportOptions,
   AppDeploymentStatusResponse,
+  LakebaseInstance,
 } from '../../types/crewExport';
 
 interface ExportCrewDialogProps {
@@ -88,6 +89,15 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   const [deployCatalog, setDeployCatalog] = useState<string>('');
   const [deploySchema, setDeploySchema] = useState<string>('');
   const [deployExperiment, setDeployExperiment] = useState<string>('');
+  const [deployWarehouse, setDeployWarehouse] = useState<string>('');
+  // Lakebase: '' = none, '__create__' = create a new instance, else an existing
+  // instance name to attach.
+  const [lakebaseChoice, setLakebaseChoice] = useState<string>('');
+  const [newLakebaseName, setNewLakebaseName] = useState<string>('');
+  const [lakebaseInstances, setLakebaseInstances] = useState<LakebaseInstance[]>(
+    []
+  );
+  const [loadingLakebase, setLoadingLakebase] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployStatus, setDeployStatus] =
     useState<AppDeploymentStatusResponse | null>(null);
@@ -107,6 +117,16 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
       .finally(() => setLoadingModels(false));
   }, [open]);
 
+  // Load the workspace's Lakebase instances for the deploy screen dropdown.
+  useEffect(() => {
+    if (!open) return;
+    setLoadingLakebase(true);
+    CrewExportService.listLakebaseInstances()
+      .then((list) => setLakebaseInstances(list))
+      .catch((e) => console.error('Failed to load Lakebase instances:', e))
+      .finally(() => setLoadingLakebase(false));
+  }, [open]);
+
   const stopPolling = () => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -124,6 +144,13 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
     setDeployStatus(null);
     stopPolling();
 
+    // Resolve the Lakebase selection: attach an existing instance, create a new
+    // one, or none.
+    const creatingLakebase = lakebaseChoice === '__create__';
+    const lakebaseInstance = creatingLakebase
+      ? newLakebaseName.trim() || undefined
+      : lakebaseChoice || undefined;
+
     try {
       const started = await CrewExportService.deployApp(crewId, {
         config: {
@@ -133,6 +160,9 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
           catalog: deployCatalog || undefined,
           schema_name: deploySchema || undefined,
           experiment_name: deployExperiment || undefined,
+          lakebase_instance: lakebaseInstance,
+          create_lakebase: creatingLakebase,
+          warehouse_id: deployWarehouse || undefined,
         },
       });
       setDeployStatus({ ...started, step: 'QUEUED' });
@@ -389,6 +419,65 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
                   size="small"
                   disabled={isDeploying}
                 />
+                <TextField
+                  label="SQL Warehouse ID (optional)"
+                  value={deployWarehouse}
+                  onChange={(e) => setDeployWarehouse(e.target.value)}
+                  helperText="Used to store MLflow traces in Unity Catalog. Defaults to the workspace's configured warehouse."
+                  fullWidth
+                  size="small"
+                  disabled={isDeploying}
+                />
+                <FormControl fullWidth size="small">
+                  <InputLabel id="lakebase-label">
+                    Lakebase (persistent memory)
+                  </InputLabel>
+                  <Select
+                    labelId="lakebase-label"
+                    label="Lakebase (persistent memory)"
+                    value={lakebaseChoice}
+                    onChange={(e) => setLakebaseChoice(e.target.value)}
+                    disabled={isDeploying || loadingLakebase}
+                  >
+                    <MenuItem value="">
+                      <em>None (no persistent memory)</em>
+                    </MenuItem>
+                    {loadingLakebase ? (
+                      <MenuItem disabled value="">
+                        <CircularProgress size={18} sx={{ mr: 1 }} /> Loading
+                        instances...
+                      </MenuItem>
+                    ) : (
+                      lakebaseInstances.map((lb) => (
+                        <MenuItem key={lb.name} value={lb.name}>
+                          {lb.name}
+                          {lb.state ? ` (${lb.state})` : ''}
+                        </MenuItem>
+                      ))
+                    )}
+                    <MenuItem value="__create__">
+                      Create new Lakebase instance…
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+                {lakebaseChoice === '__create__' && (
+                  <TextField
+                    label="New Lakebase instance name"
+                    value={newLakebaseName}
+                    onChange={(e) =>
+                      setNewLakebaseName(
+                        e.target.value
+                          .toLowerCase()
+                          .replace(/[^a-z0-9-]/g, '-')
+                          .slice(0, 63)
+                      )
+                    }
+                    helperText="A new Lakebase instance is created and attached to the app."
+                    fullWidth
+                    size="small"
+                    disabled={isDeploying}
+                  />
+                )}
               </Box>
             </FormControl>
           )}

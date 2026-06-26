@@ -14,7 +14,19 @@ env:
     value: "300"
   - name: MLFLOW_EXPERIMENT_ID
     value: "{{EXPERIMENT_ID}}"
+  # The app creates this MLflow experiment, bound to Unity Catalog at creation.
+  - name: MLFLOW_EXPERIMENT_NAME
+    value: "{{MLFLOW_EXPERIMENT_NAME}}"
   - name: DATABRICKS_CATALOG
     value: "{{DATABRICKS_CATALOG}}"
   - name: DATABRICKS_SCHEMA
     value: "{{DATABRICKS_SCHEMA}}"
+  # SQL warehouse used to provision the experiment's Unity Catalog trace tables.
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "{{DATABRICKS_WAREHOUSE_ID}}"
+  # Lakebase instance attached to this app (empty if none). The instance is
+  # bound as an app `database` resource so the app SP can connect to it.
+  - name: LAKEBASE_INSTANCE_NAME
+    value: "{{LAKEBASE_INSTANCE}}"
+  - name: LAKEBASE_DATABASE_NAME
+    value: "{{LAKEBASE_DATABASE}}"
