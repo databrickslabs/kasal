@@ -8,7 +8,9 @@ import {
   DeploymentRequest,
   DeploymentResponse,
   DeploymentStatusResponse,
-  ExportFormat
+  ExportFormat,
+  LakebaseInstance,
+  LakebaseInstancesResponse
 } from '../types/crewExport';
 
 /**
@@ -125,6 +127,22 @@ export class CrewExportService {
     } catch (error) {
       console.error('Error fetching app deployment status:', error);
       throw error;
+    }
+  }
+
+  /**
+   * List the workspace's Lakebase instances for the deploy screen.
+   * Returns [] if Lakebase is unavailable so the UI can still offer "create new".
+   */
+  static async listLakebaseInstances(): Promise<LakebaseInstance[]> {
+    try {
+      const response = await API.get<LakebaseInstancesResponse>(
+        `/crews/deploy-app/lakebase-instances`
+      );
+      return response.data.instances || [];
+    } catch (error) {
+      console.error('Error listing Lakebase instances:', error);
+      return [];
     }
   }
 

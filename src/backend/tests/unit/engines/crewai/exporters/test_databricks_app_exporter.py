@@ -13,7 +13,10 @@ import re
 import pytest
 import yaml
 
-from src.engines.crewai.exporters.databricks_app_exporter import DatabricksAppExporter
+from src.engines.crewai.exporters.databricks_app_exporter import (
+    TEMPLATE_DIR,
+    DatabricksAppExporter,
+)
 
 # Our placeholder tokens are uppercase {{TOKEN}}; GitHub Actions ${{ vars.X }}
 # expressions in deploy.yml are intentionally left untouched.
@@ -204,20 +207,19 @@ class TestDatabricksAppExporter:
         assert "conversation.respond" in agent
 
     @pytest.mark.asyncio
-    async def test_supervisor_delegation_over_existing_agents(
-        self, exporter, crew_data
-    ):
-        """The 'act' step delegates to existing agents via a hierarchical supervisor."""
+    async def test_conversation_runs_configured_crew(self, exporter, crew_data):
+        """The 'act' step runs the crew's CONFIGURED pipeline (like Kasal), not a
+        fragile supervisor that delegates to a coworker ('coworker not found')."""
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
-        assert "_run_supervised" in agent
-        assert "_build_supervised_crew" in agent
-        # Supervisor agent delegates to the existing agents (its coworkers) via
-        # allow_delegation; avoids the hierarchical autolog/coworker bugs.
-        assert "allow_delegation=True" in agent
-        assert "[supervisor, *workers.values()]" in agent
-        # The conversation layer is wired to the supervisor runner, not the
-        # predefined-task runner.
-        assert "crew_runner=_run_supervised" in agent
+        assert "def _run_conversational" in agent
+        assert "crew_runner=_run_conversational" in agent
+        # Runs the predefined crew with the user's message as the input key.
+        assert "_run_crew({INPUT_KEY: request_text})" in agent
+        # The fragile supervisor+delegation wrapper is gone (per-agent
+        # allow_delegation from the crew config may still legitimately appear).
+        assert "_run_supervised" not in agent
+        assert "_build_supervised_crew" not in agent
+        assert "[supervisor, *workers" not in agent
 
     @pytest.mark.asyncio
     async def test_otel_uc_log_export_present(self, exporter, crew_data):
@@ -239,18 +241,17 @@ class TestDatabricksAppExporter:
         files = _files(await exporter.export(crew_data, {}))
         assert "@mlflow.trace" in files["agent_server/conversation.py"]
         # Tracing setup is logged (not silent) so misconfig is visible in app logs.
-        assert "MLFLOW_EXPERIMENT_ID is not set" in files["agent_server/agent.py"]
+        assert "traces will not be written" in files["agent_server/agent.py"]
 
     @pytest.mark.asyncio
     async def test_clarify_and_resume_loop(self, exporter, crew_data):
-        """Supervisor can ask for clarification; the loop resumes with context."""
-        files = _files(await exporter.export(crew_data, {}))
-        agent = files["agent_server/agent.py"]
-        conv = files["agent_server/conversation.py"]
-        # Supervisor is told to ask instead of guess.
-        assert "CLARIFY:" in agent
-        # Conversation detects CLARIFY and passes prior context so a follow-up resumes.
-        assert "CLARIFY:" in conv
+        """The conversation layer can ask a clarifying question and resume with
+        prior context (multi-turn info-gathering)."""
+        conv = _files(await exporter.export(crew_data, {}))["agent_server/conversation.py"]
+        # Classify -> gather asks ONE clarifying question instead of guessing.
+        assert "def _classify" in conv and "def _gather" in conv
+        assert "clarifying question" in conv
+        # Recent history is passed so a follow-up resumes the goal.
         assert "history[-6:]" in conv
 
     @pytest.mark.asyncio
@@ -326,9 +327,32 @@ class TestDatabricksAppExporter:
         assert "INPUT_KEY = 'topic'" in agent
 
     @pytest.mark.asyncio
-    async def test_mcp_servers_rendered_as_relative_path(self, exporter, crew_data):
+    async def test_mcp_servers_rendered_as_relative_path_with_transport(
+        self, exporter, crew_data
+    ):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
-        assert '("genie space", "/api/2.0/mcp/genie/01ef")' in agent
+        # Databricks-managed MCP keeps the host-relative path AND is pinned to
+        # streamable-http (else the adapter defaults to SSE and times out).
+        assert (
+            '("genie space", "/api/2.0/mcp/genie/01ef", "streamable-http")' in agent
+        )
+
+    @pytest.mark.asyncio
+    async def test_third_party_mcp_transport_and_token_env(self, exporter, crew_data):
+        crew = dict(crew_data)
+        crew["mcp_servers"] = [
+            {
+                "name": "Acme Tools",
+                "server_url": "https://acme.example.com/sse",
+                "server_type": "sse",
+            }
+        ]
+        files = _files(await exporter.export(crew, {}))
+        agent = files["agent_server/agent.py"]
+        # Third-party server keeps its configured transport and full URL.
+        assert '("Acme Tools", "https://acme.example.com/sse", "sse")' in agent
+        # Its bearer comes from a per-server env var (never the Databricks token).
+        assert "ACME_TOOLS_MCP_TOKEN" in files[".env.example"]
 
     @pytest.mark.asyncio
     async def test_mcp_setup_is_best_effort(self, exporter, crew_data):
@@ -347,10 +371,64 @@ class TestDatabricksAppExporter:
         never tries to interactively prompt-install it (which aborts in a server)."""
         with_mcp = _files(await exporter.export(crew_data, {}))["pyproject.toml"]
         assert "mcp>=" in with_mcp
+        # MCPServerAdapter imports mcpadapt.core — both are required, else it
+        # fails with a misleading "missing the 'mcp' package" prompt.
+        assert "mcpadapt" in with_mcp
 
         no_mcp_crew = dict(crew_data, mcp_servers=[])
         without = _files(await exporter.export(no_mcp_crew, {}))["pyproject.toml"]
         assert "mcp>=" not in without
+        assert "mcpadapt" not in without
+
+    @pytest.mark.asyncio
+    async def test_pins_compatible_crewai_and_litellm(self, exporter, crew_data):
+        """The app ships no lockfile, so crewai + litellm must be pinned to the
+        tested pair — loose floors resolve a mismatch where crewai's LiteLLM
+        fallback fails ("LiteLLM fallback package is not installed")."""
+        pyproject = _files(await exporter.export(crew_data, {}))["pyproject.toml"]
+        assert "crewai[tools]==1.14.5" in pyproject
+        assert "litellm==1.74.9" in pyproject
+
+    @pytest.mark.asyncio
+    async def test_llm_passes_explicit_databricks_auth(self, exporter, crew_data):
+        """_make_llm must pass an explicit api_base + api_key for the databricks/
+        LiteLLM route (the Apps runtime won't auto-provide Databricks env to
+        LiteLLM)."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        assert "def _databricks_host_token" in agent
+        assert '"api_base"' in agent and '"api_key"' in agent
+        # AI Gateway-aware base for the chat (LiteLLM) route.
+        assert "ai-gateway/mlflow/v1" in agent and "serving-endpoints" in agent
+
+    @pytest.mark.asyncio
+    async def test_app_creates_uc_bound_experiment_for_tracing(self, exporter, crew_data):
+        """The app OWNS its experiment and creates it bound to Unity Catalog at
+        creation (the only way to get UC trace storage — it can't be added to an
+        existing experiment). Needs the SQL warehouse to provision the tables."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        # Experiment created by NAME with a UnityCatalog trace location.
+        assert "MLFLOW_EXPERIMENT_NAME" in agent
+        assert "trace_location=UnityCatalog(" in agent
+        assert "table_prefix=_TRACE_TABLE_PREFIX" in agent
+        # Warehouse set before set_experiment provisions the tables.
+        assert 'os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"]' in agent
+        # The deprecated destination API must not be used.
+        assert "set_destination" not in agent
+        assert "UCSchemaLocation" not in agent
+
+    @pytest.mark.asyncio
+    async def test_skips_binary_junk_in_template_tree(self, exporter, crew_data):
+        """A stray binary file (e.g. macOS .DS_Store) must not crash the export
+        or leak into the output."""
+        junk = TEMPLATE_DIR / ".DS_Store"
+        junk.write_bytes(b"\x00\x80\x81 not utf-8 \xff")
+        try:
+            files = _files(await exporter.export(crew_data, {}))
+        finally:
+            junk.unlink(missing_ok=True)
+        assert ".DS_Store" not in files
+        # Export still produced a valid project.
+        ast.parse(files["agent_server/agent.py"])
 
     @pytest.mark.asyncio
     async def test_obo_toggle(self, exporter, crew_data):
@@ -416,8 +494,8 @@ class TestDatabricksAppExporter:
         pyproject = _files(await exporter.export(crew, {}))["pyproject.toml"]
         assert "beautifulsoup4" in pyproject
 
-    @pytest.mark.asyncio
-    async def test_custom_tools_emitted_when_requested(self, exporter):
+    @staticmethod
+    def _genie_crew(tool_configs=None):
         crew = {
             "id": "x",
             "name": "Genie Bot",
@@ -443,13 +521,99 @@ class TestDatabricksAppExporter:
             ],
             "mcp_servers": [],
         }
+        if tool_configs is not None:
+            crew["tool_configs"] = tool_configs
+        return crew
+
+    @pytest.mark.asyncio
+    async def test_bundled_tool_emitted_when_requested(self, exporter):
+        crew = self._genie_crew()
         with_tools = _files(await exporter.export(crew, {"include_custom_tools": True}))
-        assert "tools/custom_tools.py" in with_tools
+        # GenieTool ships as a self-contained module under tools/ (no Kasal deps).
+        assert "tools/genie_tool.py" in with_tools
         assert "tools/__init__.py" in with_tools
-        assert "from tools.custom_tools import *" in with_tools["agent_server/agent.py"]
+        genie_src = with_tools["tools/genie_tool.py"]
+        assert "class GenieTool" in genie_src
+        assert "from src." not in genie_src  # must be standalone
+        agent_py = with_tools["agent_server/agent.py"]
+        assert "from tools.genie_tool import GenieTool" in agent_py
+        # TOOL_MAP keyed by the title the crew's agents.yaml carries.
+        assert '"GenieTool": lambda: GenieTool(' in agent_py
 
         without = _files(await exporter.export(crew, {"include_custom_tools": False}))
-        assert "tools/custom_tools.py" not in without
+        assert "tools/genie_tool.py" not in without
+
+    @pytest.mark.asyncio
+    async def test_genie_space_id_baked_from_config(self, exporter):
+        crew = self._genie_crew(tool_configs={"GenieTool": {"space_id": "abc123"}})
+        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        # space_id from config is baked as the default, with env override.
+        assert "GENIE_SPACE_ID" in agent_py
+        assert "'abc123'" in agent_py or '"abc123"' in agent_py
+
+    @pytest.mark.asyncio
+    async def test_tool_config_baked_into_factory(self, exporter):
+        crew = self._genie_crew()
+        crew["agents"][0]["tools"] = ["SerperDevTool"]
+        crew["tool_configs"] = {
+            "SerperDevTool": {
+                "n_results": 7,
+                "country": "fr",
+                "serper_api_key": "SECRET",  # must NOT be baked
+            }
+        }
+        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        assert '"SerperDevTool": lambda: SerperDevTool(' in agent_py
+        assert "'n_results': 7" in agent_py
+        assert "'country': 'fr'" in agent_py
+        assert "SECRET" not in agent_py  # secrets are stripped
+
+    @pytest.mark.asyncio
+    async def test_unsupported_tool_flagged_not_called(self, exporter):
+        crew = self._genie_crew()
+        crew["agents"][0]["tools"] = ["Power BI Comprehensive Analysis Tool"]
+        result = await exporter.export(crew, {})
+        agent_py = _files(result)["agent_server/agent.py"]
+        # Flagged as a comment, never emitted as a runtime call that NameErrors.
+        assert "unsupported standalone" in agent_py
+        assert (
+            "Power BI Comprehensive Analysis Tool"
+            in result["metadata"]["unsupported_tools"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_llm_guardrail_reproduced(self, exporter):
+        crew = self._genie_crew()
+        crew["agents"][0]["tools"] = []
+        crew["tasks"][0]["llm_guardrail"] = {
+            "description": "Output must cite at least one source",
+            "llm_model": "databricks-llama-4-maverick",
+        }
+        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        assert "TASK_GUARDRAILS = {" in agent_py
+        assert "'type': 'llm'" in agent_py
+        assert "Output must cite at least one source" in agent_py
+        # The runtime builds a CrewAI LLMGuardrail from the spec.
+        assert "def _make_task_guardrail" in agent_py
+        assert "LLMGuardrail(" in agent_py
+
+    @pytest.mark.asyncio
+    async def test_code_guardrail_flagged_not_executed(self, exporter):
+        crew = self._genie_crew()
+        crew["agents"][0]["tools"] = []
+        crew["tasks"][0]["guardrail"] = {"type": "word_count", "max": 500}
+        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        # Code/factory guardrails are carried but flagged (can't be bundled).
+        assert "'type': 'code'" in agent_py
+        assert "'name': 'word_count'" in agent_py
+        assert "not reproduced in this app" in agent_py
+
+    @pytest.mark.asyncio
+    async def test_no_guardrail_yields_empty_map(self, exporter):
+        crew = self._genie_crew()
+        crew["agents"][0]["tools"] = []
+        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        assert "TASK_GUARDRAILS = {}" in agent_py
 
     @pytest.mark.asyncio
     async def test_app_name_is_valid_databricks_name(self, exporter):

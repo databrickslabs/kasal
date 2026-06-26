@@ -2,22 +2,22 @@
 Service for exporting CrewAI crews to various formats.
 """
 
-from typing import Dict, Any, Optional, List
-from uuid import UUID
 import logging
-import uuid
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.crew_export import ExportFormat, ExportOptions
 from src.engines.crewai.exporters import (
-    PythonProjectExporter,
-    DatabricksNotebookExporter,
     DatabricksAppExporter,
+    DatabricksNotebookExporter,
+    PythonProjectExporter,
 )
-from src.repositories.crew_repository import CrewRepository
 from src.repositories.agent_repository import AgentRepository
+from src.repositories.crew_repository import CrewRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.tool_repository import ToolRepository
+from src.schemas.crew_export import ExportFormat, ExportOptions
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,9 @@ class CrewExportService:
         self.agent_repository = AgentRepository(session)
         self.task_repository = TaskRepository(session)
         self.tool_repository = ToolRepository(session)
+        # title -> non-secret config, captured while resolving tool IDs so the
+        # exporters can configure the crew's tools like Kasal does at runtime.
+        self._tool_configs: Dict[str, Dict[str, Any]] = {}
 
     async def export_crew(
         self,
@@ -128,9 +131,13 @@ class CrewExportService:
         # exported notebook mirrors that by wiring them via MCPServerAdapter.
         mcp_servers = await self._get_enabled_mcp_servers(group_context)
 
-        # Unity Catalog target (catalog/schema) from the workspace's Databricks
-        # configuration, so the deployment cell deploys to the configured location.
-        catalog, schema = await self._get_databricks_catalog_schema(group_context)
+        # Unity Catalog target (catalog/schema) + SQL warehouse from the
+        # workspace's Databricks configuration, so the deployment cell / app
+        # default to the configured location (warehouse is used to provision UC
+        # trace tables).
+        catalog, schema, warehouse_id = await self._get_databricks_catalog_schema(
+            group_context
+        )
 
         return {
             "id": str(crew.id),
@@ -140,8 +147,12 @@ class CrewExportService:
             "nodes": crew.nodes or [],
             "edges": crew.edges or [],
             "mcp_servers": mcp_servers,
+            # Non-secret per-tool config (title -> config), captured while
+            # resolving the agents'/tasks' tool IDs above.
+            "tool_configs": self._tool_configs,
             "databricks_catalog": catalog,
             "databricks_schema": schema,
+            "databricks_warehouse_id": warehouse_id,
             # Crew-level execution settings so exports match Kasal's runtime
             # (process, planning, reasoning, manager, memory).
             "process": crew.process or "sequential",
@@ -157,7 +168,7 @@ class CrewExportService:
     async def _get_databricks_catalog_schema(
         self, group_context: Optional[GroupContext] = None
     ) -> tuple:
-        """Return (catalog, schema) from the workspace's active Databricks config.
+        """Return (catalog, schema, warehouse_id) from the active Databricks config.
 
         Non-fatal: returns (None, None) if no config or on error, letting the
         exporter fall back to its defaults (main/agents).
@@ -173,16 +184,18 @@ class CrewExportService:
             # `config.schema` returns the bound method, not the value.
             catalog = getattr(config, "catalog", None) if config else None
             schema = getattr(config, "db_schema", None) if config else None
+            warehouse_id = getattr(config, "warehouse_id", None) if config else None
             if catalog and schema:
                 logger.info(
-                    f"Export: using Databricks catalog/schema {catalog}.{schema}"
+                    f"Export: using Databricks catalog/schema {catalog}.{schema} "
+                    f"(warehouse {warehouse_id})"
                 )
-                return catalog, schema
+                return catalog, schema, warehouse_id
         except Exception as e:
             logger.warning(
                 f"Export: could not load Databricks catalog/schema, using defaults: {e}"
             )
-        return None, None
+        return None, None, None
 
     async def _get_enabled_mcp_servers(
         self, group_context: Optional[GroupContext] = None
@@ -211,7 +224,8 @@ class CrewExportService:
                     }
                 )
             logger.info(
-                f"Export: found {len(servers)} enabled MCP server(s) for group {group_id}"
+                f"Export: found {len(servers)} enabled MCP server(s) "
+                f"for group {group_id}"
             )
             return servers
         except Exception as e:
@@ -241,6 +255,11 @@ class CrewExportService:
                 tool = await self.tool_repository.get(tool_id)
                 if tool:
                     tool_names.append(tool.title)
+                    # Capture the tool's non-secret config so exporters can
+                    # configure it (e.g. GenieTool space_id, Serper n_results).
+                    self._tool_configs[tool.title] = self._safe_tool_config(
+                        getattr(tool, "config", None)
+                    )
                     logger.info(f"Converted tool ID {tool_id} to name: {tool.title}")
                 else:
                     logger.warning(f"Tool with ID {tool_id} not found in database")
@@ -255,6 +274,29 @@ class CrewExportService:
                 tool_names.append(str(tool_id))
 
         return tool_names
+
+    # Config keys that look like secrets — never exported (the deployed app
+    # reads these from env vars / OBO instead of baking them into the project).
+    _SECRET_CONFIG_HINTS = (
+        "api_key",
+        "apikey",
+        "secret",
+        "password",
+        "token",
+        "pat",
+        "credential",
+    )
+
+    def _safe_tool_config(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Strip secret-looking keys from a tool's stored config for export."""
+        if not isinstance(config, dict):
+            return {}
+        safe: Dict[str, Any] = {}
+        for key, value in config.items():
+            if any(hint in str(key).lower() for hint in self._SECRET_CONFIG_HINTS):
+                continue
+            safe[key] = value
+        return safe
 
     async def _agent_to_dict(self, agent) -> Dict[str, Any]:
         """Convert agent model to dictionary"""

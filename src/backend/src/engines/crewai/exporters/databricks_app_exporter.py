@@ -22,54 +22,91 @@ from .base_exporter import BaseExporter
 from .yaml_generator import YAMLGenerator
 
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
+# Standalone tool implementations bundled into the app (no Kasal `src.*` deps).
+BUNDLED_TOOLS_DIR = Path(__file__).parent / "templates" / "_app_bundled_tools"
+# Kasal's runtime custom-tool implementations (some are self-contained).
+CUSTOM_TOOLS_DIR = Path(__file__).parent.parent / "tools" / "custom"
 
-# crewai_tools we know how to import + instantiate directly.
-_STANDARD_TOOLS = {
-    "SerperDevTool",
-    "ScrapeWebsiteTool",
-    "DallETool",
-    "FileReadTool",
-    "DirectoryReadTool",
+# Tools we can faithfully reproduce inside a standalone Databricks App, keyed by
+# the tool's Kasal title (what `config/agents.yaml` carries). Each spec declares:
+#   import      — import line for the tool class
+#   class       — the class name to instantiate
+#   config_keys — non-secret config keys baked into the factory from the crew's
+#                 tool config (api keys/secrets are NEVER baked; they come via env)
+#   env         — env vars the tool needs (surfaced in `.env.example` + app.yaml)
+#   deps        — extra pip deps beyond the template's base set
+#   bundle      — (filename, source) self-contained impl to ship under `tools/`;
+#                 source is "bundled" (BUNDLED_TOOLS_DIR) or "custom" (CUSTOM_TOOLS_DIR)
+#   special     — custom factory builder key (e.g. "genie")
+_BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
+    "SerperDevTool": {
+        "import": "from crewai_tools import SerperDevTool",
+        "class": "SerperDevTool",
+        "config_keys": ["n_results", "country", "locale", "location", "search_type"],
+        "env": ["SERPER_API_KEY"],
+    },
+    "ScrapeWebsiteTool": {
+        "import": "from crewai_tools import ScrapeWebsiteTool",
+        "class": "ScrapeWebsiteTool",
+        "config_keys": ["website_url"],
+        "deps": ['"beautifulsoup4>=4.12.0"'],
+    },
+    "Dall-E Tool": {
+        "import": "from crewai_tools import DallETool",
+        "class": "DallETool",
+        "config_keys": ["model", "size", "quality", "n"],
+        "env": ["OPENAI_API_KEY"],
+    },
+    "PerplexityTool": {
+        "import": "from tools.perplexity_tool import PerplexitySearchTool",
+        "class": "PerplexitySearchTool",
+        "config_keys": [
+            "model",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "presence_penalty",
+            "frequency_penalty",
+            "search_recency_filter",
+            "search_domain_filter",
+            "return_images",
+            "return_related_questions",
+            "web_search_options",
+        ],
+        "env": ["PERPLEXITY_API_KEY"],
+        "deps": ['"requests>=2.31.0"'],
+        "bundle": ("perplexity_tool.py", "custom"),
+    },
+    "GenieTool": {
+        "import": "from tools.genie_tool import GenieTool",
+        "class": "GenieTool",
+        # space_id is baked as the default; GENIE_SPACE_ID env overrides it.
+        "config_keys": ["max_result_rows"],
+        "env": ["GENIE_SPACE_ID"],
+        "bundle": ("genie_tool.py", "bundled"),
+        "special": "genie",
+    },
 }
 
-_TOOL_IMPORTS = {
-    "SerperDevTool": "from crewai_tools import SerperDevTool",
-    "ScrapeWebsiteTool": "from crewai_tools import ScrapeWebsiteTool",
-    "DallETool": "from crewai_tools import DallETool",
-    "FileReadTool": "from crewai_tools import FileReadTool",
-    "DirectoryReadTool": "from crewai_tools import DirectoryReadTool",
-}
+# Class-name aliases that may appear instead of the canonical Kasal title.
+_TOOL_ALIASES = {"DallETool": "Dall-E Tool", "GmailTool": "Gmail"}
 
-_TOOL_MAP_ENTRIES = {
-    "SerperDevTool": '"SerperDevTool": lambda: SerperDevTool(),',
-    "ScrapeWebsiteTool": '"ScrapeWebsiteTool": lambda: ScrapeWebsiteTool(),',
-    "DallETool": '"DallETool": lambda: DallETool(),',
-    "FileReadTool": '"FileReadTool": lambda: FileReadTool(),',
-    "DirectoryReadTool": '"DirectoryReadTool": lambda: DirectoryReadTool(),',
-    "GenieTool": (
-        '"GenieTool": lambda: GenieTool('
-        'space_id=os.environ.get("GENIE_SPACE_ID", "")),'
-    ),
-}
+# Config keys that look like secrets are never baked into the export — the
+# deployed app reads them from env vars / OBO instead.
+_SECRET_KEY_HINTS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "password",
+    "token",
+    "pat",
+    "credential",
+)
 
-# Extra pip deps a tool needs beyond the template's base set.
-_TOOL_EXTRA_DEPS = {
-    "PerplexityTool": ['"requests>=2.31.0"'],
-    "ScrapeWebsiteTool": ['"beautifulsoup4>=4.12.0"'],
-}
-
-# Env vars a tool expects (surfaced as commented hints in .env.example).
-_TOOL_ENV_KEYS = {
-    "SerperDevTool": "SERPER_API_KEY",
-    "PerplexityTool": "PERPLEXITY_API_KEY",
-    "GenieTool": "GENIE_SPACE_ID",
-}
-
-# Custom tool name -> implementation file under crewai/tools/custom/.
-_CUSTOM_TOOL_FILES = {
-    "PerplexityTool": "perplexity_tool.py",
-    "GenieTool": "genie_tool.py",
-}
+# OS/editor junk that must never be emitted into the exported project (and which
+# would crash the UTF-8 template read if walked).
+_SKIP_FILES = {".DS_Store", "Thumbs.db", ".pyc"}
 
 _EXT_TYPE = {
     ".py": "python",
@@ -96,6 +133,12 @@ class DatabricksAppExporter(BaseExporter):
         agents = crew_data.get("agents", [])
         tasks = crew_data.get("tasks", [])
         mcp_servers = crew_data.get("mcp_servers", [])
+        # Non-secret config per tool title (e.g. GenieTool space_id, Serper
+        # n_results), so the deployed crew's tools are configured like Kasal's.
+        tool_configs = crew_data.get("tool_configs", {}) or {}
+        # Tools referenced by the crew that can't run standalone — populated by
+        # _tool_map and surfaced in metadata so they're never silently dropped.
+        self._unsupported_tools: List[str] = []
 
         include_custom_tools = options.get("include_custom_tools", True)
         include_obo = options.get("include_obo_auth", True)
@@ -121,9 +164,6 @@ class DatabricksAppExporter(BaseExporter):
         display_name = crew_name.replace("_", " ").title()
         input_key = self._detect_input_key(agents, tasks)
 
-        custom_tools = [t for t in tools if t not in _STANDARD_TOOLS]
-        has_custom = include_custom_tools and bool(custom_tools)
-
         tokens = {
             "{{APP_NAME}}": app_name,
             "{{BUNDLE_NAME}}": bundle_name,
@@ -137,18 +177,21 @@ class DatabricksAppExporter(BaseExporter):
             "{{MODEL_OVERRIDE}}": repr(model_override),
             "{{ENABLE_OBO}}": "True" if include_obo else "False",
             "{{MCP_SERVERS}}": self._mcp_block(mcp_servers),
-            "{{TOOL_IMPORTS}}": self._tool_imports(tools, has_custom),
-            "{{TOOL_MAP}}": self._tool_map(tools),
+            "{{TOOL_IMPORTS}}": self._tool_imports(tools, include_custom_tools),
+            "{{TOOL_MAP}}": self._tool_map(tools, tool_configs, include_custom_tools),
             "{{EXTRA_DEPENDENCIES}}": self._extra_deps(
-                tools, has_mcp=bool(mcp_servers)
+                tools, include_custom_tools, has_mcp=bool(mcp_servers)
             ),
-            "{{ENV_TOOL_KEYS}}": self._env_keys(tools),
+            "{{ENV_TOOL_KEYS}}": self._env_keys(tools, mcp_servers),
             # Crew execution settings (mirror Kasal's runtime).
             "{{PROCESS}}": crew_data.get("process") or "sequential",
             "{{PLANNING}}": "True" if crew_data.get("planning") else "False",
             "{{PLANNING_LLM}}": repr(crew_data.get("planning_llm") or None),
             "{{REASONING}}": "True" if crew_data.get("reasoning") else "False",
             "{{MANAGER_LLM}}": repr(crew_data.get("manager_llm") or None),
+            # Per-task guardrails (LLM guardrails are reproduced; Kasal built-in
+            # code guardrails are flagged — they can't be bundled standalone).
+            "{{TASK_GUARDRAILS}}": self._task_guardrails(tasks),
             # CrewAI's built-in memory embeds + extracts via OpenAI by default,
             # which fails on a Databricks-only app (OPENAI_API_KEY required). Keep
             # it OFF until the deploy wires a Databricks-backed memory backend
@@ -156,8 +199,20 @@ class DatabricksAppExporter(BaseExporter):
             "{{MEMORY}}": "False",
             # Deploy-time env values written into app.yaml.
             "{{EXPERIMENT_ID}}": experiment_id,
+            # The app creates this MLflow experiment UC-bound at startup.
+            "{{MLFLOW_EXPERIMENT_NAME}}": options.get("mlflow_experiment_name") or "",
             "{{DATABRICKS_CATALOG}}": catalog,
             "{{DATABRICKS_SCHEMA}}": schema,
+            # Lakebase instance attached at deploy time (empty for plain export).
+            "{{LAKEBASE_INSTANCE}}": options.get("lakebase_instance") or "",
+            "{{LAKEBASE_DATABASE}}": "databricks_postgres",
+            # SQL warehouse the app uses to provision its UC trace tables. Deploy
+            # selection first, else the workspace's configured warehouse.
+            "{{DATABRICKS_WAREHOUSE_ID}}": (
+                options.get("databricks_warehouse_id")
+                or crew_data.get("databricks_warehouse_id")
+                or ""
+            ),
         }
 
         files: List[Dict[str, str]] = []
@@ -167,8 +222,17 @@ class DatabricksAppExporter(BaseExporter):
             if not path.is_file():
                 continue
             rel = path.relative_to(TEMPLATE_DIR).as_posix()
-            async with aiofiles.open(path, "r", encoding="utf-8") as f:
-                content = await f.read()
+            # Skip OS/editor junk and Python caches that can sneak into the tree.
+            if path.name in _SKIP_FILES or "__pycache__" in rel.split("/"):
+                continue
+            try:
+                async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                    content = await f.read()
+            except (UnicodeDecodeError, ValueError):
+                # Non-text/binary file (e.g. .DS_Store, an image) — can't be
+                # templated, so leave it out rather than crashing the export.
+                self.logger.warning(f"Skipping non-text template file: {rel}")
+                continue
             for token, value in tokens.items():
                 content = content.replace(token, value)
             files.append({"path": rel, "content": content, "type": self._ftype(rel)})
@@ -193,18 +257,15 @@ class DatabricksAppExporter(BaseExporter):
             }
         )
 
-        # 3. Custom tool implementations (only when requested and present).
-        if has_custom:
-            tools_code = await self._generate_custom_tools(custom_tools)
-            files.append({"path": "tools/__init__.py", "content": "", "type": "python"})
-            files.append(
-                {
-                    "path": "tools/custom_tools.py",
-                    "content": tools_code
-                    or "# No bundled implementation found for the custom tools.\n",
-                    "type": "python",
-                }
-            )
+        # 3. Bundle self-contained tool implementations the crew uses (e.g.
+        #    PerplexityTool, GenieTool) under tools/ so they run in the app.
+        if include_custom_tools:
+            bundled = await self._bundle_tool_files(tools)
+            if bundled:
+                files.append(
+                    {"path": "tools/__init__.py", "content": "", "type": "python"}
+                )
+                files.extend(bundled)
 
         return {
             "crew_id": str(crew_data.get("id", "")),
@@ -220,6 +281,9 @@ class DatabricksAppExporter(BaseExporter):
                 "bundle_name": bundle_name,
                 "include_obo_auth": include_obo,
                 "input_key": input_key,
+                # Tools the crew uses that can't run standalone (Kasal-internal);
+                # attach these via MCP or add an implementation under tools/.
+                "unsupported_tools": sorted(set(self._unsupported_tools)),
             },
             "generated_at": self._get_timestamp(),
             "size_bytes": sum(len(f["content"]) for f in files),
@@ -266,54 +330,188 @@ class DatabricksAppExporter(BaseExporter):
         purpose = purpose.replace('"""', "'''").replace("\\", " ")
         return purpose[:600]
 
+    def _task_guardrails(self, tasks: List[Dict[str, Any]]) -> str:
+        """Render a ``{task_name: guardrail_spec}`` literal for the GENERATED block.
+
+        Reuses the runtime classification (``code_generator._parse_task_guardrail``):
+        LLM guardrails are reproduced in the app as CrewAI ``LLMGuardrail``; code/
+        factory guardrails are Kasal built-ins that can't be bundled standalone, so
+        they're carried as ``{"type": "code"}`` and flagged at runtime.
+        """
+        from .code_generator import _parse_task_guardrail
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for task in tasks:
+            parsed = _parse_task_guardrail(task)
+            if not parsed:
+                continue
+            name = str(task.get("name", "task")).lower().replace(" ", "_")
+            if parsed[0] == "llm":
+                result[name] = {
+                    "type": "llm",
+                    "description": parsed[1],
+                    "llm_model": parsed[2],
+                }
+            else:
+                result[name] = {"type": "code", "name": parsed[1]}
+        return repr(result)
+
     def _mcp_block(self, mcp_servers: List[Dict[str, Any]]) -> str:
+        """Emit (name, url, transport) tuples for the crew's MCP servers.
+
+        The transport is explicit so the app's MCPServerAdapter connects
+        correctly: Databricks-managed MCP is streamable-HTTP (the adapter would
+        otherwise default to SSE and time out after ~30s); third-party servers
+        keep their configured transport.
+        """
         lines = []
         for server in mcp_servers or []:
             name = str(server.get("name", "mcp")).replace('"', "'")
             url = server.get("server_url") or ""
             if "/api/2.0/mcp/" in url:
+                # Databricks-managed: keep the host-relative path; always HTTP.
                 url = "/api/2.0/mcp/" + url.split("/api/2.0/mcp/", 1)[1]
-            lines.append(f'    ("{name}", "{url}"),')
+                transport = "streamable-http"
+            else:
+                transport = (
+                    "streamable-http"
+                    if server.get("server_type") == "streamable"
+                    else "sse"
+                )
+            lines.append(f'    ("{name}", "{url}", "{transport}"),')
         return ("\n".join(lines) + "\n") if lines else ""
 
-    def _tool_imports(self, tools: List[str], has_custom: bool) -> str:
+    def _spec_for(self, title: str) -> Optional[Dict[str, Any]]:
+        """Return the bundle spec for a tool title (resolving class-name aliases)."""
+        return _BUNDLEABLE_TOOLS.get(title) or _BUNDLEABLE_TOOLS.get(
+            _TOOL_ALIASES.get(title, "")
+        )
+
+    def _tool_imports(self, tools: List[str], include_custom: bool) -> str:
         imports: List[str] = []
         for tool in tools:
-            stmt = _TOOL_IMPORTS.get(tool)
-            if stmt and stmt not in imports:
+            spec = self._spec_for(tool)
+            if not spec:
+                continue
+            # Bundled (custom) tools are only importable when bundling is enabled.
+            if spec.get("bundle") and not include_custom:
+                continue
+            stmt = spec["import"]
+            if stmt not in imports:
                 imports.append(stmt)
-        if has_custom:
-            imports.append("from tools.custom_tools import *  # noqa: F401,F403")
         return ("\n".join(imports) + "\n") if imports else ""
 
-    def _tool_map(self, tools: List[str]) -> str:
+    def _clean_config(self, cfg: Dict[str, Any], allowed: List[str]) -> Dict[str, Any]:
+        """Keep only allowed, non-secret, non-empty config keys for a factory."""
+        clean: Dict[str, Any] = {}
+        for key in allowed:
+            if key not in cfg:
+                continue
+            if any(hint in key.lower() for hint in _SECRET_KEY_HINTS):
+                continue
+            value = cfg[key]
+            if value in (None, "", [], {}):
+                continue
+            clean[key] = value
+        return clean
+
+    def _factory_expr(
+        self, title: str, spec: Dict[str, Any], cfg: Dict[str, Any]
+    ) -> str:
+        """Build the tool constructor call, baking in the crew's non-secret config."""
+        cls = spec["class"]
+        if spec.get("special") == "genie":
+            space = cfg.get("space_id") or cfg.get("spaceId") or ""
+            if isinstance(space, list):
+                space = space[0] if space else ""
+            kwargs = [f'space_id=os.environ.get("GENIE_SPACE_ID") or {space!r}']
+            rows = cfg.get("max_result_rows")
+            if isinstance(rows, int) and rows > 0:
+                kwargs.append(f"max_result_rows={rows}")
+            return f"{cls}({', '.join(kwargs)})"
+        # SerperDevTool: Kasal stores the search kind as `endpoint_type`.
+        if title == "SerperDevTool" and cfg.get("endpoint_type") in ("search", "news"):
+            cfg = {**cfg, "search_type": cfg["endpoint_type"]}
+        clean = self._clean_config(cfg, spec.get("config_keys", []))
+        return f"{cls}(**{clean!r})" if clean else f"{cls}()"
+
+    def _tool_map(
+        self,
+        tools: List[str],
+        tool_configs: Dict[str, Any],
+        include_custom: bool,
+    ) -> str:
         lines: List[str] = []
         for tool in tools:
-            entry = _TOOL_MAP_ENTRIES.get(tool)
-            if entry:
-                lines.append("    " + entry)
-            elif tool not in _STANDARD_TOOLS:
-                lines.append(f'    "{tool}": lambda: {tool}(),')
+            spec = self._spec_for(tool)
+            cfg = tool_configs.get(tool, {}) or {}
+            if spec and (include_custom or not spec.get("bundle")):
+                expr = self._factory_expr(tool, spec, cfg)
+                # Key by the title the crew's agents.yaml carries.
+                lines.append(f'    "{tool}": lambda: {expr},')
+            else:
+                # Not reproducible standalone (Kasal-internal tool). Flag it
+                # rather than emit a call that NameErrors at runtime.
+                self._unsupported_tools.append(tool)
+                lines.append(
+                    f'    # "{tool}": unsupported standalone — attach via MCP '
+                    f"or add an implementation under tools/."
+                )
         return ("\n".join(lines) + "\n") if lines else ""
 
-    def _extra_deps(self, tools: List[str], has_mcp: bool = False) -> str:
+    def _extra_deps(
+        self, tools: List[str], include_custom: bool, has_mcp: bool = False
+    ) -> str:
         seen: set = set()
         lines: List[str] = []
         deps: List[str] = []
         for tool in tools:
-            deps.extend(_TOOL_EXTRA_DEPS.get(tool, []))
+            spec = self._spec_for(tool)
+            if not spec:
+                continue
+            if spec.get("bundle") and not include_custom:
+                continue
+            deps.extend(spec.get("deps", []))
         if has_mcp:
-            # crewai_tools' MCPServerAdapter imports `mcp`; ship it so it never
-            # tries to interactively prompt-install (which aborts in a server).
-            deps.append('"mcp>=1.0.0"')
+            # crewai_tools' MCPServerAdapter needs the `crewai-tools[mcp]` extra,
+            # which is BOTH `mcp` AND `mcpadapt` (the adapter imports
+            # `mcpadapt.core`). Shipping only `mcp` makes the adapter fail at
+            # import with a misleading "missing the 'mcp' package" prompt and skip
+            # every server. Pin `mcp` to the range crewai 1.14.5 requires; add
+            # `mcpadapt` (matching Kasal's tested combo) so the adapter loads.
+            deps.append('"mcp>=1.26.0,<1.27.0"')
+            deps.append('"mcpadapt>=0.1.9,<0.2.0"')
         for dep in deps:
             if dep not in seen:
                 seen.add(dep)
                 lines.append(f"    {dep},")
         return ("\n".join(lines) + "\n") if lines else ""
 
-    def _env_keys(self, tools: List[str]) -> str:
-        lines = [f"# {_TOOL_ENV_KEYS[t]}=" for t in tools if t in _TOOL_ENV_KEYS]
+    def _mcp_env_key(self, name: str) -> str:
+        """Env var a third-party MCP server reads its bearer from (mirrors agent.py)."""
+        slug = "".join(c if c.isalnum() else "_" for c in name.upper()).strip("_")
+        return f"{slug}_MCP_TOKEN"
+
+    def _env_keys(
+        self, tools: List[str], mcp_servers: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        keys: List[str] = []
+        for tool in tools:
+            spec = self._spec_for(tool)
+            if not spec:
+                continue
+            for env in spec.get("env", []):
+                if env not in keys:
+                    keys.append(env)
+        # Third-party (non-Databricks-managed) MCP servers need their own token.
+        for server in mcp_servers or []:
+            url = server.get("server_url") or ""
+            if "/api/2.0/mcp/" in url:
+                continue
+            key = self._mcp_env_key(str(server.get("name", "mcp")))
+            if key not in keys:
+                keys.append(key)
+        lines = [f"# {key}=" for key in keys]
         return (
             ("\n".join(lines) + "\n") if lines else "# (none required for this crew)\n"
         )
@@ -321,21 +519,30 @@ class DatabricksAppExporter(BaseExporter):
     def _ftype(self, rel_path: str) -> str:
         return _EXT_TYPE.get(Path(rel_path).suffix, "text")
 
-    async def _generate_custom_tools(self, custom_tools: List[str]) -> Optional[str]:
-        """Read bundled custom tool implementations from crewai/tools/custom/."""
-        tools_dir = Path(__file__).parent.parent / "tools" / "custom"
-        parts: List[str] = []
-        for tool_name in custom_tools:
-            tool_file = _CUSTOM_TOOL_FILES.get(tool_name)
-            if not tool_file:
+    async def _bundle_tool_files(self, tools: List[str]) -> List[Dict[str, str]]:
+        """Emit self-contained impls for the bundled tools the crew uses."""
+        files: List[Dict[str, str]] = []
+        emitted: set = set()
+        for tool in tools:
+            spec = self._spec_for(tool)
+            if not spec or not spec.get("bundle"):
                 continue
-            tool_path = tools_dir / tool_file
+            filename, source = spec["bundle"]
+            if filename in emitted:
+                continue
+            base = BUNDLED_TOOLS_DIR if source == "bundled" else CUSTOM_TOOLS_DIR
+            tool_path = base / filename
             if not tool_path.exists():
+                self.logger.warning(f"Bundled tool source missing: {tool_path}")
                 continue
             try:
                 async with aiofiles.open(tool_path, "r", encoding="utf-8") as f:
                     code = await f.read()
-                parts.append(f"# {tool_name} implementation\n{code}")
             except Exception as exc:  # noqa: BLE001
-                self.logger.warning(f"Could not read tool {tool_file}: {exc}")
-        return "\n\n".join(parts) if parts else None
+                self.logger.warning(f"Could not read bundled tool {filename}: {exc}")
+                continue
+            files.append(
+                {"path": f"tools/{filename}", "content": code, "type": "python"}
+            )
+            emitted.add(filename)
+        return files

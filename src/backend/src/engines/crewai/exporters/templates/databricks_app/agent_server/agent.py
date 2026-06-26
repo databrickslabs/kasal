@@ -32,20 +32,89 @@ from mlflow.types.responses import (
 import agent_server.conversation as conversation
 from agent_server.utils import get_session_id, get_user_workspace_client
 
-# Point tracing at the experiment configured on the app (MLFLOW_EXPERIMENT_ID is
-# set in app.yaml by the Kasal deploy), then capture CrewAI + LLM traces there.
-# Logged (not silent) so it's clear in the app logs whether tracing is wired.
+# Configure where CrewAI + LLM traces are stored. This app OWNS its MLflow
+# experiment and creates it here, because a Unity Catalog trace location can ONLY
+# be bound at experiment-creation time — it cannot be added to an existing
+# experiment (Databricks: "an experiment can only be bound to a UC trace location
+# at creation time"). So we create the experiment by name with a UnityCatalog
+# trace location; MLflow then PROVISIONS the UC Delta tables
+# (<catalog>.<schema>.<prefix>_otel_spans, ...) through the SQL warehouse, giving
+# unlimited storage, fine-grained access, and queryability from SQL/notebooks.
+# Requirements (per the docs above): a SQL warehouse (MLFLOW_TRACING_SQL_WAREHOUSE_ID,
+# runs the table DDL), MLflow >= 3.11, and the workspace UC-tracing previews.
+# See https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
+#
+# Fallback order: a platform-injected experiment id, else no tracing.
+_experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME")
 _experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID")
-if _experiment_id:
+_trace_catalog = os.environ.get("DATABRICKS_CATALOG")
+_trace_schema = os.environ.get("DATABRICKS_SCHEMA")
+_trace_warehouse = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+# Delta-table prefix for this app's UC traces (-> <prefix>_otel_spans, etc.).
+_TRACE_TABLE_PREFIX = "agent"
+
+
+def _experiment_path(name: str) -> str:
+    """A Databricks experiment name must be an absolute workspace path. The app's
+    service principal can write under /Shared, so place it there."""
+    return name if name.startswith("/") else f"/Shared/{name}"
+
+
+_traces_configured = False
+if _experiment_name and _trace_catalog and _trace_schema and _trace_warehouse:
+    try:
+        from mlflow.entities.trace_location import UnityCatalog
+
+        # The warehouse must be in the env BEFORE set_experiment provisions the
+        # trace tables.
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(_trace_warehouse)
+        _exp_path = _experiment_path(_experiment_name)
+        mlflow.set_experiment(
+            experiment_name=_exp_path,
+            trace_location=UnityCatalog(
+                catalog_name=_trace_catalog,
+                schema_name=_trace_schema,
+                table_prefix=_TRACE_TABLE_PREFIX,
+            ),
+        )
+        _traces_configured = True
+        print(
+            f"MLflow traces -> Unity Catalog {_trace_catalog}.{_trace_schema} "
+            f"(experiment '{_exp_path}', tables {_TRACE_TABLE_PREFIX}_otel_*)"
+        )
+    except Exception as e:  # noqa: BLE001
+        # Most common cause: the app's service principal lacks UC permissions to
+        # provision/write the trace tables. Grant it (run as a schema owner):
+        #   GRANT USE CATALOG ON CATALOG <catalog> TO `<sp-client-id>`;
+        #   GRANT USE SCHEMA, CREATE TABLE, MODIFY, SELECT ON SCHEMA <catalog>.<schema> TO `<sp-client-id>`;
+        # A UC trace location can only be bound at experiment creation, so after
+        # granting, redeploy with a FRESH experiment name.
+        print(
+            f"Could not create UC-backed experiment ({e}). The app's service "
+            f"principal likely needs USE CATALOG/SCHEMA + CREATE TABLE + MODIFY + "
+            f"SELECT on {_trace_catalog}.{_trace_schema}."
+        )
+if not _traces_configured and _experiment_name:
+    try:
+        mlflow.set_experiment(experiment_name=_experiment_path(_experiment_name))
+        print(
+            f"MLflow tracing -> experiment {_experiment_name} (managed storage; "
+            "set catalog + schema + warehouse on deploy for Unity Catalog traces)"
+        )
+        _traces_configured = True
+    except Exception as e:  # noqa: BLE001
+        print(f"Could not set MLflow experiment {_experiment_name}: {e}")
+if not _traces_configured and _experiment_id:
     try:
         mlflow.set_experiment(experiment_id=_experiment_id)
-        print(f"MLflow tracing -> experiment {_experiment_id}")
+        print(f"MLflow tracing -> experiment {_experiment_id} (managed storage)")
+        _traces_configured = True
     except Exception as e:  # noqa: BLE001
         print(f"Could not set MLflow experiment {_experiment_id}: {e}")
-else:
+if not _traces_configured:
     print(
-        "MLFLOW_EXPERIMENT_ID is not set — traces will not be written. "
-        "Choose an MLflow experiment in the Kasal deploy screen and redeploy."
+        "No MLflow experiment configured — traces will not be written. "
+        "Choose an MLflow experiment + SQL warehouse in the Kasal deploy screen."
     )
 try:
     mlflow.crewai.autolog()
@@ -66,7 +135,8 @@ INPUT_KEY = '{{INPUT_KEY}}'
 CREW_PURPOSE = """{{CREW_PURPOSE}}"""
 # Authenticate Databricks-managed tools/MCP as the requesting user (OBO).
 ENABLE_OBO = {{ENABLE_OBO}}
-# MCP servers auto-attached to the crew, as (name, url) pairs.
+# MCP servers auto-attached to the crew, as (name, url, transport) tuples.
+# transport is "streamable-http" for Databricks-managed MCP, else "sse".
 MCP_SERVERS = [
 {{MCP_SERVERS}}]
 # Crew execution settings — mirror how Kasal runs this crew.
@@ -76,6 +146,9 @@ PLANNING_LLM = {{PLANNING_LLM}}  # None, or a model name for the planner
 REASONING = {{REASONING}}  # agents reason/reflect before acting
 MANAGER_LLM = {{MANAGER_LLM}}  # None, or a model name for the hierarchical manager
 MEMORY = {{MEMORY}}  # enable CrewAI memory
+# Per-task output guardrails (task_name -> spec). LLM guardrails are reproduced
+# as CrewAI LLMGuardrail; "code" guardrails are Kasal built-ins not bundled here.
+TASK_GUARDRAILS = {{TASK_GUARDRAILS}}
 # END GENERATED
 
 # Mapping of tool name -> factory; populated from the crew's configured tools.
@@ -110,33 +183,53 @@ def _is_codex_model(model_name: str) -> bool:
     return bool(model_name) and "gpt-5-3-codex" in str(model_name).lower()
 
 
+def _gateway_on() -> bool:
+    """Whether the workspace routes model traffic through the AI Gateway."""
+    return os.environ.get("DATABRICKS_AI_GATEWAY_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _databricks_host_token() -> tuple:
+    """Resolve the workspace host + a bearer token (OBO user token, else app SP).
+
+    Uses ``config.authenticate()`` so the token is valid for any auth type (OBO,
+    app service-principal OAuth, or PAT).
+    """
+    from databricks.sdk import WorkspaceClient
+
+    w = get_user_workspace_client() if ENABLE_OBO else WorkspaceClient()
+    host = (
+        getattr(w.config, "host", None) or os.environ.get("DATABRICKS_HOST", "")
+    ).rstrip("/")
+    try:
+        token = (
+            (w.config.authenticate() or {}).get("Authorization", "").split(" ", 1)[-1]
+        )
+    except Exception:  # noqa: BLE001
+        token = os.environ.get("DATABRICKS_TOKEN", "")
+    return host, token
+
+
 def _make_llm(model_name: str, temperature: float = 0.7):
     """Build the LLM for an agent.
 
-    Databricks models normally route through LiteLLM with a ``databricks/`` prefix
-    (``LLM(model="databricks/<endpoint>")``). gpt-5-3-codex is the exception — the
-    Chat Completions route returns 404 "Supervisor API is not enabled", so it must
-    use the Databricks Responses API instead.
+    Databricks models route through CrewAI's LiteLLM fallback as
+    ``databricks/<endpoint>`` with an EXPLICIT ``api_base`` + ``api_key`` — so the
+    app authenticates with its own identity (OBO/SP) instead of relying on
+    LiteLLM picking up Databricks env vars (it won't in the Apps runtime). This
+    mirrors how Kasal configures the LLM at runtime. gpt-5-3-codex is the
+    exception — the Chat Completions route returns 404 "Supervisor API is not
+    enabled", so it must use the Databricks Responses API (OpenAICompletion).
     """
+    host, token = _databricks_host_token()
     if _is_codex_model(model_name):
-        from databricks.sdk import WorkspaceClient
         from crewai.llms.providers.openai.completion import OpenAICompletion
 
-        w = get_user_workspace_client() if ENABLE_OBO else WorkspaceClient()
-        host = (
-            getattr(w.config, "host", None) or os.environ.get("DATABRICKS_HOST", "")
-        ).rstrip("/")
-        try:
-            token = (w.config.authenticate() or {}).get("Authorization", "").split(" ", 1)[-1]
-        except Exception:  # noqa: BLE001
-            token = os.environ.get("DATABRICKS_TOKEN", "")
-        # AI Gateway on -> /ai-gateway/openai/v1 ; off -> /serving-endpoints (default).
-        gateway_on = os.environ.get("DATABRICKS_AI_GATEWAY_ENABLED", "false").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        base_path = "ai-gateway/openai/v1" if gateway_on else "serving-endpoints"
+        # Responses API: AI Gateway on -> /ai-gateway/openai/v1 ; off -> /serving-endpoints.
+        base_path = "ai-gateway/openai/v1" if _gateway_on() else "serving-endpoints"
         return OpenAICompletion(
             model=model_name,
             api="responses",
@@ -144,8 +237,21 @@ def _make_llm(model_name: str, temperature: float = 0.7):
             api_key=token,
             timeout=300,
         )
-    model = model_name if str(model_name).startswith("databricks/") else f"databricks/{model_name}"
-    return LLM(model=model, temperature=temperature)
+    endpoint = (
+        model_name.split("/", 1)[1]
+        if str(model_name).startswith("databricks/")
+        else model_name
+    )
+    # LiteLLM's Databricks provider appends /chat/completions to api_base:
+    # AI Gateway on -> /ai-gateway/mlflow/v1 ; off -> /serving-endpoints.
+    kwargs = {"model": f"databricks/{endpoint}", "temperature": temperature}
+    if host:
+        kwargs["api_base"] = (
+            f"{host}/ai-gateway/mlflow/v1" if _gateway_on() else f"{host}/serving-endpoints"
+        )
+    if token:
+        kwargs["api_key"] = token
+    return LLM(**kwargs)
 
 
 def _build_agents(mcp_tools: List[Any] | None = None) -> Dict[str, Agent]:
@@ -169,20 +275,51 @@ def _build_agents(mcp_tools: List[Any] | None = None) -> Dict[str, Agent]:
     return agents
 
 
+def _make_task_guardrail(task_name: str):
+    """Build the output guardrail for a task, or None.
+
+    LLM guardrails (configured on the task in Kasal) are reproduced with CrewAI's
+    native ``LLMGuardrail``. Kasal built-in code/factory guardrails can't be
+    bundled standalone, so they're flagged and skipped.
+    """
+    spec = TASK_GUARDRAILS.get(task_name)
+    if not spec:
+        return None
+    if spec.get("type") == "llm":
+        try:
+            from crewai.tasks.llm_guardrail import LLMGuardrail
+
+            llm = _make_llm(spec.get("llm_model") or MODEL_OVERRIDE or _conversation_model())
+            return LLMGuardrail(
+                description=spec.get("description") or "Validate the task output",
+                llm=llm,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not build LLM guardrail for task '{task_name}': {exc}")
+            return None
+    print(
+        f"Task '{task_name}' has a Kasal built-in guardrail "
+        f"'{spec.get('name')}' that is not reproduced in this app."
+    )
+    return None
+
+
 def _build_tasks(agents: Dict[str, Agent]) -> list:
     tasks = []
     agent_names = list(agents.keys())
-    for cfg in TASKS_CONFIG.values():
+    for task_name, cfg in TASKS_CONFIG.items():
         agent_key = cfg.get("agent", agent_names[0] if agent_names else None)
         agent = agents.get(agent_key) or (next(iter(agents.values())) if agents else None)
-        tasks.append(
-            Task(
-                description=cfg["description"],
-                expected_output=cfg["expected_output"],
-                agent=agent,
-                tools=_build_tools(cfg.get("tools", [])),
-            )
+        kwargs: Dict[str, Any] = dict(
+            description=cfg["description"],
+            expected_output=cfg["expected_output"],
+            agent=agent,
+            tools=_build_tools(cfg.get("tools", [])),
         )
+        guardrail = _make_task_guardrail(task_name)
+        if guardrail is not None:
+            kwargs["guardrail"] = guardrail
+        tasks.append(Task(**kwargs))
     return tasks
 
 
@@ -210,29 +347,70 @@ def build_crew(mcp_tools: List[Any] | None = None) -> Crew:
     return Crew(**kwargs)
 
 
-def _mcp_server_params() -> list:
-    """Resolve MCP connection params; Databricks-managed URLs get host + bearer.
+def _mcp_auth() -> tuple:
+    """Resolve (host, auth_headers) for Databricks-managed MCP servers.
 
-    Uses ``config.authenticate()`` so the Authorization header is valid for any
-    auth type — OBO user token, app service-principal OAuth, or PAT. (``config.token``
-    is only populated for PAT auth and is None for OAuth, which would 401 the MCP call.)
+    Uses ``get_user_workspace_client`` — the requesting user's OBO token when
+    present, else the app's service principal (NOT a broken token=None client).
+    ``config.authenticate()`` yields a valid Authorization header for any auth
+    type (unlike ``config.token`` which is None for OAuth and would 401).
     """
-    from databricks.sdk import WorkspaceClient
-
-    w = get_user_workspace_client() if ENABLE_OBO else WorkspaceClient()
     host = (
-        getattr(w.config, "host", None) or os.environ.get("DATABRICKS_HOST", "")
+        getattr(get_user_workspace_client().config, "host", None)
+        or os.environ.get("DATABRICKS_HOST", "")
     ).rstrip("/")
     try:
-        auth_headers = dict(w.config.authenticate() or {})
+        db_headers = dict(get_user_workspace_client().config.authenticate() or {})
     except Exception:  # noqa: BLE001
         token = os.environ.get("DATABRICKS_TOKEN", "")
-        auth_headers = {"Authorization": f"Bearer {token}"} if token else {}
-    params = []
-    for _name, url in MCP_SERVERS:
-        full_url = f"{host}{url}" if url.startswith("/") else url
-        params.append({"url": full_url, "headers": dict(auth_headers)})
-    return params
+        db_headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return host, db_headers
+
+
+def _mcp_param(name: str, url: str, transport: str, host: str, db_headers: dict) -> dict:
+    """Build the connection params for one MCP server.
+
+    Transport MATTERS: Databricks-managed MCP is streamable-HTTP; without it the
+    adapter falls back to SSE and times out. Databricks-managed servers (relative
+    ``/api/2.0/mcp/...`` URLs) use the app's Databricks identity; third-party
+    servers (absolute URLs) use their own ``<NAME>_MCP_TOKEN`` so the Databricks
+    token is never sent off-platform.
+    """
+    if url.startswith("/"):
+        return {"url": f"{host}{url}", "transport": transport, "headers": dict(db_headers)}
+    env_key = (
+        "".join(c if c.isalnum() else "_" for c in name.upper()).strip("_") + "_MCP_TOKEN"
+    )
+    token = os.environ.get(env_key, "")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return {"url": url, "transport": transport, "headers": headers}
+
+
+def _open_mcp_tools(stack) -> List[Any]:
+    """Connect to each configured MCP server INDEPENDENTLY and return the union of
+    their tools, keeping the adapters open via the caller's ExitStack for the
+    duration of the crew kickoff.
+
+    Per-server isolation is the point: a server the app can't reach or isn't
+    authorized for (e.g. a Genie space the service principal lacks access to) is
+    skipped with a log, instead of taking down ALL MCP tools (the old single
+    ``MCPServerAdapter([all])`` was all-or-nothing).
+    """
+    from crewai_tools import MCPServerAdapter
+
+    host, db_headers = _mcp_auth()
+    tools: List[Any] = []
+    for name, url, transport in MCP_SERVERS:
+        try:
+            adapter = stack.enter_context(
+                MCPServerAdapter([_mcp_param(name, url, transport, host, db_headers)])
+            )
+            server_tools = list(adapter)
+            tools.extend(server_tools)
+            print(f"MCP '{name}': {len(server_tools)} tool(s) available")
+        except Exception as exc:  # noqa: BLE001
+            print(f"MCP '{name}' unavailable ({exc}); skipping that server.")
+    return tools
 
 
 def _run_crew(inputs: Dict[str, Any]) -> str:
@@ -243,75 +421,32 @@ def _run_crew(inputs: Dict[str, Any]) -> str:
     than failing the whole request.
     """
     if MCP_SERVERS:
-        try:
-            from crewai_tools import MCPServerAdapter
+        from contextlib import ExitStack
 
-            with MCPServerAdapter(_mcp_server_params()) as mcp_tools:
-                crew = build_crew(mcp_tools=list(mcp_tools))
-                return str(crew.kickoff(inputs=inputs))
+        try:
+            with ExitStack() as stack:
+                mcp_tools = _open_mcp_tools(stack)
+                return str(
+                    build_crew(mcp_tools=mcp_tools or None).kickoff(inputs=inputs)
+                )
         except Exception as exc:  # noqa: BLE001
-            print(f"MCP tools unavailable ({exc}); running crew without MCP.")
+            print(f"MCP setup failed ({exc}); running crew without MCP.")
     return str(build_crew().kickoff(inputs=inputs))
 
 
-def _build_supervised_crew(request_text: str, mcp_tools: List[Any] | None = None) -> Crew:
-    """Build a crew where a supervisor agent delegates the user's request to the
-    crew's existing agents (its coworkers).
+def _run_conversational(request_text: str) -> str:
+    """Run the crew's CONFIGURED pipeline (its agents + tasks) with the user's
+    request as the crew input — exactly how Kasal runs the crew.
 
-    Uses a sequential process with the task assigned to the supervisor (which has
-    ``allow_delegation=True``) rather than the hierarchical process: hierarchical
-    leaves the task's agent unset, which makes ``mlflow.crewai.autolog`` crash
-    reading ``task.agent.role`` and is prone to the "coworker not found" bug.
+    This replaces an earlier supervisor+delegation wrapper. Having a supervisor
+    agent delegate to the crew's agents is fragile — a weaker model fails the
+    ``delegate_work_to_coworker`` call with "coworker mentioned not found" — and
+    it doesn't match how Kasal runs the crew. Running the predefined tasks
+    directly is robust and produces the same result as in Kasal. Conversational
+    clarification still happens in the conversation layer's gather step (not the
+    crew), so multi-turn info-gathering is unchanged.
     """
-    workers = _build_agents(mcp_tools)
-    supervisor = Agent(
-        role=f"{NAME} supervisor",
-        goal=(
-            "Fulfill the user's request by delegating to the most appropriate "
-            "specialist coworker(s) and synthesizing their work into a final answer."
-        ),
-        backstory=(
-            "You coordinate a team of specialists. You delegate work to the right "
-            "coworker(s) for the request and combine their results."
-        ),
-        llm=_make_llm(MANAGER_LLM or MODEL_OVERRIDE or _conversation_model()),
-        allow_delegation=True,  # gives the Delegate/Ask-coworker tools over the team
-        verbose=True,
-    )
-    task = Task(
-        description=(
-            f"{CREW_PURPOSE}\n\n"
-            "Handle the following conversation/request by delegating to the most "
-            f"appropriate specialist coworker(s) on the team:\n{request_text}\n\n"
-            "If the request is ambiguous or missing essential details needed to do a "
-            "good job, do NOT guess — reply with exactly 'CLARIFY:' followed by one "
-            "concise question for the user."
-        ),
-        expected_output=(
-            "A complete, helpful response to the user's request, OR a single line "
-            "'CLARIFY: <question>' when essential information is missing."
-        ),
-        agent=supervisor,  # assigned, so autolog can read the agent's role
-    )
-    return Crew(
-        agents=[supervisor, *workers.values()],
-        tasks=[task],
-        process=Process.sequential,
-        verbose=True,
-    )
-
-
-def _run_supervised(request_text: str) -> str:
-    """Run the request through the supervisor that delegates to the team (best-effort MCP)."""
-    if MCP_SERVERS:
-        try:
-            from crewai_tools import MCPServerAdapter
-
-            with MCPServerAdapter(_mcp_server_params()) as mcp_tools:
-                return str(_build_supervised_crew(request_text, list(mcp_tools)).kickoff())
-        except Exception as exc:  # noqa: BLE001
-            print(f"MCP tools unavailable ({exc}); running crew without MCP.")
-    return str(_build_supervised_crew(request_text).kickoff())
+    return _run_crew({INPUT_KEY: request_text})
 
 
 def _conversation_model() -> str:
@@ -324,14 +459,14 @@ def _conversation_model() -> str:
     return "databricks-llama-4-maverick"
 
 
-# Wire the generic conversation layer to this crew. The "act" step delegates the
-# user's request to the existing agents via a hierarchical supervisor.
+# Wire the generic conversation layer to this crew. The "act" step runs the
+# crew's configured agents + tasks (the same pipeline Kasal runs).
 conversation.configure(
     name=NAME,
     input_key=INPUT_KEY,
     purpose=CREW_PURPOSE,
     llm_factory=lambda: _make_llm(_conversation_model()),
-    crew_runner=_run_supervised,
+    crew_runner=_run_conversational,
 )
 
 

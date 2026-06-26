@@ -60,8 +60,13 @@ This serves the chat UI and the agent at http://localhost:8000.
   `backstory`, and `tools` come straight from the crew you exported.
 - **Model:** set `MODEL_OVERRIDE` in `agent_server/agent.py` (or leave `None` to keep each agent's `llm`).
 - **Input mapping:** `INPUT_KEY` controls which crew input the chat message fills (default from your crew).
-- **Tools:** add CrewAI/`crewai_tools` tools to `TOOL_MAP` in `agent_server/agent.py`; for
-  Databricks-managed tools via MCP, add `(name, url)` pairs to `MCP_SERVERS` (see the `add-tools` skill).
+- **Tools:** Kasal pre-populates `TOOL_MAP` in `agent_server/agent.py` from the tools configured on
+  your crew, with their non-secret config baked in (e.g. the Genie space id, Serper result count).
+  Secrets are read from env vars instead — see `.env.example`. Self-contained tools (GenieTool,
+  PerplexityTool) are bundled under `tools/`. Tools that rely on the Kasal runtime can't run
+  standalone: they're left as commented `# unsupported` entries in `TOOL_MAP` — provide your own
+  implementation, or attach the capability over **MCP** by adding `(name, url)` pairs to `MCP_SERVERS`
+  (the recommended path for Databricks-managed tools; see the `add-tools` skill).
 - **Add dependencies:** `uv add <package>`.
 
 ### On-behalf-of (OBO) user authentication

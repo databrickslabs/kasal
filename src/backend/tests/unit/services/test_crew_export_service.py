@@ -622,6 +622,39 @@ class TestConvertToolIdsToNames:
         result = await service._convert_tool_ids_to_names([])
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_captures_non_secret_tool_config(self, service):
+        """Resolving an integer tool ID captures the tool's non-secret config."""
+        mock_tool = MagicMock()
+        mock_tool.title = 'GenieTool'
+        mock_tool.config = {'space_id': 'abc123', 'api_key': 'SECRET', 'max_result_rows': 50}
+        service.tool_repository.get = AsyncMock(return_value=mock_tool)
+
+        await service._convert_tool_ids_to_names([35])
+        captured = service._tool_configs['GenieTool']
+        assert captured['space_id'] == 'abc123'
+        assert captured['max_result_rows'] == 50
+        # Secret-looking keys are stripped before export.
+        assert 'api_key' not in captured
+
+    def test_safe_tool_config_strips_secrets(self, service):
+        """_safe_tool_config keeps functional keys and drops secret-looking ones."""
+        safe = service._safe_tool_config(
+            {
+                'space_id': 's1',
+                'n_results': 10,
+                'DATABRICKS_API_KEY': 'x',
+                'client_secret': 'y',
+                'password': 'z',
+                'access_token': 't',
+            }
+        )
+        assert safe == {'space_id': 's1', 'n_results': 10}
+
+    def test_safe_tool_config_handles_non_dict(self, service):
+        assert service._safe_tool_config(None) == {}
+        assert service._safe_tool_config("not-a-dict") == {}
+
 
 class TestGetDatabricksCatalogSchema:
     """Tests for _get_databricks_catalog_schema (catalog/schema for deploy cell)."""
@@ -651,20 +684,21 @@ class TestGetDatabricksCatalogSchema:
         )
         with patch('src.services.databricks_service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=config)
-            catalog, schema = await service._get_databricks_catalog_schema(mock_group_context)
+            catalog, schema, warehouse = await service._get_databricks_catalog_schema(mock_group_context)
         assert catalog == 'nemotemo_catalog'
         assert schema == 'kasal'  # not "<bound method BaseModel.schema ...>"
+        assert warehouse == 'w'
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_config(self, service, mock_group_context):
-        """No active Databricks config → (None, None) so exporter uses defaults."""
+        """No active Databricks config → (None, None, None) so exporter uses defaults."""
         with patch('src.services.databricks_service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=None)
-            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None)
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
 
     @pytest.mark.asyncio
     async def test_non_fatal_on_error(self, service, mock_group_context):
-        """Errors are swallowed → (None, None), export still proceeds."""
+        """Errors are swallowed → (None, None, None), export still proceeds."""
         with patch('src.services.databricks_service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(side_effect=RuntimeError('boom'))
-            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None)
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
