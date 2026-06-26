@@ -125,6 +125,7 @@ export interface AppDeploymentConfig {
   experiment_name?: string;
   lakebase_instance?: string;
   create_lakebase?: boolean;
+  warehouse_id?: string;
 }
 
 export interface AppDeploymentRequest {
@@ -148,4 +149,14 @@ export interface AppDeploymentStatusResponse {
   message?: string;
   app_url?: string;
   error?: string;
+}
+
+export interface LakebaseInstance {
+  name: string;
+  state?: string;
+  capacity?: string;
+}
+
+export interface LakebaseInstancesResponse {
+  instances: LakebaseInstance[];
 }

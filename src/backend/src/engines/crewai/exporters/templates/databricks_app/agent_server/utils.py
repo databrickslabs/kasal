@@ -39,10 +39,22 @@ def build_mcp_url(path: str, workspace_client: Optional[WorkspaceClient] = None)
 
 
 def get_user_workspace_client() -> WorkspaceClient:
-    """Authenticate as the requesting user via the forwarded OBO access token.
+    """Authenticate as the requesting user via the forwarded OBO access token,
+    falling back to the app's service principal when no user token is available.
 
     Databricks Apps injects ``x-forwarded-access-token`` on each request; the
-    MLflow AgentServer surfaces it through ``get_request_headers()``.
+    MLflow AgentServer surfaces it through ``get_request_headers()``. That token
+    is only present on the request thread — when work runs off it (e.g. a crew
+    kickoff in ``asyncio.to_thread``) the header is absent, so we must NOT build a
+    ``WorkspaceClient(token=None, auth_type="pat")`` (which has no valid auth and
+    breaks MCP/Genie calls). Instead fall back to the default client, which uses
+    the app's service-principal OAuth (``DATABRICKS_CLIENT_ID``/``SECRET`` that
+    Databricks Apps injects).
     """
-    token = get_request_headers().get("x-forwarded-access-token")
-    return WorkspaceClient(token=token, auth_type="pat")
+    try:
+        token = get_request_headers().get("x-forwarded-access-token")
+    except Exception:  # noqa: BLE001 - off the request thread / no context
+        token = None
+    if token:
+        return WorkspaceClient(token=token, auth_type="pat")
+    return WorkspaceClient()

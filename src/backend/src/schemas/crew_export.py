@@ -70,6 +70,21 @@ class ExportOptions(BaseModel):
     databricks_schema: Optional[str] = Field(
         None, description="UC schema the deployed app uses (tools/memory)"
     )
+    lakebase_instance: Optional[str] = Field(
+        None,
+        description="Lakebase instance name surfaced to the app as "
+        "LAKEBASE_INSTANCE_NAME (set by the one-click deploy)",
+    )
+    databricks_warehouse_id: Optional[str] = Field(
+        None,
+        description="SQL warehouse id surfaced to the app as DATABRICKS_WAREHOUSE_ID; "
+        "used to provision Unity Catalog trace tables",
+    )
+    mlflow_experiment_name: Optional[str] = Field(
+        None,
+        description="MLflow experiment name the deployed app creates (UC-bound) and "
+        "traces to; surfaced as MLFLOW_EXPERIMENT_NAME",
+    )
 
 
 class CrewExportRequest(BaseModel):
@@ -189,6 +204,11 @@ class AppDeploymentConfig(BaseModel):
     create_lakebase: bool = Field(
         False, description="Create a new Lakebase instance/database for the app"
     )
+    warehouse_id: Optional[str] = Field(
+        None,
+        description="SQL warehouse id used to provision Unity Catalog trace tables "
+        "(defaults to the workspace's configured warehouse)",
+    )
 
 
 class AppDeploymentRequest(BaseModel):
@@ -218,6 +238,20 @@ class AppDeploymentStatusResponse(BaseModel):
     message: Optional[str] = None
     app_url: Optional[str] = None
     error: Optional[str] = None
+
+
+class LakebaseInstance(BaseModel):
+    """A Lakebase (database) instance available for the deploy screen."""
+
+    name: str
+    state: Optional[str] = None
+    capacity: Optional[str] = None
+
+
+class LakebaseInstancesResponse(BaseModel):
+    """List of the workspace's Lakebase instances."""
+
+    instances: List[LakebaseInstance] = Field(default_factory=list)
 
 
 class DeploymentResponse(BaseModel):

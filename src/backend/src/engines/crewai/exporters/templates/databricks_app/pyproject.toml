@@ -10,14 +10,18 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
-    "crewai>=0.100.0",
-    "crewai-tools>=0.30.0",
-    # CrewAI routes Databricks models (databricks/<endpoint>) through LiteLLM,
-    # which is an optional extra in recent crewai — ship it explicitly.
-    "litellm>=1.50.0",
-    "databricks-agents>=1.9.3",
-    "databricks-sdk>=0.40.0",
-    "mlflow>=3.10.0",
+    # Pin crewai + litellm to the exact pair Kasal tests against. CrewAI routes
+    # Databricks models (databricks/<endpoint>) through its LiteLLM fallback, but
+    # crewai 1.14.5 only enables that fallback when an EXACTLY compatible litellm
+    # is importable (it imports version-sensitive litellm submodules at startup).
+    # This app ships no uv.lock, so loose floors let `uv sync` resolve a
+    # mismatched crewai+litellm pair and fail at runtime with
+    # "the LiteLLM fallback package is not installed". These pins avoid that.
+    "crewai[tools]==1.14.5",
+    "litellm==1.74.9",
+    "databricks-agents>=1.4.0",
+    "databricks-sdk>=0.102.0",
+    "mlflow>=3.11,<4",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.1",
     "opentelemetry-exporter-otlp-proto-grpc>=1.25.0",

@@ -105,16 +105,12 @@ class TestStartDeployment:
             catalog="main",
             schema_name="agents",
             experiment_name="news-exp",
+            warehouse_id="wh-1",
         )
         with (
             patch(
                 "src.services.crew_app_deployment_service.get_workspace_client",
                 new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch.object(
-                CrewAppDeploymentService,
-                "_resolve_experiment",
-                return_value="exp-123",
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
@@ -124,18 +120,32 @@ class TestStartDeployment:
         assert opts.model_override == "databricks-claude-sonnet-4-5"
         assert opts.databricks_catalog == "main"
         assert opts.databricks_schema == "agents"
-        assert opts.experiment_id == "exp-123"
+        assert opts.databricks_warehouse_id == "wh-1"
+        # The app creates the experiment itself — the deploy just passes the name.
+        assert opts.mlflow_experiment_name == "news-exp"
 
     @pytest.mark.asyncio
-    async def test_resolve_experiment_creates_under_user(self, service):
-        client = MagicMock()
-        client.current_user.me.return_value.user_name = "u@e.com"
-        client.experiments.create_experiment.return_value.experiment_id = "exp-9"
-        exp_id = CrewAppDeploymentService._resolve_experiment(client, "my-exp")
-        assert exp_id == "exp-9"
-        # Bare name is namespaced under the user.
-        created_name = client.experiments.create_experiment.call_args.kwargs["name"]
-        assert created_name == "/Users/u@e.com/my-exp"
+    async def test_experiment_name_defaults_to_app_name_when_blank(
+        self, service, obo_context
+    ):
+        """With no experiment_name, the app's experiment defaults to the app name."""
+        captured = {}
+
+        async def fake_export(*, crew_id, export_format, options, group_context):
+            captured["options"] = options
+            return _export_result()
+
+        service.export_service.export_crew = fake_export
+        cfg = AppDeploymentConfig(app_name="oracle")  # no experiment_name
+        with (
+            patch(
+                "src.services.crew_app_deployment_service.get_workspace_client",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
+        ):
+            await service.start_deployment("crew-1", cfg, obo_context)
+        assert captured["options"].mlflow_experiment_name == "oracle"
 
     @pytest.mark.asyncio
     async def test_defaults_app_name_from_metadata(self, service, obo_context):
@@ -220,7 +230,7 @@ class TestDeployBlocking:
         assert status.status == STATUS_SUCCEEDED
         assert status.app_url == "https://research-crew.databricksapps.com"
 
-    def test_configures_experiment_and_otel_telemetry(self, service):
+    def test_configures_otel_telemetry_no_experiment_resource(self, service):
         self._register(service)
         client = self._mock_client(app_exists=False)  # get: [not found, url_app]
 
@@ -229,16 +239,16 @@ class TestDeployBlocking:
             client,
             "research-crew",
             [{"path": "app.yaml", "content": "c"}],
-            "exp-77",
             "main",
             "agents",
         )
 
         client.apps.update.assert_called_once()
         app = client.apps.update.call_args.kwargs["app"]
-        # Experiment attached as a resource (SP can write traces).
+        # The experiment is NOT attached as a resource — the app owns/creates its
+        # own UC-bound experiment (UC binding is creation-only).
         exp_res = [r for r in (app.resources or []) if r.name == "experiment"]
-        assert exp_res and exp_res[0].experiment.experiment_id == "exp-77"
+        assert not exp_res
         # OTel -> Unity Catalog telemetry destination from catalog/schema.
         dests = app.telemetry_export_destinations
         assert dests and dests[0].unity_catalog.logs_table == "main.agents.otel_logs"
@@ -254,6 +264,89 @@ class TestDeployBlocking:
         client.apps.create_and_wait.assert_not_called()
         assert service.get_status("d-1").status == STATUS_SUCCEEDED
 
+    def test_creates_new_lakebase_and_attaches_resource(self, service):
+        self._register(service)
+        client = self._mock_client(app_exists=False)
+        # Instance does not exist yet -> _ensure_lakebase_instance creates it.
+        client.database.get_database_instance.side_effect = Exception("not found")
+
+        service._deploy_blocking(
+            "d-1",
+            client,
+            "research-crew",
+            [{"path": "app.yaml", "content": "c"}],
+            "",  # catalog
+            "",  # schema
+            "my-lakebase",  # lakebase_instance
+            True,  # create_lakebase
+        )
+
+        client.database.create_database_instance_and_wait.assert_called_once()
+        app = client.apps.update.call_args.kwargs["app"]
+        db_res = [r for r in (app.resources or []) if r.name == "database"]
+        assert db_res and db_res[0].database.instance_name == "my-lakebase"
+        assert service.get_status("d-1").status == STATUS_SUCCEEDED
+
+    def test_attaches_existing_lakebase_without_creating(self, service):
+        self._register(service)
+        client = self._mock_client(app_exists=False)
+
+        service._deploy_blocking(
+            "d-1",
+            client,
+            "research-crew",
+            [{"path": "app.yaml", "content": "c"}],
+            "",  # catalog
+            "",  # schema
+            "existing-lb",  # lakebase_instance
+            False,  # create_lakebase -> attach only
+        )
+
+        client.database.create_database_instance_and_wait.assert_not_called()
+        app = client.apps.update.call_args.kwargs["app"]
+        db_res = [r for r in (app.resources or []) if r.name == "database"]
+        assert db_res and db_res[0].database.instance_name == "existing-lb"
+        assert service.get_status("d-1").status == STATUS_SUCCEEDED
+
+
+    def test_grants_explicit_uc_trace_permissions_to_app_sp(self, service):
+        """The app SP gets EXPLICIT CREATE TABLE/MODIFY/SELECT (+USE) — ALL_PRIVILEGES
+        is not sufficient for UC trace tables."""
+        self._register(service)
+        client = MagicMock()
+        client.apps.get.return_value.service_principal_client_id = "sp-abc"
+
+        service._grant_trace_permissions(
+            "d-1", client, "research-crew", "nemotemo_catalog", "kasal", "wh-1"
+        )
+
+        stmts = [
+            c.kwargs["statement"]
+            for c in client.statement_execution.execute_statement.call_args_list
+        ]
+        assert any("USE CATALOG" in s and "sp-abc" in s for s in stmts)
+        assert any(
+            "CREATE TABLE" in s and "MODIFY" in s and "SELECT" in s and "sp-abc" in s
+            for s in stmts
+        )
+        # Run via the configured SQL warehouse.
+        assert (
+            client.statement_execution.execute_statement.call_args.kwargs["warehouse_id"]
+            == "wh-1"
+        )
+
+    def test_grant_trace_permissions_is_best_effort(self, service):
+        """A grant failure (e.g. deployer doesn't own the schema) must not fail the
+        deploy — it records a hint and continues."""
+        self._register(service)
+        client = MagicMock()
+        client.apps.get.return_value.service_principal_client_id = "sp-1"
+        client.statement_execution.execute_statement.side_effect = Exception(
+            "no grant authority"
+        )
+        service._grant_trace_permissions("d-1", client, "research-crew", "c", "s", "wh")
+        assert "Could not grant" in (service.get_status("d-1").message or "")
+
     @pytest.mark.asyncio
     async def test_run_deployment_records_failure(self, service):
         self._register(service)
@@ -264,6 +357,43 @@ class TestDeployBlocking:
         status = service.get_status("d-1")
         assert status.status == STATUS_FAILED
         assert "boom" in (status.error or "")
+
+
+class TestListLakebaseInstances:
+    @pytest.mark.asyncio
+    async def test_lists_instances(self, service, obo_context):
+        inst = MagicMock()
+        inst.name = "lb-1"
+        inst.state = MagicMock(value="AVAILABLE")
+        inst.capacity = "CU_1"
+        client = MagicMock()
+        client.database.list_database_instances.return_value = [inst]
+        with patch(
+            "src.services.crew_app_deployment_service.get_workspace_client",
+            new=AsyncMock(return_value=client),
+        ):
+            result = await service.list_lakebase_instances(group_context=obo_context)
+        assert result == [{"name": "lb-1", "state": "AVAILABLE", "capacity": "CU_1"}]
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_error(self, service, obo_context):
+        client = MagicMock()
+        client.database.list_database_instances.side_effect = Exception("boom")
+        with patch(
+            "src.services.crew_app_deployment_service.get_workspace_client",
+            new=AsyncMock(return_value=client),
+        ):
+            result = await service.list_lakebase_instances(group_context=obo_context)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_raises_when_auth_fails(self, service, obo_context):
+        with patch(
+            "src.services.crew_app_deployment_service.get_workspace_client",
+            new=AsyncMock(return_value=None),
+        ):
+            with pytest.raises(PermissionError):
+                await service.list_lakebase_instances(group_context=obo_context)
 
 
 class TestNormalizeAppName:
