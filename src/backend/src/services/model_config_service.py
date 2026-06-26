@@ -9,6 +9,7 @@ invalidation on mutations. See src/core/cache.py for cache implementation.
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional, List
 from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
 
@@ -22,6 +23,21 @@ from src.models.model_config import ModelConfig
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().crew
+
+
+def _databricks_configured() -> bool:
+    """True when a Databricks workspace is reachable via environment.
+
+    Databricks Apps and PAT/SP setups always export at least one of these; a
+    purely-local deployment exports none. Used to decide whether a Databricks
+    model can actually authenticate — if not, system/auxiliary LLM ops fall back
+    to the enabled local model instead of failing over to OpenAI (→ 401).
+    """
+    return any(
+        os.getenv(v)
+        for v in ("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_CLIENT_ID")
+    )
+
 
 class ModelConfigService:
     """Service for model configuration operations."""
@@ -284,7 +300,6 @@ class ModelConfigService:
             HTTPException: If model configuration is not found
         """
         try:
-            # Normalize model key (handle provider-prefixed routes like "databricks/model-key")
             normalized_key = model.rsplit('/', 1)[-1] if isinstance(model, str) else model
 
             # Read-through TTL cache (PERF-005): this runs on EVERY LLM
@@ -296,8 +311,12 @@ class ModelConfigService:
             if cached is not None:
                 config = dict(cached)
             else:
-                # Try to get from repository first using normalized key
-                model_config = await self.repository.find_by_key(normalized_key)
+                # Try the full model name first (supports HF-style names like
+                # "mlx-community/model-name"), then fall back to the normalized
+                # key (strips provider prefix e.g. "databricks/model" → "model").
+                model_config = await self.repository.find_by_key(model)
+                if not model_config:
+                    model_config = await self.repository.find_by_key(normalized_key)
                 if model_config:
                     config = {
                         "key": model_config.key,
@@ -321,8 +340,27 @@ class ModelConfigService:
 
             # Check if we're using Databricks provider - unified auth handles it
             if provider == "databricks":
+                # LOCAL FALLBACK: on a non-Databricks deployment, Databricks-provider
+                # models (the dispatcher / crew-agent-task generation / planning
+                # defaults, e.g. databricks-gpt-5-3-codex) can't authenticate, and
+                # litellm falls back to OpenAI with whatever key is set → 401
+                # "Incorrect API key". Resolve to the enabled LOCAL model instead so
+                # these system/auxiliary ops run on the local stack (vLLM / Ollama).
+                if not _databricks_configured():
+                    local = await self._local_fallback_config()
+                    if local and local.get("key") != config.get("key"):
+                        logger.warning(
+                            "Databricks model '%s' requested but no Databricks workspace "
+                            "is configured — falling back to local model '%s'",
+                            config.get("name"), local.get("name"),
+                        )
+                        return local
                 logger.info("Databricks provider - unified auth will handle authentication")
                 # Don't add API key for Databricks - unified auth handles it
+                return config
+
+            # vLLM is self-hosted; api_key is baked into llm_manager via env var
+            if provider == "vllm":
                 return config
 
             # For non-Databricks providers, get API key
@@ -355,6 +393,36 @@ class ModelConfigService:
             raise KasalError(
                 detail=f"Failed to get model configuration: {str(e)}"
             )
+
+    async def _local_fallback_config(self) -> Optional[Dict[str, Any]]:
+        """The enabled self-hosted (vllm/ollama) model's config dict, used to
+        substitute a Databricks model on a non-Databricks deployment. Prefers
+        vllm (self-hosted OpenAI-compatible) over ollama; returns None when no
+        local model is enabled (so the caller keeps the original Databricks config)."""
+        try:
+            models = await self.find_enabled_models()
+        except Exception as e:  # noqa: BLE001 — fallback must never raise
+            logger.warning(f"Local-fallback lookup failed: {e}")
+            return None
+        order = {"vllm": 0, "ollama": 1}
+        locals_ = sorted(
+            (m for m in models if (m.provider or "").lower() in order),
+            key=lambda m: order[(m.provider or "").lower()],
+        )
+        if not locals_:
+            return None
+        m = locals_[0]
+        return {
+            "key": m.key,
+            "name": m.name,
+            "provider": m.provider,
+            "temperature": m.temperature,
+            "context_window": m.context_window,
+            "max_output_tokens": m.max_output_tokens,
+            "extended_thinking": getattr(m, "extended_thinking", False),
+            "enabled": m.enabled,
+        }
+
     # Group-aware methods for multi-tenant support
 
     async def find_all_for_group(self, group_context: GroupContext) -> List[ModelConfig]:

@@ -85,6 +85,23 @@ class EmbedderConfigBuilder:
             crew_kwargs, custom_embedder, emb_config = await self._configure_databricks_embedder(crew_kwargs, config)
             self.custom_embedder = custom_embedder
             self.embedder_config = emb_config
+            # Databricks auth unavailable — fall back to a local Ollama embedder.
+            # (The previous FastEmbed fallback is unusable: this CrewAI build does not
+            # register a "fastembed" provider, so memory init crashed with
+            # "Unknown provider: fastembed".) The Ollama host comes from
+            # OLLAMA_API_BASE — the same env the Ollama LLM path uses — and the model
+            # from OLLAMA_EMBED_MODEL; no URL is hardcoded.
+            if custom_embedder is None and not crew_kwargs.get('embedder'):
+                import os
+                crew_kwargs['embedder'] = {
+                    'provider': 'ollama',
+                    'config': {
+                        'model': os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text'),
+                        'url': os.getenv('OLLAMA_API_BASE', 'http://localhost:11434'),
+                    },
+                }
+                logger.info(f"Databricks embedder unavailable, falling back to Ollama: {crew_kwargs['embedder']}")
+                self.embedder_config = crew_kwargs['embedder']
         elif provider == 'openai':
             crew_kwargs = await self._configure_openai_embedder(crew_kwargs, config)
             self.embedder_config = crew_kwargs.get('embedder')
@@ -314,10 +331,15 @@ class EmbedderConfigBuilder:
 
     def _configure_ollama_embedder(self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """Configure Ollama embedder"""
+        import os
         crew_kwargs['embedder'] = {
             'provider': 'ollama',
             'config': {
-                'model': config.get('model', 'nomic-embed-text')
+                'model': config.get('model', os.getenv('OLLAMA_EMBED_MODEL', 'nomic-embed-text')),
+                # Point at the Ollama host (OLLAMA_API_BASE, the same env the LLM
+                # path uses). chromadb's OllamaEmbeddingFunction normalizes a trailing
+                # /api/embeddings to the base, so either form is accepted.
+                'url': config.get('url', os.getenv('OLLAMA_API_BASE', 'http://localhost:11434')),
             }
         }
         logger.info(f"Configured CrewAI embedder for Ollama: {crew_kwargs['embedder']}")

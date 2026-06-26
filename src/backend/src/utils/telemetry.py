@@ -165,7 +165,11 @@ async def send_logfood_telemetry(
         auth = await get_auth_context(user_token=effective_user_token, skip_db_auth=skip_db_auth)
         
         if not auth:
-            logger.warning(
+            # DEBUG (not WARNING): this fires per LLM completion and, before the
+            # callback-level guard in llm_manager, flooded crew.log at ~300 lines/sec
+            # on non-Databricks setups. Telemetry is best-effort, so a skip is not
+            # warning-worthy.
+            logger.debug(
                 f"[Telemetry] ✗ No auth available: context={product_context}, model={model}, "
                 f"tokens={usage.get('total_tokens', 0)} - skipped"
             )
