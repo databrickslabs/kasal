@@ -7,12 +7,11 @@ dependencies = [
     # Web framework
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
-    "starlette>=0.49.1,<0.50.0",  # >=0.49.1 fixes CVE-2025-54121 / CVE-2025-62727 (DoS); minimal bump from 0.40
-    "limits>=3.6",  # API rate-limiting engine. NOTE: we use limits directly in a
+    "starlette>=0.49.1,<0.50.0", # >=0.49.1 fixes CVE-2025-54121 / CVE-2025-62727 (DoS); minimal bump from 0.40
+    "limits>=3.6", # API rate-limiting engine. NOTE: we use limits directly in a
     # pure-ASGI middleware (core/rate_limit.py) rather than slowapi, because
     # slowapi's SlowAPIMiddleware is BaseHTTPMiddleware and buffers streaming
     # responses — which would break the app's SSE streaming.
-
     # Database
     "sqlalchemy>=2.0.27",
     "alembic>=1.13.1",
@@ -20,19 +19,16 @@ dependencies = [
     "pg8000",
     "aiosqlite",
     "greenlet>=3.0.3",
-
     # Pydantic
     "pydantic>=2.6.1",
     "pydantic-settings>=2.1.0",
     "pydantic[email]",
     "email-validator",
-
     # HTTP clients
     "httpx>=0.26.0",
     "aiohttp>=3.9.0",
     "httpx-sse==0.4.0",
     "urllib3>=1.26.6",
-
     # Auth
     # NOTE: python-jose + passlib removed — they were unused (0 imports) and
     # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt is
@@ -40,27 +36,22 @@ dependencies = [
     "bcrypt==4.0.1",
     "cryptography",
     "python-multipart>=0.0.9",
-
     # Document parsing
-    "pdfminer.six",  # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
-
+    "pdfminer.six", # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
     # Databricks
     "databricks",
     "databricks-sdk>=0.102.0",
     "databricks-vectorsearch",
     "databricks-agents>=1.4.0",
-
     # Azure
     "azure-identity>=1.15.0",
-
     # AI/ML
     "litellm==1.74.9",
-    "crewai[tools]>=1.14.5",  # Unified cognitive memory system
+    "crewai[tools]>=1.14.5", # Unified cognitive memory system
     "langchain",
-    "langchain-text-splitters",  # langchain 1.x moved text splitters out of core
-    "mcp>=1.26.0,<1.27.0",  # Required by crewai 1.14.5
+    "langchain-text-splitters", # langchain 1.x moved text splitters out of core
+    "mcp>=1.26.0,<1.27.0", # Required by crewai 1.14.5
     "mcpadapt",
-
     # Observability
     "mlflow>=3.11,<4",  # >=3.11 required for Unity Catalog trace storage (OTel tables)
     "opentelemetry-sdk>=1.27.0,<2.0.0",
@@ -68,7 +59,6 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0,<2.0.0",
     "openinference-instrumentation-crewai>=1.1.9,<2.0.0",
-
     # Utils
     "tenacity>=8.2.3",
     "croniter",
@@ -76,12 +66,10 @@ dependencies = [
     "rich>=14.2.0",
     "redis>=5.0.0",
     "aiofiles>=23.0.0",
-    "rapidfuzz>=3.0.0",  # Power BI metadata fuzzy matching (optional; falls back to difflib)
-
+    "rapidfuzz>=3.0.0", # Power BI metadata fuzzy matching (optional; falls back to difflib)
     # Protobuf (version pinned for compatibility)
     "protobuf>=5.29.0,<6.0.0",
     "grpcio-status>=1.62.0,<1.71.0",
-
     # Tools
     "google-api-python-client",
     "pysendpulse",
@@ -89,6 +77,7 @@ dependencies = [
     "selenium",
     "python-pptx",
     "wheel",
+    "ollama>=0.6.2",
 ]
 
 [dependency-groups]

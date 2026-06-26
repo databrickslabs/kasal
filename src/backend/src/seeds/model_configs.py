@@ -222,6 +222,35 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 4096
     },
+    # --- vLLM (self-hosted, OpenAI-compatible) ---
+    "deepseek-r1-70b": {
+        "name": "deepseek-r1-70b",
+        "temperature": 0.6,
+        "provider": "vllm",
+        "context_window": 32768,
+        "max_output_tokens": 4096
+    },
+    "Qwen3-Coder-30B-A3B-Instruct": {
+        # Self-hosted via vLLM (provider=vllm, endpoint from VLLM_BASE_URL).
+        # `name` is BOTH the UI label and the model id sent to the serving endpoint,
+        # so vLLM --served-model-name must match it exactly.
+        "name": "Qwen3-Coder-30B-A3B-Instruct",
+        "temperature": 0.6,
+        "provider": "vllm",
+        # Qwen3-Coder-30B-A3B is a MoE (~3.3B active): newer, faster and more
+        # reliable at the A2UI JSON format than dense 32B/14B models. Served from the
+        # AWQ-4bit build (cpatonn/...-AWQ-4bit). context_window=28672 MUST match vLLM
+        # --max-model-len: vLLM enforces prompt_tokens + max_tokens <= max-model-len
+        # and 400s "passed N input and requested M output" otherwise, so the window
+        # has to cover a large prompt PLUS max_output_tokens (8192). At 0.85 util the
+        # GPU (shared with Ollama's embedder) fits ~31.8K of KV, so 28672 leaves
+        # margin. vLLM MUST be launched with --enable-auto-tool-choice
+        # --tool-call-parser qwen3_coder, else CrewAI planning/reasoning (which force
+        # tool_choice="function") 400 with "requires --tool-call-parser to be set".
+        # vLLM keeps legacy served-name aliases so older runs still resolve.
+        "context_window": 28672,
+        "max_output_tokens": 8192
+    },
     # --- Databricks (sorted alphabetically) ---
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
@@ -506,12 +535,12 @@ async def seed_async():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
+                        existing_model.enabled = (model_key == "Qwen3-Coder-30B-A3B-Instruct")  # Only enable the self-hosted vllm model
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
                     else:
-                        # Add new model config - only Databricks models are enabled by default
+                        # Add new model config - only vLLM model is enabled by default
                         model_config = ModelConfig(
                             key=model_key,
                             name=model_data["name"],
@@ -520,14 +549,14 @@ async def seed_async():
                             context_window=model_data["context_window"],
                             max_output_tokens=model_data["max_output_tokens"],
                             extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
+                            enabled=(model_key == "Qwen3-Coder-30B-A3B-Instruct"),  # Only enable the self-hosted vllm model
                             created_at=datetime.now().replace(tzinfo=None),
                             updated_at=datetime.now().replace(tzinfo=None)
                         )
                         session.add(model_config)
                         logger.debug(f"Adding new model: {model_key}")
                         models_added += 1
-                        
+
                 except Exception as model_error:
                     logger.error(f"Error processing model {model_key}: {str(model_error)}")
                     models_error += 1
@@ -614,12 +643,12 @@ def seed_sync():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data["provider"] == "databricks")  # Only enable Databricks models
+                        existing_model.enabled = (model_key == "Qwen3-Coder-30B-A3B-Instruct")  # Only enable the self-hosted vllm model
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
                     else:
-                        # Add new model config - only Databricks models are enabled by default
+                        # Add new model config - only vLLM model is enabled by default
                         model_config = ModelConfig(
                             key=model_key,
                             name=model_data["name"],
@@ -628,7 +657,7 @@ def seed_sync():
                             context_window=model_data["context_window"],
                             max_output_tokens=model_data["max_output_tokens"],
                             extended_thinking=model_data.get("extended_thinking", False),
-                            enabled=(model_data["provider"] == "databricks"),  # Only enable Databricks models
+                            enabled=(model_key == "Qwen3-Coder-30B-A3B-Instruct"),  # Only enable the self-hosted vllm model
                             created_at=datetime.now().replace(tzinfo=None),
                             updated_at=datetime.now().replace(tzinfo=None)
                         )

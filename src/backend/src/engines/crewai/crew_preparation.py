@@ -284,6 +284,17 @@ class CrewPreparation:
                     agent_config['reasoning_config'] = crew_config['reasoning_config']
                     logger.info(f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}")
 
+                # SAFETY: CrewAI's reasoning refine loop is
+                #   while not ready and (max_attempts is None or attempt < max_attempts)
+                # so an unset cap (None) loops FOREVER whenever the model never returns
+                # ready=True — which smaller local models routinely don't (they omit the
+                # structured `ready` field). With litellm response caching on, each refine
+                # call is an instant cache hit, so it spins at hundreds/sec and never
+                # finishes. Bound it whenever reasoning is enabled without an explicit cap.
+                if agent_config.get('reasoning') and not agent_config.get('max_reasoning_attempts'):
+                    agent_config['max_reasoning_attempts'] = 3
+                    logger.info(f"Agent {agent_name}: reasoning enabled without a cap — defaulting max_reasoning_attempts=3 to prevent an unbounded refine loop")
+
                 agent = await create_agent(
                     agent_key=agent_name,
                     agent_config=agent_config,
@@ -505,6 +516,38 @@ class CrewPreparation:
                     tool_factory=self.tool_factory,
                     execution_name=execution_name
                 )
+
+                # Self-hosted vLLM: CrewAI engages NATIVE tool-calling only when the
+                # executing AGENT carries the tools (the executor gates native mode on
+                # bool(original_tools), populated from agent.tools — NOT task.tools).
+                # The dispatcher frequently attaches tools to the TASK with an empty
+                # agent.tools, so the agent's executor is built with zero tools, native
+                # calling never engages, and Qwen3-Coder falls back to ReAct text and
+                # skips the tool entirely. Mirror the task's resolved tools onto its
+                # agent and rebuild the executor so they are present at execution.
+                # Scoped to vLLM agents (the _VLLMFunctionCallingLLM subclass) so
+                # Databricks/other providers are unaffected. De-dup by tool name.
+                try:
+                    from src.core.llm_manager import _VLLMFunctionCallingLLM
+                    task_tools = getattr(task, "tools", None) or []
+                    if task_tools and isinstance(getattr(agent, "llm", None), _VLLMFunctionCallingLLM):
+                        existing = {getattr(t, "name", id(t)) for t in (agent.tools or [])}
+                        added = [t for t in task_tools if getattr(t, "name", id(t)) not in existing]
+                        if added:
+                            agent.tools = list(agent.tools or []) + added
+                            if hasattr(agent, "create_agent_executor"):
+                                agent.create_agent_executor(tools=agent.tools)
+                            logger.info(
+                                f"[CrewPreparation] Propagated {len(added)} task tool(s) onto "
+                                f"agent '{agent_name}' for native vLLM tool-calling: "
+                                f"{[getattr(t, 'name', '?') for t in added]} "
+                                f"(agent.tools={len(agent.tools)})"
+                            )
+                except Exception as _prop_err:
+                    logger.warning(
+                        f"[CrewPreparation] Could not propagate task tools to agent "
+                        f"'{agent_name}': {_prop_err}"
+                    )
 
                 self.tasks.append(task)
                 # Store in our dictionary for context resolution

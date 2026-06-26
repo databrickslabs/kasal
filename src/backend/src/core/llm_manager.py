@@ -27,6 +27,72 @@ from litellm import CustomLogger
 
 from crewai import LLM
 from src.schemas.model_provider import ModelProvider
+
+
+class _VLLMFunctionCallingLLM(LLM):
+    """CrewAI LLM subclass for self-hosted vLLM endpoints that forces native
+    function-calling ON so attached tools are actually used.
+
+    CrewAI decides native-tools vs ReAct-text via
+    ``check_native_tool_support`` -> ``llm.supports_function_calling()``. For a
+    litellm-backed custom model this returns False (no registry entry), so CrewAI
+    falls back to the ReAct TEXT protocol — which Qwen3-Coder follows poorly: it
+    answers directly, never emits a tool call, and attached tools (e.g.
+    PerplexityTool) are silently dropped. Overriding the method is necessary but
+    NOT sufficient on its own: CrewAI copies the LLM before execution
+    (Crew.copy() -> agent.copy(), also kickoff_for_each/train/test/replay) and the
+    base ``LLM.__copy__``/``__deepcopy__`` hardcode ``return LLM(...)``, which drops
+    instance attributes AND the subclass type. We re-stamp ``__class__`` after the
+    base copy so the override survives every copy path. This is deterministic and
+    does NOT depend on litellm's model registry (which the execution subprocess can
+    reset). The vLLM backend runs with ``--enable-auto-tool-choice
+    --tool-call-parser``, so native tool calls work. Opt out via
+    ``VLLM_SUPPORTS_TOOLS=false`` (e.g. an mlx_lm.server without a tool parser).
+    """
+
+    def supports_function_calling(self) -> bool:  # noqa: D102
+        return True
+
+    def __copy__(self):
+        new = super().__copy__()
+        new.__class__ = _VLLMFunctionCallingLLM
+        return new
+
+    def __deepcopy__(self, memo):
+        new = super().__deepcopy__(memo)
+        new.__class__ = _VLLMFunctionCallingLLM
+        return new
+
+    def _prepare_completion_params(self, messages, tools=None, skip_file_processing=False):
+        """Force a tool call on the FIRST turn so Qwen3-Coder cannot skip attached
+        tools and fabricate an answer.
+
+        Making native function-calling *available* is not enough: under CrewAI's
+        large ReAct-scaffolded prompt, Qwen3-Coder declines ``tool_choice="auto"``
+        and emits a fabricated "Final Answer" in a single turn without ever calling
+        the tool (verified against the live vLLM endpoint: short prompts tool-call
+        under ``auto``, the full crew prompt does not). We pin
+        ``tool_choice="required"`` only while no tool result is present in the
+        message history (i.e. the opening turn); once any tool has run we revert to
+        the model's default so it can produce the final answer instead of looping.
+        Opt out with ``VLLM_FORCE_TOOL_FIRST_TURN=false``.
+        """
+        params = super()._prepare_completion_params(
+            messages, tools=tools, skip_file_processing=skip_file_processing
+        )
+        if os.getenv("VLLM_FORCE_TOOL_FIRST_TURN", "true").lower() != "true":
+            return params
+        # Only act when tools are offered this turn and nothing else already pinned
+        # tool_choice (e.g. structured-output / guardrail named-function calls).
+        if params.get("tools") and "tool_choice" not in params:
+            history = params.get("messages") or []
+            already_used_tool = any(
+                isinstance(m, dict) and (m.get("role") == "tool" or m.get("tool_calls"))
+                for m in history
+            )
+            if not already_used_tool:
+                params["tool_choice"] = "required"
+        return params
 from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.model_config_service import ModelConfigService
 from src.services.api_keys_service import ApiKeysService
@@ -152,7 +218,20 @@ class LiteLLMTokenTelemetryLogger(CustomLogger):
     
     def _should_send(self, kwargs: Dict[str, Any], response_obj: Any) -> Tuple[bool, Optional[Dict], Optional[str], Optional[str]]:
         """Check if telemetry should be sent. Returns (should_send, usage, model, product_context)."""
-        
+
+        # Token telemetry targets Databricks "logfood"; a non-Databricks (local)
+        # deployment has no workspace to send to. Bail out CHEAPLY here — before the
+        # auth chain, any async-task scheduling, or logging — because litellm/CrewAI
+        # re-fires this callback many times for a single streamed completion. Without
+        # this guard, one completion scheduled tens of thousands of no-op telemetry
+        # coroutines (each running get_auth_context + a WARNING log), which flooded
+        # crew.log (100k+ lines / 100s+ MB) and starved the event loop so runs barely
+        # progressed. Databricks Apps always set DATABRICKS_HOST; OBO flows carry a
+        # user token — so this only short-circuits genuinely-local setups.
+        from src.utils.user_context import UserContext
+        if not os.getenv("DATABRICKS_HOST") and not (UserContext.get_user_token() or _subprocess_user_token):
+            return False, None, None, None
+
         usage = response_obj.get('usage', {})
         if not usage:
             self.logger.debug(f"[TokenTelemetry] No usage in response - type={type(response_obj).__name__}")
@@ -895,6 +974,26 @@ class LLMManager:
             # GPT-OSS Harmony response format is handled by the monkey patch in DatabricksGPTOSSHandler.
             logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
             return DatabricksRetryLLM(**llm_params)
+        elif provider == ModelProvider.VLLM:
+            # Self-hosted vLLM server — OpenAI-compatible endpoint
+            api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
+            api_key = os.getenv("VLLM_API_KEY", "vllm")
+            prefixed_model = f"openai/{model_name_value}"
+            # Tell litellm/CrewAI the self-hosted model supports native function
+            # calling. litellm has no registry entry for a custom model, so
+            # supports_function_calling() returns False → CrewAI falls back to the
+            # ReAct TEXT tool protocol, which smaller local models follow poorly:
+            # the agent never emits an "Action:" and answers directly, so its tools
+            # (e.g. PerplexityTool) are silently ignored. The vLLM backend is launched
+            # with --enable-auto-tool-choice --tool-call-parser, so native tool calls
+            # work — registering the model makes CrewAI use them. Opt out by setting
+            # VLLM_SUPPORTS_TOOLS=false (e.g. an mlx_lm.server without a tool parser).
+            if os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true":
+                try:
+                    _tool_info = {"supports_function_calling": True, "litellm_provider": "openai", "mode": "chat"}
+                    litellm.register_model({prefixed_model: _tool_info, model_name_value: _tool_info})
+                except Exception as reg_err:  # noqa: BLE001 — never block LLM creation
+                    logger.debug(f"Could not register vllm function-calling support: {reg_err}")
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
@@ -961,6 +1060,16 @@ class LLMManager:
             llm_params["additional_drop_params"] = ["stop", "temperature"]
             logger.info(f"Creating CrewAI LLM for GPT-5 model: {prefixed_model} (with additional_drop_params)")
         logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
+
+        # Self-hosted vLLM: build a subclass that forces native function-calling ON
+        # so CrewAI sends `tools=[...]` to the endpoint (and its --tool-call-parser
+        # engages) instead of the ReAct text protocol that Qwen3-Coder follows poorly.
+        # See _VLLMFunctionCallingLLM for why a plain instance override is not enough
+        # (CrewAI copies the LLM before execution and drops instance attrs). Opt out
+        # with VLLM_SUPPORTS_TOOLS=false (e.g. an mlx_lm.server without a tool parser).
+        if provider == ModelProvider.VLLM and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true":
+            return _VLLMFunctionCallingLLM(**llm_params)
+
         return LLM(**llm_params)
 
     @staticmethod
