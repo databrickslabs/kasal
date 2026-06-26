@@ -15,6 +15,7 @@ class ModelProvider(str, Enum):
     DEEPSEEK = "deepseek"
     DATABRICKS = "databricks"
     GEMINI = "gemini"
+    VLLM = "vllm"
 
 # List of supported models per provider
 SUPPORTED_MODELS = {
@@ -62,5 +63,8 @@ SUPPORTED_MODELS = {
     ModelProvider.GEMINI: [
         "gemini-2.5-pro",
         "gemini-2.0-flash",
-    ]
+    ],
+    ModelProvider.VLLM: [
+        "deepseek-r1-70b",
+    ],
 } 

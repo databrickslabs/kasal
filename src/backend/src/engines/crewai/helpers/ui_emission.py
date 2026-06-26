@@ -124,7 +124,9 @@ def _build_directives_block(
         return []
     return [
         "",
-        "DELIVERABLE SETTINGS — when you build one of these, follow its settings:",
+        "DELIVERABLE SETTINGS — apply these as DEFAULTS, but anything the request states",
+        "explicitly ALWAYS overrides them. In particular, an explicit quantity in the",
+        "request (e.g. \"50 questions\", \"12 slides\", \"20 images\") wins over any count below:",
         *lines,
     ]
 
