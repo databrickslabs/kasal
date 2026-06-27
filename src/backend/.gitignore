@@ -17,6 +17,12 @@ eggs/
 .eggs/
 lib/
 lib64/
+# The Databricks-App export template ships a real frontend source dir named
+# `lib/` (shadcn utils, markdown renderer, deck themes). It is NOT a Python venv
+# lib — keep it tracked despite the `lib/` rule above, else exports break on a
+# fresh clone (the files exist locally but never get committed).
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/lib/
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/lib/**
 parts/
 sdist/
 var/

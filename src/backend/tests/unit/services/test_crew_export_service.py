@@ -702,3 +702,26 @@ class TestGetDatabricksCatalogSchema:
         with patch('src.services.databricks_service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(side_effect=RuntimeError('boom'))
             assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
+
+
+class TestExtractMcpNames:
+    """Per-agent MCP scoping: the export reads MCP server names an agent/task
+    references via tool_configs.MCP_SERVERS (dict or legacy list form), so each
+    agent exports scoped to only the servers it actually uses."""
+
+    def test_dict_form(self):
+        cfg = {"MCP_SERVERS": {"servers": ["perplexity", "genie space"]}}
+        assert CrewExportService._extract_mcp_names(cfg) == ["perplexity", "genie space"]
+
+    def test_legacy_list_form(self):
+        cfg = {"MCP_SERVERS": ["perplexity"]}
+        assert CrewExportService._extract_mcp_names(cfg) == ["perplexity"]
+
+    def test_strips_and_drops_empties(self):
+        cfg = {"MCP_SERVERS": ["  perplexity  ", "", None]}
+        assert CrewExportService._extract_mcp_names(cfg) == ["perplexity"]
+
+    def test_none_or_missing_returns_empty(self):
+        assert CrewExportService._extract_mcp_names(None) == []
+        assert CrewExportService._extract_mcp_names({}) == []
+        assert CrewExportService._extract_mcp_names({"MCP_SERVERS": "nope"}) == []

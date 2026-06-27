@@ -12,6 +12,22 @@ env:
     value: "3000"
   - name: CHAT_PROXY_TIMEOUT_SECONDS
     value: "300"
+  # A2UI generative UI: compose the agent's answer into a declarative surface the
+  # frontend renders (presentation/dashboard/mindmap/...). Set "false" to disable.
+  - name: A2UI_ENABLED
+    value: "true"
+  # Source citations: agents cite tool-sourced claims with inline [n](url) links +
+  # a "## Sources" list; the UI renders [n] as a clickable reference. "false"=off.
+  - name: CITATIONS
+    value: "true"
+  # Runaway/hang guards so a stuck turn can't burn tokens forever. The Stop button
+  # cancels a turn on demand; these are the automatic safety nets.
+  #   LLM_REQUEST_TIMEOUT  — per LLM call (s); a hung call fails instead of hanging.
+  #   CREW_TIMEOUT_SECONDS — whole turn (s); on expiry the crew is cancelled. 0=off.
+  - name: LLM_REQUEST_TIMEOUT
+    value: "300"
+  - name: CREW_TIMEOUT_SECONDS
+    value: "600"
   - name: MLFLOW_EXPERIMENT_ID
     value: "{{EXPERIMENT_ID}}"
   # The app creates this MLflow experiment, bound to Unity Catalog at creation.

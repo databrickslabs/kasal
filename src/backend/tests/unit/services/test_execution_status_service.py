@@ -591,3 +591,70 @@ class TestExecutionStatusService:
             )
 
             assert result is True
+
+
+class TestUiDocumentNormalizationOnWrite:
+    """update_status is the single result-write chokepoint: it canonicalizes an
+    A2UI 'UI document' result once, and a normalization failure must never break
+    persistence (the raw result is stored instead). The normalization logic
+    itself is covered by tests/.../helpers/test_ui_document.py."""
+
+    @staticmethod
+    async def _update_with(result, *, normalize_return=None, normalize_raises=False):
+        """Drive update_status through the real _update_operation with a provided
+        session, capturing the data handed to repo.update_execution."""
+        session = AsyncMock()
+        record = MagicMock(id=7, status="RUNNING", group_id="g1", completed_at=None)
+        repo = MagicMock()
+        repo.get_execution_by_job_id = AsyncMock(return_value=record)
+        repo.update_execution = AsyncMock(
+            return_value=MagicMock(group_id="g1", completed_at=None)
+        )
+        norm = (
+            patch(
+                "src.engines.crewai.helpers.ui_document.normalize_ui_document",
+                side_effect=RuntimeError("boom"),
+            )
+            if normalize_raises
+            else patch(
+                "src.engines.crewai.helpers.ui_document.normalize_ui_document",
+                return_value=normalize_return,
+            )
+        )
+        with patch(
+            "src.services.execution_status_service.ExecutionRepository",
+            return_value=repo,
+        ), patch.dict("os.environ", {"CREW_SUBPROCESS_MODE": "true"}), norm:
+            ok = await ExecutionStatusService.update_status(
+                job_id="job-1",
+                status="COMPLETED",
+                message="done",
+                result=result,
+                session=session,
+            )
+        stored = repo.update_execution.call_args.kwargs["data"].get("result")
+        return ok, stored
+
+    @pytest.mark.asyncio
+    async def test_a2ui_result_is_canonicalized(self):
+        """An A2UI result is replaced with the normalizer's canonical output."""
+        ok, stored = await self._update_with(
+            "```json\n{\"surfaceKind\": \"x\"}\n```",
+            normalize_return={"surfaceKind": "x"},
+        )
+        assert ok is True
+        assert stored == {"surfaceKind": "x"}
+
+    @pytest.mark.asyncio
+    async def test_non_a2ui_result_stored_verbatim(self):
+        """A non-A2UI result (normalizer returns None) is stored unchanged."""
+        ok, stored = await self._update_with("just a plain answer", normalize_return=None)
+        assert ok is True
+        assert stored == "just a plain answer"
+
+    @pytest.mark.asyncio
+    async def test_normalization_error_does_not_break_persistence(self):
+        """If normalization raises, the raw result is still persisted."""
+        ok, stored = await self._update_with("some result", normalize_raises=True)
+        assert ok is True
+        assert stored == "some result"

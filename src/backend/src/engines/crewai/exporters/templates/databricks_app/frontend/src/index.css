@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Enable `dark:` utilities driven by a `dark` class on <html> (toggled in App). */
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn/ui design tokens (light, corporate B2B; blue primary).
+   Theme lives here as CSS variables — no tailwind.config.js, no PostCSS file. */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.02 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 264);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.02 264);
+  --primary: oklch(0.55 0.215 264);          /* ~ blue-600 */
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0.005 264);
+  --secondary-foreground: oklch(0.3 0.02 264);
+  --muted: oklch(0.97 0.005 264);
+  --muted-foreground: oklch(0.55 0.02 264);
+  --accent: oklch(0.96 0.02 264);
+  --accent-foreground: oklch(0.42 0.16 264);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.006 264);
+  --input: oklch(0.9 0.006 264);
+  --ring: oklch(0.55 0.215 264);
+}
+
+/* Dark theme: overrides the same CSS variables, so every color token flips
+   automatically when <html class="dark"> is set. */
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.2 0.015 264);
+  --foreground: oklch(0.96 0.005 264);
+  --card: oklch(0.24 0.018 264);
+  --card-foreground: oklch(0.96 0.005 264);
+  --popover: oklch(0.24 0.018 264);
+  --popover-foreground: oklch(0.96 0.005 264);
+  --primary: oklch(0.62 0.19 264);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.3 0.02 264);
+  --secondary-foreground: oklch(0.96 0.005 264);
+  --muted: oklch(0.29 0.018 264);
+  --muted-foreground: oklch(0.72 0.02 264);
+  --accent: oklch(0.34 0.025 264);
+  --accent-foreground: oklch(0.96 0.005 264);
+  --destructive: oklch(0.62 0.21 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.34 0.02 264);
+  --input: oklch(0.38 0.02 264);
+  --ring: oklch(0.62 0.19 264);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+      Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Slide body inherits the deck theme's text color so prose stays readable on a
+   dark slide. Scoped to .a2-slide; inline-styled elements (stat numbers, titles)
+   keep their own color. */
+.a2-slide :where(p, li, ul, ol, h1, h2, h3, h4, h5, h6, strong, em, blockquote, code, td, th, a) {
+  color: inherit;
+}
+.a2-slide .prose,
+.a2-slide .prose :where(p, li, a, strong, em, blockquote, code, h1, h2, h3, h4, h5, h6, th, td) {
+  color: inherit !important;
+}
+.a2-slide .a2-table th {
+  background: rgba(127, 127, 127, 0.16);
+}
+
+/* Typing indicator dots (used by the "working…" bubble). */
+@keyframes a2-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.a2-dot {
+  animation: a2-blink 1.2s infinite both;
+}
