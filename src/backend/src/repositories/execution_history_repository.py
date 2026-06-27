@@ -13,6 +13,8 @@ from sqlalchemy import desc, func, delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
+from src.models.execution_trace import ExecutionTrace
+from src.models.billing import LLMUsageBilling
 # Removed async_session_factory import - using injected session only
 
 logger = logging.getLogger(__name__)
@@ -394,6 +396,19 @@ class ExecutionHistoryRepository:
                 error_trace_result = await session.execute(error_trace_stmt)
                 result['error_trace_count'] = error_trace_result.rowcount
 
+                # Delete execution traces (FK to executionhistory.id and .job_id)
+                await session.execute(
+                    delete(ExecutionTrace).where(ExecutionTrace.run_id.in_(execution_ids))
+                )
+                await session.execute(
+                    delete(ExecutionTrace).where(ExecutionTrace.job_id.in_(job_ids))
+                )
+
+                # Delete billing records (FK to executionhistory.job_id)
+                await session.execute(
+                    delete(LLMUsageBilling).where(LLMUsageBilling.execution_id.in_(job_ids))
+                )
+
                 # Delete executions for the group
                 run_count = len(execution_ids)
                 run_stmt = delete(ExecutionHistory).where(ExecutionHistory.group_id.in_(group_ids))
@@ -409,6 +424,12 @@ class ExecutionHistoryRepository:
                 error_trace_stmt = delete(ErrorTrace)
                 error_trace_result = await session.execute(error_trace_stmt)
                 result['error_trace_count'] = error_trace_result.rowcount
+
+                # Delete all execution traces (FK to executionhistory.id and .job_id)
+                await session.execute(delete(ExecutionTrace))
+
+                # Delete all billing records (FK to executionhistory.job_id)
+                await session.execute(delete(LLMUsageBilling))
 
                 # Delete all runs and count them
                 count_stmt = select(func.count()).select_from(ExecutionHistory)
