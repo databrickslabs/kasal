@@ -102,7 +102,8 @@ class YAMLGenerator:
         self,
         tasks: List[Dict[str, Any]],
         agents: List[Dict[str, Any]],
-        include_comments: bool = True
+        include_comments: bool = True,
+        include_guardrails: bool = False,
     ) -> str:
         """
         Generate tasks.yaml content
@@ -111,6 +112,10 @@ class YAMLGenerator:
             tasks: List of task configurations
             agents: List of agent configurations (for mapping)
             include_comments: Whether to include explanatory comments
+            include_guardrails: Emit a task's LLM guardrail (as a ``guardrail``
+                description string) into the plan so the deployed app reads it from
+                tasks.yaml — defined => used, absent => none. Off by default so other
+                exporters (notebook/python) keep their own guardrail handling.
 
         Returns:
             YAML string for tasks configuration
@@ -197,6 +202,18 @@ class YAMLGenerator:
                             task_config['context'] = context_names
                     else:
                         task_config[field] = value
+
+            # Per-task LLM guardrail from the crew plan (opt-in). Emitted as a plain
+            # description string so the deployed app's tasks.yaml is the single,
+            # editable source: defined => used, absent => no guardrail. Code/factory
+            # guardrails are Kasal built-ins that can't run standalone, so they are
+            # intentionally omitted (no guardrail) rather than hardcoded into the app.
+            if include_guardrails:
+                from .code_generator import _parse_task_guardrail
+
+                parsed = _parse_task_guardrail(task)
+                if parsed and parsed[0] == 'llm':
+                    task_config['guardrail'] = parsed[1]
 
             # Add tools if present
             task_tools = task.get('tools', [])

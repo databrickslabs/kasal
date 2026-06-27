@@ -99,7 +99,9 @@ def _gather(message: str, history: List[dict]) -> str:
         backstory=(
             "You are a helpful assistant limited to this crew's purpose. You explain "
             "what you can do, and when the request is unclear or missing details you "
-            "ask one concise, specific clarifying question rather than guessing. "
+            "ask one concise, specific clarifying question rather than guessing. You "
+            "NEVER produce, generate, draft, or preview the deliverable itself while "
+            "gathering — that only happens after the user confirms what they want. "
             "You do not attempt tasks outside the crew's scope."
         ),
     )
@@ -109,8 +111,11 @@ def _gather(message: str, history: List[dict]) -> str:
             f"Needed input: '{_CFG['input_key']}'\n"
             f"Conversation: {history}\n"
             f"User: '{message}'\n"
-            "Reply helpfully. If the input is missing OR ambiguous, ask one specific "
-            "clarifying question so the user can tell you exactly what they want."
+            "The request does not yet give a clear, specific input to run on. Reply "
+            "with ONE short, specific clarifying question (you may briefly note what "
+            "you can do first). Do NOT generate, draft, or output any part of the "
+            "deliverable (e.g. quiz questions, slides, a report) in this reply — only "
+            "ask. The crew runs on the NEXT turn once the user answers."
         ).raw
         or ""
     )

@@ -7,7 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import type { NodeProps } from './types'
-import { Download } from 'lucide-react'
+import { Check, Download, RotateCcw, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
@@ -395,6 +395,191 @@ export function SlideDeck({ node, render }: NodeProps) {
           Next ›
         </Button>
       </div>
+    </div>
+  )
+}
+
+// FNV-1a hash of a string -> uint32 seed (stable, dependency-free).
+function hashStr(s: string): number {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+// A deterministic permutation of [0..n-1] from a seed (seeded Fisher-Yates with a
+// small LCG). The same seed always yields the same order, so calling it inline on
+// every render is stable — no hook / state needed.
+function shuffleIndices(n: number, seed: number): number[] {
+  const idx = Array.from({ length: n }, (_, i) => i)
+  let s = (seed || 1) >>> 0
+  for (let i = n - 1; i > 0; i--) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+    const j = s % (i + 1)
+    const t = idx[i]
+    idx[i] = idx[j]
+    idx[j] = t
+  }
+  return idx
+}
+
+// ---- Quiz (interactive multiple-choice assessment) -------------------------
+// One question at a time with Prev/Next + progress dots (mirrors SlideDeck), an
+// immediate right/wrong reveal on select, and a final score summary. Self-grades
+// from each question's `answer` index — the composer supplies ONLY the data.
+type QuizQuestion = {
+  question?: unknown
+  options?: unknown
+  answer?: unknown
+  explanation?: unknown
+}
+
+export function Quiz({ node, resolve }: NodeProps) {
+  const title = asStr(resolve(node.title))
+  const questions = asArr(resolve(node.questions)) as QuizQuestion[]
+  const total = questions.length
+  // idx ranges over [0, total]; idx === total is the results summary (the deck's
+  // "closing slide" analogue). Hooks run before the empty-guard so order is stable.
+  const [idx, setIdx] = useState(0)
+  const [picked, setPicked] = useState<Record<number, number>>({})
+  // Themed like a slide deck: the active theme flows in via DeckThemeContext from
+  // the QuizSurface picker (App.tsx). Hook runs before the empty-guard so the hook
+  // order is stable.
+  const theme = useContext(DeckThemeContext)
+  if (!total) return null
+
+  const clamp = (n: number) => Math.max(0, Math.min(total, n))
+  const score = questions.reduce(
+    (acc, q, i) => acc + (picked[i] === Number(q.answer) ? 1 : 0),
+    0,
+  )
+  const onResults = idx >= total
+
+  const dots = (
+    <div className="flex flex-wrap items-center justify-center gap-1.5">
+      {Array.from({ length: total + 1 }).map((_, i) => (
+        <button
+          key={i}
+          aria-label={i === total ? 'Results' : `Go to question ${i + 1}`}
+          onClick={() => setIdx(i)}
+          className="h-2 rounded-full transition-all"
+          style={
+            i === idx
+              ? { width: 20, background: theme.accent }
+              : { width: 8, background: theme.muted, opacity: 0.5 }
+          }
+        />
+      ))}
+    </div>
+  )
+
+  const nav = (
+    <div className="flex items-center justify-between gap-3">
+      <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i - 1))} disabled={idx === 0}>
+        ‹ Prev
+      </Button>
+      {dots}
+      <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i + 1))} disabled={idx >= total}>
+        Next ›
+      </Button>
+    </div>
+  )
+
+  if (onResults) {
+    const pct = Math.round((score / total) * 100)
+    return (
+      <div className="flex flex-col gap-4">
+        {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+        <div
+          className="flex flex-col items-center gap-2 rounded-2xl border p-8 text-center"
+          style={{ background: theme.stage, borderColor: theme.panelBorder, color: theme.fg }}
+        >
+          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.muted }}>Your score</div>
+          <div className="text-[2.4rem] font-extrabold leading-none" style={{ color: theme.accent }}>
+            {score} / {total}
+          </div>
+          <div className="text-sm" style={{ color: theme.muted }}>{pct}% correct</div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3 gap-1"
+            onClick={() => {
+              setPicked({})
+              setIdx(0)
+            }}
+          >
+            <RotateCcw className="size-3.5" /> Retake
+          </Button>
+        </div>
+        {nav}
+      </div>
+    )
+  }
+
+  const q = questions[idx] || {}
+  const options = asArr(q.options)
+  const correct = Number(q.answer)
+  const chosen = picked[idx]
+  const answered = chosen != null
+  const explanation = asStr(q.explanation)
+  // Display options in a deterministic, per-question shuffled order so the correct
+  // answer isn't always in the same slot (composer models tend to park it at a
+  // fixed index, e.g. always the 2nd option). Seeded by the question text → stable
+  // across re-renders and navigation (never reshuffles under the user) yet varied
+  // question-to-question. `picked` and scoring keep the ORIGINAL option index, so
+  // grading is unaffected.
+  const order = shuffleIndices(options.length, hashStr(asStr(q.question)))
+
+  return (
+    <div className="flex flex-col gap-4">
+      {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+      <div className="rounded-2xl border p-6" style={{ background: theme.stage, borderColor: theme.panelBorder, color: theme.fg }}>
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.muted }}>
+          Question {idx + 1} of {total}
+        </div>
+        <p className="mt-2 text-base font-medium leading-snug" style={{ color: theme.fg }}>{asStr(q.question)}</p>
+        <div className="mt-4 flex flex-col gap-2">
+          {order.map((oi) => {
+            const opt = options[oi]
+            const isCorrect = oi === correct
+            const isChosen = oi === chosen
+            const reveal = answered && (isCorrect || isChosen)
+            // Themed until answered; on reveal, semantic green/red overrides the
+            // theme so right/wrong reads clearly on any palette.
+            const base = { borderColor: theme.panelBorder, color: theme.fg }
+            const style =
+              reveal && isCorrect
+                ? { ...base, borderColor: '#10b981', background: 'rgba(16,185,129,0.12)' }
+                : answered && isChosen && !isCorrect
+                  ? { ...base, borderColor: '#ef4444', background: 'rgba(239,68,68,0.12)' }
+                  : answered
+                    ? { ...base, opacity: 0.6 }
+                    : base
+            return (
+              <button
+                key={oi}
+                disabled={answered}
+                onClick={() => setPicked((p) => ({ ...p, [idx]: oi }))}
+                className={cn(
+                  'flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
+                  !answered && 'hover:opacity-90',
+                )}
+                style={style}
+              >
+                <span>{asStr(opt)}</span>
+                {reveal && isCorrect && <Check className="size-4 shrink-0" style={{ color: '#10b981' }} />}
+                {answered && isChosen && !isCorrect && <X className="size-4 shrink-0" style={{ color: '#ef4444' }} />}
+              </button>
+            )
+          })}
+        </div>
+        {answered && explanation && (
+          <p className="mt-4 rounded-lg px-3 py-2 text-sm" style={{ background: theme.panel, color: theme.muted }}>{explanation}</p>
+        )}
+      </div>
+      {nav}
     </div>
   )
 }

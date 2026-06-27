@@ -11,6 +11,7 @@ const SURFACE_CLASS: Record<string, string> = {
   presentation: '',
   dashboard: '',
   mindmap: 'overflow-x-auto',
+  quiz: '',
 }
 
 export function A2UIRenderer({ payload }: { payload: Surface }) {

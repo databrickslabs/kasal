@@ -195,7 +195,7 @@ class TestDatabricksAppExporter:
         assert "Process.hierarchical" in agent
         assert "manager_llm" in agent
         # Reasoning is driven by the answer mode (research/deep), not a static flag.
-        assert 'reasoning=mode in ("research", "deep")' in agent
+        assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
         # Planning runs when configured OR in deep mode, and always gets an explicit
         # planner LLM (never CrewAI's OpenAI default).
         assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
@@ -257,6 +257,19 @@ class TestDatabricksAppExporter:
         assert "clarifying question" in conv
         # Recent history is passed so a follow-up resumes the goal.
         assert "history[-6:]" in conv
+
+    @pytest.mark.asyncio
+    async def test_gather_does_not_produce_deliverable(self, exporter, crew_data):
+        """While clarifying, the assistant must ASK and stop — never generate the
+        deliverable unprompted (the crew only runs after the user confirms)."""
+        files = _files(await exporter.export(crew_data, {}))
+        conv = files["agent_server/conversation.py"]
+        # Gather is explicitly forbidden from drafting/producing the deliverable.
+        assert "NEVER produce, generate, draft, or preview the deliverable" in conv
+        assert "Do NOT generate, draft, or output any part of the" in conv
+        # Chat mode likewise asks one question for vague deliverable requests.
+        agent = files["agent_server/agent.py"]
+        assert "short clarifying question and STOP" in agent
 
     @pytest.mark.asyncio
     async def test_conversation_layer_present(self, exporter, crew_data):
@@ -575,38 +588,48 @@ class TestDatabricksAppExporter:
         assert "Power BI Comprehensive Analysis Tool" in result["metadata"]["unsupported_tools"]
 
     @pytest.mark.asyncio
-    async def test_llm_guardrail_reproduced(self, exporter):
+    async def test_llm_guardrail_from_plan(self, exporter):
+        """An LLM guardrail is written into the editable plan (tasks.yaml), not
+        hardcoded in app code; the runtime reproduces it from the task's config."""
         crew = self._genie_crew()
         crew["agents"][0]["tools"] = []
         crew["tasks"][0]["llm_guardrail"] = {
             "description": "Output must cite at least one source",
             "llm_model": "databricks-llama-4-maverick",
         }
-        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
-        assert "TASK_GUARDRAILS = {" in agent_py
-        assert "'type': 'llm'" in agent_py
-        assert "Output must cite at least one source" in agent_py
-        # The runtime builds a CrewAI LLMGuardrail from the spec.
-        assert "def _make_task_guardrail" in agent_py
+        files = _files(await exporter.export(crew, {}))
+        tasks_cfg = yaml.safe_load(files["config/tasks.yaml"])
+        assert tasks_cfg["answer"]["guardrail"] == "Output must cite at least one source"
+        agent_py = files["agent_server/agent.py"]
+        # Runtime reads the guardrail FROM the plan config and builds an LLMGuardrail.
+        assert "def _make_task_guardrail(cfg" in agent_py
+        assert 'cfg.get("guardrail")' in agent_py
         assert "LLMGuardrail(" in agent_py
+        # Nothing is baked into app code anymore.
+        assert "TASK_GUARDRAILS" not in agent_py
 
     @pytest.mark.asyncio
-    async def test_code_guardrail_flagged_not_executed(self, exporter):
+    async def test_code_guardrail_omitted_from_plan(self, exporter):
+        """Code/factory guardrails can't run standalone, so they are omitted from
+        the plan (no guardrail) rather than hardcoded or flagged in the app."""
         crew = self._genie_crew()
         crew["agents"][0]["tools"] = []
         crew["tasks"][0]["guardrail"] = {"type": "word_count", "max": 500}
-        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
-        # Code/factory guardrails are carried but flagged (can't be bundled).
-        assert "'type': 'code'" in agent_py
-        assert "'name': 'word_count'" in agent_py
-        assert "not reproduced in this app" in agent_py
+        tasks_cfg = yaml.safe_load(
+            _files(await exporter.export(crew, {}))["config/tasks.yaml"]
+        )
+        assert "guardrail" not in tasks_cfg["answer"]
 
     @pytest.mark.asyncio
-    async def test_no_guardrail_yields_empty_map(self, exporter):
+    async def test_no_guardrail_in_plan(self, exporter):
+        """A task with no configured guardrail gets none — no guardrail key in the
+        plan and no baked map in the app."""
         crew = self._genie_crew()
         crew["agents"][0]["tools"] = []
-        agent_py = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
-        assert "TASK_GUARDRAILS = {}" in agent_py
+        files = _files(await exporter.export(crew, {}))
+        tasks_cfg = yaml.safe_load(files["config/tasks.yaml"])
+        assert "guardrail" not in tasks_cfg["answer"]
+        assert "TASK_GUARDRAILS" not in files["agent_server/agent.py"]
 
     @pytest.mark.asyncio
     async def test_app_name_is_valid_databricks_name(self, exporter):
@@ -632,8 +655,10 @@ class TestDatabricksAppA2UI:
         assert isinstance(catalog.get("components"), dict) and catalog["components"]
         assert "surfaceKinds" in catalog
         # Core components the composer/renderer rely on.
-        for comp in ("Markdown", "Table", "Chart", "SlideDeck", "Slide", "Mindmap"):
+        for comp in ("Markdown", "Table", "Chart", "SlideDeck", "Slide", "Mindmap", "Quiz"):
             assert comp in catalog["components"]
+        # Quiz is a first-class surface kind (interactive assessment).
+        assert "quiz" in catalog["surfaceKinds"]
 
     @pytest.mark.asyncio
     async def test_a2ui_composer_present(self, exporter, crew_data):
@@ -709,6 +734,48 @@ class TestDatabricksAppA2UI:
         agent = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
         assert 'A2UI_HINT = """"""' in agent
         ast.parse(agent, filename="agent_server/agent.py")
+
+    @pytest.mark.asyncio
+    async def test_a2ui_hint_quiz_keyword(self, exporter):
+        """A quiz/assessment crew biases the composer toward the 'quiz' surface."""
+        crew = {
+            "id": "q1",
+            "name": "Quiz Maker",
+            "agents": [
+                {
+                    "id": "a1",
+                    "name": "Maker",
+                    "role": "r",
+                    "goal": "g",
+                    "backstory": "b",
+                    "llm": "databricks-claude-sonnet-4-5",
+                    "tools": [],
+                }
+            ],
+            "tasks": [
+                {
+                    "id": "t1",
+                    "name": "Build",
+                    "description": "Create a multiple-choice quiz.",
+                    "expected_output": "A 10-question assessment.",
+                    "agent_id": "a1",
+                    "tools": [],
+                }
+            ],
+        }
+        agent = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
+        assert 'A2UI_HINT = """Prefer surfaceKind \'quiz\'."""' in agent
+
+    @pytest.mark.asyncio
+    async def test_a2ui_quiz_surface_wired_in_composer(self, exporter, crew_data):
+        """The composer prompt teaches the 'quiz' surface and the rich-intent
+        heuristic treats quiz keywords as a rich (A2UI) request."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        # System prompt instructs the model to build ONE Quiz component for quizzes.
+        assert "surfaceKind from the USER'S REQUEST" in agent
+        assert "for a quiz/assessment/test use 'quiz'" in agent
+        # Rich-intent vocabulary includes quiz terms so the surface is composed.
+        assert '"quiz", "quizzes", "assessment"' in agent
 
     @pytest.mark.asyncio
     async def test_frontend_bundled_not_cloned(self, exporter, crew_data):
@@ -834,10 +901,22 @@ class TestDatabricksAppModes:
     async def test_mode_drives_reasoning_and_planning(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         # Reasoning on in research + deep; planning only in deep.
-        assert 'reasoning=mode in ("research", "deep")' in agent
+        assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
         assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
         # Research mode caps tool-call loops for speed.
         assert "min(cfg.get(\"max_iter\", 25), FAST_MAX_ITER)" in agent
+
+    @pytest.mark.asyncio
+    async def test_reasoning_env_gated_and_off_for_local(self, exporter, crew_data):
+        """CrewAI agent reasoning is env-toggleable and defaults OFF for local
+        OpenAI-compatible models, which fail its structured StepObservation schema."""
+        files = _files(await exporter.export(crew_data, {}))
+        agent = files["agent_server/agent.py"]
+        assert 'REASONING_ENABLED = os.environ.get("AGENT_REASONING"' in agent
+        assert '_REASONING_DEFAULT = "false" if os.environ.get("LOCAL_LLM_BASE_URL")' in agent
+        # Reasoning is gated by the toggle AND the mode.
+        assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
+        assert "AGENT_REASONING" in files[".env.example"]
 
     @pytest.mark.asyncio
     async def test_fast_deep_tool_split(self, exporter, crew_data):

@@ -187,9 +187,6 @@ class DatabricksAppExporter(BaseExporter):
             "{{PLANNING_LLM}}": repr(crew_data.get("planning_llm") or None),
             "{{REASONING}}": "True" if crew_data.get("reasoning") else "False",
             "{{MANAGER_LLM}}": repr(crew_data.get("manager_llm") or None),
-            # Per-task guardrails (LLM guardrails are reproduced; Kasal built-in
-            # code guardrails are flagged — they can't be bundled standalone).
-            "{{TASK_GUARDRAILS}}": self._task_guardrails(tasks),
             # CrewAI's built-in memory embeds + extracts via OpenAI by default,
             # which fails on a Databricks-only app (OPENAI_API_KEY required). Keep
             # it OFF until the deploy wires a Databricks-backed memory backend
@@ -256,7 +253,7 @@ class DatabricksAppExporter(BaseExporter):
             {
                 "path": "config/tasks.yaml",
                 "content": self.yaml_generator.generate_tasks_yaml(
-                    tasks, agents, include_comments=include_comments
+                    tasks, agents, include_comments=include_comments, include_guardrails=True
                 ),
                 "type": "yaml",
             }
@@ -349,6 +346,7 @@ class DatabricksAppExporter(BaseExporter):
             "dashboard",
         ),
         (("mindmap", "mind map", "concept map", "tree diagram"), "mindmap"),
+        (("quiz", "quizzes", "assessment", "trivia", "exam"), "quiz"),
         (
             ("report", "document", "article", "whitepaper", "summary", "brief"),
             "document",
@@ -413,31 +411,6 @@ class DatabricksAppExporter(BaseExporter):
                 break
         return json.dumps(prompts, ensure_ascii=False)
 
-    def _task_guardrails(self, tasks: List[Dict[str, Any]]) -> str:
-        """Render a ``{task_name: guardrail_spec}`` literal for the GENERATED block.
-
-        Reuses the runtime classification (``code_generator._parse_task_guardrail``):
-        LLM guardrails are reproduced in the app as CrewAI ``LLMGuardrail``; code/
-        factory guardrails are Kasal built-ins that can't be bundled standalone, so
-        they're carried as ``{"type": "code"}`` and flagged at runtime.
-        """
-        from .code_generator import _parse_task_guardrail
-
-        result: Dict[str, Dict[str, Any]] = {}
-        for task in tasks:
-            parsed = _parse_task_guardrail(task)
-            if not parsed:
-                continue
-            name = str(task.get("name", "task")).lower().replace(" ", "_")
-            if parsed[0] == "llm":
-                result[name] = {
-                    "type": "llm",
-                    "description": parsed[1],
-                    "llm_model": parsed[2],
-                }
-            else:
-                result[name] = {"type": "code", "name": parsed[1]}
-        return repr(result)
 
     def _mcp_block(self, mcp_servers: List[Dict[str, Any]]) -> str:
         """Emit (name, url, transport) tuples for the crew's MCP servers.
