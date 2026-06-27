@@ -60,6 +60,18 @@ FAST_MAX_ITER = int(os.environ.get("FAST_MAX_ITER", "5"))
 FAST_MODE_DISABLED_TOOLS = {
     t.strip() for t in os.environ.get("FAST_MODE_DISABLED_TOOLS", "").split(",") if t.strip()
 }
+# CrewAI's agent *reasoning* makes the model emit a structured ``StepObservation``
+# (whose ``suggested_refinements`` must be objects). Weaker / local OpenAI-compatible
+# models often return those as plain strings, so the reasoning step fails Pydantic
+# validation and CrewAI falls back to a "conservative replan" — noisy, slower, and
+# degraded. Default reasoning ON, but OFF when a local model is configured
+# (LOCAL_LLM_BASE_URL set); override explicitly with AGENT_REASONING=true/false.
+_REASONING_DEFAULT = "false" if os.environ.get("LOCAL_LLM_BASE_URL") else "true"
+REASONING_ENABLED = os.environ.get("AGENT_REASONING", _REASONING_DEFAULT).strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
 _CURRENT_MODE: ContextVar[str] = ContextVar("crew_mode", default="")
 
 
@@ -222,9 +234,6 @@ PLANNING_LLM = {{PLANNING_LLM}}  # None, or a model name for the planner
 REASONING = {{REASONING}}  # agents reason/reflect before acting
 MANAGER_LLM = {{MANAGER_LLM}}  # None, or a model name for the hierarchical manager
 MEMORY = {{MEMORY}}  # enable CrewAI memory
-# Per-task output guardrails (task_name -> spec). LLM guardrails are reproduced
-# as CrewAI LLMGuardrail; "code" guardrails are Kasal built-ins not bundled here.
-TASK_GUARDRAILS = {{TASK_GUARDRAILS}}
 # A2UI generative UI: when enabled, the agent's text answer is also composed into
 # a declarative A2UI surface (custom_outputs.a2ui) the frontend renders as rich UI
 # (presentation/dashboard/mindmap/document/...). A2UI_HINT biases the surface kind
@@ -400,7 +409,7 @@ def _build_agents(mcp_by_server: Dict[str, List[Any]] | None = None) -> Dict[str
             # off unless AGENT_MAX_EXECUTION_TIME (or per-agent config) is set.
             max_execution_time=cfg.get("max_execution_time", AGENT_MAX_EXECUTION_TIME),
             # Reasoning in research + deep; planning is added in deep (build_crew).
-            reasoning=mode in ("research", "deep"),
+            reasoning=REASONING_ENABLED and mode in ("research", "deep"),
             # Inject today's date so agents answer "latest/current" correctly.
             inject_date=cfg.get("inject_date", True),
             date_format=cfg.get("date_format", "%Y-%m-%d"),
@@ -408,33 +417,30 @@ def _build_agents(mcp_by_server: Dict[str, List[Any]] | None = None) -> Dict[str
     return agents
 
 
-def _make_task_guardrail(task_name: str):
-    """Build the output guardrail for a task, or None.
+def _make_task_guardrail(cfg: Dict[str, Any]):
+    """Build the output guardrail for a task FROM ITS PLAN (config/tasks.yaml), or None.
 
-    LLM guardrails (configured on the task in Kasal) are reproduced with CrewAI's
-    native ``LLMGuardrail``. Kasal built-in code/factory guardrails can't be
-    bundled standalone, so they're flagged and skipped.
+    The crew plan is the single source of truth: a task with a ``guardrail``
+    description (string) gets a CrewAI ``LLMGuardrail`` reproducing it; a task with
+    no ``guardrail`` in the plan gets none. Edit tasks.yaml to change or remove it —
+    nothing is hardcoded here. (Kasal built-in code/factory guardrails can't run
+    standalone, so the exporter omits them from the plan rather than baking one in.)
     """
-    spec = TASK_GUARDRAILS.get(task_name)
-    if not spec:
+    text = cfg.get("guardrail")
+    if isinstance(text, dict):  # tolerate {description: ...} shape
+        text = text.get("description")
+    if not isinstance(text, str) or not text.strip():
         return None
-    if spec.get("type") == "llm":
-        try:
-            from crewai.tasks.llm_guardrail import LLMGuardrail
+    try:
+        from crewai.tasks.llm_guardrail import LLMGuardrail
 
-            llm = _make_llm(spec.get("llm_model") or MODEL_OVERRIDE or _conversation_model())
-            return LLMGuardrail(
-                description=spec.get("description") or "Validate the task output",
-                llm=llm,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"Could not build LLM guardrail for task '{task_name}': {exc}")
-            return None
-    print(
-        f"Task '{task_name}' has a Kasal built-in guardrail "
-        f"'{spec.get('name')}' that is not reproduced in this app."
-    )
-    return None
+        return LLMGuardrail(
+            description=text.strip(),
+            llm=_make_llm(MODEL_OVERRIDE or _conversation_model()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Could not build LLM guardrail: {exc}")
+        return None
 
 
 def _build_tasks(agents: Dict[str, Agent]) -> list:
@@ -449,7 +455,7 @@ def _build_tasks(agents: Dict[str, Agent]) -> list:
             agent=agent,
             tools=_build_tools(cfg.get("tools", [])),
         )
-        guardrail = _make_task_guardrail(task_name)
+        guardrail = _make_task_guardrail(cfg)
         if guardrail is not None:
             kwargs["guardrail"] = guardrail
         tasks.append(Task(**kwargs))
@@ -664,8 +670,12 @@ def _run_chat(request_text: str) -> str:
                 "it (a different subject, or a task unrelated to this domain), do NOT "
                 "attempt it and do NOT produce its content — briefly and politely say it's "
                 "outside what you cover, then give one example of what you can help with. "
-                "Within the domain, answer directly; use your tools to look up current "
-                "information when it helps, but keep it quick and to the point."
+                "If the user asks you to create a deliverable but the request is too vague "
+                "to do it well (e.g. missing the topic, scope, count, or format), ask ONE "
+                "short clarifying question and STOP — do not guess and do not generate the "
+                "deliverable until they answer. Within the domain and once the request is "
+                "clear, answer directly; use your tools to look up current information when "
+                "it helps, but keep it quick and to the point."
             ),
             llm=_make_llm(_conversation_model()),
             tools=tools,
@@ -789,7 +799,8 @@ def _a2ui_system_prompt(
         "5. Choose surfaceKind from the USER'S REQUEST first: if they ask for a "
         "presentation/slides/deck use 'presentation' with a SlideDeck of Slides; for a "
         "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
-        "mind map use 'mindmap'; otherwise use 'document' with Markdown.\n"
+        "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
+        "component; otherwise use 'document' with Markdown.\n"
         "6. For presentations build a REAL deck of Slides, each with a 'variant': start "
         "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'); "
         "then near the front a variant='stats' slide whose children are 3-4 KeyValue big "
@@ -799,6 +810,14 @@ def _a2ui_system_prompt(
         "'title'); end with a closing slide. Use AS MANY slides as the content needs, give "
         "each slide a DISTINCT focus, and NEVER cram everything onto one slide or repeat the "
         "same structure. Keep ONE consistent theme — the app styles it, so do not specify colors.\n"
+        "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
+        "REAL, answerable questions — each {question, options:[4 distinct strings], "
+        "answer:<0-based index of the correct option>, explanation:<one sentence why>}. "
+        "Produce the ACTUAL questions and options (as many as the request asks for, else "
+        "about 10), NOT a description of a quiz or a grading rubric. VARY which option is "
+        "correct across questions — the answer index must be spread across 0/1/2/3, never "
+        "always the same slot. Put the questions array in dataModel and bind it with "
+        "{\"path\":\"/questions\"}. The app handles selection, scoring and navigation.\n"
         f"Crew purpose: {purpose}\n"
         + (f"The user's request this turn: {query}\n" if query else "")
         + (
@@ -818,6 +837,7 @@ _A2UI_RICH_INTENT = (
     "ppt", "pitch", "dashboard", "kpi", "metric", "metrics", "chart", "charts",
     "graph", "plot", "visualize", "visualise", "visualization", "visualisation",
     "analytics", "mindmap", "mind map", "concept map",
+    "quiz", "quizzes", "assessment", "trivia", "exam", "test my", "test your",
 )
 
 

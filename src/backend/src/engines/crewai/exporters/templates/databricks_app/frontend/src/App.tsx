@@ -39,8 +39,11 @@ interface Session {
 }
 
 // Surface kinds that render as a rich A2UI surface in addition to the text bubble.
-const RICH = new Set(['document', 'presentation', 'dashboard', 'mindmap'])
+const RICH = new Set(['document', 'presentation', 'dashboard', 'mindmap', 'quiz'])
 const STORAGE_KEY = 'kasal.sessions.v1'
+// The quiz keeps its own theme choice (independent of the deck's), using the same
+// palette set as presentations.
+const QUIZ_THEME_KEY = 'kasal.quizTheme'
 
 // Answer depth: Chat = a single fast agent (no crew); Research = the full crew
 // with fast tools; Deep Research = the full crew with deep tools + reasoning.
@@ -126,12 +129,53 @@ function PresentationSurface({ surface }: { surface: Surface }) {
   )
 }
 
-// A rich A2UI surface. Presentations get the themed deck above; dashboards and
-// mindmaps get a PNG snapshot. (Tables carry their own CSV button.)
+// A quiz surface: a theme picker (same palette as decks) wrapping the interactive
+// quiz; the choice persists. Mirrors PresentationSurface, minus the PPTX export.
+function QuizSurface({ surface }: { surface: Surface }) {
+  const [themeId, setThemeId] = useState(
+    () => localStorage.getItem(QUIZ_THEME_KEY) || DEFAULT_DECK_THEME_ID,
+  )
+  useEffect(() => {
+    localStorage.setItem(QUIZ_THEME_KEY, themeId)
+  }, [themeId])
+  const theme = getDeckTheme(themeId)
+  return (
+    <Card className="mt-3 overflow-hidden">
+      <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+              <Palette className="size-3.5" /> Theme: {theme.name}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {DECK_THEMES.map((t) => (
+              <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
+                <span className="size-3 rounded-full" style={{ background: t.accent }} />
+                {t.name}
+                {t.id === themeId && <Check className="ml-auto size-3.5" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="bg-card p-5">
+        <DeckThemeContext.Provider value={theme}>
+          <A2UIRenderer payload={surface} />
+        </DeckThemeContext.Provider>
+      </div>
+    </Card>
+  )
+}
+
+// A rich A2UI surface. Presentations get the themed deck above; quizzes get a
+// themed picker; dashboards and mindmaps get a PNG snapshot. (Tables carry their
+// own CSV button.)
 function RichSurface({ surface }: { surface: Surface }) {
   const ref = useRef<HTMLDivElement>(null)
   const kind = surface.surfaceKind
   if (kind === 'presentation') return <PresentationSurface surface={surface} />
+  if (kind === 'quiz') return <QuizSurface surface={surface} />
   const action =
     kind === 'dashboard' || kind === 'mindmap'
       ? { label: 'PNG', run: () => ref.current && downloadElementPng(ref.current, `${kind}.png`) }
