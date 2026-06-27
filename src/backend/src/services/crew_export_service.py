@@ -110,26 +110,31 @@ class CrewExportService:
             if crew.group_id not in group_context.group_ids:
                 raise ValueError(f"Crew {crew_id} not found")  # Don't reveal existence
 
-        # Get agents
+        # Get agents (collect any MCP servers they explicitly reference)
         agents = []
+        mcp_names: set = set()
         for agent_id in crew.agent_ids:
             agent = await self.agent_repository.get(agent_id)
             if agent:
                 agent_dict = await self._agent_to_dict(agent)
                 agents.append(agent_dict)
+                mcp_names.update(self._extract_mcp_names(getattr(agent, "tool_configs", None)))
 
-        # Get tasks
+        # Get tasks (collect any MCP servers they explicitly reference)
         tasks = []
         for task_id in crew.task_ids:
             task = await self.task_repository.get(task_id)
             if task:
                 task_dict = await self._task_to_dict(task)
                 tasks.append(task_dict)
+                mcp_names.update(self._extract_mcp_names(getattr(task, "tool_configs", None)))
 
-        # Get MCP servers enabled for this workspace. At runtime the engine
-        # auto-attaches all enabled MCP servers to the crew's agents, so the
-        # exported notebook mirrors that by wiring them via MCPServerAdapter.
-        mcp_servers = await self._get_enabled_mcp_servers(group_context)
+        # MCP servers: include ONLY the ones the crew's agents/tasks explicitly
+        # reference (via tool_configs.MCP_SERVERS), mirroring the runtime — which
+        # attaches MCP per agent/task (resolve_effective_mcp_servers with
+        # include_global=False), NOT every enabled workspace server. A crew that
+        # uses no MCP therefore exports with MCP_SERVERS = [].
+        mcp_servers = await self._get_crew_mcp_servers(mcp_names, group_context)
 
         # Unity Catalog target (catalog/schema) + SQL warehouse from the
         # workspace's Databricks configuration, so the deployment cell / app
@@ -197,24 +202,48 @@ class CrewExportService:
             )
         return None, None, None
 
-    async def _get_enabled_mcp_servers(
-        self, group_context: Optional[GroupContext] = None
-    ) -> List[Dict[str, Any]]:
-        """Return the workspace's enabled MCP servers for export (group-aware).
+    @staticmethod
+    def _extract_mcp_names(tool_configs: Optional[Dict[str, Any]]) -> List[str]:
+        """MCP server names referenced in an agent's/task's tool_configs.
 
-        Failures are non-fatal: a crew should still export without MCP if the
-        lookup fails, so any error is logged and an empty list returned.
+        Mirrors MCPIntegration._extract_mcp_servers_from_config: reads
+        ``tool_configs.MCP_SERVERS`` in either the dict ({"servers": [...]}) or
+        legacy list form. Returns [] when none are configured.
         """
+        if not isinstance(tool_configs, dict):
+            return []
+        mcp = tool_configs.get("MCP_SERVERS")
+        if isinstance(mcp, dict):
+            servers = mcp.get("servers", [])
+        elif isinstance(mcp, list):
+            servers = mcp
+        else:
+            return []
+        return [str(s).strip() for s in servers if s]
+
+    async def _get_crew_mcp_servers(
+        self, server_names, group_context: Optional[GroupContext] = None
+    ) -> List[Dict[str, Any]]:
+        """Resolve ONLY the MCP servers the crew explicitly references, for export.
+
+        Mirrors the runtime (which attaches MCP per agent/task via explicit
+        ``tool_configs.MCP_SERVERS``, not every enabled server). Returns [] when
+        the crew uses no MCP. Failures are non-fatal: log and export without MCP.
+        """
+        names = sorted({n for n in (server_names or []) if n})
+        if not names:
+            logger.info("Export: crew references no MCP servers — exporting without MCP")
+            return []
         try:
             from src.services.mcp_service import MCPService
 
             mcp_service = MCPService(self.session)
             group_id = group_context.primary_group_id if group_context else None
-            response = await mcp_service.get_all_servers_effective(
-                group_id, enabled_only=True
-            )
+            resolved = await mcp_service.get_servers_by_names_group_aware(names, group_id)
             servers = []
-            for server in response.servers:
+            for server in resolved:
+                if not getattr(server, "enabled", True):
+                    continue
                 servers.append(
                     {
                         "name": server.name,
@@ -224,13 +253,14 @@ class CrewExportService:
                     }
                 )
             logger.info(
-                f"Export: found {len(servers)} enabled MCP server(s) "
+                f"Export: crew references {len(servers)} MCP server(s) {names} "
                 f"for group {group_id}"
             )
             return servers
         except Exception as e:
             logger.warning(
-                f"Export: could not load MCP servers, exporting without MCP: {e}"
+                f"Export: could not resolve crew MCP servers {names}, "
+                f"exporting without MCP: {e}"
             )
             return []
 
@@ -320,6 +350,10 @@ class CrewExportService:
             "system_template": agent.system_template,
             "prompt_template": agent.prompt_template,
             "response_template": agent.response_template,
+            # MCP servers THIS agent is configured to use (from its tool_configs).
+            # Emitted per-agent so the deployed app attaches each MCP server only
+            # to the agent(s) that reference it — not to every agent.
+            "mcp_servers": self._extract_mcp_names(getattr(agent, "tool_configs", None)),
         }
 
     async def _task_to_dict(self, task) -> Dict[str, Any]:

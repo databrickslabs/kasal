@@ -12,6 +12,7 @@ them and appends the generated crew config so the output is deploy-ready. The
 returned ``files`` list keeps the existing export contract (the router zips it).
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -126,9 +127,7 @@ class DatabricksAppExporter(BaseExporter):
         super().__init__()
         self.yaml_generator = YAMLGenerator()
 
-    async def export(
-        self, crew_data: Dict[str, Any], options: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def export(self, crew_data: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
         crew_name = crew_data.get("name", "crew")
         agents = crew_data.get("agents", [])
         tasks = crew_data.get("tasks", [])
@@ -148,14 +147,8 @@ class DatabricksAppExporter(BaseExporter):
         # Deploy-time selections (set by the one-click deploy); fall back to the
         # workspace's configured catalog/schema for plain downloads.
         experiment_id = options.get("experiment_id") or ""
-        catalog = (
-            options.get("databricks_catalog")
-            or crew_data.get("databricks_catalog")
-            or ""
-        )
-        schema = (
-            options.get("databricks_schema") or crew_data.get("databricks_schema") or ""
-        )
+        catalog = options.get("databricks_catalog") or crew_data.get("databricks_catalog") or ""
+        schema = options.get("databricks_schema") or crew_data.get("databricks_schema") or ""
 
         tools = self._get_unique_tools(agents, tasks)
         sanitized = self._sanitize_name(crew_name)
@@ -168,12 +161,17 @@ class DatabricksAppExporter(BaseExporter):
             "{{APP_NAME}}": app_name,
             "{{BUNDLE_NAME}}": bundle_name,
             "{{DISPLAY_NAME}}": display_name,
-            "{{DESCRIPTION}}": (
-                f"CrewAI crew '{display_name}' deployed as a Databricks App."
-            ),
+            "{{DESCRIPTION}}": (f"CrewAI crew '{display_name}' deployed as a Databricks App."),
             "{{NAME}}": app_name,
             "{{INPUT_KEY}}": input_key,
             "{{CREW_PURPOSE}}": self._crew_purpose(display_name, tasks),
+            # Optional bias for the A2UI composer's surface kind, sniffed from
+            # the crew's purpose/task output specs (empty = composer decides).
+            "{{A2UI_HINT}}": self._a2ui_hint(crew_data, tasks),
+            # Crew-relevant example prompts for the UI empty state, derived from
+            # THIS crew's tasks (crews are generated dynamically — no static
+            # examples). JSON array literal; "[]" hides the suggestion row.
+            "{{STARTER_PROMPTS_JSON}}": self._starter_prompts(crew_data, tasks),
             "{{MODEL_OVERRIDE}}": repr(model_override),
             "{{ENABLE_OBO}}": "True" if include_obo else "False",
             "{{MCP_SERVERS}}": self._mcp_block(mcp_servers),
@@ -222,8 +220,15 @@ class DatabricksAppExporter(BaseExporter):
             if not path.is_file():
                 continue
             rel = path.relative_to(TEMPLATE_DIR).as_posix()
-            # Skip OS/editor junk and Python caches that can sneak into the tree.
-            if path.name in _SKIP_FILES or "__pycache__" in rel.split("/"):
+            # Skip OS/editor junk, Python caches, and frontend deps/build artifacts
+            # (node_modules/dist/...) so they're never templated or shipped — they'd
+            # bloat the export and could crash the UTF-8 read.
+            parts = set(rel.split("/"))
+            if (
+                path.name in _SKIP_FILES
+                or "__pycache__" in parts
+                or parts & {"node_modules", "dist", ".vite", "build", ".turbo"}
+            ):
                 continue
             try:
                 async with aiofiles.open(path, "r", encoding="utf-8") as f:
@@ -262,9 +267,7 @@ class DatabricksAppExporter(BaseExporter):
         if include_custom_tools:
             bundled = await self._bundle_tool_files(tools)
             if bundled:
-                files.append(
-                    {"path": "tools/__init__.py", "content": "", "type": "python"}
-                )
+                files.append({"path": "tools/__init__.py", "content": "", "type": "python"})
                 files.extend(bundled)
 
         return {
@@ -299,9 +302,7 @@ class DatabricksAppExporter(BaseExporter):
         slug = slug[:30].strip("-")
         return slug or "agent-crew"
 
-    def _detect_input_key(
-        self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]
-    ) -> str:
+    def _detect_input_key(self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]) -> str:
         """Infer the crew input key from ``{placeholder}`` tokens, default ``topic``."""
         pattern = re.compile(r"\{(\w+)\}")
         scan = [
@@ -320,15 +321,97 @@ class DatabricksAppExporter(BaseExporter):
         """A short description of what the crew does, for the conversation layer."""
         parts = [display_name]
         for task in tasks:
-            text = (
-                task.get("description") or task.get("expected_output") or ""
-            ).strip()
+            text = (task.get("description") or task.get("expected_output") or "").strip()
             if text:
                 parts.append(text)
         purpose = " ".join(parts)
         # Keep it safe to embed in a triple-quoted Python string and bounded.
         purpose = purpose.replace('"""', "'''").replace("\\", " ")
         return purpose[:600]
+
+    # Keyword -> preferred A2UI surface kind. Ordered: first match wins.
+    _A2UI_KEYWORDS = [
+        (
+            ("presentation", "slides", "slide deck", "deck", "powerpoint", "pitch"),
+            "presentation",
+        ),
+        (
+            (
+                "dashboard",
+                "kpi",
+                "metrics",
+                "chart",
+                "charts",
+                "graph",
+                "plot",
+                "analytics",
+            ),
+            "dashboard",
+        ),
+        (("mindmap", "mind map", "concept map", "tree diagram"), "mindmap"),
+        (
+            ("report", "document", "article", "whitepaper", "summary", "brief"),
+            "document",
+        ),
+    ]
+
+    def _a2ui_hint(self, crew_data: Dict[str, Any], tasks: List[Dict[str, Any]]) -> str:
+        """Bias the A2UI composer's surfaceKind from crew/task metadata.
+
+        Sniffs the crew name + task descriptions/expected_output for content-type
+        keywords; structured task output (output_pydantic/output_json) implies a
+        dashboard. Returns a one-line hint, or "" to let the composer decide.
+        """
+        haystack = " ".join(
+            [str(crew_data.get("name", ""))]
+            + [str(t.get("expected_output", "")) for t in tasks]
+            + [str(t.get("description", "")) for t in tasks]
+        ).lower()
+        for words, kind in self._A2UI_KEYWORDS:
+            if any(w in haystack for w in words):
+                hint = f"Prefer surfaceKind '{kind}'."
+                break
+        else:
+            structured = any(t.get("output_pydantic") or t.get("output_json") for t in tasks)
+            hint = (
+                "The output is structured data; prefer a 'dashboard' with Table/Chart/KeyValue."
+                if structured
+                else ""
+            )
+        # Safe to embed in a triple-quoted Python string.
+        return hint.replace('"""', "'''").replace("\\", " ")
+
+    def _starter_prompts(self, crew_data: Dict[str, Any], tasks: List[Dict[str, Any]]) -> str:
+        """JSON array of crew-relevant example prompts for the UI empty state.
+
+        Derived from the crew's own task descriptions so the suggestions reflect
+        what THIS crew actually does (crews are generated dynamically, so static
+        examples would be misleading). Each prompt is the first sentence of a
+        task, cleaned to a single line and dropped if it contains template
+        placeholders. Returns a JSON array literal (possibly "[]") that is safe
+        to inline directly into the React source.
+        """
+        prompts: List[str] = []
+        seen = set()
+        for task in tasks:
+            text = (task.get("description") or task.get("expected_output") or "").strip()
+            if not text:
+                continue
+            # First sentence, collapsed to a single line.
+            text = re.split(r"(?<=[.!?])\s", text.replace("\n", " "))[0].strip()
+            text = re.sub(r"\s+", " ", text)
+            if not text or "{" in text or "}" in text or len(text) < 12:
+                continue
+            if len(text) > 100:
+                text = text[:100].rsplit(" ", 1)[0].strip() + "…"
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            prompts.append(text)
+            if len(prompts) >= 3:
+                break
+        return json.dumps(prompts, ensure_ascii=False)
 
     def _task_guardrails(self, tasks: List[Dict[str, Any]]) -> str:
         """Render a ``{task_name: guardrail_spec}`` literal for the GENERATED block.
@@ -374,18 +457,14 @@ class DatabricksAppExporter(BaseExporter):
                 transport = "streamable-http"
             else:
                 transport = (
-                    "streamable-http"
-                    if server.get("server_type") == "streamable"
-                    else "sse"
+                    "streamable-http" if server.get("server_type") == "streamable" else "sse"
                 )
             lines.append(f'    ("{name}", "{url}", "{transport}"),')
         return ("\n".join(lines) + "\n") if lines else ""
 
     def _spec_for(self, title: str) -> Optional[Dict[str, Any]]:
         """Return the bundle spec for a tool title (resolving class-name aliases)."""
-        return _BUNDLEABLE_TOOLS.get(title) or _BUNDLEABLE_TOOLS.get(
-            _TOOL_ALIASES.get(title, "")
-        )
+        return _BUNDLEABLE_TOOLS.get(title) or _BUNDLEABLE_TOOLS.get(_TOOL_ALIASES.get(title, ""))
 
     def _tool_imports(self, tools: List[str], include_custom: bool) -> str:
         imports: List[str] = []
@@ -415,9 +494,7 @@ class DatabricksAppExporter(BaseExporter):
             clean[key] = value
         return clean
 
-    def _factory_expr(
-        self, title: str, spec: Dict[str, Any], cfg: Dict[str, Any]
-    ) -> str:
+    def _factory_expr(self, title: str, spec: Dict[str, Any], cfg: Dict[str, Any]) -> str:
         """Build the tool constructor call, baking in the crew's non-secret config."""
         cls = spec["class"]
         if spec.get("special") == "genie":
@@ -459,9 +536,7 @@ class DatabricksAppExporter(BaseExporter):
                 )
         return ("\n".join(lines) + "\n") if lines else ""
 
-    def _extra_deps(
-        self, tools: List[str], include_custom: bool, has_mcp: bool = False
-    ) -> str:
+    def _extra_deps(self, tools: List[str], include_custom: bool, has_mcp: bool = False) -> str:
         seen: set = set()
         lines: List[str] = []
         deps: List[str] = []
@@ -512,9 +587,7 @@ class DatabricksAppExporter(BaseExporter):
             if key not in keys:
                 keys.append(key)
         lines = [f"# {key}=" for key in keys]
-        return (
-            ("\n".join(lines) + "\n") if lines else "# (none required for this crew)\n"
-        )
+        return ("\n".join(lines) + "\n") if lines else "# (none required for this crew)\n"
 
     def _ftype(self, rel_path: str) -> str:
         return _EXT_TYPE.get(Path(rel_path).suffix, "text")
@@ -541,8 +614,6 @@ class DatabricksAppExporter(BaseExporter):
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(f"Could not read bundled tool {filename}: {exc}")
                 continue
-            files.append(
-                {"path": f"tools/{filename}", "content": code, "type": "python"}
-            )
+            files.append({"path": f"tools/{filename}", "content": code, "type": "python"})
             emitted.add(filename)
         return files

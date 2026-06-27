@@ -22,6 +22,33 @@ def get_session_id(request: ResponsesAgentRequest) -> Optional[str]:
     return None
 
 
+def get_user_id(request: ResponsesAgentRequest) -> Optional[str]:
+    """Best-effort stable identifier for the requesting user, used for MLflow
+    session grouping (``mlflow.trace.user``).
+
+    Reads Databricks' forwarded identity headers, which the AgentServer surfaces
+    via ``get_request_headers()``. Like the OBO token, those headers only exist on
+    the request thread — so call this from the async handler BEFORE offloading to
+    ``asyncio.to_thread``. Falls back to a client-supplied ``user_id`` custom input.
+    """
+    try:
+        headers = get_request_headers() or {}
+        identity = (
+            headers.get("x-forwarded-preferred-username")
+            or headers.get("x-forwarded-email")
+            or headers.get("x-forwarded-user")
+        )
+        if identity:
+            return identity
+    except Exception:  # noqa: BLE001 — off the request thread / no context
+        pass
+    if request.custom_inputs and isinstance(request.custom_inputs, dict):
+        uid = request.custom_inputs.get("user_id")
+        if uid:
+            return str(uid)
+    return None
+
+
 def get_databricks_host(workspace_client: Optional[WorkspaceClient] = None) -> Optional[str]:
     workspace_client = workspace_client or WorkspaceClient()
     try:

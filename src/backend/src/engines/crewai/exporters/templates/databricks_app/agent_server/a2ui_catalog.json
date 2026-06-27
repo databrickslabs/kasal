@@ -1,0 +1,232 @@
+{
+  "version": "1.0",
+  "description": "A2UI component catalog — the single contract shared by the backend composer (which is told these components and asked to emit one of these surfaces) and the frontend registry renderer (which has a React component for each). Add a component here + a renderer in the frontend registry to extend; no other code changes are needed.",
+  "surfaceKinds": [
+    "conversation",
+    "document",
+    "presentation",
+    "dashboard",
+    "mindmap"
+  ],
+  "components": {
+    "Markdown": {
+      "summary": "A block of GitHub-flavored markdown (headings, lists, tables, code, links).",
+      "props": {
+        "content": {
+          "type": "string",
+          "binding": true
+        }
+      }
+    },
+    "Text": {
+      "summary": "A short run of plain text.",
+      "props": {
+        "text": {
+          "type": "string",
+          "binding": true
+        },
+        "variant": {
+          "type": "enum",
+          "values": [
+            "body",
+            "caption",
+            "label"
+          ]
+        }
+      }
+    },
+    "Heading": {
+      "summary": "A section heading.",
+      "props": {
+        "text": {
+          "type": "string",
+          "binding": true
+        },
+        "level": {
+          "type": "int",
+          "min": 1,
+          "max": 6
+        }
+      }
+    },
+    "Image": {
+      "summary": "An image with optional caption.",
+      "props": {
+        "src": {
+          "type": "string",
+          "binding": true
+        },
+        "alt": {
+          "type": "string"
+        },
+        "caption": {
+          "type": "string",
+          "binding": true
+        }
+      }
+    },
+    "Card": {
+      "summary": "A titled container that groups child components.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "children": {
+          "type": "componentIds"
+        }
+      }
+    },
+    "KeyValue": {
+      "summary": "A single label/value pair; good for KPIs and metrics.",
+      "props": {
+        "label": {
+          "type": "string",
+          "binding": true
+        },
+        "value": {
+          "type": "string",
+          "binding": true
+        }
+      }
+    },
+    "List": {
+      "summary": "An ordered or unordered list of strings.",
+      "props": {
+        "items": {
+          "type": "array",
+          "binding": true
+        },
+        "ordered": {
+          "type": "bool"
+        }
+      }
+    },
+    "Table": {
+      "summary": "A data table. columns is a list of header strings; rows is a list of row arrays (cell values aligned to columns).",
+      "props": {
+        "columns": {
+          "type": "array"
+        },
+        "rows": {
+          "type": "array",
+          "binding": true
+        }
+      }
+    },
+    "Divider": {
+      "summary": "A horizontal rule / visual separator.",
+      "props": {}
+    },
+    "Row": {
+      "summary": "Lays out children horizontally.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "gap": {
+          "type": "int"
+        }
+      }
+    },
+    "Column": {
+      "summary": "Lays out children vertically.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "gap": {
+          "type": "int"
+        }
+      }
+    },
+    "Grid": {
+      "summary": "Lays out children in a responsive grid with the given column count.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "columns": {
+          "type": "int"
+        }
+      }
+    },
+    "Chart": {
+      "summary": "A chart. data is a list of row objects; xKey names the category field; yKeys names the numeric series field(s).",
+      "props": {
+        "chartType": {
+          "type": "enum",
+          "values": [
+            "bar",
+            "line",
+            "pie"
+          ]
+        },
+        "data": {
+          "type": "array",
+          "binding": true
+        },
+        "xKey": {
+          "type": "string"
+        },
+        "yKeys": {
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "SlideDeck": {
+      "summary": "A presentation container; each child is a Slide. Use as the root for surfaceKind 'presentation'.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        }
+      }
+    },
+    "Slide": {
+      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic.",
+      "props": {
+        "variant": {
+          "type": "string",
+          "enum": [
+            "title",
+            "stats",
+            "quote",
+            "content",
+            "section"
+          ]
+        },
+        "kicker": {
+          "type": "string",
+          "binding": true
+        },
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "subtitle": {
+          "type": "string",
+          "binding": true
+        },
+        "children": {
+          "type": "componentIds"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "Mindmap": {
+      "summary": "A mindmap / tree. root is a node object of shape {id, label, description?, children:[node...]}. Give EVERY node a short label AND a one-sentence 'description' explaining it (shown as a hover tooltip). Use as the root for surfaceKind 'mindmap'.",
+      "props": {
+        "root": {
+          "type": "object",
+          "binding": true,
+          "shape": "{ id, label, description, children: [node...] }"
+        }
+      }
+    }
+  }
+}

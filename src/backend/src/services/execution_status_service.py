@@ -97,11 +97,35 @@ class ExecutionStatusService:
                         # Check if we need to serialize to JSON
                         if isinstance(result, (dict, list)):
                             # For dict or list, store as is (SQLAlchemy handles JSON conversion)
-                            update_data["result"] = result
+                            stored_result = result
                         else:
                             # For other types, convert to string representation
-                            update_data["result"] = str(result)
+                            stored_result = str(result)
 
+                        # Predefined-UI runs end with an A2UI "UI document" as their
+                        # final output, but weaker models wrap it in a prose preamble /
+                        # a ```json fence / double-encoding, or emit mismatched or
+                        # truncated brackets. Normalize it ONCE here — the single
+                        # chokepoint every execution channel funnels result-writes
+                        # through — so the persisted result is clean, canonical A2UI
+                        # JSON instead of being salvaged per-render on every client.
+                        # Content-gated: a non-A2UI result returns None and is stored
+                        # verbatim, and any error leaves the result untouched.
+                        try:
+                            from src.engines.crewai.helpers.ui_document import (
+                                normalize_ui_document,
+                            )
+
+                            canonical = normalize_ui_document(stored_result)
+                            if canonical is not None:
+                                stored_result = canonical
+                        except Exception as norm_err:  # noqa: BLE001 — never affect persistence
+                            logger.warning(
+                                f"[ExecutionStatusService] UI-document normalization "
+                                f"skipped for job_id {job_id}: {norm_err}"
+                            )
+
+                        update_data["result"] = stored_result
                         logger.info(f"[ExecutionStatusService] Successfully processed result for job_id: {job_id}")
                     except Exception as json_err:
                         logger.error(f"[ExecutionStatusService] Error processing result for job_id: {job_id}: {str(json_err)}")

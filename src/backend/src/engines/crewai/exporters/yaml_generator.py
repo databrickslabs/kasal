@@ -31,6 +31,12 @@ class YAMLGenerator:
         """
         agents_config = {}
 
+        # Only emit per-agent ``mcp_servers`` when the crew actually uses MCP, so
+        # non-MCP exports are unchanged. When present, each agent gets exactly the
+        # servers it's configured for ([] = none); the deployed app then attaches
+        # MCP per agent instead of to all agents. (Absent => legacy all-agents.)
+        crew_uses_mcp = any(a.get('mcp_servers') for a in agents)
+
         for agent in agents:
             agent_name = agent.get('name', 'agent').lower().replace(' ', '_')
 
@@ -60,6 +66,9 @@ class YAMLGenerator:
             for field in optional_fields:
                 if field in agent and agent[field] is not None:
                     agent_config[field] = agent[field]
+
+            if crew_uses_mcp:
+                agent_config['mcp_servers'] = agent.get('mcp_servers', [])
 
             agents_config[agent_name] = agent_config
 
