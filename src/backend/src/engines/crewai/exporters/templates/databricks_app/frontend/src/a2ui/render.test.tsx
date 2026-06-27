@@ -50,6 +50,27 @@ describe('A2UIRenderer', () => {
     expect(out).toContain('Supervised')
   })
 
+  it('renders a quiz with its first question and options from bindings', () => {
+    const out = html({
+      surfaceKind: 'quiz',
+      root: 'q',
+      components: [{ id: 'q', component: 'Quiz', title: 'ML Quiz', questions: { path: '/qs' } }],
+      dataModel: {
+        qs: [
+          {
+            question: 'What is supervised learning?',
+            options: ['Labeled data', 'No data', 'Only images', 'Random'],
+            answer: 0,
+          },
+        ],
+      },
+    })
+    expect(out).toContain('ML Quiz')
+    expect(out).toContain('What is supervised learning?')
+    expect(out).toContain('Labeled data')
+    expect(out).toContain('Question 1 of 1')
+  })
+
   it('falls back to Unsupported for unknown components', () => {
     const out = html({
       surfaceKind: 'document',

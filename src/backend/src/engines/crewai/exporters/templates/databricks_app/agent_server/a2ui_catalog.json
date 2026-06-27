@@ -6,7 +6,8 @@
     "document",
     "presentation",
     "dashboard",
-    "mindmap"
+    "mindmap",
+    "quiz"
   ],
   "components": {
     "Markdown": {
@@ -225,6 +226,20 @@
           "type": "object",
           "binding": true,
           "shape": "{ id, label, description, children: [node...] }"
+        }
+      }
+    },
+    "Quiz": {
+      "summary": "An interactive multiple-choice quiz / assessment. questions is a list of REAL questions, each of shape {question, options:[4 strings], answer:<0-based index of the correct option>, explanation?}. The renderer handles option selection, immediate right/wrong reveal, scoring and navigation — supply ONLY the question data, never a description of a quiz. Use as the root for surfaceKind 'quiz'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "questions": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ question, options: [string], answer: int, explanation }]"
         }
       }
     }

@@ -343,6 +343,79 @@ class TestGenerateTasksYaml:
         assert 'my_research_task' in parsed
 
 
+class TestGenerateTasksYamlGuardrails:
+    """Tests for the opt-in ``include_guardrails`` flag on generate_tasks_yaml.
+
+    The Databricks-App export turns this on so the deployed app reads each task's
+    LLM guardrail from tasks.yaml (defined => used, absent => none). Other
+    exporters leave it off, so the default must NOT emit guardrails.
+    """
+
+    @pytest.fixture
+    def generator(self):
+        return YAMLGenerator()
+
+    @pytest.fixture
+    def agents(self):
+        return [{'id': 'agent-1', 'name': 'Research Agent', 'role': 'Researcher'}]
+
+    def _task(self, **extra):
+        task = {
+            'id': 'task-1',
+            'name': 'Research Task',
+            'description': 'Research the topic',
+            'expected_output': 'A report',
+            'agent_id': 'agent-1',
+        }
+        task.update(extra)
+        return task
+
+    def test_llm_guardrail_emitted_when_enabled(self, generator, agents):
+        """A task's LLM guardrail description lands in tasks.yaml when opted in."""
+        task = self._task(guardrail={'description': 'Output must cite sources.'})
+        result = generator.generate_tasks_yaml(
+            tasks=[task], agents=agents, include_comments=False, include_guardrails=True
+        )
+        parsed = yaml.safe_load(result)
+        assert parsed['research_task']['guardrail'] == 'Output must cite sources.'
+
+    def test_llm_guardrail_from_llm_guardrail_field(self, generator, agents):
+        """The dedicated ``llm_guardrail`` shape is also reproduced as a string."""
+        task = self._task(llm_guardrail={'description': 'No profanity.'})
+        result = generator.generate_tasks_yaml(
+            tasks=[task], agents=agents, include_comments=False, include_guardrails=True
+        )
+        parsed = yaml.safe_load(result)
+        assert parsed['research_task']['guardrail'] == 'No profanity.'
+
+    def test_default_does_not_emit_guardrail(self, generator, agents):
+        """Off by default — other exporters keep their own guardrail handling."""
+        task = self._task(guardrail={'description': 'Output must cite sources.'})
+        result = generator.generate_tasks_yaml(
+            tasks=[task], agents=agents, include_comments=False
+        )
+        parsed = yaml.safe_load(result)
+        assert 'guardrail' not in parsed['research_task']
+
+    def test_code_guardrail_omitted_even_when_enabled(self, generator, agents):
+        """Kasal built-in code/factory guardrails can't run standalone, so they are
+        omitted (no guardrail) rather than baked into the plan."""
+        task = self._task(guardrail={'type': 'minimum_number'})
+        result = generator.generate_tasks_yaml(
+            tasks=[task], agents=agents, include_comments=False, include_guardrails=True
+        )
+        parsed = yaml.safe_load(result)
+        assert 'guardrail' not in parsed['research_task']
+
+    def test_no_guardrail_in_plan_stays_absent(self, generator, agents):
+        """A task with no guardrail gets none, even when the flag is on."""
+        result = generator.generate_tasks_yaml(
+            tasks=[self._task()], agents=agents, include_comments=False, include_guardrails=True
+        )
+        parsed = yaml.safe_load(result)
+        assert 'guardrail' not in parsed['research_task']
+
+
 class TestAgentIdMapping:
     """Tests for agent ID to name mapping logic."""
 
