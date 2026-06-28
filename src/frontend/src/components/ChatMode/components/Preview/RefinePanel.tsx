@@ -181,6 +181,14 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
     fontWeight: 600,
   };
 
+  // Primary AI button styling. A disabled button must read as intentionally
+  // inactive (neutral grey), NOT as a faded version of the accent — a saturated
+  // red at 40% opacity smears into a washed-out pink that looks broken.
+  const primaryBtnStyle = (enabled: boolean): React.CSSProperties =>
+    enabled
+      ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+      : { backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)', borderColor: 'var(--border-color)' };
+
   return (
     <div
       className="flex flex-col gap-4 px-4 py-3.5 flex-shrink-0 overflow-auto"
@@ -289,8 +297,8 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
           <button
             onClick={submitContent}
             disabled={!directive}
-            className="self-start mt-0.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
+            className="self-start mt-0.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-colors hover:opacity-90 disabled:cursor-not-allowed"
+            style={primaryBtnStyle(!!directive)}
             title={directive ? 'Regenerate with these changes' : 'Change a setting above to enable'}
           >
             Update with AI
@@ -316,8 +324,8 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
           <button
             onClick={submitFreeText}
             disabled={!freeText.trim()}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
+            className="px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-colors hover:opacity-90 disabled:cursor-not-allowed"
+            style={primaryBtnStyle(!!freeText.trim())}
           >
             Send
           </button>

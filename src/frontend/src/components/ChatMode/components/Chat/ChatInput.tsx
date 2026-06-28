@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import McpPicker from './McpPicker';
@@ -121,6 +121,51 @@ interface ChatInputProps {
 
 const attachmentsKey = (sessionId: string) => `kasal-chat-attachments-${sessionId}`;
 
+// Width of the composer pop-up menus (matches Tailwind `w-72` = 18rem).
+const MENU_WIDTH = 288;
+
+/**
+ * Anchored fixed-position style for a composer pop-up menu.
+ *
+ * The pills sit inside the chat's `overflow-hidden` layout containers (the
+ * <main> column + the chat scroll wrapper). An `absolute` menu that extends
+ * past those bounds — which happens once the sidebar narrows <main> — gets
+ * CLIPPED, so the menu appears to vanish "behind" the sidebar. `position: fixed`
+ * is positioned against the viewport and is NOT clipped by an ancestor's
+ * overflow, while keeping the menu a DOM child of the picker wrapper (so the
+ * outside-click `contains()` checks and the #kasal-chat-root theme/Tailwind
+ * scope both still apply). We compute the coords from the trigger: right-edge
+ * aligned to it, opening up or down per `placement`, clamped to the viewport.
+ */
+function useAnchoredFixedStyle(
+  open: boolean,
+  anchorRef: React.RefObject<HTMLElement>,
+  placement: 'up' | 'down',
+): React.CSSProperties {
+  const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed' });
+  useLayoutEffect(() => {
+    const el = anchorRef.current;
+    if (!open || !el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+      setStyle(
+        placement === 'down'
+          ? { position: 'fixed', left, top: r.bottom + 8, width: MENU_WIDTH }
+          : { position: 'fixed', left, bottom: window.innerHeight - r.top + 8, width: MENU_WIDTH },
+      );
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open, placement, anchorRef]);
+  return style;
+}
+
 const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   disabled = false,
@@ -138,12 +183,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onRunPending,
   menuPlacement = 'up',
 }) => {
-  // Tailwind classes for a pop-up menu opening up (above) or down (below) its
-  // trigger, matching the input's position on screen.
-  const menuPosClass =
-    menuPlacement === 'down'
-      ? 'top-full mt-2 animate-slide-down'
-      : 'bottom-full mb-2 animate-slide-up';
+  // Entrance animation for the pop-up menus, matching the open direction. The
+  // menus are positioned with `position: fixed` (see useAnchoredFixedStyle) so
+  // they escape the chat's overflow-hidden containers; this class only drives the
+  // slide-in motion, not the placement.
+  const menuAnimClass =
+    menuPlacement === 'down' ? 'animate-slide-down' : 'animate-slide-up';
   const [value, setValue] = useState('');
   const [showCommands, setShowCommands] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -158,6 +203,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const modePickerRef = useRef<HTMLDivElement>(null);
   const memoryPickerRef = useRef<HTMLDivElement>(null);
+  // Viewport-anchored fixed coords for each pop-up menu (escape overflow-hidden).
+  const modeMenuStyle = useAnchoredFixedStyle(showModePicker, modePickerRef, menuPlacement);
+  const memoryMenuStyle = useAnchoredFixedStyle(showMemoryPicker, memoryPickerRef, menuPlacement);
+  const modelMenuStyle = useAnchoredFixedStyle(showModelPicker, modelPickerRef, menuPlacement);
   // Answer mode (chat|research|deep) lives in the store so the choice persists
   // and is consistent across ChatInput's dual mount (read store-direct, not props).
   const chatModeType = useExecutionStore((s) => s.chatModeType);
@@ -564,19 +613,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </div>
         )}
 
-        {/* Top row — textarea with sparkle icon */}
-        <div className="flex items-start gap-3 px-5 pt-4 pb-1">
-          {/* Sparkle icon */}
-          <svg
-            className="w-5 h-5 mt-0.5 flex-shrink-0"
-            style={{ color: 'var(--text-muted)' }}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
-          </svg>
+        {/* Top row — textarea */}
+        <div className="flex items-start px-5 pt-4 pb-1">
           <textarea
             ref={inputRef}
             value={value}
@@ -671,7 +709,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 aria-label={`Answer mode: ${activeMode.label}`}
                 title={activeMode.hint}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
-                style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+                style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
@@ -689,8 +727,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               </button>
               {showModePicker && (
                 <div
-                  className={`kasal-popover absolute ${menuPosClass} right-0 w-72 rounded-xl overflow-hidden z-50`}
-                  style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
+                  className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
+                  style={{ ...modeMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
                 >
                   <div className="px-3 py-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -743,8 +781,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
                 style={{
                   color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
-                  backgroundColor: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'transparent',
+                  border: 'none',
                 }}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -766,8 +804,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               </button>
               {showMemoryPicker && (
                 <div
-                  className={`kasal-popover absolute ${menuPosClass} right-0 w-72 rounded-xl overflow-hidden z-50`}
-                  style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
+                  className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
+                  style={{ ...memoryMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
                 >
                   <div className="px-3 py-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -814,8 +852,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
                   style={{
                     color: 'var(--text-secondary)',
-                    backgroundColor: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    border: 'none',
                   }}
                   title="Select model"
                 >
@@ -845,8 +883,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 </button>
                 {showModelPicker && (
                   <div
-                    className={`kasal-popover absolute ${menuPosClass} right-0 w-72 rounded-xl overflow-hidden z-50`}
-                    style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
+                    className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
+                    style={{ ...modelMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
                   >
                     <div className="px-3 py-2">
                       <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
