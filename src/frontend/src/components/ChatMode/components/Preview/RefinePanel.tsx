@@ -73,12 +73,22 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [fineOpen, setFineOpen] = useState(false);
+  // Which preset is currently applied (for the selected-chip highlight). Seeded
+  // by matching the artifact's accent; cleared when a fine-tune edit diverges.
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(
+    () => THEME_PRESETS.find((p) => p.theme.accent === seedTheme(currentTheme).accent)?.key ?? null,
+  );
   // Only the content options the user actually changed (so the AI directive is
   // scoped to their intent rather than restating every default).
   const [changed, setChanged] = useState<Record<string, OptionValue>>({});
   const [freeText, setFreeText] = useState('');
 
   const specs = useMemo(() => optionSpecs(deliverable), [deliverable]);
+  // Split content options so the layout reads as a tidy form: labelled fields
+  // (number / select) align in a 2-column grid; on/off switches stack as a clean
+  // checklist below — instead of one flex-wrap row that spreads them unevenly.
+  const fieldSpecs = useMemo(() => specs.filter((s) => s.kind !== 'switch'), [specs]);
+  const switchSpecs = useMemo(() => specs.filter((s) => s.kind === 'switch'), [specs]);
 
   // Debounce the live "apply" so dragging a color picker doesn't thrash the
   // store / IndexedDB write (and re-render the heavy renderer) on every
@@ -104,6 +114,7 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
   const patchDraft = (patch: Partial<Theme>) => {
     const next = { ...draftRef.current, ...patch };
     setDraft(next);
+    setSelectedPreset(null); // a manual color/font edit no longer matches a preset
     applyDebounced(next);
   };
 
@@ -131,11 +142,12 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
     const value = optionVal(changed, s);
     if (s.kind === 'switch') {
       return (
-        <label key={s.key} className="flex items-center gap-2 cursor-pointer text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <label key={s.key} className="flex items-center gap-2.5 cursor-pointer text-[13px] py-0.5" style={{ color: 'var(--text-secondary)' }}>
           <input
             type="checkbox"
             checked={value as boolean}
             onChange={(e) => setChangedOpt(s.key, e.target.checked)}
+            className="w-4 h-4 flex-shrink-0 cursor-pointer"
             style={{ accentColor: 'var(--accent)' }}
           />
           {s.label}
@@ -144,7 +156,7 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
     }
     if (s.kind === 'number') {
       return (
-        <label key={s.key} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <label key={s.key} className="flex flex-col gap-1 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
           {s.label}
           <input
             type="number"
@@ -153,19 +165,19 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
             max={s.max}
             step={s.step ?? 1}
             onChange={(e) => setChangedOpt(s.key, Number(e.target.value))}
-            className="w-20 rounded-md px-2 py-1 text-sm outline-none"
+            className="w-full rounded-md px-2.5 py-1.5 text-sm outline-none"
             style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
           />
         </label>
       );
     }
     return (
-      <label key={s.key} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+      <label key={s.key} className="flex flex-col gap-1 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
         {s.label}
         <select
           value={value as string}
           onChange={(e) => setChangedOpt(s.key, e.target.value)}
-          className="rounded-md px-2 py-1 text-sm outline-none"
+          className="w-full rounded-md px-2.5 py-1.5 text-sm outline-none"
           style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
         >
           {s.choices.map((c) => (
@@ -181,43 +193,73 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
     fontWeight: 600,
   };
 
-  // Primary AI button styling. A disabled button must read as intentionally
-  // inactive (neutral grey), NOT as a faded version of the accent — a saturated
-  // red at 40% opacity smears into a washed-out pink that looks broken.
+  // Primary AI button styling. Enabled → a solid accent CTA. Disabled → a clean
+  // borderless ghost (no fill, no box) so it reads as inactive without the ugly
+  // grey/white square a filled-but-disabled button left on the panel; NOT a faded
+  // accent either (a red at low opacity smears into a washed-out pink).
   const primaryBtnStyle = (enabled: boolean): React.CSSProperties =>
     enabled
       ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
-      : { backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)', borderColor: 'var(--border-color)' };
+      : { backgroundColor: 'transparent', color: 'var(--text-muted)', borderColor: 'transparent' };
 
   return (
     <div
-      className="flex flex-col gap-4 px-4 py-3.5 flex-shrink-0 overflow-auto"
+      className="flex flex-col px-5 py-4 flex-shrink-0 overflow-auto"
       style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', maxHeight: '60vh' }}
       data-testid="refine-panel"
     >
-      <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-        Customize this <span style={{ fontWeight: 700 }}>{deliverableLabel}</span>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+          Customize this <span style={{ fontWeight: 700 }}>{deliverableLabel}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close customize"
+          title="Close"
+          className="w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:opacity-70 flex-shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* ---- Look: instant, deterministic ---- */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide" style={sectionLabel}>Look</span>
+          <span className="text-[11px] uppercase tracking-wider" style={sectionLabel}>Look</span>
           <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Applies instantly</span>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {THEME_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => applyPreset({ ...p.theme })}
-              className="flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium transition-colors hover:opacity-80"
-              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
-              title={`Apply the ${p.label} style`}
-            >
-              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: p.theme.accent, border: '1px solid rgba(128,128,128,0.4)' }} />
-              {p.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-1">
+          {THEME_PRESETS.map((p) => {
+            const active = selectedPreset === p.key;
+            return (
+              <button
+                key={p.key}
+                onClick={() => {
+                  setSelectedPreset(p.key);
+                  applyPreset({ ...p.theme });
+                }}
+                className="flex items-center gap-2 h-8 px-2.5 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
+                style={{
+                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  backgroundColor: active ? 'var(--bg-active-chip)' : 'transparent',
+                  boxShadow: active ? 'inset 0 0 0 1.5px var(--accent)' : 'none',
+                }}
+                title={`Apply the ${p.label} style`}
+                aria-pressed={active}
+              >
+                <span
+                  className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: p.theme.accent, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.18)' }}
+                />
+                {p.label}
+              </button>
+            );
+          })}
         </div>
 
         <button
@@ -281,9 +323,12 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
 
       {/* ---- Content: needs AI ---- */}
       {specs.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div
+          className="flex flex-col gap-3 mt-4 pt-4"
+          style={{ borderTop: '1px solid var(--border-color)' }}
+        >
           <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide" style={sectionLabel}>Content</span>
+            <span className="text-[11px] uppercase tracking-wider" style={sectionLabel}>Content</span>
             <span
               className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide"
               style={{ color: 'var(--accent)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
@@ -291,13 +336,20 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
               Uses AI
             </span>
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-2.5 items-end">
-            {specs.map(renderOptionControl)}
-          </div>
+          {fieldSpecs.length > 0 && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {fieldSpecs.map(renderOptionControl)}
+            </div>
+          )}
+          {switchSpecs.length > 0 && (
+            <div className="flex flex-col gap-1">
+              {switchSpecs.map(renderOptionControl)}
+            </div>
+          )}
           <button
             onClick={submitContent}
             disabled={!directive}
-            className="self-start mt-0.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-colors hover:opacity-90 disabled:cursor-not-allowed"
+            className="self-start mt-1 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-colors hover:opacity-90 disabled:cursor-not-allowed"
             style={primaryBtnStyle(!!directive)}
             title={directive ? 'Regenerate with these changes' : 'Change a setting above to enable'}
           >
@@ -307,8 +359,11 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
       )}
 
       {/* ---- Free-text refine (always available) ---- */}
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Or describe a change</span>
+      <div
+        className="flex flex-col gap-1.5 mt-4 pt-4"
+        style={{ borderTop: '1px solid var(--border-color)' }}
+      >
+        <span className="text-[11px] uppercase tracking-wider" style={sectionLabel}>Describe a change</span>
         <div className="flex items-center gap-2">
           <input
             value={freeText}
