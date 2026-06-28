@@ -54,11 +54,56 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             await self.session.rollback()
             raise
 
+    async def get_recent_by_session_and_group(
+        self,
+        session_id: str,
+        group_ids: List[str],
+        limit: int = 120,
+    ) -> List[ChatHistory]:
+        """Get the MOST RECENT ``limit`` messages for a session, oldest→newest.
+
+        ``get_by_session_and_group(page=0)`` returns the OLDEST page (ascending +
+        offset 0), which silently drops recent turns once a session exceeds
+        ``per_page`` — wrong for cross-turn recall, where we need the latest
+        window. This selects the newest ``limit`` rows (descending) and reverses
+        them back to chronological order so callers can read top→bottom.
+
+        Args:
+            session_id: Chat session identifier.
+            group_ids: Allowed group IDs (tenant isolation).
+            limit: Max messages to return (the most recent ones).
+
+        Returns:
+            Up to ``limit`` ChatHistory rows, ordered oldest→newest.
+        """
+        if not group_ids:
+            return []
+
+        try:
+            query = (
+                select(self.model)
+                .where(
+                    and_(
+                        self.model.session_id == session_id,
+                        self.model.group_id.in_(group_ids),
+                    )
+                )
+                .order_by(self.model.timestamp.desc())
+                .limit(limit)
+            )
+            result = await self.session.execute(query)
+            rows = list(result.scalars().all())
+            rows.reverse()  # newest-first query → chronological for the caller
+            return rows
+        except Exception:
+            await self.session.rollback()
+            raise
+
     async def get_sessions_by_group(
-        self, 
-        group_ids: List[str], 
+        self,
+        group_ids: List[str],
         user_id: Optional[str] = None,
-        page: int = 0, 
+        page: int = 0,
         per_page: int = 20
     ) -> List[dict]:
         """

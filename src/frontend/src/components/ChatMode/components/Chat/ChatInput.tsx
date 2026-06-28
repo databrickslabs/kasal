@@ -30,6 +30,8 @@ export interface SendMeta {
   dispatchSuffix?: string;
   /** Attached knowledge-file names, shown as chips on the user's message. */
   attachments?: string[];
+  /** Attached knowledge-file PATHS — scopes the knowledge search to these files. */
+  knowledgeFilePaths?: string[];
 }
 
 function formatBytes(bytes: number): string {
@@ -64,12 +66,13 @@ const MODES = [
 
 // Memory modes shown in the composer's memory pill — same labelled-dropdown
 // pattern as the answer-mode pill so the three states are explicit (no blind
-// cycling). Mapped to the (memoryEnabled, workspaceMemory) prop pair below.
-type MemoryModeId = 'workspace' | 'session' | 'off';
+// cycling). Mapped to the single `memoryEnabled` flag below.
+//   workspace = semantic memory ON (workspace/group-scoped recall + this chat's history)
+//   session   = semantic memory OFF — recall comes ONLY from this chat's history
+type MemoryModeId = 'workspace' | 'session';
 const MEMORY_MODES: { id: MemoryModeId; label: string; short: string; hint: string }[] = [
   { id: 'workspace', label: 'Workspace memory', short: 'Workspace', hint: 'Recall context across the whole workspace' },
-  { id: 'session', label: 'Session memory', short: 'Session', hint: 'Recall only this chat session' },
-  { id: 'off', label: 'No memory', short: 'Off', hint: 'Run without memory — nothing recalled or persisted' },
+  { id: 'session', label: 'Session memory', short: 'Session', hint: "Recall only this chat's history — no workspace memory" },
 ];
 
 // NOTE: there is deliberately NO per-message output-format picker. The
@@ -93,16 +96,11 @@ interface ChatInputProps {
   /** Stop the running execution (only meaningful while isExecuting). */
   onStopExecution?: () => void;
   /**
-   * "Workspace memory" toggle — owned by the parent so it persists across the
-   * empty→conversation input swap and remounts. true (default) = recall
-   * workspace-wide; false = restrict recall to this chat session only.
-   */
-  workspaceMemory?: boolean;
-  onWorkspaceMemoryChange?: (value: boolean) => void;
-  /**
-   * "No memory" toggle — owned by the parent for the same persistence reason.
-   * true (default) = crews keep memory (scope governed by workspaceMemory);
-   * false = agents run without memory (nothing recalled or persisted).
+   * Memory mode toggle — owned by the parent so it persists across the
+   * empty→conversation input swap and remounts.
+   *   true  (default) = "Workspace memory": semantic memory on (workspace-scoped)
+   *   false           = "Session memory": semantic memory off; recall comes only
+   *                     from this chat's history (the light-agent preamble).
    */
   memoryEnabled?: boolean;
   onMemoryEnabledChange?: (value: boolean) => void;
@@ -175,8 +173,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   sessionId,
   isExecuting = false,
   isGenerating = false,
-  workspaceMemory = true,
-  onWorkspaceMemoryChange,
   memoryEnabled = true,
   onMemoryEnabledChange,
   pendingRunLabel,
@@ -193,7 +189,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [showCommands, setShowCommands] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showModePicker, setShowModePicker] = useState(false);
-  const [showMemoryPicker, setShowMemoryPicker] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -202,31 +197,20 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const modePickerRef = useRef<HTMLDivElement>(null);
-  const memoryPickerRef = useRef<HTMLDivElement>(null);
   // Viewport-anchored fixed coords for each pop-up menu (escape overflow-hidden).
   const modeMenuStyle = useAnchoredFixedStyle(showModePicker, modePickerRef, menuPlacement);
-  const memoryMenuStyle = useAnchoredFixedStyle(showMemoryPicker, memoryPickerRef, menuPlacement);
   const modelMenuStyle = useAnchoredFixedStyle(showModelPicker, modelPickerRef, menuPlacement);
   // Answer mode (chat|research|deep) lives in the store so the choice persists
   // and is consistent across ChatInput's dual mount (read store-direct, not props).
   const chatModeType = useExecutionStore((s) => s.chatModeType);
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const activeMode = MODES.find((m) => m.id === chatModeType) ?? MODES[0];
-  // Current memory mode derived from the (memoryEnabled, workspaceMemory) pair.
-  const memoryModeId: MemoryModeId = !memoryEnabled
-    ? 'off'
-    : workspaceMemory
-      ? 'workspace'
-      : 'session';
+  // Memory mode is a single binary toggle: workspace (semantic memory on) vs
+  // session (semantic memory off — recall comes only from this chat's history).
+  const memoryModeId: MemoryModeId = memoryEnabled ? 'workspace' : 'session';
   const activeMemory = MEMORY_MODES.find((m) => m.id === memoryModeId) ?? MEMORY_MODES[0];
-  const selectMemoryMode = (id: MemoryModeId) => {
-    if (id === 'off') {
-      onMemoryEnabledChange?.(false);
-    } else {
-      onMemoryEnabledChange?.(true);
-      onWorkspaceMemoryChange?.(id === 'workspace');
-    }
-    setShowMemoryPicker(false);
+  const toggleMemoryMode = () => {
+    onMemoryEnabledChange?.(!memoryEnabled);
     inputRef.current?.focus();
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -371,19 +355,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [showModePicker]);
 
-  // Close the memory picker on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (memoryPickerRef.current && !memoryPickerRef.current.contains(e.target as Node)) {
-        setShowMemoryPicker(false);
-      }
-    };
-    if (showMemoryPicker) {
-      document.addEventListener('mousedown', handleClick);
-      return () => document.removeEventListener('mousedown', handleClick);
-    }
-  }, [showMemoryPicker]);
-
   const handleSend = () => {
     const trimmed = value.trim();
     if (!trimmed || disabled || isUploading) return;
@@ -398,10 +369,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
     let dispatchSuffix = '';
     const tools: string[] = [];
     let attachments: string[] | undefined;
+    let knowledgeFilePaths: string[] | undefined;
 
     // Attach uploaded knowledge: include the knowledge-search tool + a steering note.
     if (!isSlash && readyAttachments.length > 0) {
       attachments = readyAttachments.map((a) => a.name);
+      // Scope the knowledge search to THESE files so the run grounds on the
+      // just-uploaded document instead of group-wide search picking another file.
+      knowledgeFilePaths = readyAttachments
+        .map((a) => a.path)
+        .filter((p): p is string => Boolean(p));
       tools.push(KNOWLEDGE_TOOL);
       dispatchSuffix += `\n\n[Knowledge files attached: ${attachments.join(', ')}. Use the ${KNOWLEDGE_TOOL} to search the uploaded documents before answering.]`;
     }
@@ -422,6 +399,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       ...(tools.length ? { tools } : {}),
       ...(dispatchSuffix ? { dispatchSuffix } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(knowledgeFilePaths && knowledgeFilePaths.length ? { knowledgeFilePaths } : {}),
     };
     if (Object.keys(meta).length) {
       onSend(trimmed, meta);
@@ -702,7 +680,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 type="button"
                 onClick={() => {
                   setShowModePicker(!showModePicker);
-                  setShowMemoryPicker(false);
                   setShowModelPicker(false);
                   setShowCommands(false);
                 }}
@@ -763,78 +740,32 @@ const ChatInput: React.FC<ChatInputProps> = ({
               )}
             </div>
 
-            {/* Memory pill + dropdown — same labelled-dropdown pattern as the
-                answer mode (no blind cycling): Workspace / Session / No memory.
+            {/* Memory toggle — a single button that flips between Workspace
+                memory (semantic memory on) and Session memory (chat-history only).
                 Owned by the parent (props) so the choice survives the
                 empty→conversation remount. */}
-            <div className="relative" ref={memoryPickerRef}>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMemoryPicker(!showMemoryPicker);
-                  setShowModePicker(false);
-                  setShowModelPicker(false);
-                  setShowCommands(false);
-                }}
-                aria-label={`Memory mode: ${activeMemory.label}`}
-                title={activeMemory.hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-                style={{
-                  color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                }}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                  {!memoryEnabled && (
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
-                  )}
-                </svg>
-                <span>{activeMemory.short}</span>
-                <svg
-                  className={`w-3 h-3 transition-transform ${showMemoryPicker ? 'rotate-180' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </button>
-              {showMemoryPicker && (
-                <div
-                  className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
-                  style={{ ...memoryMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
-                >
-                  <div className="px-3 py-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                      Memory
-                    </span>
-                  </div>
-                  <div className="px-1.5 pb-1.5">
-                    {MEMORY_MODES.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => selectMemoryMode(m.id)}
-                        aria-label={`Memory mode: ${m.label}`}
-                        className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${m.id === memoryModeId ? 'bg-[var(--bg-active-chip)]' : 'hover:bg-[var(--bg-rail-hover)]'}`}
-                      >
-                        <div>
-                          <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
-                          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.hint}</div>
-                        </div>
-                        {m.id === memoryModeId && (
-                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={memoryEnabled}
+              onClick={toggleMemoryMode}
+              aria-label={`Memory mode: ${activeMemory.label}`}
+              title={activeMemory.hint}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+              style={{
+                color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
+                backgroundColor: 'transparent',
+                border: 'none',
+              }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                {!memoryEnabled && (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
+                )}
+              </svg>
+              <span>{activeMemory.label}</span>
+            </button>
 
             {/* Model pill + dropdown — same anchored up/down pattern as the
                 answer-mode & memory pills: opens DOWN when the composer is
@@ -846,7 +777,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   onClick={() => {
                     setShowModelPicker(!showModelPicker);
                     setShowModePicker(false);
-                    setShowMemoryPicker(false);
                     setShowCommands(false);
                   }}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"

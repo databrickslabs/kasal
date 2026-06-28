@@ -35,6 +35,8 @@ export async function dispatch(
       request.mcp_servers = runSettings.mcp_servers;
     if (runSettings.agentbricks_endpoints && runSettings.agentbricks_endpoints.length > 0)
       request.agentbricks_endpoints = runSettings.agentbricks_endpoints;
+    if (runSettings.knowledge_file_paths && runSettings.knowledge_file_paths.length > 0)
+      request.knowledge_file_paths = runSettings.knowledge_file_paths;
     if (runSettings.chat_mode_type) request.chat_mode_type = runSettings.chat_mode_type;
   }
 

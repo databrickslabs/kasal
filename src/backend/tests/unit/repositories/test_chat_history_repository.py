@@ -98,6 +98,33 @@ class TestChatHistoryRepository:
         mock_session.rollback.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_get_recent_returns_chronological_most_recent(self, chat_history_repository, mock_session):
+        """get_recent fetches newest-first then reverses to chronological order."""
+        # DB returns newest-first (descending); the method reverses to oldest→newest.
+        newest_first = ["m3", "m2", "m1"]
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = newest_first
+        mock_result.scalars.return_value = mock_scalars
+        mock_session.execute.return_value = mock_result
+
+        result = await chat_history_repository.get_recent_by_session_and_group(
+            session_id="session-123", group_ids=["group-111"], limit=120
+        )
+
+        assert result == ["m1", "m2", "m3"]  # reversed to chronological
+        mock_session.execute.assert_called_once()
+        mock_session.rollback.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_recent_empty_group_ids(self, chat_history_repository):
+        """Empty group_ids returns empty list without querying."""
+        result = await chat_history_repository.get_recent_by_session_and_group(
+            session_id="session-123", group_ids=[], limit=120
+        )
+        assert result == []
+
+    @pytest.mark.asyncio
     async def test_get_by_session_and_group_empty_group_ids(self, chat_history_repository):
         """Test that empty group_ids returns empty list."""
         # Act

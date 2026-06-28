@@ -343,20 +343,13 @@ class CrewMemoryService:
         if not group_id and crew_id and "_crew_" in crew_id:
             group_id = crew_id.split("_crew_")[0]
 
-        # Memory READ scope from the chat "Workspace memory" toggle (default ON =
-        # workspace-wide). When the user turns it off, the frontend sends
-        # memory_workspace_scope=False, so recall is restricted to this chat
-        # SESSION (session_id) instead of the whole workspace. crew_id is only
-        # used for tracing/identity — never for read scoping.
-        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
-        # Stable chat-session id used to partition session-only recall. Falls
-        # back to the per-run job_id for non-chat runs (always workspace-wide).
-        session_scope_id = self.config.get("session_id") or job_id
+        # Semantic memory is ALWAYS workspace/group-scoped. Per-session
+        # conversational recall is owned by the chat-history preamble (the light
+        # agent reads prior turns directly), so the chat session id is NO LONGER a
+        # memory scope key — the old "session-only memory" mode is superseded and
+        # session_id never narrows recall. crew_id is only used for tracing.
         logger.info(
-            "Memory read scope: %s (session_id=%s, crew_id=%s)",
-            "workspace" if workspace_wide else "session-only",
-            session_scope_id,
-            crew_id,
+            "Memory read scope: workspace (group=%s, crew_id=%s)", group_id, crew_id
         )
 
         try:
@@ -367,8 +360,8 @@ class CrewMemoryService:
                 embedder=embedder,
                 user_token=self.user_token,
                 job_id=job_id,
-                workspace_wide=workspace_wide,
-                session_scope_id=session_scope_id,
+                workspace_wide=True,
+                session_scope_id=None,
             )
         except DatabricksIndexValidationError as e:
             await self._emit_index_validation_trace(e)
@@ -633,25 +626,13 @@ class CrewMemoryService:
         if embedder is not None:
             kwargs["embedder"] = embedder
 
-        # Root scope mirrors ChatMode's workspace/session toggle. group_id is
-        # ALWAYS the tenant boundary; the toggle decides whether we ALSO narrow
-        # to the chat session:
-        #   - workspace (default): root_scope = /<group>  → recall sees every
-        #     session in the workspace (session sub-scopes nest under it).
-        #   - session-only: root_scope = /<group>/<session> → recall is confined
-        #     to this chat session, yet the record stays visible workspace-wide
-        #     because it nests under /<group>.
-        # For the custom Databricks/Lakebase backends this same intent is enforced
-        # by their tenant WHERE clause; for the local LanceDB store the scope PATH
-        # is the lever. crew_id is never part of the scope (it changes per prompt
-        # and would wall every run off from the rest of the workspace).
+        # Root scope is ALWAYS the tenant boundary (/<group>) — semantic recall
+        # spans the whole workspace. Per-session conversational recall is owned by
+        # the chat-history preamble, NOT by narrowing memory to a session, so
+        # session_id is intentionally not part of the scope. crew_id is never part
+        # of the scope either (it changes per prompt and would wall each run off).
         group_id = self.config.get("group_id") or "default"
-        workspace_wide = bool(self.config.get("memory_workspace_scope", True))
-        session_id = self.config.get("session_id")
-        if workspace_wide or not session_id:
-            kwargs["root_scope"] = f"/{group_id}"
-        else:
-            kwargs["root_scope"] = f"/{group_id}/{session_id}"
+        kwargs["root_scope"] = f"/{group_id}"
 
         cognitive = getattr(memory_config, "cognitive_config", None)
         cognitive_dict = (
