@@ -2,35 +2,38 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import MessageContent from './MessageContent';
 
+// Styling is applied via the chat MUI theme (sx), so these tests assert on the
+// rendered structure (branch testids + real markdown elements), not Tailwind
+// classes. `message-plain` = the plain-text branch, `message-markdown` = the
+// ReactMarkdown branch.
 describe('MessageContent', () => {
-  it('renders plain text in a <p> with whitespace-pre-wrap when content has no markdown', () => {
+  it('renders plain text in the plain-text branch when content has no markdown', () => {
     const { container } = render(<MessageContent content="just plain text" />);
 
-    const p = container.querySelector('p.whitespace-pre-wrap');
-    expect(p).not.toBeNull();
-    expect(p?.textContent).toBe('just plain text');
-    // Should not render the markdown prose wrapper.
-    expect(container.querySelector('.prose')).toBeNull();
+    const p = screen.getByTestId('message-plain');
+    expect(p.tagName.toLowerCase()).toBe('p');
+    expect(p.textContent).toBe('just plain text');
+    // Should not render the markdown branch.
+    expect(container.querySelector('[data-testid="message-markdown"]')).toBeNull();
   });
 
-  it('renders markdown content inside the prose wrapper using ReactMarkdown', () => {
+  it('renders markdown content in the markdown branch using ReactMarkdown', () => {
     const { container } = render(<MessageContent content="# Heading" />);
 
-    const wrapper = container.querySelector('div.prose');
-    expect(wrapper).not.toBeNull();
+    expect(screen.getByTestId('message-markdown')).toBeInTheDocument();
     // ReactMarkdown should produce an actual heading element.
     const heading = container.querySelector('h1');
     expect(heading).not.toBeNull();
     expect(heading?.textContent).toBe('Heading');
-    // The plain-text fallback paragraph should not be present.
-    expect(container.querySelector('p.whitespace-pre-wrap')).toBeNull();
+    // The plain-text fallback should not be present.
+    expect(container.querySelector('[data-testid="message-plain"]')).toBeNull();
   });
 
   it('renders markdown code blocks (GFM enabled) for fenced code content', () => {
     const md = '```\nconst x = 1;\n```';
     const { container } = render(<MessageContent content={md} />);
 
-    expect(container.querySelector('div.prose')).not.toBeNull();
+    expect(screen.getByTestId('message-markdown')).toBeInTheDocument();
     const code = container.querySelector('pre code');
     expect(code).not.toBeNull();
     expect(code?.textContent).toContain('const x = 1;');
@@ -39,13 +42,13 @@ describe('MessageContent', () => {
   it('renders empty plain content as an empty paragraph', () => {
     const { container } = render(<MessageContent content="" />);
 
-    const p = container.querySelector('p.whitespace-pre-wrap');
-    expect(p).not.toBeNull();
-    expect(p?.textContent).toBe('');
-    expect(container.querySelector('.prose')).toBeNull();
+    const p = screen.getByTestId('message-plain');
+    expect(p.tagName.toLowerCase()).toBe('p');
+    expect(p.textContent).toBe('');
+    expect(container.querySelector('[data-testid="message-markdown"]')).toBeNull();
   });
 
-  it('renders bold markdown inside the prose wrapper', () => {
+  it('renders bold markdown in the markdown branch', () => {
     render(<MessageContent content="**bold text**" />);
     const strong = screen.getByText('bold text');
     expect(strong.tagName.toLowerCase()).toBe('strong');

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import Box from '@mui/material/Box';
 import { CatalogItem } from '../api/crews';
+import { buttonResetSx, inputResetSx } from '../chatSx';
 
 interface CatalogLibraryProps {
   crews: CatalogItem[];
@@ -16,32 +18,32 @@ type LibraryEntry = CatalogItem & { kind: 'crew' | 'flow' };
  * browse and open their saved work with a click (replaces /list crews & flows).
  */
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
-  <svg
-    className="w-3 h-3 flex-shrink-0 transition-transform"
-    style={{ transform: open ? 'rotate(90deg)' : 'none' }}
+  <Box
+    component="svg"
+    sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'none' }}
     fill="none"
     viewBox="0 0 24 24"
     stroke="currentColor"
     strokeWidth={2.5}
   >
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-  </svg>
+  </Box>
 );
 
 // Crew = a small team (people); Flow = connected nodes (a pipeline).
 const CrewIcon: React.FC = () => (
-  <svg className="w-3.5 h-3.5 flex-shrink-0 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+  <Box component="svg" sx={{ width: 14, height: 14, flexShrink: 0, opacity: 0.8 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
     <circle cx="9" cy="8" r="3" />
     <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 19a5.5 5.5 0 0111 0M16 11a3 3 0 100-6M19.5 19a5.5 5.5 0 00-3.5-5.1" />
-  </svg>
+  </Box>
 );
 
 const FlowIcon: React.FC = () => (
-  <svg className="w-3.5 h-3.5 flex-shrink-0 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+  <Box component="svg" sx={{ width: 14, height: 14, flexShrink: 0, opacity: 0.8 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
     <rect x="3" y="4" width="6" height="5" rx="1.5" />
     <rect x="15" y="15" width="6" height="5" rx="1.5" />
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 9v4a3 3 0 003 3h6" />
-  </svg>
+  </Box>
 );
 
 const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCrew, onLoadFlow }) => {
@@ -59,60 +61,96 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
   const showSearch = entries.length > 6;
 
   return (
-    <div className="px-2 pt-2">
-      <button
+    <Box sx={{ px: 1, pt: 1 }}>
+      <Box
+        component="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--bg-rail-hover)]"
-        style={{ color: 'var(--text-muted)' }}
         aria-expanded={open}
+        sx={{
+          ...buttonResetSx,
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.75,
+          px: 1.5,
+          py: 0.75,
+          borderRadius: '8px',
+          transition: 'background-color 0.15s',
+          color: 'text.disabled',
+          '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
+        }}
       >
         <Chevron open={open} />
-        <span className="text-[10px] font-semibold uppercase tracking-wider flex-1 text-left">
+        <Box component="span" sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1, textAlign: 'left' }}>
           Agents Catalog
-        </span>
-        <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+        </Box>
+        <Box component="span" sx={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: 'text.disabled' }}>
           {entries.length}
-        </span>
-      </button>
+        </Box>
+      </Box>
       {open && (
-        <div className="mt-0.5">
+        <Box sx={{ mt: 0.25 }}>
           {showSearch && (
-            <input
+            <Box
+              component="input"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
               placeholder="Search agents catalog…"
-              className="w-[calc(100%-1.5rem)] mx-3 mb-1 px-2 py-1 rounded-md text-[12px] outline-none"
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
+              sx={{
+                ...inputResetSx,
+                width: 'calc(100% - 1.5rem)',
+                mx: 1.5,
+                mb: 0.5,
+                px: 1,
+                py: 0.5,
+                borderRadius: '6px',
+                fontSize: 12,
+                backgroundColor: 'background.paper',
+                color: 'text.primary',
+                border: 1,
+                borderColor: 'divider',
               }}
             />
           )}
           {/* Capped + scrollable so the catalog never pushes the chat session
               list (Recent) off-screen. */}
-          <div className="max-h-52 overflow-y-auto">
+          <Box sx={{ maxHeight: 208, overflowY: 'auto' }}>
             {filtered.map((item) => (
-              <button
+              <Box
+                component="button"
                 key={`${item.kind}-${item.id}`}
                 onClick={() => (item.kind === 'crew' ? onLoadCrew(item.name) : onLoadFlow(item.name))}
                 title={`Open ${item.kind} “${item.name}”`}
-                className="w-full flex items-center gap-2 pl-7 pr-3 py-1.5 my-0.5 rounded-lg text-left transition-colors hover:bg-[var(--bg-rail-hover)]"
-                style={{ color: 'var(--text-secondary)' }}
+                sx={{
+                  ...buttonResetSx,
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  pl: 3.5,
+                  pr: 1.5,
+                  py: 0.75,
+                  my: 0.25,
+                  borderRadius: '8px',
+                  textAlign: 'left',
+                  transition: 'background-color 0.15s',
+                  color: 'text.secondary',
+                  '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
+                }}
               >
                 {item.kind === 'crew' ? <CrewIcon /> : <FlowIcon />}
-                <span className="truncate text-[13px]">{item.name}</span>
-              </button>
+                <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{item.name}</Box>
+              </Box>
             ))}
             {filtered.length === 0 && (
-              <div className="pl-7 pr-3 py-1.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              <Box sx={{ pl: 3.5, pr: 1.5, py: 0.75, fontSize: 12, color: 'text.disabled' }}>
                 No matches
-              </div>
+              </Box>
             )}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 };
 

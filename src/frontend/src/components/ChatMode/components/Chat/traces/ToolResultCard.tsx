@@ -1,4 +1,5 @@
 import React from 'react';
+import Box from '@mui/material/Box';
 import MessageContent from '../MessageContent';
 
 /**
@@ -8,26 +9,36 @@ import MessageContent from '../MessageContent';
  * Returns null when there's no content.
  *
  * Accepts the full inline-trace props (label / sublabel / durationMs) for
- * registry compatibility, but renders only the answer body.
+ * registry compatibility, but renders only the answer body. `indent` is the left
+ * indent in MUI spacing units (8px each): 1.5 = 12px.
  */
 export const ToolResultCard: React.FC<{
   detail: string;
   label?: string;
   sublabel?: string;
   durationMs?: number;
-  indentClass?: string;
-}> = ({ detail, indentClass = 'ml-3' }) => {
+  indent?: number;
+}> = ({ detail, indent = 1.5 }) => {
   if (!detail || !detail.trim()) return null;
   return (
-    <div
-      className={`mt-1 ${indentClass} max-w-[85%] rounded p-3 max-h-96 overflow-y-auto text-sm leading-relaxed`}
-      style={{
-        color: 'var(--text-primary)',
-        backgroundColor: 'var(--bg-primary)',
-        border: '1px solid var(--border-color)',
+    <Box
+      sx={{
+        mt: 0.5,
+        ml: indent,
+        maxWidth: '85%',
+        borderRadius: '4px',
+        p: 1.5,
+        maxHeight: 384,
+        overflowY: 'auto',
+        fontSize: 14,
+        lineHeight: 1.625,
+        color: 'text.primary',
+        backgroundColor: 'background.default',
+        border: 1,
+        borderColor: 'divider',
       }}
     >
       <MessageContent content={detail} />
-    </div>
+    </Box>
   );
 };

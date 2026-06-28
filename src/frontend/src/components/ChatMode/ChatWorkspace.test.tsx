@@ -35,6 +35,7 @@ const h = vi.hoisted(() => {
       reloadForGroup: vi.fn(async () => {}),
       switchSession: vi.fn(async () => {}),
       createNewSession: vi.fn(async () => 's-new'),
+      startNewChat: vi.fn(),
       deleteSession: vi.fn(async () => {}),
       renameSession: vi.fn(async () => {}),
     },
@@ -47,7 +48,9 @@ const h = vi.hoisted(() => {
       previewOwnerSessionId: null as unknown,
       previewHistory: [] as unknown[],
       previewIndex: 0,
+      previewPaneOpen: false,
       navigatePreview: vi.fn(),
+      openPreviewPane: vi.fn(),
       updatePreviewData: vi.fn(),
       chatCollapsed: false,
       executionOwnerSessionId: 's1',
@@ -242,12 +245,6 @@ vi.mock('./components/Chat/ChatContainer', () => ({
           for the current session, and the button drives onRunPending. */}
       <span data-testid="cc-pending-label">{(props as { pendingRunLabel?: string }).pendingRunLabel ?? ''}</span>
       <button data-testid="cc-run-pending" onClick={() => props.onRunPending?.()}>run-pending</button>
-      {/* The reopen-preview pill now lives inside ChatContainer; surface it here
-          when armed so the workspace wiring (showReopenPreview/onReopenPreview)
-          stays under test. */}
-      {(props as { showReopenPreview?: boolean }).showReopenPreview && (
-        <button onClick={() => (props as { onReopenPreview?: () => void }).onReopenPreview?.()}>Show preview</button>
-      )}
     </div>
   ),
 }));
@@ -268,6 +265,7 @@ import ChatWorkspace, {
   summarizeTaskOutput,
   cleanTaskLabel,
   extractResultText,
+  extractA2uiSurface,
   stripEmbeddedUiDocument,
   tracesToRunSteps,
 } from './ChatWorkspace';
@@ -610,6 +608,47 @@ describe('extractResultText / stripEmbeddedUiDocument', () => {
     const payload = JSON.stringify({ value: 'Based on my research, here it is.\n\n```json\n' + uiDoc + '\n```' });
     expect(extractResultText({ result: payload })).toBe('Based on my research, here it is.');
   });
+
+  it('reads the chat text from the composed { text, a2ui } envelope', () => {
+    const surface = { surfaceKind: 'presentation', root: 'r', components: [{ id: 'r', component: 'SlideDeck' }], dataModel: {} };
+    // As an object…
+    expect(extractResultText({ result: { text: 'Here is your deck.', a2ui: surface } })).toBe(
+      'Here is your deck.',
+    );
+    // …and as a JSON string (the other transport shape).
+    expect(extractResultText({ result: JSON.stringify({ text: 'Here is your deck.', a2ui: surface }) })).toBe(
+      'Here is your deck.',
+    );
+  });
+});
+
+describe('extractA2uiSurface', () => {
+  const surface = {
+    surfaceKind: 'dashboard',
+    root: 'root',
+    components: [{ id: 'root', component: 'Grid', children: [] }],
+    dataModel: {},
+  };
+
+  it('pulls the surface from a { text, a2ui } object', () => {
+    expect(extractA2uiSurface({ result: { text: 'hi', a2ui: surface } })).toEqual(surface);
+  });
+
+  it('pulls the surface from a JSON-string result', () => {
+    expect(extractA2uiSurface({ result: JSON.stringify({ text: 'hi', a2ui: surface }) })).toEqual(surface);
+  });
+
+  it('unwraps a result nested one level (result.result.a2ui)', () => {
+    expect(extractA2uiSurface({ result: { result: { text: 'hi', a2ui: surface } } })).toEqual(surface);
+  });
+
+  it('returns null for a plain string answer (no rich surface)', () => {
+    expect(extractA2uiSurface({ result: 'just a normal answer' })).toBeNull();
+  });
+
+  it('returns null for a malformed surface (missing components/surfaceKind)', () => {
+    expect(extractA2uiSurface({ result: { text: 'hi', a2ui: { foo: 'bar' } } })).toBeNull();
+  });
 });
 
 describe('cleanTaskLabel', () => {
@@ -645,6 +684,7 @@ describe('ChatWorkspace component', () => {
     h.session.messages = [];
     h.exec.previewContent = null;
     h.exec.previewOwnerSessionId = null;
+    h.exec.previewPaneOpen = false;
     h.exec.executionOwnerSessionId = 's1';
     h.app.sidebarOpen = true;
     h.parsePreview.mockReturnValue(null);
@@ -688,6 +728,7 @@ describe('ChatWorkspace component', () => {
 
   it('shows the preview panel only when previewOwnerSessionId matches the current session', () => {
     h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
+    h.exec.previewPaneOpen = true; // pane is opt-in — the user opened it
     h.exec.previewOwnerSessionId = 's2'; // different session
     const { rerender } = render(<ChatWorkspace />);
     expect(screen.queryByTestId('preview-panel')).not.toBeInTheDocument();
@@ -1071,6 +1112,7 @@ describe('ChatWorkspace component', () => {
 
   it('refines via the preview pane onRefine handler', async () => {
     h.exec.previewContent = { type: 'ui', data: '<html><body>x</body></html>' };
+    h.exec.previewPaneOpen = true;
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
@@ -1079,6 +1121,7 @@ describe('ChatWorkspace component', () => {
 
   it('applies a deterministic restyle via the preview pane onStyleChange handler', async () => {
     h.exec.previewContent = { type: 'ui', data: '{"messages":[]}' };
+    h.exec.previewPaneOpen = true;
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-restyle')); });
@@ -1212,11 +1255,14 @@ describe('ChatWorkspace component', () => {
   });
 
   // --- sidebar interactions ---
-  it('New Chat saves + creates + restores session state', async () => {
+  it('New Chat saves state + resets to a blank chat WITHOUT persisting a session', async () => {
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
-    expect(h.session.createNewSession).toHaveBeenCalled();
-    expect(h.exec.restoreSessionState).toHaveBeenCalled();
+    // Lazy creation: the row is created on the first message, not on the button —
+    // so no empty "New Chat" lands in the Recent rail.
+    expect(h.session.startNewChat).toHaveBeenCalled();
+    expect(h.session.createNewSession).not.toHaveBeenCalled();
+    expect(h.exec.resetForSession).toHaveBeenCalled();
   });
 
   it('clicking a session switches to it', async () => {
@@ -1258,18 +1304,10 @@ describe('ChatWorkspace component', () => {
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
   });
 
-  // --- preview reopen + panel controls ---
-  it('shows the "Show preview" reopen button when a hidden preview exists', async () => {
-    h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue({ type: 'ui', data: '<p>x</p>' });
-    render(<ChatWorkspace />);
-    expect(await screen.findByText('Show preview')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Show preview'));
-    expect(h.exec.reopenPreview).toHaveBeenCalled();
-  });
-
+  // --- preview panel controls ---
   it('preview panel close + toggle-chat buttons call the store', () => {
     h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
+    h.exec.previewPaneOpen = true;
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     fireEvent.click(screen.getByTestId('preview-close'));
@@ -1391,44 +1429,6 @@ describe('ChatWorkspace component', () => {
     expect(h.createExecution).toHaveBeenCalled();
   });
 
-  it('backfills a hidden preview from an assistant message containing previewable content', async () => {
-    h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue(null);
-    h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
-    h.session.messages = [
-      { id: 'u', role: 'user', content: 'hi', timestamp: new Date() },
-      { id: 'a', role: 'assistant', content: '<html>doc</html>', timestamp: new Date() },
-    ] as unknown[];
-    render(<ChatWorkspace />);
-    await screen.findByText('Show preview');
-    expect(h.saveSessionPreview).toHaveBeenCalled();
-  });
-
-  it('does not show a reopen button when no stored or message preview exists', async () => {
-    h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue(null);
-    h.parsePreview.mockReturnValue(null);
-    h.session.messages = [{ id: 'a', role: 'assistant', content: 'plain', timestamp: new Date() }] as unknown[];
-    render(<ChatWorkspace />);
-    // allow the effect's promise chain to settle
-    await act(async () => { await Promise.resolve(); });
-    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
-  });
-
-  it('does NOT leak the pill from a prior session via the global previewHistory', async () => {
-    // The new-chat path flips currentSessionId before restoreSessionState clears
-    // the single global preview slot, so previewHistory can still hold the
-    // PREVIOUS session's runs. The pill must key off session-scoped sources only.
-    h.exec.previewContent = null;
-    h.exec.previewHistory = [{ type: 'ui', data: '<p>old session</p>' }] as unknown[];
-    h.getSessionPreview.mockResolvedValue(null); // this session has nothing stored
-    h.parsePreview.mockReturnValue(null);
-    h.session.messages = [];
-    render(<ChatWorkspace />);
-    await act(async () => { await Promise.resolve(); });
-    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
-  });
-
   it('onComplete handles a deeply nested object whose inner is stringified', () => {
     render(<ChatWorkspace />);
     act(() => { h.streamOpts.onComplete({ result: { result: { foo: 'bar' } } }); });
@@ -1452,14 +1452,6 @@ describe('ChatWorkspace component', () => {
     await send('/stop job-match');
     expect(h.stopExecution).toHaveBeenCalledWith('job-match');
     expect(h.exec.updateExecutionStatus).toHaveBeenCalledWith('stopped');
-  });
-
-  it('preview-check effect no-ops when there is no current session', async () => {
-    h.session.currentSessionId = null;
-    h.exec.previewContent = null;
-    render(<ChatWorkspace />);
-    await act(async () => { await Promise.resolve(); });
-    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
   });
 
   it('routes trace/taskOutput/generation messages to addMessage when no owner session', () => {
@@ -1558,8 +1550,8 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     fireEvent.contextMenu(screen.getByTitle('One'));
     expect(screen.getByText('Rename')).toBeInTheDocument();
-    // backdrop is the fixed inset-0 overlay
-    const backdrop = document.querySelector('.fixed.inset-0.z-40') as HTMLElement;
+    // backdrop is the fixed full-screen overlay behind the context menu
+    const backdrop = screen.getByTestId('context-menu-backdrop');
     fireEvent.click(backdrop);
     expect(screen.queryByText('Rename')).not.toBeInTheDocument();
   });
@@ -1604,10 +1596,11 @@ describe('ChatWorkspace component', () => {
     h.exec.isLoading = true;
     h.exec.chatCollapsed = true;
     h.exec.previewContent = { type: 'ui', data: '<p>x</p>' };
+    h.exec.previewPaneOpen = true;
     h.exec.previewOwnerSessionId = 's1';
     h.exec.executionOwnerSessionId = 's1';
     render(<ChatWorkspace />);
-    // chatCollapsed && previewContent -> the chat main panel is hidden
+    // chatCollapsed && previewPaneOpen && previewContent -> the chat main panel is hidden
     expect(screen.queryByTestId('chat-container')).not.toBeInTheDocument();
     expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
@@ -1720,6 +1713,7 @@ describe('ChatWorkspace component', () => {
   it('refining via the preview pane with an empty instruction is a no-op', async () => {
     (globalThis as { __refineMsg?: string }).__refineMsg = '   ';
     h.exec.previewContent = { type: 'ui', data: 'x' };
+    h.exec.previewPaneOpen = true;
     h.exec.previewOwnerSessionId = 's1';
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByTestId('preview-refine')); });
@@ -1814,7 +1808,7 @@ describe('ChatWorkspace component', () => {
     render(<ChatWorkspace />);
     await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
-    expect(h.session.createNewSession).toHaveBeenCalled();
+    expect(h.session.startNewChat).toHaveBeenCalled();
     await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
     expect(h.session.switchSession).toHaveBeenCalledWith('s2');
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
@@ -1838,20 +1832,6 @@ describe('ChatWorkspace component', () => {
     h.exec.startExecution = vi.fn();
     await act(async () => { await h.dispatcherOpts.onExecuteFlow({ name: 'F' }); });
     expect(h.exec.startExecution).toHaveBeenCalledWith('job-1', undefined, undefined);
-  });
-
-  it('the preview backfill scan skips non-assistant and empty-content messages', async () => {
-    h.exec.previewContent = null;
-    h.getSessionPreview.mockResolvedValue(null);
-    h.parsePreview.mockReturnValue(null); // no message is previewable
-    h.session.messages = [
-      { id: 'u', role: 'user', content: 'hi', timestamp: new Date() },
-      { id: 'e', role: 'assistant', content: '', timestamp: new Date() },
-      { id: 'a', role: 'assistant', content: 'plain text', timestamp: new Date() },
-    ] as unknown[];
-    render(<ChatWorkspace />);
-    await act(async () => { await Promise.resolve(); });
-    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
   });
 
   it('onTrace ignores noise events that yield no trace entry', () => {

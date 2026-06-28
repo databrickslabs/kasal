@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import Box from '@mui/material/Box';
 import GenieSpaceSelector from './GenieSpaceSelector';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { stripGenieTools } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
+import { buttonResetSx } from '../../chatSx';
 
 /**
  * Minimal inline Genie-space prompt — replaces the full crew card in the chat
@@ -45,11 +47,11 @@ const GenieSpacePrompt: React.FC<GenieSpacePromptProps> = ({ data, messageId, on
   };
 
   return (
-    <div className="px-4 my-2 max-w-3xl">
-      <div className="pt-1 space-y-2">
-        <p className="text-xs px-1" style={{ color: 'var(--text-muted)' }}>
+    <Box sx={{ px: 2, my: 1, maxWidth: '48rem' }}>
+      <Box sx={{ pt: 0.5, '& > * + *': { mt: 1 } }}>
+        <Box component="p" sx={{ fontSize: 12, px: 0.5, color: 'text.disabled' }}>
           This crew queries a Genie space — pick one to run.
-        </p>
+        </Box>
         <GenieSpaceSelector
           value={selectedSpaceId}
           onChange={(v) => {
@@ -57,7 +59,8 @@ const GenieSpacePrompt: React.FC<GenieSpacePromptProps> = ({ data, messageId, on
             persist({ spaceId: v });
           }}
         />
-        <button
+        <Box
+          component="button"
           type="button"
           onClick={() => {
             setRan(true);
@@ -65,17 +68,36 @@ const GenieSpacePrompt: React.FC<GenieSpacePromptProps> = ({ data, messageId, on
             onExecute?.(data, selectedSpaceId);
           }}
           disabled={!selectedSpaceId || ran}
-          className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
+          sx={{
+            ...buttonResetSx,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            borderRadius: '8px',
+            px: 1.5,
+            py: 1,
+            fontSize: 14,
+            fontWeight: 500,
+            transition: 'all 0.15s',
+            backgroundColor: (t) => t.chat.bgSecondary,
+            color: 'text.secondary',
+            border: 1,
+            borderColor: 'divider',
+            '&:hover': { opacity: 0.8 },
+            '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
+          }}
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <Box component="svg" sx={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 24 24">
             <path d="M8 5v14l11-7z" />
-          </svg>
+          </Box>
           {ran ? 'Running…' : selectedSpaceId ? 'Run crew' : 'Select a Genie space to run'}
-        </button>
+        </Box>
         {/* Skip: run WITHOUT Genie — the tool is stripped from the generated
             crew so it doesn't run blind against an unconfigured space. */}
-        <button
+        <Box
+          component="button"
           type="button"
           onClick={() => {
             setRan(true);
@@ -83,13 +105,24 @@ const GenieSpacePrompt: React.FC<GenieSpacePromptProps> = ({ data, messageId, on
             onExecute?.(stripGenieTools(data));
           }}
           disabled={ran}
-          className="w-full rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ color: 'var(--text-muted)' }}
+          sx={{
+            ...buttonResetSx,
+            width: '100%',
+            borderRadius: '8px',
+            px: 1.5,
+            py: 0.75,
+            fontSize: 12,
+            fontWeight: 500,
+            transition: 'all 0.15s',
+            color: 'text.disabled',
+            '&:hover': { opacity: 0.8 },
+            '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
+          }}
         >
           Skip — run without Genie
-        </button>
-      </div>
-    </div>
+        </Box>
+      </Box>
+    </Box>
   );
 };
 

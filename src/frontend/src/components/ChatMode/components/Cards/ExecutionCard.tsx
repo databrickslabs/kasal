@@ -1,5 +1,8 @@
 import React, { useRef, useEffect } from 'react';
+import Box from '@mui/material/Box';
+import { useTheme } from '@mui/material/styles';
 import { ExecutionStatus } from '../../types/execution';
+import { buttonResetSx } from '../../chatSx';
 
 interface ExecutionCardProps {
   jobId: string;
@@ -10,45 +13,23 @@ interface ExecutionCardProps {
   onStop?: () => void;
 }
 
-const statusConfig: Record<
-  ExecutionStatus,
-  { bg: string; border: string; text: string; dot: string; label: string }
-> = {
-  queued: {
-    bg: '#FFF8F0',
-    border: '#FFD6A5',
-    text: '#8A5A00',
-    dot: '#E89B00',
-    label: 'Queued',
-  },
-  running: {
-    bg: '#EFF6FF',
-    border: '#B3D4FC',
-    text: '#1A56A0',
-    dot: '#2979E5',
-    label: 'Running',
-  },
-  completed: {
-    bg: '#EEFBF3',
-    border: '#A3E0B8',
-    text: '#1A6B34',
-    dot: '#00A972',
-    label: 'Completed',
-  },
-  failed: {
-    bg: '#FFF1F0',
-    border: '#FFBDBA',
-    text: '#B91C1C',
-    dot: '#FF3621',
-    label: 'Failed',
-  },
-  stopped: {
-    bg: 'var(--bg-secondary)',
-    border: 'var(--border-color)',
-    text: 'var(--text-secondary)',
-    dot: 'var(--text-muted)',
-    label: 'Stopped',
-  },
+interface StatusCfg {
+  bg: string;
+  border: string;
+  text: string;
+  dot: string;
+  label: string;
+}
+
+// The queued/running/completed/failed states use fixed pastel palettes (a light
+// status card regardless of theme). "stopped" follows the chat theme — its
+// colours are filled in from the theme at render time.
+const statusConfig: Record<ExecutionStatus, StatusCfg> = {
+  queued: { bg: '#FFF8F0', border: '#FFD6A5', text: '#8A5A00', dot: '#E89B00', label: 'Queued' },
+  running: { bg: '#EFF6FF', border: '#B3D4FC', text: '#1A56A0', dot: '#2979E5', label: 'Running' },
+  completed: { bg: '#EEFBF3', border: '#A3E0B8', text: '#1A6B34', dot: '#00A972', label: 'Completed' },
+  failed: { bg: '#FFF1F0', border: '#FFBDBA', text: '#B91C1C', dot: '#FF3621', label: 'Failed' },
+  stopped: { bg: '', border: '', text: '', dot: '', label: 'Stopped' },
 };
 
 const ExecutionCard: React.FC<ExecutionCardProps> = ({
@@ -59,8 +40,19 @@ const ExecutionCard: React.FC<ExecutionCardProps> = ({
   error,
   onStop,
 }) => {
+  const theme = useTheme();
   const safeStatus = status || 'queued';
-  const cfg = statusConfig[safeStatus] || statusConfig.queued;
+  const base = statusConfig[safeStatus] || statusConfig.queued;
+  const cfg: StatusCfg =
+    safeStatus === 'stopped'
+      ? {
+          ...base,
+          bg: theme.chat.bgSecondary,
+          border: theme.palette.divider,
+          text: theme.palette.text.secondary,
+          dot: theme.chat.textMuted,
+        }
+      : base;
   const tracesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,101 +60,110 @@ const ExecutionCard: React.FC<ExecutionCardProps> = ({
   }, [traces]);
 
   return (
-    <div
-      className="rounded-xl overflow-hidden my-2 shadow-lg"
-      style={{
+    <Box
+      sx={{
+        borderRadius: '12px',
+        overflow: 'hidden',
+        my: 1,
+        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
         backgroundColor: cfg.bg,
         border: `1px solid ${cfg.border}`,
       }}
     >
       {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-2.5"
-        style={{ borderBottom: `1px solid ${cfg.border}` }}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 2,
+          py: 1.25,
+          borderBottom: `1px solid ${cfg.border}`,
+        }}
       >
-        <div className="flex items-center gap-2">
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${safeStatus === 'running' ? 'animate-pulse' : ''}`}
-            style={{ backgroundColor: cfg.dot }}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            component="span"
+            data-testid="execution-status-dot"
+            data-running={safeStatus === 'running'}
+            sx={{
+              width: 10,
+              height: 10,
+              borderRadius: '9999px',
+              backgroundColor: cfg.dot,
+              ...(safeStatus === 'running' && {
+                animation: 'kasalDotPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                '@keyframes kasalDotPulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } },
+              }),
+            }}
           />
-          <span
-            className="text-sm font-medium"
-            style={{ color: cfg.text }}
-          >
+          <Box component="span" sx={{ fontSize: 14, fontWeight: 500, color: cfg.text }}>
             Execution: {cfg.label}
-          </span>
+          </Box>
           {jobId && (
-            <span
-              className="text-xs font-mono"
-              style={{ color: 'var(--text-muted)' }}
-            >
+            <Box component="span" sx={{ fontSize: 12, fontFamily: 'monospace', color: 'text.disabled' }}>
               {jobId.slice(0, 8)}...
-            </span>
+            </Box>
           )}
-        </div>
+        </Box>
         {(status === 'running' || status === 'queued') && onStop && (
-          <button
+          <Box
+            component="button"
             onClick={onStop}
-            className="text-xs px-2.5 py-1 rounded-lg font-medium transition-colors hover:opacity-80"
-            style={{
+            sx={{
+              ...buttonResetSx,
+              fontSize: 12,
+              px: 1.25,
+              py: 0.5,
+              borderRadius: '8px',
+              fontWeight: 500,
+              transition: 'opacity 0.15s',
               color: '#B91C1C',
               border: '1px solid #FFBDBA',
               backgroundColor: '#FFF1F0',
+              '&:hover': { opacity: 0.8 },
             }}
           >
             Stop
-          </button>
+          </Box>
         )}
-      </div>
+      </Box>
 
       {/* Traces */}
       {traces.length > 0 && (
-        <div className="px-4 py-2.5 max-h-64 overflow-y-auto">
-          <div className="space-y-1">
+        <Box sx={{ px: 2, py: 1.25, maxHeight: 256, overflowY: 'auto' }}>
+          <Box sx={{ '& > * + *': { mt: 0.5 } }}>
             {traces.map((trace, i) => (
-              <div
-                key={i}
-                className="text-xs font-mono leading-relaxed"
-                style={{ color: 'var(--text-secondary)' }}
-              >
+              <Box key={i} sx={{ fontSize: 12, fontFamily: 'monospace', lineHeight: 1.625, color: 'text.secondary' }}>
                 {trace}
-              </div>
+              </Box>
             ))}
             <div ref={tracesEndRef} />
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
 
       {/* Result */}
       {result && (
-        <div
-          className="px-4 py-2.5"
-          style={{ borderTop: `1px solid ${cfg.border}` }}
-        >
-          <div className="text-sm font-medium mb-1" style={{ color: '#1A6B34' }}>
+        <Box sx={{ px: 2, py: 1.25, borderTop: `1px solid ${cfg.border}` }}>
+          <Box sx={{ fontSize: 14, fontWeight: 500, mb: 0.5, color: '#1A6B34' }}>
             Result:
-          </div>
-          <div
-            className="text-sm whitespace-pre-wrap"
-            style={{ color: 'var(--text-primary)' }}
-          >
+          </Box>
+          <Box sx={{ fontSize: 14, whiteSpace: 'pre-wrap', color: 'text.primary' }}>
             {result}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
 
       {/* Error */}
       {error && (
-        <div
-          className="px-4 py-2.5"
-          style={{ borderTop: '1px solid #FFBDBA' }}
-        >
-          <div className="text-sm" style={{ color: '#B91C1C' }}>
+        <Box sx={{ px: 2, py: 1.25, borderTop: '1px solid #FFBDBA' }}>
+          <Box sx={{ fontSize: 14, color: '#B91C1C' }}>
             {error}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 };
 

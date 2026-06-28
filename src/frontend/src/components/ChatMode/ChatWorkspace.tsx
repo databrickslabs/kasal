@@ -17,9 +17,14 @@ import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
-import { parseUiDocument, extractDocSummary } from './utils/uiDocument';
+import { parseUiDocument, extractDocSummary } from './utils/surfaceAdapter';
+import type { Surface } from '../../shared/a2ui';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
+import { ThemeProvider } from '@mui/material/styles';
+import Box from '@mui/material/Box';
+import { buttonResetSx, inputResetSx } from './chatSx';
+import { createChatTheme } from './chatTheme';
 import './chat.css';
 
 export interface TraceEntry {
@@ -400,6 +405,9 @@ export function extractResultText(data: Record<string, unknown>): string {
           resultText = (typeof parsed.result === 'string' ? parsed.result : '')
             || (typeof parsed.content === 'string' ? parsed.content : '')
             || (typeof parsed.value === 'string' ? parsed.value : '')
+            // The composed light/crew envelope is { text, a2ui } — the chat shows
+            // `text`; the a2ui surface is pulled out separately (extractA2uiSurface).
+            || (typeof parsed.text === 'string' ? parsed.text : '')
             || rawResult;
         } else {
           resultText = rawResult;
@@ -409,7 +417,9 @@ export function extractResultText(data: Record<string, unknown>): string {
       }
     } else if (rawResult && typeof rawResult === 'object') {
       const nested = rawResult as Record<string, unknown>;
-      const inner = nested.result ?? nested.content ?? nested.raw ?? nested.value;
+      // `nested.text` covers the composed { text, a2ui } envelope (the a2ui surface
+      // is extracted separately by extractA2uiSurface).
+      const inner = nested.result ?? nested.content ?? nested.raw ?? nested.value ?? nested.text;
       if (typeof inner === 'string') {
         resultText = inner;
       } else if (inner && typeof inner === 'object') {
@@ -437,6 +447,44 @@ export function extractResultText(data: Record<string, unknown>): string {
   return stripEmbeddedUiDocument(resultText);
 }
 
+/**
+ * Pull the composed A2UI surface out of a completion payload, if any. The
+ * light/crew runners persist a rich answer as { text, a2ui } (a plain chat turn
+ * stays a bare string), so this returns the surface for inline rendering or null
+ * when the turn is plain prose. Tolerates the result arriving as a JSON string
+ * or nested one level (result.result), matching extractResultText's unwrapping.
+ */
+export function extractA2uiSurface(data: Record<string, unknown>): Surface | null {
+  try {
+    let result: unknown = data.result;
+    if (typeof result === 'string') {
+      try {
+        result = JSON.parse(result);
+      } catch {
+        return null;
+      }
+    }
+    if (!result || typeof result !== 'object') return null;
+    const obj = result as Record<string, unknown>;
+    const nested =
+      obj.result && typeof obj.result === 'object'
+        ? (obj.result as Record<string, unknown>)
+        : null;
+    const candidate = obj.a2ui ?? nested?.a2ui;
+    if (
+      candidate &&
+      typeof candidate === 'object' &&
+      'surfaceKind' in candidate &&
+      'components' in candidate
+    ) {
+      return candidate as Surface;
+    }
+  } catch {
+    /* a malformed surface must never break completion */
+  }
+  return null;
+}
+
 const ChatWorkspace: React.FC = () => {
   // --- Zustand Stores ---
   const sessions = useSessionStore((s) => s.sessions);
@@ -460,6 +508,10 @@ const ChatWorkspace: React.FC = () => {
   const previewHistory = useExecutionStore((s) => s.previewHistory);
   const previewIndex = useExecutionStore((s) => s.previewIndex);
   const navigatePreview = useExecutionStore((s) => s.navigatePreview);
+  // The side preview pane is opt-in: closed by default even when a deliverable
+  // exists (it renders inline in the chat), opened via a surface's "expand"
+  // control or the reopen pill.
+  const previewPaneOpen = useExecutionStore((s) => s.previewPaneOpen);
   const chatCollapsed = useExecutionStore((s) => s.chatCollapsed);
   // Where the run activity ("thinking" stream) is shown: the preview pane (default)
   // or collapsed into the chat's "Working…" bar (expandable). A persisted choice.
@@ -492,25 +544,6 @@ const ChatWorkspace: React.FC = () => {
   const viewIsGenerating = isGenerating && ownsExecution;
   const viewIsLoading = isLoading && ownsExecution;
   const viewExecutionContext = ownsExecution ? executionContext : null;
-
-  // While the viewed session's run is producing its deliverable, show an
-  // in-progress skeleton in the preview pane so it appears immediately instead
-  // of staying blank (chat full-width) until the final task emits its A2UI
-  // document. The real PreviewPanel takes over the moment the first deliverable
-  // renders (hasPreview flips true). `previewPaneVisible` drives the split
-  // layout so the chat shares the width during the run, exactly as it does once
-  // the preview exists.
-  // Only show the "Running agent…" preview once the job is EXECUTING — not
-  // during the generation phase (when the agent/task cards are still streaming
-  // into the chat). previewContent (a finished deliverable) always shows.
-  const showPreviewSkeleton = shouldShowPreviewSkeleton({
-    runActive: viewIsExecuting,
-    hasPreview: !!previewContent,
-  })
-    // In 'chat' placement the activity lives in the chat's Working bar, so the
-    // preview pane stays out until there's a real deliverable.
-    && !activityInChat;
-  const previewPaneVisible = !!previewContent || showPreviewSkeleton;
 
   // The run-activity timeline shown in the preview pane (live skeleton AND
   // collapsed above the finished result). Sourced from the PERSISTENT chat trace
@@ -583,6 +616,28 @@ const ChatWorkspace: React.FC = () => {
     return restored && restored.length ? restored : messageActivitySteps;
   }, [restoredStepsByJob, latestRunJobId, messageActivitySteps]);
 
+  // When the user routes activity to the pane ('preview' placement), the pane
+  // shows the run-activity surface. It appears immediately during a live run
+  // (shouldShowPreviewSkeleton) instead of staying blank, AND it survives the
+  // prompt ending: once the run finishes we still have its steps, so the
+  // expanded activity keeps showing rather than vanishing. In 'chat' placement
+  // the activity lives in the chat's Working bar, so the pane stays out until a
+  // real deliverable exists. A finished deliverable (previewContent) always wins
+  // the pane — the skeleton never competes with it.
+  // The pane is OPT-IN: it expands only when the user has opened it
+  // (previewPaneOpen). A live run no longer force-expands the pane — run
+  // activity stays in the chat's Working bar until the user opens the pane.
+  const showPreviewSkeleton =
+    previewPaneOpen &&
+    !activityInChat &&
+    !previewContent &&
+    (shouldShowPreviewSkeleton({ runActive: viewIsExecuting, hasPreview: !!previewContent }) ||
+      runActivitySteps.length > 0);
+  // Opt-in: the deliverable pane shows only when the user opened it (a deliverable
+  // alone no longer forces it open). The run skeleton still shows when activity is
+  // routed to the pane.
+  const previewPaneVisible = (previewPaneOpen && !!previewContent) || showPreviewSkeleton;
+
   const models = useAppStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
@@ -599,8 +654,6 @@ const ChatWorkspace: React.FC = () => {
   const [pendingRun, setPendingRun] = useState<{ sessionId: string | null; label: string; run: () => void } | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  // Track whether a persisted preview exists that could be reopened
-  const [hasHiddenPreview, setHasHiddenPreview] = useState(false);
 
   // Input variables dialog state
   const [pendingExecution, setPendingExecution] = useState<{
@@ -611,57 +664,13 @@ const ChatWorkspace: React.FC = () => {
     originSession?: string | null;
   } | null>(null);
 
-  // Check for hidden preview when session changes or preview is closed.
-  // For old sessions that never had a preview saved, scan messages for
-  // embedded HTML and backfill the preview into IndexedDB.
-  useEffect(() => {
-    if (previewContent) {
-      setHasHiddenPreview(false);
-      return;
-    }
-    if (!currentSessionId) {
-      setHasHiddenPreview(false);
-      return;
-    }
-    // Reset eagerly: the pill must NOT linger from the previous session while the
-    // async, session-scoped lookups below resolve. We deliberately do NOT consult
-    // the in-memory previewHistory — it's a single GLOBAL slot, and on a session
-    // switch (esp. a new chat, where currentSessionId flips BEFORE
-    // restoreSessionState clears the slot) it can still hold the prior session's
-    // runs, which leaked the pill into a fresh chat. getSessionPreview (IndexedDB)
-    // and the message scan are both session-scoped, and a shown deliverable is
-    // always persisted via saveSessionPreview, so this loses no real case.
-    setHasHiddenPreview(false);
-    let cancelled = false;
-    getSessionPreview(currentSessionId).then((stored) => {
-      if (cancelled) return;
-      if (stored) {
-        setHasHiddenPreview(true);
-        return;
-      }
-      // No stored preview — scan messages for previewable content (backfill)
-      const sessionMessages = useSessionStore.getState().messages;
-      for (let i = sessionMessages.length - 1; i >= 0; i--) {
-        const msg = sessionMessages[i];
-        if (msg.role !== 'assistant' || !msg.content) continue;
-        const preview = parsePreviewContent(msg.content);
-        if (preview) {
-          // Save to IndexedDB so it persists and reopenPreview() works
-          saveSessionPreview(currentSessionId, preview);
-          if (!cancelled) setHasHiddenPreview(true);
-          return;
-        }
-      }
-      if (!cancelled) setHasHiddenPreview(false);
-    });
-    return () => { cancelled = true; };
-  }, [currentSessionId, previewContent, messages]);
-
   // Sync chat theme from Kasal's theme store (dark-mode toggle).
   const kasalIsDarkMode = useThemeStore((s) => s.isDarkMode);
   useEffect(() => {
     useAppStore.getState().setTheme(kasalIsDarkMode ? 'dark' : 'light');
   }, [kasalIsDarkMode]);
+  // The chat-mode MUI theme (replaces chat.css CSS vars), tracking dark mode.
+  const chatTheme = useMemo(() => createChatTheme(kasalIsDarkMode ? 'dark' : 'light'), [kasalIsDarkMode]);
 
   // --- Initialize stores on mount ---
   useEffect(() => {
@@ -895,27 +904,33 @@ const ChatWorkspace: React.FC = () => {
   // The bookmark/feedback actions row for the latest generated crew, parked
   // until that crew's run finishes — feedback only makes sense once the
   // result is visible. Cleared on post; a refine run never sets it.
-  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null } | null>(null);
+  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string } | null>(null);
   const postPendingActionsRow = useCallback((jobId?: string) => {
     const pending = pendingActionsRef.current;
     if (!pending) return;
     pendingActionsRef.current = null;
     const sessionStore = useSessionStore.getState();
     // Anchor the row to this run's execution id so the actions bar can offer a
-    // "Memory graph" link scoped to exactly this run's cognitive memory.
+    // "Memory graph" link scoped to exactly this run's cognitive memory. Carry
+    // the run's answer mode so the bar can hide crew-catalog actions for plain
+    // 'chat' turns (there is no crew worth cataloging).
     const extra = {
       id: generateId(),
       resultType: 'crew_actions',
-      resultData: pending.data,
+      resultData: { ...pending.data, chatModeType: pending.mode },
       executionId: jobId,
     };
     if (pending.ownerSession) sessionStore.addMessageToTargetSession(pending.ownerSession, 'assistant', '', extra);
     else sessionStore.addMessage('assistant', '', extra);
   }, []);
 
-  const completeExecutionOnce = useCallback((jobId: string | undefined, resultText: string) => {
+  const completeExecutionOnce = useCallback((jobId: string | undefined, resultText: string, surface?: Surface | null) => {
     finishOnce(jobId, () => {
-      useExecutionStore.getState().completeExecution(resultText, jobId);
+      const store = useExecutionStore.getState();
+      // Only thread the surface arg when a rich one was composed — a plain chat
+      // turn calls with the original (text, jobId) shape.
+      if (surface) store.completeExecution(resultText, jobId, surface);
+      else store.completeExecution(resultText, jobId);
       // Result is in — now surface the bookmark/feedback row beneath it.
       postPendingActionsRow(jobId);
     });
@@ -931,7 +946,7 @@ const ChatWorkspace: React.FC = () => {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);
     },
     onComplete: (data) => {
-      completeExecutionOnce(sseJobIdRef.current, extractResultText(data));
+      completeExecutionOnce(sseJobIdRef.current, extractResultText(data), extractA2uiSurface(data));
     },
     onError: (error) => {
       failExecutionOnce(sseJobIdRef.current, error);
@@ -968,7 +983,7 @@ const ChatWorkspace: React.FC = () => {
     const onJobCompleted = (e: Event) => {
       const { jobId, result } = (e as CustomEvent).detail || {};
       if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
-      completeExecutionOnce(jobId, extractResultText({ result }));
+      completeExecutionOnce(jobId, extractResultText({ result }), extractA2uiSurface({ result }));
     };
     const onJobFailed = (e: Event) => {
       const { jobId, error } = (e as CustomEvent).detail || {};
@@ -1125,7 +1140,7 @@ const ChatWorkspace: React.FC = () => {
           genDataRef.current.set(genId, data);
           // Park the actions row (bookmark + thumbs feedback) — it posts only
           // AFTER the run's result comes back, so users rate what they've seen.
-          pendingActionsRef.current = { data, ownerSession: ownerSession ?? null };
+          pendingActionsRef.current = { data, ownerSession: ownerSession ?? null, mode: useExecutionStore.getState().chatModeType };
           dispatcher.setLastGenerated(data);
           lastGeneratedRef.current = data; // /save target
           useExecutionStore.getState().completeGeneration(ownerSession ?? undefined);
@@ -1444,6 +1459,12 @@ const ChatWorkspace: React.FC = () => {
           data.user_request,
           // Agent Bricks endpoints picked via the chat input's "+" menu.
           useExecutionStore.getState().selectedAgentBricksEndpoints,
+          // Answer mode → reasoning (research/deep) + planning (+planning_llm, deep)
+          // so a manually re-run crew matches what the mode (and save) produced.
+          useExecutionStore.getState().chatModeType === 'research' ||
+            useExecutionStore.getState().chatModeType === 'deep',
+          useExecutionStore.getState().chatModeType === 'deep',
+          useExecutionStore.getState().chatModeType === 'deep' ? (selectedModel || undefined) : undefined,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1581,11 +1602,14 @@ const ChatWorkspace: React.FC = () => {
   // Used by the bookmark on each crew card (it owns its own saved-state UI), so
   // this just performs the save and resolves to the created crew.
   const handleSaveCrew = useCallback(
-    (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) =>
+    (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => {
       // Capture the chat's current memory choice so the saved crew matches what
       // the user sees here (no-memory mode → saved crew has memory disabled).
       // opts carries overwrite + the picked Genie space from the crew card.
-      saveGeneratedCrew(data, undefined, {
+      // Answer mode → persist reasoning/planning so a Research/Deep crew reloads
+      // with the same behaviour (planning_llm only matters for Deep).
+      const mode = useExecutionStore.getState().chatModeType;
+      return saveGeneratedCrew(data, undefined, {
         ...opts,
         memoryEnabled: useExecutionStore.getState().memoryEnabled,
         // Persist the MCP servers selected for the run so the saved crew keeps them.
@@ -1593,12 +1617,16 @@ const ChatWorkspace: React.FC = () => {
         // Persist the Agent Bricks endpoint picked in the "+" so the saved crew
         // reloads with the agent assigned and runs against it.
         agentBricksEndpoints: useExecutionStore.getState().selectedAgentBricksEndpoints,
+        reasoning: mode === 'research' || mode === 'deep',
+        planning: mode === 'deep',
+        planningLlm: mode === 'deep' ? (selectedModel || undefined) : undefined,
       }).then((r) => {
         // Surface the freshly saved crew in the rail library.
         void refreshLibrary();
         return r;
-      }),
-    [refreshLibrary],
+      });
+    },
+    [refreshLibrary, selectedModel],
   );
 
   const handleExecuteFlow = useCallback(
@@ -1773,9 +1801,15 @@ const ChatWorkspace: React.FC = () => {
         const name = arg;
         const memoryEnabled = useExecutionStore.getState().memoryEnabled;
         const mcpServers = useExecutionStore.getState().selectedMcpServers;
+        const saveMode = useExecutionStore.getState().chatModeType;
         try {
           const agentBricksEndpoints = useExecutionStore.getState().selectedAgentBricksEndpoints;
-          const saved = await saveGeneratedCrew(data, name || undefined, { overwrite, memoryEnabled, mcpServers, agentBricksEndpoints });
+          const saved = await saveGeneratedCrew(data, name || undefined, {
+            overwrite, memoryEnabled, mcpServers, agentBricksEndpoints,
+            reasoning: saveMode === 'research' || saveMode === 'deep',
+            planning: saveMode === 'deep',
+            planningLlm: saveMode === 'deep' ? (selectedModel || undefined) : undefined,
+          });
           void refreshLibrary();
           addMessage(
             'assistant',
@@ -1797,7 +1831,7 @@ const ChatWorkspace: React.FC = () => {
 
       return false;
     },
-    [addMessage, clearMessages, executionStream, handleRefine],
+    [addMessage, clearMessages, executionStream, handleRefine, selectedModel],
   );
 
   const handleSend = useCallback(
@@ -1866,12 +1900,15 @@ const ChatWorkspace: React.FC = () => {
   }, [addMessage, executionStream]);
 
   // --- Session switching ---
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(() => {
     if (currentSessionId) {
       useExecutionStore.getState().saveSessionState(currentSessionId);
     }
-    const newId = await useSessionStore.getState().createNewSession();
-    useExecutionStore.getState().restoreSessionState(newId);
+    // Reset to a blank chat WITHOUT persisting a row — the session is created
+    // (and titled) lazily on the first message. Eagerly creating here is what
+    // left an empty "New Chat" sitting in the Recent rail beside the button.
+    useSessionStore.getState().startNewChat();
+    useExecutionStore.getState().resetForSession();
   }, [currentSessionId]);
 
   const handleSwitchSession = useCallback(async (sessionId: string) => {
@@ -1904,29 +1941,50 @@ const ChatWorkspace: React.FC = () => {
   }, [renamingSessionId, renameValue]);
 
   return (
-    <div id="kasal-chat-root" className="h-full w-full flex" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    // ThemeProvider: the chat-mode MUI theme (replaces chat.css's CSS variables).
+    // It only governs MUI components — the Tailwind-styled shell below is untouched
+    // until each piece is migrated to sx, so the two coexist during the migration.
+    // id = appStore theming hook; class = the Tailwind/CSS scope (see tailwind.config).
+    <ThemeProvider theme={chatTheme}>
+    <Box
+      id="kasal-chat-root"
+      className="kasal-chat-root"
+      sx={{ height: '100%', width: '100%', display: 'flex', backgroundColor: 'background.default' }}
+    >
       {/* Sidebar */}
       {sidebarOpen && (
-        <aside
-          className="w-64 flex flex-col flex-shrink-0"
-          style={{ backgroundColor: 'var(--bg-rail)' }}
+        <Box
+          component="aside"
+          sx={{ width: 256, display: 'flex', flexDirection: 'column', flexShrink: 0, backgroundColor: (t) => t.chat.bgRail }}
         >
           {/* New Chat button — soft filled chip */}
-          <div className="px-3 pt-3 pb-1">
-            <button
+          <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5 }}>
+            <Box
+              component="button"
               onClick={handleNewChat}
-              className="kasal-newchat w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium"
-              style={{
-                backgroundColor: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
+              sx={{
+                ...buttonResetSx,
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.25,
+                px: 1.5,
+                py: 1.25,
+                borderRadius: '12px',
+                fontSize: 14,
+                fontWeight: 500,
+                backgroundColor: (t) => t.chat.bgSecondary,
+                color: 'text.primary',
+                transition: 'background-color 0.15s ease',
+                '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
               }}
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
+              </Box>
               New Chat
-            </button>
-          </div>
+            </Box>
+          </Box>
 
           {/* Saved catalog library (Crews / Flows) — replaces /list commands */}
           <CatalogLibrary
@@ -1938,135 +1996,188 @@ const ChatWorkspace: React.FC = () => {
 
           {/* Section label */}
           {sessions.length > 0 && (
-            <div className="px-3 pt-4 pb-1">
-              <span
-                className="text-[10px] font-semibold uppercase tracking-wider"
-                style={{ color: 'var(--text-muted)' }}
+            <Box sx={{ px: 1.5, pt: 2, pb: 0.5 }}>
+              <Box
+                component="span"
+                sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.disabled' }}
               >
                 Recent
-              </span>
-            </div>
+              </Box>
+            </Box>
           )}
 
           {/* Session list */}
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
+          <Box sx={{ flex: 1, overflowY: 'auto', px: 1, pb: 1 }}>
             {sessions.map((s) => {
               const isActive = s.id === currentSessionId;
               return (
-              <div key={s.id} className="relative">
+              <Box key={s.id} sx={{ position: 'relative' }}>
                 {renamingSessionId === s.id ? (
-                  <input
+                  <Box
+                    component="input"
                     autoFocus
                     value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRenameValue(e.target.value)}
                     onBlur={handleFinishRename}
-                    onKeyDown={(e) => {
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                       if (e.key === 'Enter') handleFinishRename();
                       if (e.key === 'Escape') { setRenamingSessionId(null); setRenameValue(''); }
                     }}
-                    className="kasal-rename-input w-full px-3 py-2 my-0.5 rounded-lg text-sm"
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-color)',
+                    sx={{
+                      ...inputResetSx,
+                      width: '100%',
+                      px: 1.5,
+                      py: 1,
+                      my: 0.25,
+                      borderRadius: '8px',
+                      fontSize: 14,
+                      backgroundColor: 'background.paper',
+                      color: 'text.primary',
+                      border: 1,
+                      borderColor: 'divider',
+                      transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+                      '&:focus': { borderColor: 'primary.main', boxShadow: '0 0 0 2px rgba(255, 54, 33, 0.22)' },
                     }}
                   />
                 ) : (
-                  <div
-                    className="kasal-session flex items-center gap-1 rounded-lg my-0.5 group"
-                    style={{
-                      backgroundColor: isActive ? 'var(--bg-active-chip)' : 'transparent',
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      borderRadius: '8px',
+                      my: 0.25,
+                      backgroundColor: isActive ? (t) => t.chat.bgActiveChip : 'transparent',
+                      transition: 'background-color 0.15s ease',
+                      '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
+                      '&:hover .session-title': { color: 'text.primary' },
+                      '&:hover .session-kebab': { opacity: 1 },
                     }}
                   >
-                    <button
+                    <Box
+                      component="button"
                       onClick={() => handleSwitchSession(s.id)}
-                      onContextMenu={(e) => {
+                      onContextMenu={(e: React.MouseEvent<HTMLButtonElement>) => {
                         e.preventDefault();
                         setContextMenu({ sessionId: s.id, x: e.clientX, y: e.clientY });
                       }}
-                      className="flex-1 text-left pl-3 pr-1 py-2 text-sm truncate min-w-0"
-                      style={{
-                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      sx={{
+                        ...buttonResetSx,
+                        flex: 1,
+                        textAlign: 'left',
+                        pl: 1.5,
+                        pr: 0.5,
+                        py: 1,
+                        fontSize: 14,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                        color: isActive ? 'text.primary' : 'text.secondary',
                       }}
                       title={s.title}
                     >
-                      <div className="flex items-center gap-1.5">
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                         <SessionSpinner sessionId={s.id} />
-                        <div className={`kasal-session-title truncate text-[13px] ${isActive ? 'font-medium' : ''}`}>{s.title}</div>
-                      </div>
-                    </button>
+                        <Box className="session-title" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, ...(isActive ? { fontWeight: 500 } : {}) }}>{s.title}</Box>
+                      </Box>
+                    </Box>
                     {/* Kebab menu button */}
-                    <button
-                      onClick={(e) => {
+                    <Box
+                      component="button"
+                      className="session-kebab"
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                         e.stopPropagation();
                         const rect = (e.target as HTMLElement).getBoundingClientRect();
                         setContextMenu({ sessionId: s.id, x: rect.right, y: rect.bottom });
                       }}
-                      className="flex-shrink-0 w-7 h-7 mr-1.5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--bg-rail-hover)]"
-                      style={{ color: 'var(--text-muted)' }}
+                      sx={{
+                        ...buttonResetSx,
+                        flexShrink: 0,
+                        width: 28,
+                        height: 28,
+                        mr: 0.75,
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: 0,
+                        transition: 'opacity 0.15s',
+                        color: 'text.disabled',
+                        '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
+                      }}
                       title="Options"
                     >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <Box component="svg" sx={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 24 24">
                         <circle cx="12" cy="6" r="1.5" />
                         <circle cx="12" cy="12" r="1.5" />
                         <circle cx="12" cy="18" r="1.5" />
-                      </svg>
-                    </button>
-                  </div>
+                      </Box>
+                    </Box>
+                  </Box>
                 )}
-              </div>
+              </Box>
               );
             })}
-          </div>
+          </Box>
 
           {/* Context menu */}
           {contextMenu && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
-              <div
-                className="kasal-popover fixed z-50 rounded-xl overflow-hidden py-1"
-                style={{
+              <Box data-testid="context-menu-backdrop" sx={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setContextMenu(null)} />
+              <Box
+                sx={{
+                  position: 'fixed',
+                  zIndex: 50,
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                  py: 0.5,
                   left: contextMenu.x,
                   top: contextMenu.y,
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'background.paper',
+                  border: 1,
+                  borderColor: 'divider',
+                  boxShadow: (t) => t.chat.shadowPopover,
                 }}
               >
-                <button
+                <Box
+                  component="button"
                   onClick={() => {
                     const session = sessions.find((s) => s.id === contextMenu.sessionId);
                     if (session) handleStartRename(session.id, session.title);
                   }}
-                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
-                  style={{ color: 'var(--text-primary)' }}
+                  sx={{ ...buttonResetSx, width: '100%', textAlign: 'left', px: 2, py: 1, fontSize: 14, transition: 'opacity 0.15s', color: 'text.primary', '&:hover': { opacity: 0.8 } }}
                 >
                   Rename
-                </button>
-                <button
+                </Box>
+                <Box
+                  component="button"
                   onClick={() => handleDeleteSession(contextMenu.sessionId)}
-                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
-                  style={{ color: '#ef4444' }}
+                  sx={{ ...buttonResetSx, width: '100%', textAlign: 'left', px: 2, py: 1, fontSize: 14, transition: 'opacity 0.15s', color: '#ef4444', '&:hover': { opacity: 0.8 } }}
                 >
                   Delete
-                </button>
-              </div>
+                </Box>
+              </Box>
             </>
           )}
-        </aside>
+        </Box>
       )}
 
       {/* Main content — chat panel */}
       {/* Chat hides full-screen ONLY for a real deliverable the user collapsed to;
           the build skeleton never hides chat — the activity must stay visible. */}
-      {!(chatCollapsed && previewContent) && (
-        <main className="flex-1 flex flex-col overflow-hidden relative" style={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%' }}>
+      {!(chatCollapsed && previewPaneOpen && previewContent) && (
+        <Box
+          component="main"
+          sx={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
+        >
           {/* The sidebar toggle + Databricks wordmark now live in the app top bar
               (ChatModeHeaderSlot), so the main area no longer renders its own
               header — this keeps it vertically stable when the sidebar toggles. */}
 
           {/* Chat container — the reopen-preview pill is rendered inside it,
               anchored above the composer, so it never overlaps the input. */}
-          <div className="flex-1 overflow-hidden">
+          <Box sx={{ flex: 1, overflow: 'hidden' }}>
             <ChatContainer
               messages={messages}
               hydrating={hydrating}
@@ -2085,7 +2196,23 @@ const ChatWorkspace: React.FC = () => {
               hideLiveTimeline={!activityInChat && previewPaneVisible}
               activityInChat={activityInChat}
               runSteps={runActivitySteps}
-              onToggleActivityPlacement={() => useExecutionStore.getState().setActivityPlacement(activityInChat ? 'preview' : 'chat')}
+              onToggleActivityPlacement={() => {
+                const st = useExecutionStore.getState();
+                if (activityInChat) {
+                  // Manual "expand into preview pane": route activity to the pane AND
+                  // open it. The pane stays OPT-IN (showPreviewSkeleton requires
+                  // previewPaneOpen), so a run never auto-expands — only this click
+                  // opens it. Without opening the pane here the activity would leave
+                  // the chat bar but the pane would stay closed and it'd vanish.
+                  st.setActivityPlacement('preview');
+                  st.openPreviewPane();
+                } else {
+                  // Collapse back to the chat Working bar; close the pane if it was
+                  // only showing the activity (no deliverable to keep it open).
+                  st.setActivityPlacement('chat');
+                  if (!previewContent) st.clearPreview();
+                }
+              }}
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
@@ -2102,15 +2229,13 @@ const ChatWorkspace: React.FC = () => {
                   run();
                 }
               }}
-              showReopenPreview={hasHiddenPreview && !previewContent}
-              onReopenPreview={() => useExecutionStore.getState().reopenPreview()}
             />
-          </div>
-        </main>
+          </Box>
+        </Box>
       )}
 
-      {/* Preview panel — right side */}
-      {previewContent && (
+      {/* Preview panel — right side. Opt-in: shown only when the user opened it. */}
+      {previewPaneOpen && previewContent && (
         <PreviewPanel
           key={currentSessionId}
           content={previewContent}
@@ -2133,11 +2258,21 @@ const ChatWorkspace: React.FC = () => {
       {showPreviewSkeleton && (
         <PreviewSkeleton
           steps={runActivitySteps}
-          onMoveActivityToChat={() => useExecutionStore.getState().setActivityPlacement('chat')}
+          running={viewIsExecuting}
+          onMoveActivityToChat={() => {
+            // Collapse activity back to the chat bar AND close the pane — the
+            // skeleton only ever shows when there's no deliverable, so leaving the
+            // pane "open" would let the next deliverable auto-expand it (the pane
+            // must open only on a manual expand click).
+            const st = useExecutionStore.getState();
+            st.setActivityPlacement('chat');
+            st.clearPreview();
+          }}
         />
       )}
 
-    </div>
+    </Box>
+    </ThemeProvider>
   );
 };
 
@@ -2146,9 +2281,19 @@ const SessionSpinner: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasActive = useExecutionStore((s) => s.hasActiveExecution(sessionId));
   if (!hasActive) return null;
   return (
-    <div
-      className="w-2 h-2 rounded-full border border-t-transparent animate-spin flex-shrink-0"
-      style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+    <Box
+      aria-hidden="true"
+      sx={{
+        width: 8,
+        height: 8,
+        borderRadius: '9999px',
+        border: '1px solid',
+        borderColor: 'primary.main',
+        borderTopColor: 'transparent',
+        flexShrink: 0,
+        animation: 'kasalSpin 1s linear infinite',
+        '@keyframes kasalSpin': { to: { transform: 'rotate(360deg)' } },
+      }}
     />
   );
 };
