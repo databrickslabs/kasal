@@ -54,20 +54,22 @@ const SLASH_COMMANDS = [
 
 // Answer modes shown in the composer's mode pill. 'chat' runs a single light
 // agent (fast); 'research'/'deep' build a crew (with reasoning, +planning).
+// `label` is the full name (dropdown rows + aria); `short` is the compact label
+// shown on the collapsed trigger pill so the composer's control row stays tidy.
 const MODES = [
-  { id: 'chat', label: 'Chat', hint: 'Quick answer from a single agent' },
-  { id: 'research', label: 'Research', hint: 'Full crew with reasoning' },
-  { id: 'deep', label: 'Deep Research', hint: 'Deep tools with planning & reasoning' },
+  { id: 'chat', label: 'Chat', short: 'Chat', hint: 'Quick answer from a single agent' },
+  { id: 'research', label: 'Research', short: 'Research', hint: 'Full crew with reasoning' },
+  { id: 'deep', label: 'Deep Research', short: 'Deep', hint: 'Deep tools with planning & reasoning' },
 ] as const;
 
 // Memory modes shown in the composer's memory pill — same labelled-dropdown
 // pattern as the answer-mode pill so the three states are explicit (no blind
 // cycling). Mapped to the (memoryEnabled, workspaceMemory) prop pair below.
 type MemoryModeId = 'workspace' | 'session' | 'off';
-const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] = [
-  { id: 'workspace', label: 'Workspace memory', hint: 'Recall context across the whole workspace' },
-  { id: 'session', label: 'Session memory', hint: 'Recall only this chat session' },
-  { id: 'off', label: 'No memory', hint: 'Run without memory — nothing recalled or persisted' },
+const MEMORY_MODES: { id: MemoryModeId; label: string; short: string; hint: string }[] = [
+  { id: 'workspace', label: 'Workspace memory', short: 'Workspace', hint: 'Recall context across the whole workspace' },
+  { id: 'session', label: 'Session memory', short: 'Session', hint: 'Recall only this chat session' },
+  { id: 'off', label: 'No memory', short: 'Off', hint: 'Run without memory — nothing recalled or persisted' },
 ];
 
 // NOTE: there is deliberately NO per-message output-format picker. The
@@ -668,13 +670,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 }}
                 aria-label={`Answer mode: ${activeMode.label}`}
                 title={activeMode.hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
                 style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                 </svg>
-                <span>{activeMode.label}</span>
+                <span>{activeMode.short}</span>
                 <svg
                   className={`w-3 h-3 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
                   fill="none"
@@ -738,7 +740,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 }}
                 aria-label={`Memory mode: ${activeMemory.label}`}
                 title={activeMemory.hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
                 style={{
                   color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
                   backgroundColor: 'var(--bg-secondary)',
@@ -751,7 +753,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
                   )}
                 </svg>
-                <span>{activeMemory.label}</span>
+                <span>{activeMemory.short}</span>
                 <svg
                   className={`w-3 h-3 transition-transform ${showMemoryPicker ? 'rotate-180' : ''}`}
                   fill="none"
@@ -809,7 +811,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     setShowMemoryPicker(false);
                     setShowCommands(false);
                   }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
                   style={{
                     color: 'var(--text-secondary)',
                     backgroundColor: 'var(--bg-secondary)',
