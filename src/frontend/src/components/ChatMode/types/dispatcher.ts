@@ -43,6 +43,8 @@ export interface DispatcherRequest {
   disable_memory?: boolean;
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
+  /** Paths of files attached this turn — scopes the knowledge search tool to them. */
+  knowledge_file_paths?: string[];
   /** Answer mode: 'chat' = single light agent, 'research' = crew+reasoning, 'deep' = crew+planning+reasoning. */
   chat_mode_type?: 'chat' | 'research' | 'deep';
 }
@@ -55,6 +57,7 @@ export interface DispatchRunSettings {
   disable_memory?: boolean;
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
+  knowledge_file_paths?: string[];
   chat_mode_type?: 'chat' | 'research' | 'deep';
 }
 

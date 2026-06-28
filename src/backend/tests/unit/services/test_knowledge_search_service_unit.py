@@ -232,9 +232,19 @@ class TestSearchSuccess:
 
     @staticmethod
     def _doc_service(rows):
-        """A patched repository whose search_similar returns `rows`."""
+        """A patched repository whose search_similar returns `rows`.
+
+        When a specific file is requested, the service first resolves the
+        requested basename(s) to stored full paths via ``list_group_file_paths``
+        (so it can rank scoped to that file), then calls ``search_similar`` —
+        mock both. The path list mirrors the stored rows so basename resolution
+        finds them.
+        """
         repo = MagicMock()
         repo.search_similar = AsyncMock(return_value=rows)
+        repo.list_group_file_paths = AsyncMock(
+            return_value=[getattr(r, "file_path", None) for r in rows]
+        )
         return repo
 
     @pytest.mark.asyncio
@@ -283,22 +293,75 @@ class TestSearchSuccess:
     @patch(LLM_MODULE)
     @patch(DOC_SVC_MODULE)
     async def test_search_with_file_paths_filter(self, mock_doc_cls, mock_llm_cls):
-        """file_paths + group_id are forwarded to the pgvector search for scoping."""
+        """file_paths + group_id scope the search; a MATCHING file returns its row."""
         self._setup_service()
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
+        # _pg_row default basename is "doc.pdf"; request the same file by basename.
         doc_svc = self._doc_service([_pg_row()])
         mock_doc_cls.return_value = doc_svc
 
         results = await self.service.search(
-            QUERY, file_paths=["/Volumes/cat/sch/vol/a.pdf"], user_token=USER_TOKEN
+            QUERY, file_paths=["/Volumes/cat/sch/vol/doc.pdf"], user_token=USER_TOKEN
         )
 
         assert len(results) == 1
         _, kwargs = doc_svc.search_similar.call_args
         assert kwargs["group_id"] == GROUP_ID
-        # The repo fetches by group only (file_paths=None); the service then
-        # filters the rows by basename in-memory (see search() lines 96-113).
-        assert kwargs["file_paths"] is None
+        # The service resolves the requested basename to the stored full path(s)
+        # and ranks SCOPED to them (file_paths set) — not group-wide-then-filter,
+        # which let a more query-similar OTHER file crowd the requested one out of
+        # the top-k and return nothing.
+        assert kwargs["file_paths"] == ["/Volumes/catalog/schema/vol/doc.pdf"]
+
+    @pytest.mark.asyncio
+    @patch(LLM_MODULE)
+    @patch(DOC_SVC_MODULE)
+    async def test_search_requested_file_not_in_store_returns_empty(
+        self, mock_doc_cls, mock_llm_cls
+    ):
+        """A requested file that matches no stored row returns NO results — the
+        service must never substitute other files in the group (which would make
+        the agent answer from the wrong document)."""
+        self._setup_service()
+        mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
+        # Group has only "doc.pdf"; the agent asks for a different file.
+        mock_doc_cls.return_value = self._doc_service([_pg_row()])
+
+        results = await self.service.search(
+            QUERY, file_paths=["/Volumes/cat/sch/vol/not-uploaded.pdf"], user_token=USER_TOKEN
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    @patch(LLM_MODULE)
+    @patch(DOC_SVC_MODULE)
+    async def test_search_matches_basename_across_unicode_normalization(
+        self, mock_doc_cls, mock_llm_cls
+    ):
+        """A macOS-NFD stored path ("a" + combining ¨) must match an NFC request
+        ("ä"): basename resolution normalizes both to NFC. Without it, accented
+        filenames (e.g. "Kindeswohlgefährdung") silently scope to nothing and the
+        agent answers from no source."""
+        import unicodedata
+
+        self._setup_service()
+        mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
+        nfd_path = unicodedata.normalize("NFD", "/Volumes/v/Kindeswohlgefährdung.pdf")
+        nfc_name = unicodedata.normalize("NFC", "Kindeswohlgefährdung.pdf")
+        # sanity: the stored path really is NFD (differs from its NFC form)
+        assert nfd_path != unicodedata.normalize("NFC", nfd_path)
+        doc_svc = self._doc_service([_pg_row(file_path=nfd_path)])
+        mock_doc_cls.return_value = doc_svc
+
+        results = await self.service.search(
+            QUERY, file_paths=[nfc_name], user_token=USER_TOKEN
+        )
+
+        # The NFC request resolved to the stored NFD full path and returned its row
+        assert len(results) == 1
+        _, kwargs = doc_svc.search_similar.call_args
+        assert kwargs["file_paths"] == [nfd_path]
 
     @pytest.mark.asyncio
     @patch(LLM_MODULE)

@@ -329,22 +329,3 @@ async def run_crew_in_process(
                 except Exception as rec_err:
                     logger.error(f"[run_crew_in_process] CancelledError recovery also failed: {rec_err}")
                 raise  # re-raise CancelledError so the task is properly marked cancelled
-
-
-async def run_light_agent(
-    execution_id: str,
-    config: Any,
-    group_context: GroupContext = None,
-    session=None,
-) -> Dict[str, Any]:
-    """Backwards-compatible delegator to :class:`LightAgentService`.
-
-    The single-agent ("chat"/light) run logic now lives in
-    ``src.engines.crewai.paths.light_agent.light_agent_service.LightAgentService`` (mirroring
-    ``CrewAIFlowService`` and ``CrewPreparation``). Kept so existing imports and
-    tests that reference ``run_light_agent`` keep working.
-    """
-    from src.engines.crewai.paths.light_agent.light_agent_service import LightAgentService
-    return await LightAgentService().run_light_agent_execution(
-        execution_id, config, group_context, session
-    )

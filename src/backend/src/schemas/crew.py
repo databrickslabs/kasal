@@ -308,6 +308,7 @@ class CrewStreamingRequest(BaseModel):
     disable_memory: bool = Field(False, description="'No memory' mode — build agents without memory for the auto-executed run")
     mcp_servers: Optional[List[str]] = Field(default_factory=list, description="MCP server names to equip the auto-executed crew with")
     agentbricks_endpoints: Optional[List[str]] = Field(default_factory=list, description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew")
+    knowledge_file_paths: Optional[List[str]] = Field(default_factory=list, description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document")
     chat_mode_type: Optional[str] = Field("chat", description="ChatMode answer mode (chat|research|deep): drives reasoning/planning/execution_type in build_crew_config_from_generated. 'chat' = single light agent, 'research' = crew+reasoning, 'deep' = crew+planning+reasoning")
 
 

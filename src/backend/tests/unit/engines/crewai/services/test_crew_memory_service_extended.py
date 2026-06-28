@@ -317,9 +317,9 @@ class TestSetupStorageDirectory:
         result = self._setup_default({"group_id": "a/b c"})
         assert os.path.basename(result) == "kasal_default_a_b_c"
 
-    def test_root_scope_workspace_vs_session(self):
-        """root_scope mirrors ChatMode: /<group> workspace-wide, /<group>/<session>
-        when the session toggle is off."""
+    def test_root_scope_is_always_group_scoped(self):
+        """root_scope is ALWAYS /<group> — session_id no longer narrows semantic
+        memory (per-session recall is owned by the chat-history preamble)."""
         from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
         cfg = MemoryBackendConfig(backend_type=MemoryBackendType.DEFAULT)
@@ -328,10 +328,11 @@ class TestSetupStorageDirectory:
         )
         assert ws["root_scope"] == "/grp"
 
+        # A session_id (and the legacy session-only flag) must NOT change the scope.
         ses = CrewMemoryService(
             {"group_id": "grp", "session_id": "sess1", "memory_workspace_scope": False}
         )._build_memory_kwargs({}, None, "grp_crew_x", cfg, None)
-        assert ses["root_scope"] == "/grp/sess1"
+        assert ses["root_scope"] == "/grp"
 
     def test_saves_original_storage_dir(self):
         os.environ["CREWAI_STORAGE_DIR"] = "original_value"

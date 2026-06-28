@@ -913,7 +913,7 @@ async def test_get_flow_executions_by_flow_error():
 
 # ── Light agent ("chat" mode): service delegates to the engine ───────────────
 # The CrewAI-specific work (agent build, kickoff, trace emission) lives in the
-# engine runner (src/engines/crewai/execution_runner.run_light_agent); the
+# light-agent path (paths/light_agent/light_agent_service.run_light_agent); the
 # service only resolves the engine and delegates, mirroring how
 # prepare_and_run_crew delegates the crew path to engine.run_execution. The
 # runner's own behavior is covered in

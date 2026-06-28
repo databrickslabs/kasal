@@ -312,6 +312,30 @@ class TestEmbedFile:
 
     @pytest.mark.asyncio
     async def test_skips_chunk_when_no_embedding_produced(self, service):
+        # One chunk embeds, one comes back None: the None chunk is skipped but the
+        # upload still succeeds for the embedded one.
+        chunks = [
+            {"content": "c1", "raw_content": "r1", "section": "Intro", "document_summary": "s"},
+            {"content": "c2", "raw_content": "r2", "section": "Body", "document_summary": "s"},
+        ]
+        bulk_mock = AsyncMock()
+        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
+            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024, None]):
+                with patch(_DOC_EMBEDDING_REPO, return_value=self._repo(bulk_mock)):
+                    result = await service.embed_file(
+                        file_path="/data/file.txt",
+                        file_content="hello",
+                        execution_id="exec-1",
+                    )
+        assert result["status"] == "success"
+        assert result["chunks_processed"] == 2
+        assert result["chunks_embedded"] == 1
+        bulk_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_no_chunk_embedded(self, service):
+        # All chunks parsed but none embedded (embedding model unavailable) must
+        # report status "error", not a misleading "success".
         chunks = [{"content": "c", "raw_content": "c", "section": "Intro", "document_summary": "s"}]
         bulk_mock = AsyncMock()
         with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
@@ -322,8 +346,10 @@ class TestEmbedFile:
                         file_content="hello",
                         execution_id="exec-1",
                     )
-        assert result["status"] == "success"
+        assert result["status"] == "error"
+        assert result["chunks_processed"] == 1
         assert result["chunks_embedded"] == 0
+        assert result["error"] == "embedding_model_unavailable"
         bulk_mock.assert_not_called()
 
     @pytest.mark.asyncio

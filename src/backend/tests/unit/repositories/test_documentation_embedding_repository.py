@@ -448,8 +448,53 @@ class TestDocumentationEmbeddingRepositorySearchSimilar:
             # Mock the postgres search method (async)
             with patch.object(repository_with_async_session, '_search_similar_postgres', AsyncMock(return_value=[])):
                 result = await repository_with_async_session.search_similar(query_embedding)
-                
+
                 assert result == []
+
+
+class TestDocumentationEmbeddingRepositoryListGroupFilePaths:
+    """list_group_file_paths resolves a requested basename to the stored full
+    path(s) before a scoped similarity search."""
+
+    @pytest.mark.asyncio
+    async def test_returns_distinct_paths_dropping_nulls(self, repository_with_async_session):
+        """Returns the distinct stored file_path values for the group; NULL
+        paths (legacy/built-in rows) are dropped."""
+        mock_result = MagicMock()
+        mock_result.all = MagicMock(return_value=[
+            ("uploads/g/e1/a.pdf",),
+            ("uploads/g/e2/b.pdf",),
+            (None,),
+        ])
+        repository_with_async_session.db.execute.return_value = mock_result
+
+        paths = await repository_with_async_session.list_group_file_paths("g")
+
+        assert paths == ["uploads/g/e1/a.pdf", "uploads/g/e2/b.pdf"]
+        # the query is scoped to the group
+        repository_with_async_session.db.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_rows(self, repository_with_async_session):
+        mock_result = MagicMock()
+        mock_result.all = MagicMock(return_value=[])
+        repository_with_async_session.db.execute.return_value = mock_result
+
+        assert await repository_with_async_session.list_group_file_paths("g") == []
+
+    @pytest.mark.asyncio
+    async def test_sync_session_fallback(self, repository_with_sync_session):
+        """The sync (non-AsyncSession) fallback queries via db.query and drops
+        NULL paths, mirroring the async branch."""
+        chain = (
+            repository_with_sync_session.db.query.return_value
+            .filter.return_value.distinct.return_value
+        )
+        chain.all.return_value = [("uploads/g/e/a.pdf",), (None,)]
+
+        paths = await repository_with_sync_session.list_group_file_paths("g")
+
+        assert paths == ["uploads/g/e/a.pdf"]
 
 
 class TestDocumentationEmbeddingRepositorySearchBySource:

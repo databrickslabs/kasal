@@ -6,12 +6,17 @@ single-agent counterpart to :class:`CrewPreparation` + ``run_crew_in_process``
 cognitive-memory wiring, tool/agent-lifecycle tracing, ``Agent.kickoff_async``,
 and terminal status. Runs IN-PROCESS for sub-second latency.
 
-The previous module-level ``run_light_agent`` function in ``execution_runner``
-now delegates here, so existing callers keep working.
+The module-level ``run_light_agent`` entry point lives at the bottom of this
+module (mirroring ``run_crew_in_process`` in the crew path and
+``run_flow_in_process`` in the flow path) and delegates to
+:class:`LightAgentService`. It was previously misplaced in
+``paths/crew/execution_runner`` and moved here as part of the engine-path
+refactor, so existing callers/tests keep working.
 """
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from src.models.execution_status import ExecutionStatus
@@ -504,13 +509,23 @@ class LightAgentService:
         group_id: str,
         log,
     ) -> str:
-        """Recent turns of THIS chat session as a short transcript.
+        """Recent turns of THIS chat session as a short transcript, weighted so
+        the user's own statements survive a long/bloated conversation.
 
         Each light-agent turn is an isolated ``kickoff_async`` with no built-in
         conversation history, so without this the assistant cannot recall what was
-        said a moment ago (e.g. the user's name). Read-only and best-effort:
-        returns ``""`` on any issue. The current turn (the just-written user row +
-        its ``Thinking...`` / ``[ui-card]`` placeholder rows) is excluded.
+        said earlier (e.g. the user's name). Read-only and best-effort: returns
+        ``""`` on any issue. The current turn (the just-written user row + its
+        ``Thinking...`` / ``[ui-card]`` placeholder rows) is excluded.
+
+        Scoring (why this beats a flat "last N turns" window): a long chat is
+        dominated by large ASSISTANT outputs (decks, reports) that would otherwise
+        push the short, high-signal USER facts out of the window. So USER turns are
+        prioritized — every user turn is kept (capped per-turn), and only the most
+        recent assistant turns are kept and hard-truncated. Under the overall
+        character budget the OLDEST assistant turns are dropped first; user turns
+        are never dropped. The header also tells the model to treat the user's
+        statements as authoritative.
         """
         session_id = getattr(config, "session_id", None)
         if not session_id:
@@ -521,15 +536,24 @@ class LightAgentService:
         if not group_ids:
             return ""
 
+        # Tunables (env-overridable). Defaults favor keeping user facts.
+        recent_limit = int(os.getenv("CHAT_HISTORY_RECENT_LIMIT", "120"))
+        user_cap = int(os.getenv("CHAT_HISTORY_USER_CHAR_CAP", "500"))
+        assistant_cap = int(os.getenv("CHAT_HISTORY_ASSISTANT_CHAR_CAP", "240"))
+        max_assistant_turns = int(os.getenv("CHAT_HISTORY_MAX_ASSISTANT_TURNS", "8"))
+        max_chars = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "6000"))
+
         try:
             from src.db.session import request_scoped_session
             from src.repositories.chat_history_repository import (
                 ChatHistoryRepository,
             )
             async with request_scoped_session() as db_session:
+                # MOST RECENT window (not the oldest page) — a session longer than
+                # one page must still recall what was just said.
                 messages = await ChatHistoryRepository(
                     db_session
-                ).get_by_session_and_group(session_id, group_ids, per_page=50)
+                ).get_recent_by_session_and_group(session_id, group_ids, limit=recent_limit)
         except Exception as hist_err:  # noqa: BLE001
             logger.debug(f"[light_agent] chat history fetch skipped: {hist_err}")
             return ""
@@ -543,7 +567,8 @@ class LightAgentService:
         prior = messages[:last_user] if last_user >= 0 else list(messages)
 
         placeholders = {"thinking...", "[ui-card]", ""}
-        turns = []
+        # Build (role, "User: ..."/"Assistant: ..." line) keeping chronological order.
+        entries: list = []  # list of (role, line)
         for m in prior:
             mtype = getattr(m, "message_type", "")
             if mtype not in ("user", "assistant"):
@@ -551,17 +576,47 @@ class LightAgentService:
             content = (getattr(m, "content", "") or "").strip()
             if content.lower() in placeholders or content.startswith("[ui-card]"):
                 continue
-            if len(content) > 600:
-                content = content[:600] + "…"
-            turns.append(
-                ("User" if mtype == "user" else "Assistant") + ": " + content
-            )
+            cap = user_cap if mtype == "user" else assistant_cap
+            if len(content) > cap:
+                content = content[:cap] + "…"
+            label = "User" if mtype == "user" else "Assistant"
+            entries.append((mtype, f"{label}: {content}"))
 
-        if not turns:
+        if not entries:
             return ""
-        turns = turns[-16:]  # bound prompt growth on long sessions
-        log(f"🧠 Recalling {len(turns)} prior message(s) from this chat session")
-        return "Conversation so far (most recent last):\n" + "\n".join(turns)
+
+        # Keep ALL user turns; keep only the most recent N assistant turns.
+        assistant_positions = [i for i, (role, _) in enumerate(entries) if role == "assistant"]
+        keep_assistant = set(assistant_positions[-max_assistant_turns:])
+        selected = [
+            (role, line)
+            for i, (role, line) in enumerate(entries)
+            if role == "user" or i in keep_assistant
+        ]
+
+        # Enforce the character budget by dropping the OLDEST assistant turns
+        # first; user turns are never dropped (they carry the facts to recall).
+        def _total(items) -> int:
+            return sum(len(line) + 1 for _, line in items)
+
+        while selected and _total(selected) > max_chars:
+            drop_at = next((i for i, (role, _) in enumerate(selected) if role == "assistant"), None)
+            if drop_at is None:
+                break  # only user turns remain — keep them even if slightly over
+            selected.pop(drop_at)
+
+        lines = [line for _, line in selected]
+        user_count = sum(1 for role, _ in selected if role == "user")
+        log(
+            f"🧠 Recalling {len(lines)} prior message(s) from this chat session "
+            f"({user_count} from you)"
+        )
+        return (
+            "Conversation so far in THIS chat session (most recent last). The "
+            "User's statements below are authoritative facts about the user and "
+            "their request — rely on them directly when answering (e.g. the user's "
+            "name, preferences, and earlier instructions):\n" + "\n".join(lines)
+        )
 
     async def _attach_memory(
         self,
@@ -670,3 +725,24 @@ class LightAgentService:
                 log("🧠 Memory unavailable for this run (no backend/embedder)")
         except Exception as mem_err:  # noqa: BLE001
             logger.warning(f"[light_agent] memory setup skipped: {mem_err}")
+
+
+async def run_light_agent(
+    execution_id: str,
+    config: Any,
+    group_context: Optional[GroupContext] = None,
+    session=None,
+) -> Dict[str, Any]:
+    """Module-level entry point for the single-agent ("chat"/light) run.
+
+    Mirrors ``run_crew_in_process`` (crew path) and ``run_flow_in_process``
+    (flow path): the light path exposes its run entry point here, in the light
+    agent module itself, alongside the :class:`LightAgentService` that holds the
+    logic. The crewai-engine path refactor split the engine into
+    ``paths/{crew,flow,light_agent}``; this previously lived (misplaced) in
+    ``paths/crew/execution_runner`` and is now back where it belongs. Kept as a
+    thin function so existing imports/tests referencing ``run_light_agent`` work.
+    """
+    return await LightAgentService().run_light_agent_execution(
+        execution_id, config, group_context, session
+    )

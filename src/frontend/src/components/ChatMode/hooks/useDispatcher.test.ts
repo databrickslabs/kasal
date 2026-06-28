@@ -299,6 +299,23 @@ describe('useDispatcher', () => {
         attachments: ['a.txt', 'b.pdf'],
       });
     });
+
+    it('forwards attachment paths as knowledge_file_paths in the dispatch run settings', async () => {
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('generate_crew', { type: 'streaming', generation_id: 'g1' }));
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        // sendMessage(message, model, tools, dispatchSuffix, attachments, displayAs, knowledgeFilePaths)
+        await hook.current.sendMessage(
+          'summarize this', 'm', ['DatabricksKnowledgeSearchTool'], undefined,
+          ['doc.pdf'], undefined, ['uploads/g/e/doc.pdf'],
+        );
+      });
+
+      const runSettings = mockedDispatch.mock.calls[0][3];
+      expect(runSettings.knowledge_file_paths).toEqual(['uploads/g/e/doc.pdf']);
+    });
   });
 
   describe('getAssistantResponse intents', () => {

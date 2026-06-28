@@ -1244,6 +1244,9 @@ Please analyze this message and provide your intent classification."""
                         disable_memory=request.disable_memory,
                         mcp_servers=request.mcp_servers or [],
                         agentbricks_endpoints=request.agentbricks_endpoints or [],
+                        # Files attached in this chat turn — scopes the knowledge
+                        # search tool so the run grounds on the just-uploaded doc.
+                        knowledge_file_paths=request.knowledge_file_paths or [],
                         # ChatMode answer mode (chat|research|deep) → drives
                         # reasoning/planning/execution_type at config-build time.
                         chat_mode_type=request.chat_mode_type or "chat",

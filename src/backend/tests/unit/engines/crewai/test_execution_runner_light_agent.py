@@ -1,6 +1,6 @@
 """
 Unit tests for the engine-level light-agent ("chat" mode) runner:
-``src.engines.crewai.paths.crew.execution_runner.run_light_agent``.
+``src.engines.crewai.paths.light_agent.light_agent_service.run_light_agent``.
 
 This is the CrewAI-specific counterpart of ``run_crew_in_process`` for the
 single-agent chat path. The service layer
@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.crewai.paths.crew.execution_runner import run_light_agent
+from src.engines.crewai.paths.light_agent.light_agent_service import run_light_agent
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.utils.user_context import GroupContext

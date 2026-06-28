@@ -347,6 +347,9 @@ describe('ChatInput — knowledge attachments', () => {
     expect(meta.dispatchSuffix).toContain('Knowledge files attached: a.txt');
     // Attachment names are surfaced for display on the message bubble.
     expect(meta.attachments).toEqual(['a.txt']);
+    // Attachment PATHS ride along so the backend scopes the knowledge search to
+    // exactly this file (not group-wide) — the names alone aren't enough.
+    expect(meta.knowledgeFilePaths).toEqual(['/Volumes/x/a.txt']);
     // Attachment stays in the composer after sending (reusable for follow-ups).
     expect(screen.getByText('a.txt')).toBeInTheDocument();
   });
@@ -615,47 +618,37 @@ describe('ChatInput — pending run mode (loaded catalog crew/flow)', () => {
   });
 });
 
-describe('ChatInput — memory mode pill (three-state dropdown, controlled)', () => {
-  it('the pill opens a labelled dropdown with all three memory modes', () => {
-    render(<ChatInput {...baseProps} memoryEnabled workspaceMemory />);
-    // Pill reflects the active mode; clicking it opens the dropdown.
-    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
-    expect(screen.getByLabelText('Memory mode: Session memory')).toBeTruthy();
-    expect(screen.getByLabelText('Memory mode: No memory')).toBeTruthy();
+describe('ChatInput — memory mode toggle (Workspace ⇄ Session)', () => {
+  it('is a switch labelled with the active mode — Workspace memory when enabled', () => {
+    render(<ChatInput {...baseProps} memoryEnabled />);
+    const toggle = screen.getByRole('switch', { name: 'Memory mode: Workspace memory' });
+    expect(toggle).toBeTruthy();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveTextContent('Workspace memory');
+    // It is a toggle, not a dropdown — there is no "No memory" option anywhere.
+    expect(screen.queryByText('No memory')).toBeNull();
   });
 
-  it('the collapsed pill shows the compact short label, not the full name', () => {
-    render(<ChatInput {...baseProps} memoryEnabled workspaceMemory />);
-    const pill = screen.getByLabelText('Memory mode: Workspace memory');
-    // Compact label on the trigger; the full name stays in the aria-label.
-    expect(pill).toHaveTextContent('Workspace');
-    expect(pill).not.toHaveTextContent('Workspace memory');
+  it('shows Session memory (unchecked) when memory is disabled', () => {
+    render(<ChatInput {...baseProps} memoryEnabled={false} />);
+    const toggle = screen.getByRole('switch', { name: 'Memory mode: Session memory' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveTextContent('Session memory');
   });
 
-  it('selecting each mode sets the controlled (memoryEnabled, workspaceMemory) state', () => {
-    const onWorkspaceMemoryChange = vi.fn();
+  it('clicking the toggle flips memoryEnabled (Workspace → Session and back)', () => {
     const onMemoryEnabledChange = vi.fn();
-    const props = { ...baseProps, onWorkspaceMemoryChange, onMemoryEnabledChange };
+    const props = { ...baseProps, onMemoryEnabledChange };
 
-    // Active Workspace → open → pick Session: memory on, workspace off.
-    const { rerender } = render(<ChatInput {...props} memoryEnabled workspaceMemory />);
-    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
-    fireEvent.click(screen.getByLabelText('Memory mode: Session memory'));
-    expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
-    expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(false);
-
-    // Active Session → open → pick No memory: memory off.
-    rerender(<ChatInput {...props} memoryEnabled workspaceMemory={false} />);
-    fireEvent.click(screen.getByLabelText('Memory mode: Session memory'));
-    fireEvent.click(screen.getByLabelText('Memory mode: No memory'));
+    // Workspace active → click → memory OFF (session, chat-history only).
+    const { rerender } = render(<ChatInput {...props} memoryEnabled />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Workspace memory' }));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(false);
 
-    // Active No memory → open → pick Workspace: memory on, workspace-wide.
-    rerender(<ChatInput {...props} memoryEnabled={false} workspaceMemory={false} />);
-    fireEvent.click(screen.getByLabelText('Memory mode: No memory'));
-    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
+    // Session active → click → memory ON (workspace-scoped).
+    rerender(<ChatInput {...props} memoryEnabled={false} />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Session memory' }));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
-    expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(true);
   });
 });
 

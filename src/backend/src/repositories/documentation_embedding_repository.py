@@ -343,6 +343,29 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [row for _, row in scored[:limit]]
 
+    async def list_group_file_paths(self, group_id: str) -> List[str]:
+        """Return the distinct stored ``file_path`` values for a group.
+
+        Used to resolve a requested file name (often a bare basename) to the
+        actual stored full path(s) before a scoped similarity search, so the
+        ranking can be narrowed to ONLY the requested file's chunks.
+        """
+        if isinstance(self.db, AsyncSession):
+            result = await self.db.execute(
+                select(self._model.file_path)
+                .where(self._model.group_id == group_id)
+                .distinct()
+            )
+            return [r for (r,) in result.all() if r]
+        # Sync fallback
+        return [
+            r for (r,) in self.db.query(self._model.file_path)
+            .filter(self._model.group_id == group_id)
+            .distinct()
+            .all()
+            if r
+        ]
+
     async def _search_similar_postgres(
         self,
         query_embedding: List[float],

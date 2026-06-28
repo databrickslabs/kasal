@@ -889,6 +889,52 @@ class TestDispatch:
         assert streaming_request.agentbricks_endpoints == []
 
     @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_forwards_knowledge_file_paths(self):
+        """knowledge_file_paths (files attached in the chat turn) must be
+        forwarded verbatim onto the CrewStreamingRequest, so the auto-executed
+        light agent scopes its knowledge search to the uploaded file."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        request = DispatcherRequest(
+            message="summarize this",
+            model="test-model",
+            knowledge_file_paths=["uploads/g/e/doc.pdf"],
+        )
+        mock_task = MagicMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            await svc.dispatch(request)
+
+        svc.crew_service.create_crew_progressive.assert_called_once()
+        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_request.knowledge_file_paths == ["uploads/g/e/doc.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_generate_crew_knowledge_file_paths_defaults_to_empty(self):
+        """When the DispatcherRequest omits knowledge_file_paths, the dispatched
+        CrewStreamingRequest gets an empty list (never None)."""
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(
+            return_value=self._make_intent_result("generate_crew")
+        )
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+
+        request = DispatcherRequest(message="build a team", model="test-model")
+        mock_task = MagicMock()
+        with patch("asyncio.create_task", return_value=mock_task):
+            await svc.dispatch(request)
+
+        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
+        assert streaming_request.knowledge_file_paths == []
+
+    @pytest.mark.asyncio
     async def test_dispatch_chat_mode_skips_phantom_intent_log(self):
         """A chat_mode dispatch takes the intent fast-path (no LLM), so it must
         NOT record a phantom detect-intent LLM interaction. detect_intent runs

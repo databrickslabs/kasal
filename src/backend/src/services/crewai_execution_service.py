@@ -390,8 +390,9 @@ class CrewAIExecutionService:
         ``engine.run_execution``: this resolves the CrewAI engine and hands off
         to ``engine.run_light_agent_execution``. All CrewAI-specific work — agent
         build, ``Agent.kickoff_async``, and tool-activity trace emission — lives
-        in the engine (``src/engines/crewai/execution_runner.run_light_agent``),
-        keeping the service free of engine internals. The engine runner runs the
+        in the light-agent path (``paths/light_agent/light_agent_service`` —
+        ``LightAgentService`` / ``run_light_agent``), keeping the service free of
+        engine internals. The engine runner runs the
         agent IN-PROCESS (no subprocess spin-up) and writes its own terminal
         status, so a sub-second answer is fetchable via the REST poller even if
         the SSE listener attaches late.

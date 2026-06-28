@@ -513,10 +513,8 @@ const ChatWorkspace: React.FC = () => {
   // or collapsed into the chat's "Working…" bar (expandable). A persisted choice.
   const activityPlacement = useExecutionStore((s) => s.activityPlacement);
   const activityInChat = activityPlacement === 'chat';
-  // "Workspace memory" recall scope, owned by the store so it persists across
-  // the empty→conversation input swap (local state would reset to ON).
-  const workspaceMemory = useExecutionStore((s) => s.workspaceMemory);
-  const setWorkspaceMemory = useExecutionStore((s) => s.setWorkspaceMemory);
+  // Memory mode (workspace vs session) is owned by the store so it persists
+  // across the empty→conversation input swap (local state would reset to ON).
   const memoryEnabled = useExecutionStore((s) => s.memoryEnabled);
   const setMemoryEnabled = useExecutionStore((s) => s.setMemoryEnabled);
 
@@ -1831,7 +1829,7 @@ const ChatWorkspace: React.FC = () => {
   const handleSend = useCallback(
     async (
       message: string,
-      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[]; displayAs?: string },
+      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[]; displayAs?: string; knowledgeFilePaths?: string[] },
     ) => {
       // A genuine user message supersedes any pending loaded-crew run (the rail's
       // own "/load …" send is exempt — it's what arms the pending run).
@@ -1855,6 +1853,7 @@ const ChatWorkspace: React.FC = () => {
           meta?.dispatchSuffix,
           meta?.attachments,
           meta?.displayAs,
+          meta?.knowledgeFilePaths,
         );
       } finally {
         useExecutionStore.getState().setIsLoading(false);
@@ -2137,8 +2136,6 @@ const ChatWorkspace: React.FC = () => {
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
               sessionId={currentSessionId}
-              workspaceMemory={workspaceMemory}
-              onWorkspaceMemoryChange={setWorkspaceMemory}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={setMemoryEnabled}
               pendingRunLabel={pendingRun && pendingRun.sessionId === currentSessionId ? pendingRun.label : undefined}

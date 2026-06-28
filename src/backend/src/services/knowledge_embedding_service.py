@@ -91,11 +91,18 @@ class KnowledgeEmbeddingService:
             # Embed ALL chunks in batches with a single auth resolution. Doing this
             # per-chunk previously re-opened a DB session + re-resolved the PAT for
             # every chunk (243 lookups for a 243-chunk file) and issued one HTTP
-            # round-trip each — the dominant cost. Same model as the search side
-            # (databricks-gte-large-en, 1024 dims) so query/stored vectors match.
+            # round-trip each — the dominant cost. The embedder is resolved through
+            # the shared resolver (Databricks in prod, local Ollama in dev) — the
+            # SAME resolver the search side uses, so query/stored vectors always
+            # match (both 1024-dim).
+            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+
+            embedder_config = await resolve_knowledge_embedder_config(
+                user_token=user_token, group_id=self.group_id
+            )
             chunk_texts = [c['content'] for c in chunks]
             embeddings = await LLMManager.get_embeddings(
-                chunk_texts, model="databricks-gte-large-en"
+                chunk_texts, embedder_config=embedder_config
             )
 
             creates: List[DocumentationEmbeddingCreate] = []
@@ -180,6 +187,29 @@ class KnowledgeEmbeddingService:
                         raise
 
             logger.info(f"[EMBEDDING] Successfully embedded {embedded_chunks}/{len(chunks)} chunks")
+
+            if embedded_chunks == 0:
+                # Every chunk was parsed but none embedded — the embedding model
+                # returned nothing (no Databricks auth and/or local Ollama model
+                # unreachable). Report this as an error instead of a misleading
+                # "success" so the upload surfaces the failure.
+                provider = embedder_config.get("provider")
+                model = embedder_config.get("config", {}).get("model")
+                logger.error(
+                    f"[EMBEDDING] Embedded 0/{len(chunks)} chunks for {file_path} — "
+                    f"embedding model unavailable (provider={provider}, model={model})"
+                )
+                return {
+                    "status": "error",
+                    "chunks_processed": len(chunks),
+                    "chunks_embedded": 0,
+                    "index_name": "knowledge_embeddings (pgvector)",
+                    "error": "embedding_model_unavailable",
+                    "message": (
+                        f"Parsed {len(chunks)} chunks but embedded 0 — the embedding "
+                        f"model is unavailable (provider={provider}, model={model})."
+                    ),
+                }
 
             return {
                 "status": "success",

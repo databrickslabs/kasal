@@ -4208,6 +4208,38 @@ class TestBuildCrewConfigFromGenerated:
         assert cfg["tasks_yaml"]["task_t1"]["tool_configs"]["MCP_SERVERS"] == servers
         assert "Databricks Genie: Sales" in cfg["tasks_yaml"]["task_t1"]["description"]
 
+    def test_knowledge_file_paths_injected_into_agents_and_tasks(self):
+        """A chat turn with attached files threads knowledge_file_paths into the
+        DatabricksKnowledgeSearchTool tool_configs on BOTH the agent and the task
+        — the light agent reads the AGENT's tool_configs, so this is what scopes
+        the knowledge search to the uploaded file instead of group-wide."""
+        paths = ["uploads/g/e/Kindeswohlgefährdung Schule Oberrieden.pdf"]
+        req = self._req(knowledge_file_paths=paths)
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": ["DatabricksKnowledgeSearchTool"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1",
+              "tools": ["DatabricksKnowledgeSearchTool"]}],
+        )
+        scope = {"file_paths": paths}
+        assert cfg["agents_yaml"]["agent_a1"]["tool_configs"][
+            "DatabricksKnowledgeSearchTool"] == scope
+        assert cfg["tasks_yaml"]["task_t1"]["tool_configs"][
+            "DatabricksKnowledgeSearchTool"] == scope
+
+    def test_no_knowledge_file_paths_no_scoping_injected(self):
+        """Without attached files, no DatabricksKnowledgeSearchTool scoping is
+        added (the tool, if present, searches group-wide)."""
+        req = self._req()  # knowledge_file_paths defaults to []
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": ["DatabricksKnowledgeSearchTool"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        assert "DatabricksKnowledgeSearchTool" not in (
+            cfg["agents_yaml"]["agent_a1"].get("tool_configs", {})
+        )
+
     def test_disable_memory_forces_agent_memory_false(self):
         req = self._req(disable_memory=True)
         cfg = CrewGenerationService.build_crew_config_from_generated(
