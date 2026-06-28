@@ -1200,24 +1200,11 @@ export class CanvasLayoutManager {
 
       // Manager node position is handled by useManagerNode hook, not here
 
-      // Flow nodes (if any) - horizontal layout: left to right
-      // Sort by explicit order field first, then fallback to Y position for legacy nodes
-      const sortedFlowNodes = [...flowNodes].sort((a, b) => {
-        const orderA = a.data?.order ?? Number.MAX_SAFE_INTEGER;
-        const orderB = b.data?.order ?? Number.MAX_SAFE_INTEGER;
-        if (orderA !== orderB) return orderA - orderB;
-        // Fallback: sort by current Y position to preserve top-to-bottom order
-        return a.position.y - b.position.y;
-      });
-      sortedFlowNodes.forEach((node, index) => {
-        reorganizedNodes.push({
-          ...node,
-          position: {
-            x: availableArea.x + index * (flowDims.width + this.minNodeSpacing),
-            y: availableArea.y + 50
-          }
-        });
-      });
+      // Flow nodes: dependency-aware layered layout (start → branches → merge),
+      // flowing left → right by graph depth so siblings sit in the same column.
+      reorganizedNodes.push(
+        ...this.layoutFlowNodesByDependency(flowNodes, edges, 'horizontal', availableArea, flowDims)
+      );
     } else {
       // Vertical layout: agents above their connected tasks, centered
       // Build map of agent -> tasks from edges
@@ -1289,27 +1276,135 @@ export class CanvasLayoutManager {
 
       // Manager node position is handled by useManagerNode hook, not here
 
-      // Flow nodes (if any) - vertical layout: top to bottom
-      // Sort by explicit order field first, then fallback to X position for legacy nodes
-      const sortedFlowNodes = [...flowNodes].sort((a, b) => {
-        const orderA = a.data?.order ?? Number.MAX_SAFE_INTEGER;
-        const orderB = b.data?.order ?? Number.MAX_SAFE_INTEGER;
-        if (orderA !== orderB) return orderA - orderB;
-        // Fallback: sort by current X position to preserve left-to-right order
-        return a.position.x - b.position.x;
+      // Flow nodes: dependency-aware layered layout (start → branches → merge),
+      // flowing top → bottom by graph depth so siblings sit in the same row.
+      reorganizedNodes.push(
+        ...this.layoutFlowNodesByDependency(flowNodes, edges, 'vertical', availableArea, flowDims)
+      );
+    }
+
+    return reorganizedNodes;
+  }
+
+  /**
+   * Lay out flow (crew) nodes as a layered DAG based on their connection graph.
+   *
+   * Nodes are assigned a depth = longest path from any root (a node with no
+   * incoming edge). Each depth becomes a layer; siblings in a layer are spread
+   * along the cross-axis and every layer is centered, so a start node sits above
+   * (or left of) its branches and a merge node lands centered after them.
+   *
+   * - vertical:   layers run top → bottom; siblings spread along X.
+   * - horizontal: layers run left → right; siblings spread along Y.
+   *
+   * Falls back gracefully when there are no edges (everything lands in one layer).
+   */
+  private layoutFlowNodesByDependency(
+    flowNodes: Node[],
+    edges: Array<{ id: string; source: string; target: string }>,
+    orientation: 'vertical' | 'horizontal',
+    availableArea: CanvasArea,
+    flowDims: NodeDimensions
+  ): Node[] {
+    if (flowNodes.length === 0) return [];
+
+    const ids = new Set(flowNodes.map(n => n.id));
+    const children = new Map<string, string[]>();
+    const indegree = new Map<string, number>();
+    ids.forEach(id => {
+      children.set(id, []);
+      indegree.set(id, 0);
+    });
+
+    edges.forEach(e => {
+      if (e.source !== e.target && ids.has(e.source) && ids.has(e.target)) {
+        children.get(e.source)!.push(e.target);
+        indegree.set(e.target, (indegree.get(e.target) || 0) + 1);
+      }
+    });
+
+    // Longest-path layering via Kahn topological traversal: a node's depth is one
+    // more than the deepest parent, so merge points sit below all their inputs.
+    const depth = new Map<string, number>();
+    const indegreeWork = new Map(indegree);
+    const queue: string[] = [];
+    ids.forEach(id => {
+      if ((indegreeWork.get(id) || 0) === 0) {
+        depth.set(id, 0);
+        queue.push(id);
+      }
+    });
+    while (queue.length) {
+      const n = queue.shift()!;
+      const nd = depth.get(n) || 0;
+      for (const c of children.get(n) || []) {
+        depth.set(c, Math.max(depth.get(c) ?? 0, nd + 1));
+        indegreeWork.set(c, (indegreeWork.get(c) || 0) - 1);
+        if ((indegreeWork.get(c) || 0) === 0) queue.push(c);
+      }
+    }
+    // Any node still unleveled (part of a cycle) lands in the first layer.
+    flowNodes.forEach(n => {
+      if (!depth.has(n.id)) depth.set(n.id, 0);
+    });
+
+    // Group nodes by depth (layer) and order siblings deterministically.
+    const byLayer = new Map<number, Node[]>();
+    flowNodes.forEach(n => {
+      const d = depth.get(n.id) ?? 0;
+      const layer = byLayer.get(d) || [];
+      layer.push(n);
+      byLayer.set(d, layer);
+    });
+    const orderOf = (n: Node) => (n.data?.order as number | undefined) ?? Number.MAX_SAFE_INTEGER;
+    byLayer.forEach(layer =>
+      layer.sort((a, b) => {
+        const oa = orderOf(a);
+        const ob = orderOf(b);
+        if (oa !== ob) return oa - ob;
+        return orientation === 'vertical'
+          ? a.position.x - b.position.x
+          : a.position.y - b.position.y;
+      })
+    );
+
+    const layerDepths = [...byLayer.keys()].sort((a, b) => a - b);
+    const maxSiblings = Math.max(...[...byLayer.values()].map(l => l.length));
+
+    const layerGap = Math.max(this.minNodeSpacing * 0.5, 40); // gap between layers
+    const siblingGap = Math.max(this.minNodeSpacing * 0.4, 28); // gap within a layer
+
+    const positioned: Node[] = [];
+
+    if (orientation === 'vertical') {
+      const crossStep = flowDims.width + siblingGap;
+      const globalWidth = maxSiblings * flowDims.width + (maxSiblings - 1) * siblingGap;
+      const centerX = availableArea.x + globalWidth / 2;
+      layerDepths.forEach(d => {
+        const layer = byLayer.get(d)!;
+        const rowWidth = layer.length * flowDims.width + (layer.length - 1) * siblingGap;
+        const startX = centerX - rowWidth / 2;
+        const y = availableArea.y + d * (flowDims.height + layerGap);
+        layer.forEach((node, i) => {
+          positioned.push({ ...node, position: { x: startX + i * crossStep, y } });
+        });
       });
-      sortedFlowNodes.forEach((node, index) => {
-        reorganizedNodes.push({
-          ...node,
-          position: {
-            x: availableArea.x + 50,
-            y: availableArea.y + index * (flowDims.height + this.minNodeSpacing)
-          }
+    } else {
+      const crossStep = flowDims.height + siblingGap;
+      const globalHeight = maxSiblings * flowDims.height + (maxSiblings - 1) * siblingGap;
+      const centerY = availableArea.y + globalHeight / 2;
+      layerDepths.forEach(d => {
+        const layer = byLayer.get(d)!;
+        const colHeight = layer.length * flowDims.height + (layer.length - 1) * siblingGap;
+        const startY = centerY - colHeight / 2;
+        const x = availableArea.x + d * (flowDims.width + layerGap);
+        layer.forEach((node, i) => {
+          positioned.push({ ...node, position: { x, y: startY + i * crossStep } });
         });
       });
     }
 
-    return reorganizedNodes;
+    return positioned;
   }
 
   /**

@@ -105,6 +105,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   executionHistoryHeight = 0
 }) => {
   const { isDarkMode } = useThemeManager();
+  // Reactive so edge attachment points re-derive when the layout is toggled.
+  const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
   const [controlsVisible, _setControlsVisible] = useState(false);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -673,27 +675,41 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     try {
       const flowNodeIds = new Set(flowNodes.map(node => node.id));
 
-      return edges.filter(edge => {
-        if (!edge || typeof edge !== 'object' || !edge.source || !edge.target) {
-          return false;
-        }
+      // Flow edges always connect crew nodes. Force their attachment points to
+      // match the current layout orientation so connections exit the BOTTOM and
+      // enter the TOP in vertical layout (and right → left in horizontal),
+      // regardless of whichever handle was stored when the edge was created.
+      // Deriving at render time keeps this correct on toggle AND after reload.
+      const orientedSourceHandle = layoutOrientation === 'vertical' ? 'bottom' : 'right';
+      const orientedTargetHandle = layoutOrientation === 'vertical' ? 'top' : 'left';
 
-        // For merged edges, check if ALL sources exist in flowNodeIds
-        const isMergedEdge = edge.data?.isMerged && edge.data?.sources;
-        if (isMergedEdge) {
-          const sources = edge.data.sources as string[];
-          const allSourcesExist = sources.every(sourceId => flowNodeIds.has(sourceId));
-          return allSourcesExist && flowNodeIds.has(edge.target);
-        }
+      return edges
+        .filter(edge => {
+          if (!edge || typeof edge !== 'object' || !edge.source || !edge.target) {
+            return false;
+          }
 
-        // For normal edges, check source and target
-        return flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target);
-      });
+          // For merged edges, check if ALL sources exist in flowNodeIds
+          const isMergedEdge = edge.data?.isMerged && edge.data?.sources;
+          if (isMergedEdge) {
+            const sources = edge.data.sources as string[];
+            const allSourcesExist = sources.every(sourceId => flowNodeIds.has(sourceId));
+            return allSourcesExist && flowNodeIds.has(edge.target);
+          }
+
+          // For normal edges, check source and target
+          return flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target);
+        })
+        .map(edge =>
+          edge.sourceHandle === orientedSourceHandle && edge.targetHandle === orientedTargetHandle
+            ? edge
+            : { ...edge, sourceHandle: orientedSourceHandle, targetHandle: orientedTargetHandle }
+        );
     } catch (error) {
       console.error('Error filtering flow edges:', error);
       return [];
     }
-  }, [edges, flowNodes]);
+  }, [edges, flowNodes, layoutOrientation]);
 
   // Stable callback for node changes to prevent unnecessary renders
   const handleNodesChange = useCallback((changes: NodeChange[]) => {

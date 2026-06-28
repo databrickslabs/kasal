@@ -331,6 +331,42 @@ class FlowService:
             logger.error(f"Error updating flow: {str(e)}")
             raise KasalError(detail=f"Error updating flow: {str(e)}")
 
+    async def _delete_execution_children(self, execution_ids: list, job_ids: list) -> None:
+        """Delete every row that FK-references the given executionhistory rows.
+
+        Must run before deleting from executionhistory, otherwise SQLite raises
+        "FOREIGN KEY constraint failed". Covers all enforced FK children:
+          - execution_trace: run_id (-> id) AND job_id (-> job_id)
+          - errortrace:      run_id (-> id)
+          - taskstatus:      job_id (-> job_id)
+          - llm_usage_billing: execution_id (-> job_id)
+
+        Table/column names are hardcoded constants (no injection surface).
+        """
+        from sqlalchemy import text, bindparam
+
+        # Children keyed by executionhistory.id
+        if execution_ids:
+            for table, col in (("execution_trace", "run_id"), ("errortrace", "run_id")):
+                query = text(f"DELETE FROM {table} WHERE {col} IN :ids").bindparams(
+                    bindparam("ids", expanding=True)
+                )
+                result = await self.session.execute(query, {"ids": execution_ids})
+                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+
+        # Children keyed by executionhistory.job_id
+        if job_ids:
+            for table, col in (
+                ("execution_trace", "job_id"),
+                ("taskstatus", "job_id"),
+                ("llm_usage_billing", "execution_id"),
+            ):
+                query = text(f"DELETE FROM {table} WHERE {col} IN :jids").bindparams(
+                    bindparam("jids", expanding=True)
+                )
+                result = await self.session.execute(query, {"jids": job_ids})
+                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+
     async def force_delete_flow_with_executions(self, flow_id: uuid.UUID) -> bool:
         """
         Force delete a flow by first removing any associated flow executions.
@@ -363,22 +399,19 @@ class FlowService:
 
             logger.info(f"Starting force deletion of flow {flow_id}")
 
-            # First, find all execution history IDs for this flow
+            # First, find all execution history IDs (and job_ids) for this flow
             find_executions_query = text("""
-                SELECT id FROM executionhistory
+                SELECT id, job_id FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
             """).bindparams(flow_id_param)
             result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
-            execution_ids = [row[0] for row in result.fetchall()]
+            rows = result.fetchall()
+            execution_ids = [row[0] for row in rows]
+            job_ids = [row[1] for row in rows]
 
-            # Delete execution_trace records that reference these executions (by run_id)
-            if execution_ids:
-                trace_delete_query = text("""
-                    DELETE FROM execution_trace
-                    WHERE run_id IN :execution_ids
-                """).bindparams(bindparam("execution_ids", expanding=True))
-                trace_result = await self.session.execute(trace_delete_query, {"execution_ids": execution_ids})
-                logger.info(f"Deleted {trace_result.rowcount} execution_trace records for flow {flow_id}")
+            # Delete every child row that FK-references these executions, or the
+            # executionhistory delete below fails with "FOREIGN KEY constraint failed".
+            await self._delete_execution_children(execution_ids, job_ids)
 
             # Delete all flow executions from executionhistory
             execution_delete_query = text("""
@@ -464,14 +497,9 @@ class FlowService:
             if job_ids:
                 logger.info(f"Found {len(job_ids)} flow executions to delete")
 
-            # Delete execution_trace records that reference these executions (by run_id)
-            if execution_ids:
-                trace_delete_query = text("""
-                    DELETE FROM execution_trace
-                    WHERE run_id IN :execution_ids
-                """).bindparams(bindparam("execution_ids", expanding=True))
-                trace_result = await self.session.execute(trace_delete_query, {"execution_ids": execution_ids})
-                logger.info(f"Deleted {trace_result.rowcount} execution_trace records for flow {flow_id}")
+            # Delete every child row that FK-references these executions, or the
+            # executionhistory delete below fails with "FOREIGN KEY constraint failed".
+            await self._delete_execution_children(execution_ids, job_ids)
 
             # Delete all flow executions from executionhistory
             execution_delete_query = text("""

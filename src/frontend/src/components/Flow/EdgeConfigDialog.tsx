@@ -7,8 +7,6 @@ import {
   Button,
   FormControl,
   FormLabel,
-  RadioGroup,
-  Radio,
   FormControlLabel,
   Typography,
   Box,
@@ -16,19 +14,22 @@ import {
   TextField,
   Divider,
   Checkbox,
-  FormGroup,
   Select,
   MenuItem,
-  IconButton,
   InputLabel,
+  Link,
 } from '@mui/material';
 import {
-  Delete as DeleteIcon,
   Add as AddIcon,
   PanTool as PanToolIcon,
+  HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import { Edge, Node } from 'reactflow';
 import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
+import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
+import { SchemaService } from '../../api/SchemaService';
+import { TaskService } from '../../api/TaskService';
+import { Schema } from '../../types/schema';
 
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 
@@ -71,6 +72,7 @@ export interface HITLConfig {
 export interface EdgeConfig {
   logicType: FlowLogicType;
   routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
+  routerSchema?: string;          // Name of the output schema the router routes on (set on source crew's final task)
   description?: string;
   listenToTaskIds?: string[];     // Tasks from source crew to wait for
   targetTaskIds?: string[];       // Tasks from target crew to execute
@@ -87,8 +89,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   edge,
   nodes,
   onSave,
-  aggregatedSourceTasks = [],
-  flowStateVariables = []
+  aggregatedSourceTasks = []
 }) => {
   const [logicType, setLogicType] = useState<FlowLogicType>('NONE');
   const [routerConditions, setRouterConditions] = useState<Condition[]>([]);
@@ -96,8 +97,13 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const [listenToTaskIds, setListenToTaskIds] = useState<string[]>([]);
   const [targetTaskIds, setTargetTaskIds] = useState<string[]>([]);
 
+  // Router schema-driven routing
+  const [schemas, setSchemas] = useState<Schema[]>([]);
+  const [routerSchema, setRouterSchema] = useState<string>('');
+  const [schemaCreateOpen, setSchemaCreateOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // State management
-  const [stateMappings, setStateMappings] = useState<StateMapping[]>([]);
   const [checkpoint, setCheckpoint] = useState(false);
 
   // HITL configuration
@@ -117,32 +123,15 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const sourceNode = edge ? nodes.find(n => n.id === edge.source) : null;
   const fallbackSourceTasks: Task[] = sourceNode?.data?.allTasks || [];
 
-  // Debug logging for source tasks
-  console.log('EdgeConfigDialog: source tasks check', {
-    aggregatedSourceTasksLength: aggregatedSourceTasks.length,
-    aggregatedSourceTasks: aggregatedSourceTasks,
-    fallbackSourceTasksLength: fallbackSourceTasks.length,
-    fallbackSourceTasks: fallbackSourceTasks,
-    sourceNodeId: sourceNode?.id,
-    sourceNodeDataKeys: sourceNode?.data ? Object.keys(sourceNode.data) : []
-  });
+  // Stable id keys for the auto-include effect (avoids array-identity churn in deps)
+  const sourceTaskIdsKey = (aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.flatMap(g => g.tasks)
+    : fallbackSourceTasks).map(t => t.id).join(',');
+  const targetTaskIdsKey = targetTasks.map(t => t.id).join(',');
 
   // Load existing configuration when edge changes
   useEffect(() => {
     if (edge && edge.data) {
-      console.log('EdgeConfigDialog: Loading edge data', {
-        edgeId: edge.id,
-        logicType: edge.data.logicType,
-        listenToTaskIds: edge.data.listenToTaskIds,
-        stateMappings: edge.data.stateMappings,
-        checkpoint: edge.data.checkpoint,
-        'checkpoint type': typeof edge.data.checkpoint,
-        hitl: edge.data.hitl,
-        'hitl.enabled': edge.data.hitl?.enabled,
-        'hitl.enabled type': typeof edge.data.hitl?.enabled,
-        allDataKeys: Object.keys(edge.data)
-      });
-
       setLogicType(edge.data.logicType || 'NONE');
 
       // Parse router condition from string to conditions array
@@ -153,8 +142,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setListenToTaskIds(edge.data.listenToTaskIds || []);
       setTargetTaskIds(edge.data.targetTaskIds || []);
 
-      // Load state management settings
-      setStateMappings(edge.data.stateMappings || []);
+      // Load router schema selection
+      setRouterSchema(edge.data.routerSchema || '');
+      setSaveError(null);
       // Use explicit boolean check to handle false values correctly
       setCheckpoint(edge.data.checkpoint === true);
 
@@ -180,7 +170,8 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setDescription('');
       setListenToTaskIds([]);
       setTargetTaskIds([]);
-      setStateMappings([]);
+      setRouterSchema('');
+      setSaveError(null);
       setCheckpoint(false);
       // Reset HITL
       setHitlEnabled(false);
@@ -190,6 +181,19 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setHitlRequireComment(false);
     }
   }, [edge]);
+
+  // Auto-include all source/target tasks — task selection was removed from the UI.
+  // The edge endpoints already define source → target, so we listen to every source
+  // task (wait-for-all of the source crew) and run every target task by default.
+  useEffect(() => {
+    if (!open) return;
+    const srcTasks = aggregatedSourceTasks.length > 0
+      ? aggregatedSourceTasks.flatMap(g => g.tasks)
+      : fallbackSourceTasks;
+    setListenToTaskIds(srcTasks.map(t => t.id));
+    setTargetTaskIds(targetTasks.map(t => t.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, edge?.id, sourceTaskIdsKey, targetTaskIdsKey]);
 
   // Auto-adjust logic type when multiple tasks are selected/deselected
   useEffect(() => {
@@ -202,24 +206,66 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     }
   }, [listenToTaskIds.length, logicType]);
 
-  const handleSave = () => {
+  // Get all source tasks as a flat list. The crew's final task is the one whose
+  // output becomes the crew result (what the router routes on), so the schema is
+  // applied there.
+  const allSourceTasks: Task[] = aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.flatMap(g => g.tasks)
+    : fallbackSourceTasks;
+  const finalSourceTask: Task | undefined = allSourceTasks[allSourceTasks.length - 1];
+  const sourceCrewName = aggregatedSourceTasks[0]?.crewName
+    || sourceNode?.data?.crewName
+    || sourceNode?.data?.label
+    || 'the source crew';
+
+  // Resolve the selected schema's fields → router condition variables.
+  // Only scalar fields (string / number / integer / boolean) are routable, since
+  // the condition operators compare single values; arrays/objects are excluded.
+  const selectedSchema = schemas.find(s => s.name === routerSchema);
+  const schemaProperties = (selectedSchema?.schema_definition as { properties?: Record<string, { type?: string }> } | undefined)?.properties;
+  const ROUTABLE_TYPES = ['string', 'number', 'integer', 'boolean'];
+  const routableSchemaFields = schemaProperties
+    ? Object.entries(schemaProperties).filter(([, def]) => ROUTABLE_TYPES.includes(def?.type ?? ''))
+    : [];
+  const schemaFieldOptions = routableSchemaFields.map(([key]) => key);
+  const schemaFieldTypes: Record<string, string> = Object.fromEntries(
+    routableSchemaFields.map(([key, def]) => [key, def?.type ?? 'string'])
+  );
+
+  // Load schemas for the router picker whenever the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void SchemaService.getInstance().getSchemas().then((list) => {
+      if (!cancelled) setSchemas(list);
+    });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // For an existing ROUTER edge without a stored schema, prefill from the source
+  // crew's final task if it already declares an output schema.
+  useEffect(() => {
+    if (!open || logicType !== 'ROUTER' || routerSchema || !finalSourceTask) return;
+    let cancelled = false;
+    void TaskService.getTask(finalSourceTask.id).then((task) => {
+      const existing = task?.config?.output_pydantic;
+      if (!cancelled && existing) setRouterSchema(existing);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, logicType, routerSchema, finalSourceTask?.id]);
+
+  const handleSave = async () => {
     if (!edge) return;
+    setSaveError(null);
 
-    // Convert conditions to Python expressions (conditions now reference state variables)
     const routerConditionStr = conditionsToPython(routerConditions);
-
-    // Filter out incomplete state mappings (need sourceTaskId, outputField, and stateVariable)
-    const validStateMappings = stateMappings.filter(
-      m => m.sourceTaskId && m.outputField.trim() && m.stateVariable.trim()
-    );
 
     const config: EdgeConfig = {
       logicType,
       description,
       listenToTaskIds,
       targetTaskIds,
-      // Include state management if configured
-      ...(validStateMappings.length > 0 && { stateMappings: validStateMappings }),
       // Always include checkpoint (explicit true/false)
       checkpoint: checkpoint,
       // Always include HITL config (when checkpoint enabled, use settings; when disabled, explicitly disable)
@@ -238,74 +284,32 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       },
     };
 
-    // Only include router condition if logic type is ROUTER
-    // Router conditions are evaluated against state variables (populated by stateMappings)
-    if (logicType === 'ROUTER' && routerConditionStr) {
-      config.routerCondition = routerConditionStr;
-    }
+    if (logicType === 'ROUTER') {
+      if (routerConditionStr) config.routerCondition = routerConditionStr;
+      if (routerSchema) config.routerSchema = routerSchema;
 
-    console.log('EdgeConfigDialog: Saving config', {
-      edgeId: edge.id,
-      logicType: config.logicType,
-      routerCondition: config.routerCondition,
-      stateMappings: config.stateMappings,
-      listenToTaskIds: config.listenToTaskIds,
-      allConfigKeys: Object.keys(config)
-    });
+      // Apply the chosen schema to the source crew's final task so it produces the
+      // structured output the router evaluates. Fetch-then-update preserves the
+      // task's other config fields.
+      if (routerSchema && finalSourceTask) {
+        try {
+          const fullTask = await TaskService.getTask(finalSourceTask.id);
+          if (fullTask && fullTask.config?.output_pydantic !== routerSchema) {
+            await TaskService.updateTask(finalSourceTask.id, {
+              ...fullTask,
+              config: { ...fullTask.config, output_pydantic: routerSchema },
+            });
+          }
+        } catch (e) {
+          setSaveError(e instanceof Error ? e.message : 'Failed to apply the schema to the source task.');
+          return; // keep the dialog open so the user can retry
+        }
+      }
+    }
 
     onSave(edge.id, config);
     onClose();
   };
-
-  const handleSourceTaskToggle = (taskId: string) => {
-    setListenToTaskIds(prev =>
-      prev.includes(taskId)
-        ? prev.filter(id => id !== taskId)
-        : [...prev, taskId]
-    );
-  };
-
-  const handleTargetTaskToggle = (taskId: string) => {
-    setTargetTaskIds(prev =>
-      prev.includes(taskId)
-        ? prev.filter(id => id !== taskId)
-        : [...prev, taskId]
-    );
-  };
-
-  // State mapping helpers
-  const handleAddStateMapping = () => {
-    // Default to first selected task if available
-    const defaultTaskId = listenToTaskIds.length > 0 ? listenToTaskIds[0] : '';
-    setStateMappings([...stateMappings, { sourceTaskId: defaultTaskId, outputField: '', stateVariable: '' }]);
-  };
-
-  const handleRemoveStateMapping = (index: number) => {
-    setStateMappings(stateMappings.filter((_, i) => i !== index));
-  };
-
-  const handleStateMappingChange = (index: number, field: 'sourceTaskId' | 'outputField' | 'stateVariable', value: string) => {
-    const updated = [...stateMappings];
-    updated[index] = { ...updated[index], [field]: value };
-    setStateMappings(updated);
-  };
-
-  // Get all source tasks as flat list for state mapping dropdown
-  const allSourceTasks: Task[] = aggregatedSourceTasks.length > 0
-    ? aggregatedSourceTasks.flatMap(g => g.tasks)
-    : fallbackSourceTasks;
-
-  // Get state variable names for displaying in condition builder hint
-  // Combine current edge's state mappings with flow-wide state variables
-  const currentEdgeStateVars = stateMappings
-    .filter(m => m.stateVariable.trim())
-    .map(m => m.stateVariable.trim());
-
-  // Combine and deduplicate: current edge vars + flow-wide vars
-  const allStateVariableNames = [...new Set([...currentEdgeStateVars, ...flowStateVariables])];
-
-  // Separate into "this edge" vs "from flow" for better display
-  const flowOnlyStateVars = flowStateVariables.filter(v => !currentEdgeStateVars.includes(v));
 
   const handleCancel = () => {
     onClose();
@@ -340,7 +344,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                   : `From ${sourceNode?.data?.crewName || aggregatedSourceTasks[0]?.crewName || 'source crew'}`
                 }
               </Typography>
-            {(aggregatedSourceTasks.length === 0 && fallbackSourceTasks.length === 0) ? (
+            {allSourceTasks.length === 0 ? (
               <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
                 No tasks available
               </Alert>
@@ -353,117 +357,32 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                 borderRadius: 1,
                 p: 1.5
               }}>
-                <FormGroup>
-                  {aggregatedSourceTasks.length > 0 ? (
-                    // Show crew names only when there are MULTIPLE source crews
-                    aggregatedSourceTasks.length > 1 ? (
-                      aggregatedSourceTasks.map((group) => (
-                        <Box key={group.crewName} sx={{ mb: 1.5 }}>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              color: 'primary.main',
-                              fontWeight: 600,
-                              fontSize: '0.7rem',
-                              display: 'block',
-                              mb: 0.5
-                            }}
-                          >
-                            {group.crewName}
-                          </Typography>
-                          {group.tasks.map((task) => (
-                            <FormControlLabel
-                              key={task.id}
-                              control={
-                                <Checkbox
-                                  size="small"
-                                  checked={listenToTaskIds.includes(task.id)}
-                                  onChange={() => handleSourceTaskToggle(task.id)}
-                                  sx={{ py: 0.25, pl: 0 }}
-                                />
-                              }
-                              label={
-                                <Typography variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
-                                  {task.name}
-                                </Typography>
-                              }
-                              sx={{
-                                ml: 0,
-                                mb: 0.25,
-                                display: 'flex',
-                                alignItems: 'flex-start',
-                                width: '100%'
-                              }}
-                            />
-                          ))}
-                        </Box>
-                      ))
-                    ) : (
-                      // Single source crew - no need to show crew name again
-                      aggregatedSourceTasks[0].tasks.map((task) => (
-                        <FormControlLabel
-                          key={task.id}
-                          control={
-                            <Checkbox
-                              size="small"
-                              checked={listenToTaskIds.includes(task.id)}
-                              onChange={() => handleSourceTaskToggle(task.id)}
-                              sx={{ py: 0.25, pl: 0 }}
-                            />
-                          }
-                          label={
-                            <Typography variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
-                              {task.name}
-                            </Typography>
-                          }
-                          sx={{
-                            ml: 0,
-                            mb: 0.25,
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            width: '100%'
-                          }}
-                        />
-                      ))
-                    )
-                  ) : (
-                    fallbackSourceTasks.map((task) => (
-                      <FormControlLabel
-                        key={task.id}
-                        control={
-                          <Checkbox
-                            size="small"
-                            checked={listenToTaskIds.includes(task.id)}
-                            onChange={() => handleSourceTaskToggle(task.id)}
-                            sx={{ py: 0.25, pl: 0 }}
-                          />
-                        }
-                        label={
-                          <Typography variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
-                            {task.name}
-                          </Typography>
-                        }
-                        sx={{
-                          ml: 0,
-                          mb: 0.25,
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          width: '100%'
-                        }}
-                      />
-                    ))
-                  )}
-                </FormGroup>
+                {aggregatedSourceTasks.length > 1 ? (
+                  // Multiple source crews — group the read-only list by crew name
+                  aggregatedSourceTasks.map((group) => (
+                    <Box key={group.crewName} sx={{ mb: 1.5 }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'primary.main', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
+                      >
+                        {group.crewName}
+                      </Typography>
+                      {group.tasks.map((task) => (
+                        <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                          • {task.name}
+                        </Typography>
+                      ))}
+                    </Box>
+                  ))
+                ) : (
+                  allSourceTasks.map((task) => (
+                    <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                      • {task.name}
+                    </Typography>
+                  ))
+                )}
               </Box>
             )}
-              {listenToTaskIds.length > 0 && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                    Selected: {listenToTaskIds.length}
-                  </Typography>
-                </Box>
-              )}
-
             </Box>
 
             {/* Target Tasks Selection */}
@@ -487,258 +406,168 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                 borderRadius: 1,
                 p: 1.5
               }}>
-                <FormGroup>
-                  {targetTasks.map((task) => (
-                    <FormControlLabel
-                      key={task.id}
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={targetTaskIds.includes(task.id)}
-                          onChange={() => handleTargetTaskToggle(task.id)}
-                          sx={{ py: 0.25, pl: 0 }}
-                        />
-                      }
-                      label={
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.4 }}>
-                          {task.name}
-                        </Typography>
-                      }
-                      sx={{
-                        ml: 0,
-                        mb: 0.25,
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        width: '100%'
-                      }}
-                    />
-                  ))}
-                </FormGroup>
+                {targetTasks.map((task) => (
+                  <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                    • {task.name}
+                  </Typography>
+                ))}
               </Box>
             )}
-              {targetTaskIds.length > 0 && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                    Selected: {targetTaskIds.length}
-                  </Typography>
-                </Box>
-              )}
             </Box>
           </Box>
 
           <Divider sx={{ my: 1 }} />
 
           {/* Logic Type Selection */}
-          <FormControl component="fieldset" size="small">
+          <FormControl fullWidth size="small">
             <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
               Flow Logic Type
             </FormLabel>
-            <RadioGroup
+            <Select
               value={logicType}
               onChange={(e) => setLogicType(e.target.value as FlowLogicType)}
-              sx={{ gap: 0.5 }}
+              sx={{ fontSize: '0.85rem' }}
+              renderValue={(value) => {
+                const labels: Record<FlowLogicType, string> = {
+                  NONE: 'None (Default) — Sequential',
+                  AND: 'AND Logic — Wait for all',
+                  OR: 'OR Logic — Execute when any completes',
+                  ROUTER: 'Router — Conditional routing',
+                };
+                return (
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    {labels[value as FlowLogicType]}
+                  </Typography>
+                );
+              }}
             >
-              <FormControlLabel
-                value="NONE"
-                control={<Radio size="small" />}
-                disabled={listenToTaskIds.length > 1}
-                label={
-                  <Box sx={{ ml: 0.5 }}>
-                    <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      None (Default) <Typography component="span" variant="caption" color="text.secondary">— Sequential</Typography>
+              <MenuItem value="NONE" disabled={listenToTaskIds.length > 1}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    None (Default) <Typography component="span" variant="caption" color="text.secondary">— Sequential</Typography>
+                  </Typography>
+                  {listenToTaskIds.length > 1 && (
+                    <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Not available with multiple source tasks
                     </Typography>
-                    {listenToTaskIds.length > 1 && (
-                      <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                        Not available with multiple source tasks
-                      </Typography>
-                    )}
-                  </Box>
-                }
-                sx={{ mb: 0 }}
-              />
-              <FormControlLabel
-                value="AND"
-                control={<Radio size="small" />}
-                disabled={listenToTaskIds.length <= 1}
-                label={
-                  <Box sx={{ ml: 0.5 }}>
-                    <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      AND Logic <Typography component="span" variant="caption" color="text.secondary">— Wait for all</Typography>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="AND" disabled={listenToTaskIds.length <= 1}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    AND Logic <Typography component="span" variant="caption" color="text.secondary">— Wait for all</Typography>
+                  </Typography>
+                  {listenToTaskIds.length <= 1 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Requires multiple source tasks
                     </Typography>
-                    {listenToTaskIds.length <= 1 && (
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                        Requires multiple source tasks
-                      </Typography>
-                    )}
-                  </Box>
-                }
-                sx={{ mb: 0 }}
-              />
-              <FormControlLabel
-                value="OR"
-                control={<Radio size="small" />}
-                disabled={listenToTaskIds.length <= 1}
-                label={
-                  <Box sx={{ ml: 0.5 }}>
-                    <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      OR Logic <Typography component="span" variant="caption" color="text.secondary">— Execute when any completes</Typography>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="OR" disabled={listenToTaskIds.length <= 1}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    OR Logic <Typography component="span" variant="caption" color="text.secondary">— Execute when any completes</Typography>
+                  </Typography>
+                  {listenToTaskIds.length <= 1 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Requires multiple source tasks
                     </Typography>
-                    {listenToTaskIds.length <= 1 && (
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                        Requires multiple source tasks
-                      </Typography>
-                    )}
-                  </Box>
-                }
-                sx={{ mb: 0 }}
-              />
-              <FormControlLabel
-                value="ROUTER"
-                control={<Radio size="small" />}
-                label={
-                  <Box sx={{ ml: 0.5 }}>
-                    <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      Router <Typography component="span" variant="caption" color="text.secondary">— Conditional routing</Typography>
-                    </Typography>
-                  </Box>
-                }
-                sx={{ mb: 0 }}
-              />
-            </RadioGroup>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="ROUTER">
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    Router <Typography component="span" variant="caption" color="text.secondary">— Conditional routing</Typography>
+                  </Typography>
+                </Box>
+              </MenuItem>
+            </Select>
           </FormControl>
 
           {/* Router Configuration (only shown when ROUTER is selected) */}
           {logicType === 'ROUTER' && (
             <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600, color: 'primary.main' }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'primary.main' }}>
                 Router Configuration
               </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                A crew returns <strong>one structured result</strong> for the whole run. Pick or create the
+                output schema for <strong>{sourceCrewName}</strong>, then choose a field to branch on
+                (e.g. <code>status == &quot;failed&quot;</code>).
+              </Typography>
+              <Link
+                href="/docs/flow-routing"
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', mb: 1.5 }}
+              >
+                <HelpOutlineIcon sx={{ fontSize: 14 }} /> Learn how routing works
+              </Link>
 
-              {/* Step 1: State Mappings - extract task outputs to state variables */}
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.8rem', mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box component="span" sx={{ bgcolor: 'primary.main', color: 'white', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>1</Box>
-                  Save Task Output to State
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block', mb: 1.5, ml: 3.5 }}>
-                  Extract values from task outputs to use in the route condition
-                </Typography>
+              {/* Step 1: Output schema */}
+              <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
+                <InputLabel>Output schema</InputLabel>
+                <Select
+                  value={routerSchema}
+                  label="Output schema"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '__create__') {
+                      setSchemaCreateOpen(true);
+                    } else if (value !== routerSchema) {
+                      setRouterSchema(value);
+                      // Existing conditions reference the previous schema's fields — start fresh.
+                      setRouterConditions([]);
+                    }
+                  }}
+                >
+                  <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
+                    <em>Select a schema…</em>
+                  </MenuItem>
+                  {schemas.map((s) => (
+                    <MenuItem key={s.id} value={s.name} sx={{ fontSize: '0.85rem' }}>{s.name}</MenuItem>
+                  ))}
+                  <MenuItem value="__create__" sx={{ color: 'primary.main', fontSize: '0.85rem' }}>
+                    <AddIcon fontSize="small" sx={{ mr: 1 }} /> Add new schema…
+                  </MenuItem>
+                </Select>
+              </FormControl>
 
-                {listenToTaskIds.length === 0 ? (
-                  <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5, ml: 3.5 }}>
-                    <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                      Select source tasks above first to enable state mappings
-                    </Typography>
-                  </Alert>
-                ) : stateMappings.length === 0 ? (
-                  <Box
-                    sx={{
-                      border: '1px dashed',
-                      borderColor: 'divider',
-                      borderRadius: 1,
-                      p: 1.5,
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      ml: 3.5,
-                      '&:hover': { borderColor: 'primary.main', bgcolor: 'background.paper' }
-                    }}
-                    onClick={handleAddStateMapping}
-                  >
-                    <AddIcon fontSize="small" sx={{ color: 'text.secondary', mb: 0.5 }} />
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
-                      Add state mapping
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, ml: 3.5 }}>
-                    {stateMappings.map((mapping, index) => (
-                      <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <FormControl size="small" sx={{ minWidth: 120 }}>
-                          <Select
-                            value={mapping.sourceTaskId || ''}
-                            onChange={(e) => handleStateMappingChange(index, 'sourceTaskId', e.target.value)}
-                            displayEmpty
-                            sx={{ fontSize: '0.75rem' }}
-                          >
-                            <MenuItem value="" disabled><em>Task</em></MenuItem>
-                            {allSourceTasks.map((task) => (
-                              <MenuItem key={task.id} value={task.id} sx={{ fontSize: '0.75rem' }}>{task.name}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                        <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>.</Typography>
-                        <TextField
-                          size="small"
-                          placeholder="field"
-                          value={mapping.outputField}
-                          onChange={(e) => handleStateMappingChange(index, 'outputField', e.target.value)}
-                          sx={{ width: 80, '& input': { fontSize: '0.75rem' } }}
-                        />
-                        <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 600 }}>→</Typography>
-                        <TextField
-                          size="small"
-                          placeholder="state var"
-                          value={mapping.stateVariable}
-                          onChange={(e) => handleStateMappingChange(index, 'stateVariable', e.target.value)}
-                          sx={{ width: 90, '& input': { fontSize: '0.75rem' } }}
-                        />
-                        <IconButton size="small" onClick={() => handleRemoveStateMapping(index)} sx={{ color: 'error.main', p: 0.5 }}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    ))}
-                    <Button size="small" startIcon={<AddIcon />} onClick={handleAddStateMapping} sx={{ alignSelf: 'flex-start', fontSize: '0.7rem' }}>
-                      Add mapping
-                    </Button>
-                  </Box>
-                )}
-              </Box>
-
-              <Divider sx={{ my: 2 }} />
-
-              {/* Step 2: Route Condition - evaluates state variables */}
-              <Box sx={{ mb: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.8rem', mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box component="span" sx={{ bgcolor: 'primary.main', color: 'white', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>2</Box>
-                  Route Condition
-                </Typography>
-
-                {/* Show available state variables */}
-                <Box sx={{ ml: 3.5, mb: 1.5 }}>
-                  {allStateVariableNames.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                      {currentEdgeStateVars.length > 0 && (
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                          <strong>This edge:</strong> {currentEdgeStateVars.join(', ')}
-                        </Typography>
-                      )}
-                      {flowOnlyStateVars.length > 0 && (
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                          <strong>From flow:</strong> {flowOnlyStateVars.join(', ')}
-                        </Typography>
-                      )}
-                      {currentEdgeStateVars.length === 0 && flowOnlyStateVars.length > 0 && (
-                        <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.65rem', fontStyle: 'italic' }}>
-                          Tip: Add state mappings above to extract values from this edge&apos;s tasks
-                        </Typography>
-                      )}
-                    </Box>
-                  ) : (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                      Add state mappings above first, then use state variables here
-                    </Typography>
-                  )}
-                </Box>
-
-                <Box sx={{ ml: 3.5 }}>
+              {/* Step 2: Condition on a schema variable */}
+              {!routerSchema ? (
+                <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  Select or create an output schema to route on.
+                </Alert>
+              ) : (schemas.length > 0 && !selectedSchema) ? (
+                <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  Schema &ldquo;{routerSchema}&rdquo; isn&apos;t available anymore — pick another above.
+                </Alert>
+              ) : schemaFieldOptions.length === 0 ? (
+                <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  This schema has no scalar fields to route on.
+                </Alert>
+              ) : (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    <strong>Variables:</strong> {schemaFieldOptions.join(', ')}
+                  </Typography>
                   <ConditionBuilder
                     conditions={routerConditions}
                     onChange={setRouterConditions}
                     label=""
+                    fieldOptions={schemaFieldOptions}
+                    fieldTypes={schemaFieldTypes}
                     helperText="If TRUE → this route activates. If FALSE → route is skipped."
                   />
                 </Box>
-              </Box>
+              )}
+
+              {saveError && (
+                <Alert severity="error" sx={{ fontSize: '0.75rem', py: 0.5, mt: 1 }}>{saveError}</Alert>
+              )}
             </Box>
           )}
 
@@ -886,15 +715,22 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
           onClick={handleSave}
           variant="contained"
           size="small"
-          disabled={
-            listenToTaskIds.length === 0 ||
-            targetTaskIds.length === 0 ||
-            (logicType === 'ROUTER' && routerConditions.length === 0)
-          }
+          disabled={logicType === 'ROUTER' && (!routerSchema || routerConditions.length === 0)}
         >
           Save
         </Button>
       </DialogActions>
+
+      <SchemaQuickCreateDialog
+        open={schemaCreateOpen}
+        onClose={() => setSchemaCreateOpen(false)}
+        onCreated={(schema) => {
+          setSchemas((prev) => [...prev.filter(s => s.name !== schema.name), schema]);
+          setRouterSchema(schema.name);
+          setRouterConditions([]);
+          setSchemaCreateOpen(false);
+        }}
+      />
     </Dialog>
   );
 };

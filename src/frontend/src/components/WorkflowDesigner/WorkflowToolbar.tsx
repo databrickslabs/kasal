@@ -77,10 +77,11 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   const canRunCrew = React.useMemo(() => hasCrewContent(nodes), [nodes]);
 
   // Get the active tab's info so we can overwrite instead of creating new
-  const { activeTabSavedCrewId, activeTabId } = useTabManagerStore(state => {
+  const { activeTabSavedCrewId, activeTabSavedFlowId, activeTabId } = useTabManagerStore(state => {
     const activeTab = state.tabs.find(t => t.id === state.activeTabId);
     return {
       activeTabSavedCrewId: activeTab?.savedCrewId,
+      activeTabSavedFlowId: activeTab?.savedFlowId,
       activeTabId: state.activeTabId,
     };
   });
@@ -376,8 +377,15 @@ const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               data-tour="save-flow-button"
               onClick={() => {
-                const event = new CustomEvent('openSaveFlowDialog');
-                window.dispatchEvent(event);
+                if (activeTabSavedFlowId) {
+                  // Overwrite the existing flow (no save-as dialog)
+                  window.dispatchEvent(new CustomEvent('updateExistingFlow', {
+                    detail: { flowId: activeTabSavedFlowId, tabId: activeTabId }
+                  }));
+                } else {
+                  // No existing flow — open save-as dialog to name it
+                  window.dispatchEvent(new CustomEvent('openSaveFlowDialog'));
+                }
               }}
             >
               <AccountTreeIcon sx={{ fontSize: 20 }} />

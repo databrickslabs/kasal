@@ -46,6 +46,7 @@ interface FlowExecutionState {
   stopTracking: () => void;
   getCrewNodeStatus: (crewName: string) => CrewNodeState | undefined;
   clearStates: () => void;
+  seedCompletedCrews: (crewNames: string[]) => void;
   loadCrewStates: (jobId: string) => Promise<void>;
 }
 
@@ -233,6 +234,24 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
     });
   },
 
+  // Pre-mark already-completed crews (from a resumed checkpoint) as green so the
+  // nodes before the chosen resume point show completed immediately. Polling merges
+  // (never removes) and 'completed' is terminal, so these survive subsequent updates.
+  seedCompletedCrews: (crewNames: string[]) => {
+    if (!crewNames || crewNames.length === 0) return;
+    set((store) => {
+      const crewNodeStates = new Map(store.crewNodeStates);
+      const timestamp = new Date().toISOString();
+      for (const crewName of crewNames) {
+        const current = crewNodeStates.get(crewName);
+        // Don't downgrade a crew that's already running/completed in this session
+        if (current && (current.status === 'running' || current.status === 'completed')) continue;
+        crewNodeStates.set(crewName, { status: 'completed', completed_at: timestamp });
+      }
+      return { crewNodeStates };
+    });
+  },
+
   loadCrewStates: async (jobId: string) => {
     try {
       console.log('[FlowExecutionStore] Loading crew states for job:', jobId);
@@ -417,9 +436,44 @@ if (typeof window !== 'undefined') {
         }
       }
 
-      // Give time for final state update before stopping tracking
+      // After a short delay (so the backend can persist the final traces),
+      // rebuild crew node states from the authoritative DB trace list. The per-job
+      // SSE can close before the last task_completed traces are written, which
+      // leaves a crew that actually ran (e.g. a router's downstream target) without
+      // a 'completed' state and therefore uncolored. loadCrewStates recomputes every
+      // crew that produced traces; crews that never ran (unmatched router branches)
+      // have no traces and correctly stay idle.
+      const completedJobId = detail.jobId;
       setTimeout(() => {
-        store.stopTracking();
+        void (async () => {
+          try {
+            await useFlowExecutionStore.getState().loadCrewStates(completedJobId);
+          } catch (e) {
+            console.warn('[FlowExecutionStore] Trace reconciliation on completion failed:', e);
+          }
+
+          // The job succeeded, so any crew still marked running/pending (e.g. a
+          // crew whose final task_completed trace is not yet queryable) is complete.
+          const states = useFlowExecutionStore.getState().crewNodeStates;
+          const finalized = new Map(states);
+          let changed = false;
+          for (const [key, crewState] of finalized.entries()) {
+            if (crewState.status === 'running' || crewState.status === 'pending') {
+              finalized.set(key, {
+                ...crewState,
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+              });
+              changed = true;
+            }
+          }
+          useFlowExecutionStore.setState({
+            ...(changed ? { crewNodeStates: finalized } : {}),
+            isExecuting: false,
+            flowStatus: 'completed',
+          });
+          useFlowExecutionStore.getState().stopTracking();
+        })();
       }, 1000);
 
       // DON'T clear crew node states on completion - keep them visible until next run starts

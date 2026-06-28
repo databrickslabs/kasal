@@ -470,6 +470,83 @@ class TestFullPipeline:
         assert ctx['state']['id'] == 1  # first item's id
 
 
+class TestStructuredOutputPrecedence:
+    """Test that declared structured output (output_pydantic / output_json) is
+    preferred over ad-hoc raw-text JSON parsing when building the eval context.
+
+    Replicates the precedence logic from flow_builder.py build_eval_context:
+        1. result_obj.pydantic  -> model_dump()
+        2. result_obj.json_dict
+        3. result_obj.raw       -> strip fences + json.loads (fallback)
+    """
+
+    class _FakeModel:
+        """Stand-in for a Pydantic model with model_dump()."""
+        def __init__(self, data):
+            self._data = data
+
+        def model_dump(self):
+            return dict(self._data)
+
+    class _FakeCrewOutput:
+        """Stand-in for CrewAI's CrewOutput with optional structured fields."""
+        def __init__(self, raw=None, json_dict=None, pydantic=None):
+            if raw is not None:
+                self.raw = raw
+            if json_dict is not None:
+                self.json_dict = json_dict
+            if pydantic is not None:
+                self.pydantic = pydantic
+
+    def _extract(self, result_obj, ctx):
+        """Replicate the result-extraction precedence from flow_builder.py."""
+        if getattr(result_obj, 'pydantic', None) is not None:
+            merge_parsed_json(result_obj.pydantic.model_dump(), "crew output (pydantic)", ctx)
+        elif getattr(result_obj, 'json_dict', None):
+            merge_parsed_json(result_obj.json_dict, "crew output (json_dict)", ctx)
+        elif hasattr(result_obj, 'raw'):
+            raw_str = strip_code_fences(str(result_obj.raw))
+            if looks_like_json(raw_str):
+                merge_parsed_json(json.loads(raw_str), "crew output", ctx)
+
+    def test_pydantic_preferred_over_raw(self):
+        """When .pydantic is present it wins over a conflicting .raw."""
+        ctx = {'state': {}}
+        result = self._FakeCrewOutput(
+            raw='{"confidence": 10}',
+            pydantic=self._FakeModel({"confidence": 90}),
+        )
+        self._extract(result, ctx)
+        assert ctx['state']['confidence'] == 90
+        assert ctx['confidence'] == 90
+
+    def test_json_dict_used_when_no_pydantic(self):
+        """When .pydantic is absent but .json_dict is present, json_dict is used."""
+        ctx = {'state': {}}
+        result = self._FakeCrewOutput(
+            raw='{"status": "raw"}',
+            json_dict={"status": "approved", "score": "80"},
+        )
+        self._extract(result, ctx)
+        assert ctx['state']['status'] == 'approved'
+        # numeric strings still auto-converted via merge_parsed_json
+        assert ctx['state']['score'] == 80
+
+    def test_raw_fallback_when_no_structured_output(self):
+        """With neither .pydantic nor .json_dict, the raw JSON fallback still works."""
+        ctx = {'state': {}}
+        result = self._FakeCrewOutput(raw='```json\n{"category": "news"}\n```')
+        self._extract(result, ctx)
+        assert ctx['state']['category'] == 'news'
+
+    def test_empty_json_dict_falls_through_to_raw(self):
+        """An empty/falsey json_dict should not block the raw fallback."""
+        ctx = {'state': {}}
+        result = self._FakeCrewOutput(raw='{"category": "news"}', json_dict={})
+        self._extract(result, ctx)
+        assert ctx['state']['category'] == 'news'
+
+
 class TestAutoConvertValue:
     """Test the auto_convert_value helper that converts string numerics."""
 

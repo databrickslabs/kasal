@@ -10,6 +10,7 @@ from src.models.initialization_status import InitializationStatus
 from src.models.template import PromptTemplate
 from src.models.crew import Crew, Plan
 from src.models.flow import Flow
+from src.models.flow_state import FlowState
 from src.models.schedule import Schedule
 from src.models.api_key import ApiKey
 from src.models.schema import Schema
