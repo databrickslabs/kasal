@@ -12,9 +12,12 @@ import json
 
 from src.shared.a2ui.compose import (
     MINIMAL_COMPONENTS,
+    compose_a2ui,
     guidance_for,
     infer_deliverable,
     load_catalog,
+    presentation_needs_body,
+    quiz_needs_work,
     resolve_catalog,
     resolve_directives,
     resolve_themes,
@@ -22,6 +25,188 @@ from src.shared.a2ui.compose import (
 
 CATALOG = load_catalog()
 FULL = set(CATALOG["components"])
+
+
+# --- presentation_needs_body (hollow-deck detection) -----------------------
+def _deck(*slides):
+    comps = [
+        {"id": "deck", "component": "SlideDeck", "children": [s["id"] for s in slides]}
+    ]
+    for s in slides:
+        comps.append(s)
+        comps.extend(s.pop("_children", []))
+    return {"surfaceKind": "presentation", "root": "deck", "components": comps}
+
+
+def test_presentation_needs_body_flags_title_only_content_slides():
+    hollow = _deck(
+        {"id": "s1", "component": "Slide", "variant": "content", "title": "A"},
+        {"id": "s2", "component": "Slide", "variant": "content", "title": "B"},
+    )
+    assert presentation_needs_body(hollow) is True
+
+
+def test_presentation_needs_body_passes_slides_with_real_bodies():
+    filled = _deck(
+        {
+            "id": "s1",
+            "component": "Slide",
+            "variant": "content",
+            "title": "A",
+            "children": ["t1"],
+            "_children": [{"id": "t1", "component": "Text", "text": "A real point."}],
+        },
+        {
+            "id": "s2",
+            "component": "Slide",
+            "variant": "content",
+            "title": "B",
+            "children": ["c1"],
+            "_children": [
+                {
+                    "id": "c1",
+                    "component": "Chart",
+                    "chartType": "bar",
+                    "xKey": "x",
+                    "yKeys": ["y"],
+                    "data": {"path": "/d"},
+                }
+            ],
+        },
+    )
+    assert presentation_needs_body(filled) is False
+
+
+def test_presentation_needs_body_ignores_titleonly_and_nonpresentations():
+    # title/section slides are body-less by design and must not trip the check.
+    only_title_slides = _deck(
+        {"id": "s1", "component": "Slide", "variant": "title", "title": "Welcome"},
+    )
+    assert presentation_needs_body(only_title_slides) is False
+    assert (
+        presentation_needs_body({"surfaceKind": "document", "components": []}) is False
+    )
+
+
+# --- compose_a2ui retries on hollow decks, then falls back to markdown ------
+def _seq_llm(*replies):
+    it = iter(replies)
+    return lambda messages: next(it)
+
+
+def test_compose_retries_past_a_hollow_deck_to_a_filled_one():
+    hollow = json.dumps(
+        _deck(
+            {"id": "s1", "component": "Slide", "variant": "content", "title": "Empty"}
+        )
+    )
+    filled = json.dumps(
+        _deck(
+            {
+                "id": "s1",
+                "component": "Slide",
+                "variant": "content",
+                "title": "Full",
+                "children": ["t1"],
+                "_children": [
+                    {"id": "t1", "component": "Text", "text": "A genuine bullet point."}
+                ],
+            }
+        )
+    )
+    out = compose_a2ui(
+        "some answer text",
+        query="make a slide deck about x",
+        llm_call=_seq_llm(hollow, filled),
+        catalog=CATALOG,
+    )
+    assert out["surfaceKind"] == "presentation"
+    assert any(c.get("component") == "Text" for c in out["components"])
+
+
+def test_compose_falls_back_to_markdown_when_deck_stays_hollow():
+    hollow = json.dumps(
+        _deck(
+            {"id": "s1", "component": "Slide", "variant": "content", "title": "Empty"}
+        )
+    )
+    out = compose_a2ui(
+        "the full answer body",
+        query="make a slide deck about x",
+        llm_call=_seq_llm(hollow, hollow),
+        catalog=CATALOG,
+        retries=2,
+    )
+    # Hollow after every retry → readable markdown document instead of empty slides.
+    assert out["surfaceKind"] == "conversation"
+    assert out["dataModel"]["md"] == "the full answer body"
+
+
+# --- quiz_needs_work (quiz quality guard) ----------------------------------
+def _quiz(questions, bound=True):
+    quiz = {"id": "q", "component": "Quiz", "title": "T"}
+    payload = {"surfaceKind": "quiz", "root": "q", "components": [quiz]}
+    if bound:
+        quiz["questions"] = {"path": "/questions"}
+        payload["dataModel"] = {"questions": questions}
+    else:
+        quiz["questions"] = questions
+    return payload
+
+
+def _q(stem, opts, ans, expl="because."):
+    return {"question": stem, "options": opts, "answer": ans, "explanation": expl}
+
+
+_GOOD_QS = [
+    _q("What is A?", ["a1", "a2", "a3", "a4"], 0),
+    _q("What is B?", ["b1", "b2", "b3", "b4"], 2),
+    _q("What is C?", ["c1", "c2", "c3", "c4"], 1),
+]
+
+
+def test_quiz_needs_work_passes_a_real_quiz_via_binding():
+    assert quiz_needs_work(_quiz(_GOOD_QS)) is False
+    # inline (unbound) questions are accepted too
+    assert quiz_needs_work(_quiz(_GOOD_QS, bound=False)) is False
+
+
+def test_quiz_needs_work_flags_too_few_or_empty():
+    assert quiz_needs_work(_quiz([])) is True  # no questions
+    assert quiz_needs_work(_quiz(_GOOD_QS[:2])) is True  # only 2 real questions
+
+
+def test_quiz_needs_work_flags_malformed_items():
+    malformed = [
+        _q("ok", ["a", "b", "c", "d"], 0),
+        _q("dup options", ["x", "x", "y", "z"], 1),  # not distinct
+        _q("bad index", ["a", "b", "c", "d"], 9),  # out of range
+        _q("", ["a", "b", "c", "d"], 0),  # empty stem
+    ]
+    # 1 valid of 4 → under the floor of 3 → needs work
+    assert quiz_needs_work(_quiz(malformed)) is True
+
+
+def test_quiz_needs_work_accepts_string_answer_index():
+    qs = [_q("A", ["a", "b", "c", "d"], "0"), *(_GOOD_QS[1:])]
+    assert quiz_needs_work(_quiz(qs)) is False
+
+
+def test_quiz_needs_work_ignores_non_quiz():
+    assert quiz_needs_work({"surfaceKind": "document", "components": []}) is False
+
+
+def test_compose_retries_past_a_weak_quiz_to_a_real_one():
+    weak = json.dumps(_quiz([_q("only one", ["a", "b", "c", "d"], 0)]))
+    real = json.dumps(_quiz(_GOOD_QS))
+    out = compose_a2ui(
+        "make me a quiz",
+        query="quiz me on this topic",
+        llm_call=_seq_llm(weak, real),
+        catalog=CATALOG,
+    )
+    assert out["surfaceKind"] == "quiz"
+    assert len(out["dataModel"]["questions"]) == 3
 
 
 # --- infer_deliverable -----------------------------------------------------

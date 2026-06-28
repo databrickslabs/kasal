@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -6,7 +6,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
-import type { NodeProps } from './types'
+import type { ComponentNode, NodeProps } from './types'
 import { Check, Download, RotateCcw, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Separator } from './ui/separator'
@@ -275,14 +275,45 @@ const SlideCtx = createContext<{ idx: number; total: number; inDeck: boolean }>(
   inDeck: false,
 })
 
+// Whether a slide-child subtree carries any real content. A 'content' slide is
+// "effectively empty" when it has no children OR only blank Text/Markdown — both
+// render as a void below the title. Walks descendants so an empty bullet/markdown
+// node doesn't slip through a naive children.length check.
+function nodeHasContent(
+  id: string,
+  byId: Record<string, ComponentNode>,
+  seen = new Set<string>(),
+): boolean {
+  if (seen.has(id)) return false
+  seen.add(id)
+  const n = byId[id]
+  if (!n) return false
+  if (n.component === 'Text' || n.component === 'Heading') return asStr(n.text).trim() !== ''
+  if (n.component === 'Markdown') {
+    const c = n.content
+    return typeof c === 'string' ? c.trim() !== '' : c != null // binding → assume content
+  }
+  const kids = Array.isArray(n.children) ? n.children : []
+  if (kids.length) return kids.some((k) => nodeHasContent(k, byId, seen))
+  return true // a leaf visual component (KeyValue, image, chart, …) is content
+}
+
 export function Slide({ node, render }: NodeProps) {
   const { idx, total } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
+  const surface = useContext(SurfaceContext)
   const variant = (asStr(node.variant) || 'content').toLowerCase()
   const kicker = asStr(node.kicker)
   const subtitle = asStr(node.subtitle)
   const children = node.children || []
   const body = children.map((id) => render(id))
+  // Does the body actually render anything? (no/blank children → no.)
+  const slideHasBody = useMemo(() => {
+    const comps = surface?.components
+    if (!comps) return children.length > 0
+    const byId: Record<string, ComponentNode> = Object.fromEntries(comps.map((c) => [c.id, c]))
+    return children.some((id) => nodeHasContent(id, byId))
+  }, [surface, children])
 
   const num = (
     <div className="absolute right-6 top-5 text-xs font-semibold tracking-wide" style={{ color: theme.muted }}>
@@ -295,7 +326,12 @@ export function Slide({ node, render }: NodeProps) {
     </div>
   ) : null
 
-  if (variant === 'title' || variant === 'section') {
+  // A 'content' slide that ended up with a title but NO body would render as a
+  // title stranded over a big empty void — a broken-looking near-empty slide.
+  // Redirect it to the centered SECTION layout so the lone title reads as a
+  // deliberate divider regardless of what the generator emitted.
+  const titleOnlyContent = variant === 'content' && !slideHasBody && node.title != null
+  if (variant === 'title' || variant === 'section' || titleOnlyContent) {
     return (
       <div
         className="a2-slide relative flex h-full flex-col items-center justify-center p-12 text-center"
@@ -348,18 +384,65 @@ export function Slide({ node, render }: NodeProps) {
     )
   }
 
-  // content (default)
+  // content (default). Sized for the 1280×720 design canvas (the whole slide is
+  // then scaled to the stage), so text reads at slide proportions — not tiny. The
+  // body is vertically CENTERED in the area below the title so a few bullets fill
+  // the slide instead of clustering at the top over a void.
   return (
-    <div className="a2-slide relative flex h-full flex-col p-10" style={{ background: theme.stage, color: theme.fg }}>
+    <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
       {num}
       {eyebrow}
-      <div className="mb-4 mt-2 h-1.5 w-14 rounded-full" style={{ background: theme.accent }} />
+      <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
       {node.title != null && (
-        <h2 className="text-[1.9rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+        <h2 className="text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
           {asStr(node.title)}
         </h2>
       )}
-      <div className="mt-5 flex-1 space-y-3 overflow-auto pr-1 text-[15px] leading-relaxed">{body}</div>
+      <div className="mt-8 flex-1 flex flex-col justify-center space-y-5 overflow-auto pr-1 text-[1.5rem] leading-relaxed">{body}</div>
+    </div>
+  )
+}
+
+// A slide is authored on a FIXED 16:9 design canvas (1280×720) and scaled to fit
+// whatever box the deck is shown in. Because the whole canvas scales as one unit,
+// every size (text, padding, rules, child content) stays proportional and the
+// slide shrinks/grows as a whole — instead of keeping fixed-rem text that
+// overflows and clips once the stage gets smaller (e.g. when the preview pane's
+// "Customize" panel opens above the deck and steals vertical space).
+const SLIDE_W = 1280
+const SLIDE_H = 720
+function SlideStage({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(0)
+  // Layout effect → measured & scaled before the browser paints, so there's no
+  // unscaled flash live and the off-screen PDF/PPTX raster captures it correctly.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setScale(el.clientWidth / SLIDE_W)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return (
+    <div ref={ref} className="absolute inset-0 overflow-hidden">
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: SLIDE_W,
+          height: SLIDE_H,
+          transformOrigin: 'top left',
+          transform: `scale(${scale})`,
+          // Hidden until the first measure so an unscaled (huge) frame never flashes.
+          visibility: scale ? 'visible' : 'hidden',
+        }}
+      >
+        {children}
+      </div>
     </div>
   )
 }
@@ -463,7 +546,9 @@ export function SlideDeck({ node, render }: NodeProps) {
             className="relative overflow-hidden rounded-2xl border shadow-sm"
             style={{ aspectRatio: '16 / 9', height: '100%', maxWidth: '100%' }}
           >
-            <SlideCtx.Provider value={{ idx: cur, total, inDeck: true }}>{render(slides[cur])}</SlideCtx.Provider>
+            <SlideStage>
+              <SlideCtx.Provider value={{ idx: cur, total, inDeck: true }}>{render(slides[cur])}</SlideCtx.Provider>
+            </SlideStage>
           </div>
         </div>
       ) : (
@@ -471,7 +556,9 @@ export function SlideDeck({ node, render }: NodeProps) {
           className="relative w-full overflow-hidden rounded-2xl border shadow-sm"
           style={{ aspectRatio: '16 / 9', minHeight: 320 }}
         >
-          <SlideCtx.Provider value={{ idx: cur, total, inDeck: true }}>{render(slides[cur])}</SlideCtx.Provider>
+          <SlideStage>
+            <SlideCtx.Provider value={{ idx: cur, total, inDeck: true }}>{render(slides[cur])}</SlideCtx.Provider>
+          </SlideStage>
         </div>
       )}
       <div className="flex shrink-0 items-center justify-between gap-3">
