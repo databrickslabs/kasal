@@ -5,8 +5,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
-import { renderWithChatTheme as render } from '../../chatTestRender';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const updateMessage = vi.fn();
 vi.mock('../../store/sessionStore', () => ({
@@ -56,32 +55,6 @@ describe('CrewActionsBar', () => {
       resultType: 'crew_actions',
       resultData: expect.objectContaining({ savedCrewId: 'crew-1', savedName: 'Oil Crew' }),
     }));
-  });
-
-  it('chat mode hides catalog actions (Save + feedback) but keeps the memory graph', () => {
-    const chatData = { ...DATA, chatModeType: 'chat' } as never;
-    render(<CrewActionsBar data={chatData} messageId={`a-${Math.random()}`} executionId="job-1" />);
-    // No crew-catalog actions for a plain chat turn.
-    expect(screen.queryByText('Save to catalog')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Thumbs up')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Thumbs down')).not.toBeInTheDocument();
-    // Memory graph still applies when this run wrote memory.
-    expect(screen.getByLabelText('View memory graph')).toBeInTheDocument();
-  });
-
-  it('chat mode with no memory graph renders nothing', () => {
-    memoryEnabledMock = false;
-    const chatData = { ...DATA, chatModeType: 'chat' } as never;
-    const { container } = render(
-      <CrewActionsBar data={chatData} messageId={`a-${Math.random()}`} executionId="job-1" />,
-    );
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('non-chat (research/deep) modes still show Save to catalog', () => {
-    const crewData = { ...DATA, chatModeType: 'research' } as never;
-    render(<CrewActionsBar data={crewData} messageId={`a-${Math.random()}`} onSaveCrew={vi.fn()} />);
-    expect(screen.getByText('Save to catalog')).toBeInTheDocument();
   });
 
   it('thumbs-up auto-saves first, then posts the vote', async () => {

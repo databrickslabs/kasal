@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import FlowListCard from './FlowListCard';
 import { FlowListResult } from '../../types/dispatcher';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 
 describe('FlowListCard', () => {
   it('renders "No flows found." when flows is an empty array', () => {

@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import Box from '@mui/material/Box';
 import { useExecutionStore } from '../../store/executionStore';
 import { friendlyStep, type RunStep } from './RunTimeline';
 import ThinkingStream from './ThinkingStream';
 import LogSurface from './LogSurface';
-import { buttonResetSx, pulseSx } from '../../chatSx';
 
 export { friendlyStep };
 
@@ -39,12 +37,9 @@ interface PreviewSkeletonProps {
   steps: RunStep[];
   /** Dock the activity into the chat's "Working…" bar instead of this pane. */
   onMoveActivityToChat?: () => void;
-  /**
-   * Whether the run is still in flight. Defaults to `true` (the live monitor).
-   * When `false` the same surface reviews a FINISHED run that the user expanded
-   * into the pane — it relabels ("Run activity", no pulsing "WORKING" badge, no
-   * ticking elapsed) so it never claims to be running when it isn't.
-   */
+  /** False once the run has ended but the activity stays docked into the pane —
+   *  it relabels ("Run activity", no pulsing "WORKING" badge, no ticking
+   *  elapsed) so it never claims to be running when it isn't. Defaults true. */
   running?: boolean;
 }
 
@@ -64,124 +59,85 @@ const RunElapsed: React.FC = () => {
   }, []);
   const elapsed = Math.max(0, Math.floor((now - (runStartedAt ?? mountedAt)) / 1000));
   return (
-    <Box component="span" sx={{ fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }} data-testid="preview-skeleton-elapsed">
+    <span className="font-mono tabular-nums" data-testid="preview-skeleton-elapsed">
       {mmss(elapsed)}
-    </Box>
+    </span>
   );
 };
 
-const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({
-  steps,
-  onMoveActivityToChat,
-  running = true,
-}) => {
+const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ steps, running = true, onMoveActivityToChat }) => {
   const stepCount = steps.length;
   // A step the user opened to read its full context WHILE the run is still going
   // (null = show the live thinking stream). "Back" returns to the stream.
   const [activeStep, setActiveStep] = useState<RunStep | null>(null);
 
   return (
-    <Box
-      component="aside"
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
+    <aside
+      className="flex flex-col h-full"
+      style={{
         flex: '1 1 50%',
         minWidth: '300px',
-        backgroundColor: 'background.default',
-        borderLeft: 1,
-        borderColor: 'divider',
+        backgroundColor: 'var(--bg-primary)',
+        borderLeft: '1px solid var(--border-color)',
       }}
       aria-busy={running}
       aria-label={running ? 'Building preview' : 'Run activity'}
     >
       {/* Header — mirrors PreviewPanel's so the swap to the live renderer is seamless */}
-      <Box
-        sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.5, flexShrink: 0, borderBottom: 1, borderColor: 'divider' }}
+      <div
+        className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border-color)' }}
       >
-        <Box component="span" sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary' }}>
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
           {running ? 'Running agent…' : 'Run activity'}
-        </Box>
-        <Box
-          component="span"
-          sx={{
-            fontSize: 10,
-            px: 0.75,
-            py: 0.25,
-            borderRadius: '4px',
-            fontFamily: 'monospace',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 0.5,
-            color: 'text.disabled',
-            backgroundColor: (t) => t.chat.bgSecondary,
-          }}
-        >
-          {running ? (
-            <>
-              <Box component="span" sx={{ width: 6, height: 6, borderRadius: '9999px', backgroundColor: 'primary.main', ...pulseSx }} />
-              WORKING
-            </>
-          ) : (
-            'DONE'
-          )}
-        </Box>
+        </span>
+        {running && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-1"
+            style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-secondary)' }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--accent)' }} />
+            WORKING
+          </span>
+        )}
         {onMoveActivityToChat && (
-          <Box
-            component="button"
+          <button
             type="button"
             onClick={onMoveActivityToChat}
+            className="ml-auto text-[11px] transition-colors hover:opacity-80"
+            style={{ color: 'var(--text-muted)' }}
             title="Show the activity in the chat instead"
-            sx={{ ...buttonResetSx, ml: 'auto', fontSize: 11, transition: 'opacity 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
           >
             Show in chat
-          </Box>
+          </button>
         )}
-      </Box>
+      </div>
 
       {activeStep ? (
         // A chosen step's context on its own page — readable mid-run too.
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <Box
-            component="button"
+        <div className="flex-1 min-h-0 flex flex-col">
+          <button
             type="button"
             onClick={() => setActiveStep(null)}
+            className="flex items-center gap-1.5 w-full px-4 py-2 flex-shrink-0 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}
             aria-label="Back to the run activity"
-            sx={{
-              ...buttonResetSx,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.75,
-              width: '100%',
-              px: 2,
-              py: 1,
-              flexShrink: 0,
-              textAlign: 'left',
-              fontSize: 11,
-              fontWeight: 500,
-              transition: 'opacity 0.15s',
-              color: 'text.disabled',
-              borderBottom: 1,
-              borderColor: 'divider',
-              '&:hover': { opacity: 0.8 },
-            }}
           >
-            <Box component="svg" sx={{ width: 12, height: 12, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </Box>
+            </svg>
             Back · {friendlyStep(activeStep.label)}
-          </Box>
-          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }} data-testid="run-step-context">
+          </button>
+          <div className="flex-1 min-h-0 overflow-y-auto" data-testid="run-step-context">
             <LogSurface body={activeStep.detail || ''} />
-          </Box>
-        </Box>
+          </div>
+        </div>
       ) : (
         // Body — the live "thinking" stream; each step is clickable to read its
         // full context without waiting for the run to finish.
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', p: 3 }}>
+        <div className="flex-1 min-h-0 flex flex-col p-6">
           {/* Meta: steps so far + elapsed */}
-          <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, fontSize: 11, color: 'text.disabled' }}>
+          <div className="flex-shrink-0 flex items-center justify-between mb-4 text-[11px]" style={{ color: 'var(--text-muted)' }}>
             <span>
               {stepCount > 0
                 ? `${stepCount} step${stepCount === 1 ? '' : 's'}${running ? ' so far' : ''}`
@@ -190,13 +146,13 @@ const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({
                   : 'No activity'}
             </span>
             {running && <RunElapsed />}
-          </Box>
-          <Box sx={{ flex: 1, minHeight: 0 }} data-testid="preview-skeleton-body">
+          </div>
+          <div className="flex-1 min-h-0" data-testid="preview-skeleton-body">
             <ThinkingStream steps={steps} live={running} onSelect={setActiveStep} />
-          </Box>
-        </Box>
+          </div>
+        </div>
       )}
-    </Box>
+    </aside>
   );
 };
 

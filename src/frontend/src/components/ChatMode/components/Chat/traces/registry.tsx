@@ -9,8 +9,8 @@ export interface InlineTraceProps {
   label?: string;
   sublabel?: string;
   durationMs?: number;
-  /** Left indent in MUI spacing units (8px each). Default 1.5 (= 12px). */
-  indent?: number;
+  /** Left-indent Tailwind class applied to the rendered block. Default 'ml-3'. */
+  indentClass?: string;
 }
 
 /**
@@ -32,7 +32,7 @@ export interface TraceDetailRenderer {
   /** Return true if this renderer should handle the given detail / tool label. */
   match: (detail: string, label?: string) => boolean;
   /** Renders the expanded detail (inside the collapsed trace pill). */
-  Component: React.FC<{ detail: string; indent?: number }>;
+  Component: React.FC<{ detail: string; indentClass?: string }>;
   /** Optional: render the result inline in the chat instead of a collapsed pill. */
   Inline?: React.FC<InlineTraceProps>;
 }
