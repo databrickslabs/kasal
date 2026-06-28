@@ -11,6 +11,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -523,14 +524,17 @@ export default function App() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 shrink-0 gap-1 rounded-lg bg-transparent px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              className="h-8 shrink-0 gap-1 rounded-lg border bg-transparent px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="Answer mode"
             >
               {MODES.find((m) => m.id === mode)?.label ?? 'Research'}
               <ChevronDown className="size-3.5 opacity-70" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-56">
+          <DropdownMenuContent align="end" side="top" className="w-64">
+            <DropdownMenuLabel className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Answer mode
+            </DropdownMenuLabel>
             {MODES.map((m) => (
               <DropdownMenuItem key={m.id} onSelect={() => setMode(m.id)} className="items-start gap-2">
                 <Check

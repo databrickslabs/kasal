@@ -122,7 +122,7 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
         disabled={disabled}
         className="relative w-8 h-8 rounded-xl flex items-center justify-center transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
         style={{
-          color: open || totalSelected > 0 ? 'var(--accent)' : 'var(--text-secondary)',
+          color: 'var(--text-secondary)',
           backgroundColor: 'var(--bg-secondary)',
           border: '1px solid var(--border-color)',
         }}
@@ -176,7 +176,7 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
             />
           </div>
 
-          <div className="max-h-80 overflow-y-auto pb-1">
+          <div className="max-h-80 overflow-y-auto px-1.5 pb-1.5">
             {kasalServers === null ? (
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
             ) : kasalList.length === 0 ? (
@@ -199,7 +199,7 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
                     disabled={!server.enabled && !isSelected}
                     onClick={() => toggle(server.name)}
                     title={!server.enabled ? 'Disabled — enable it in Configuration → MCP' : server.server_url}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full flex items-center gap-2 !px-2.5 !py-1.5 my-0.5 rounded-lg text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ color: 'var(--text-primary)' }}
                   >
                     {check(isSelected)}
@@ -224,7 +224,7 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
               >
                 Agents
               </div>
-              <div className="max-h-48 overflow-y-auto pb-1">
+              <div className="max-h-48 overflow-y-auto px-1.5 pb-1.5">
                 {visibleAgentBricks.length === 0 ? (
                   <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
                     No matching agents
@@ -240,7 +240,7 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
                         aria-checked={isSelected}
                         onClick={() => toggleAgentBricks(ep.name)}
                         title={ep.name}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:opacity-80"
+                        className="w-full flex items-center gap-2 !px-2.5 !py-1.5 my-0.5 rounded-lg text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)]"
                         style={{ color: 'var(--text-primary)' }}
                       >
                         {check(isSelected)}
