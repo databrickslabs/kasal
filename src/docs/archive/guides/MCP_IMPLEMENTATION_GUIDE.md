@@ -411,8 +411,8 @@ logger.error(f"MCP server {server_name} connection failed: {error}")
 
 ### Key Files
 - **Frontend**: `MCPServerSelector.tsx`, `Configuration.tsx`, `AgentForm.tsx`, `TaskForm.tsx`
-- **Backend Integration**: `mcp_integration.py` (centralized MCP logic)
-- **Backend Services**: `mcp_service.py`, `agent_helpers.py`, `task_helpers.py`, `crew_preparation.py`
+- **Backend Integration**: `engines/crewai/tools/mcp_integration.py` (centralized MCP logic), `engines/crewai/tools/mcp_handler.py`
+- **Backend Services**: `mcp_service.py`, `engines/crewai/kernel/agent_builder.py`, `engines/crewai/kernel/task_builder.py`, `engines/crewai/paths/crew/crew_preparation.py`
 - **Schemas**: `mcp.py`, `agent.py`, `task.py`
 
 ### Database Tables

@@ -1,14 +1,14 @@
-# Tool 86 - UC Metric View Generator
+# Tool 86 - UC Metric View generator
 
 **What it is:** The core migration tool. Takes extracted Power BI data (measures, M-Query sources, relationships) and runs the full pipeline to produce Unity Catalog Metric View YAML definitions and deploy SQL for each fact table.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 UC Metric Views are Databricks's governed semantic layer - they define business metrics in a reusable, queryable format. Manually converting hundreds of DAX measures, M-Query source definitions, and relationship structures to UC Metric View YAML is weeks of work. Tool 86 automates this pipeline end-to-end.
 
-## What Problem It Solves
+## What problem it solves
 
 - **The core migration challenge:** DAX → SQL translation, dependency ordering, join detection, and YAML generation - all in one deterministic pipeline
 - **Reproducibility:** Same input always produces the same output (no LLM required by default)
@@ -16,9 +16,9 @@ UC Metric Views are Databricks's governed semantic layer - they define business 
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Input: measures_json + mquery_json + (optional) relationships_json + config_json
     ↓
 MQuery Parser: identify fact tables and source SQL
@@ -38,12 +38,12 @@ Output: {yaml: {...}, sql: {...}, stats: {...}, migration_report: "..."}
 
 ---
 
-## Two Input Modes
+## Two input modes
 
-### Mode 1: API Mode (pulls from PBI live)
+### Mode 1: API mode (pulls from PBI live)
 Provide `workspace_id` + `dataset_id` + PBI credentials. Tool 86 calls the PBI APIs internally to extract measures, M-Query, and relationships.
 
-### Mode 2: JSON Mode (uses pre-extracted data)
+### Mode 2: JSON mode (uses pre-extracted data)
 Provide `measures_json` from Tool 73, `mquery_json` from Tool 74, `relationships_json` from Tool 75. No PBI API calls at generation time.
 
 JSON mode is preferred for the full pipeline (each extraction tool runs separately and their outputs chain into Tool 86).
@@ -73,7 +73,7 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 
 ---
 
-## Example Crew (JSON Mode - Full Pipeline)
+## Example crew (JSON mode - full pipeline)
 
 ```json
 {
@@ -116,7 +116,7 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 
 ---
 
-## Example Output
+## Example output
 
 ```json
 {
@@ -142,7 +142,7 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 
 ---
 
-## Proven Results
+## Proven results
 
 Tested against the SC Reporting project (26 fact tables, 470 measures):
 - 20 of 23 reference views: **exact measure-level match**
@@ -152,7 +152,7 @@ Tested against the SC Reporting project (26 fact tables, 470 measures):
 
 ---
 
-## After Generation
+## After generation
 
 Pass the output directly to:
 - **Tool 88** (Metric View Deployer) for validation and deployment
@@ -165,3 +165,13 @@ Pass the output directly to:
 - `config_json` is the key to improving translation rate - see [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) and [Tool 90](./tool-90-pipeline-config-generator.md) for how to generate it
 - LLM fallback (`use_llm_fallback: true`) can push translation rate from 70% to 85%+ on complex models - at the cost of non-determinism
 - Each re-run with the same inputs produces identical output (without LLM fallback) - safe to iterate
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
+- [Tool 88 - metric view deployer](./tool-88-metric-view-deployer.md)
+- [Pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

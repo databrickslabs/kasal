@@ -1,4 +1,6 @@
-# PowerBI / UCMV / Genie / Dashboard Tooling — Architecture Assessment & Next-Release Roadmap
+# PowerBI / UCMV / Genie / dashboard tooling — architecture assessment and next-release roadmap
+
+An architecture assessment of the PBI → UCMV → Genie/dashboard tooling, with a prioritized work plan for the next release.
 
 **Date:** 2026-06-11
 **Scope:** All CrewAI tools and converter services in the PBI → UCMV → Genie/Dashboard pipelines:
@@ -8,6 +10,24 @@ PBI Visual-UCMV mapper, dashboard creator, mquery conversion pipeline, and the
 `converters/services/{mquery,powerbi,uc_metrics}` services.
 **Status baseline:** post PR-52 (LLMManager + ToolSessionProvider centralization, contextvars
 bridge, group-id policy unification) — all fixes live-validated against real flow executions.
+
+> **Note (layout):** Since this assessment was written, an `engines/crewai/` directory reorganization
+> has landed. The directory names used in the triage tables below reflect the *pre-refactor* layout;
+> they now map as: `helpers/` → `kernel/`; top-level `flow/` → `paths/flow/`; root
+> `crew_preparation.py`/`execution_runner.py` → `paths/crew/`; logging/tracing → `infra/`; a
+> `light_agent` path was added under `paths/`. The architectural analysis and work plan (WP1–WP6)
+> are unaffected by this rename.
+
+## Contents
+
+- [1. Current state (validated)](#1-current-state-validated)
+- [2. Findings — debt to address next release](#2-findings--debt-to-address-next-release)
+- [3. Next-release work plan](#3-next-release-work-plan)
+- [4. Explicitly out of scope for next release](#4-explicitly-out-of-scope-for-next-release)
+- [5. Risk notes](#5-risk-notes)
+- [6. Outlook: engine pluggability (CrewAI → user-selectable agent provider)](#6-outlook-engine-pluggability-crewai--user-selectable-agent-provider)
+- [7. Implementation sequence & effort estimate](#7-implementation-sequence--effort-estimate)
+- [8. Food for thought (explicitly NOT prioritized): first-party agent-platform alignment](#8-food-for-thought-explicitly-not-prioritized-first-party-agent-platform-alignment)
 
 ---
 
@@ -149,7 +169,7 @@ Ordered by value/effort. WP1 and WP2 are independent; WP3 depends on WP2; WP4 fo
 
 Target structure (mirrors existing `converters/services/*`):
 
-```
+```text
 src/services/powerbi/
     semantic_model_service.py      # extraction (TMDL/Scanner/DAX 3-tier), enrichment, caching
     dax_generation_service.py      # NL→DAX prompting, self-correction loop, execution
@@ -242,7 +262,7 @@ implemented by the CrewAI adapter).
 
 **Target folder structure — illustrated with LangChain as a second engine:**
 
-```
+```text
 src/backend/src/
 │
 ├── api/                                  # FastAPI routers (unchanged)
@@ -448,7 +468,7 @@ exactly once in `binder.bind()`.
 
 #### Current state (as-is) — tools welded to the engine
 
-```
+```text
                                 CLIENT (React UI)
                                        │  REST
                           API LAYER (FastAPI routers)
@@ -484,7 +504,7 @@ exactly once in `binder.bind()`.
 
 #### Target architecture (post WP3–WP6)
 
-```
+```text
                                 CLIENT (React UI)
                                        │  REST
 ┌──────────────────────────────────────▼──────────────────────────────────────┐
@@ -729,3 +749,14 @@ undefined ones** — a permanent trifecta alarm by construction.
    at execution time — the third governance layer (action-level runtime policies →
    tenant-level Kasal groups → data-level UC) that makes governed coding for non-developers
    viable at all.
+
+---
+
+## Related
+
+- [UC Metric View pipeline config guide](./UCMV_PIPELINE_CONFIG_GUIDE.md) — config reference for the UCMV pipeline
+- [Power BI tools reference](./powerbi/README.md) — the tools this assessment covers
+- [Solution architecture guide](./ARCHITECTURE_GUIDE.md) — platform-wide architecture
+- [Code structure guide](./CODE_STRUCTURE_GUIDE.md) — where the engine and tool layers live
+
+Back to the [documentation hub](./README.md).

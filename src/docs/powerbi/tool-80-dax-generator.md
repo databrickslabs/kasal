@@ -1,14 +1,14 @@
-# Tool 80 - Semantic Model DAX Generator
+# Tool 80 - semantic model DAX generator
 
 **What it is:** Takes a user question and model context JSON (from Tool 79), uses an LLM to generate a DAX EVALUATE query, executes it against Power BI, and returns the result - with automatic retry and self-correction.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tool 72 does everything in one step (model fetch + DAX generation + execution). Tool 80 is the "execution step only" - designed for multi-question workflows where the model has already been fetched (Tool 79) and optionally reduced (Tool 81). This avoids fetching the model for every single question.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Efficiency in multi-question sessions:** Ask 10 questions against the same model without 10 API roundtrips to fetch model metadata
 - **Fine-grained control:** Run metadata reduction (Tool 81) before DAX generation to improve accuracy
@@ -16,9 +16,9 @@ Tool 72 does everything in one step (model fetch + DAX generation + execution). 
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Receive model_context_json (from Tool 79 or Tool 81 output)
     ↓
 Build LLM prompt: user question + relevant model context
@@ -36,7 +36,7 @@ Return results + retry history
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `POST /groups/{groupId}/datasets/{datasetId}/executeQueries`
 Docs: [Datasets - ExecuteQueries](https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/execute-queries)
@@ -70,7 +70,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew (Full Multi-Step Q&A)
+## Example crew (full multi-step Q&A)
 
 ```json
 {
@@ -105,3 +105,13 @@ See [Authentication Setup](./01-authentication-setup.md).
 - `business_terms` lets you map customer language to DAX measure names (e.g. their team says "bookings" but the measure is "Total Orders")
 - `active_filters` automatically wraps CALCULATE around the generated DAX - useful for models with default date/region filters
 - For a single question without caching concerns, Tool 72 is simpler
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 79 - semantic model fetcher](./tool-79-semantic-model-fetcher.md)
+- [Tool 81 - metadata reducer](./tool-81-metadata-reducer.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+
+Back to the [Power BI integration hub](./README.md).

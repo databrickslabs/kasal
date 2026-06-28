@@ -1,17 +1,23 @@
-# 🔵 Kasal Solution Architecture
+# Kasal solution architecture
+
+Scalable, secure, cloud-native AI orchestration: this page explains the platform's layers, request lifecycles, and security model.
+
+- [System overview](#system-overview)
+- [High-level architecture](#high-level-architecture)
+- [Architecture pattern](#architecture-pattern)
 
 > **Enterprise AI Orchestration Platform** - Scalable, secure, cloud-native
-![Kasal Overvew](././/images/Kasal-overview.png)
+![Kasal overview](images/Kasal-overview.png)
 *Visual workflow designer for creating AI agent collaborations*
 ---
 
-## System Overview
+## System overview
 What the platform aims to achieve and core design principles.
 
-### Platform Vision
+### Platform vision
 **Transform business workflows with autonomous AI agents** - Zero infrastructure complexity
 
-### Architecture Principles
+### Architecture principles
 | Principle | Implementation |
 |-----------|---------------|
 | **Async-First** | Non-blocking I/O everywhere |
@@ -22,7 +28,7 @@ What the platform aims to achieve and core design principles.
 
 ---
 
-## High-Level Architecture
+## High-level architecture
 A big-picture view of the client, application, AI, and data layers.
 
 ```mermaid
@@ -72,7 +78,7 @@ graph TB
 
 ---
 
-## Architecture Pattern
+## Architecture pattern
 The layered approach and how requests flow through components.
 
 ### High-level
@@ -95,8 +101,8 @@ How executions are prepared, run, and observed using the engine.
 - Entry via executions_router.py → execution_service.py
 - Service prepares agents/tools/memory and selects engine (engines/engine_factory.py)
 - CrewAI path:
-  - Prep: engines/crewai/crew_preparation.py and flow_preparation.py
-  - Run: engines/crewai/execution_runner.py with callbacks/guardrails
+  - Prep: engines/crewai/paths/crew/crew_preparation.py and engines/crewai/paths/flow/ (flow services/runners)
+  - Run: engines/crewai/paths/crew/execution_runner.py with callbacks/guardrails
   - Observability: execution_logs_service.py, execution_trace_service.py
 - Persist status/history: execution_repository.py, execution_history_repository.py
 
@@ -123,7 +129,7 @@ User context, group isolation, and authorization controls.
 - Authorization checks in core/permissions.py
 
 
-### Security Controls
+### Security controls
 Defense-in-depth across network, API, data, secrets, and compliance.
 | Layer | Control | Implementation |
 |-------|---------|----------------|
@@ -133,9 +139,9 @@ Defense-in-depth across network, API, data, secrets, and compliance.
 
 ---
 
-### Storage Strategy
+### Storage strategy
 Where different data types live and why.
-| Data Type | Storage | Purpose |
+| Data type | Storage | Purpose |
 |-----------|---------|---------|
 | **Transactional** | PostgreSQL | ACID compliance |
 | **Vectors** | Databricks Vector | Semantic search |
@@ -158,3 +164,14 @@ Important toggles that affect developer and runtime experience.
 
 
 *Architected for scale, built for the future*
+
+---
+
+## Related
+- [Why Kasal](./WHY_KASAL.md)
+- [Code structure guide](./CODE_STRUCTURE_GUIDE.md)
+- [Developer guide](./DEVELOPER_GUIDE.md)
+- [API endpoints reference](./api_endpoints.md)
+- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
+
+Back to the [documentation hub](./README.md).

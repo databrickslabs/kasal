@@ -362,4 +362,3 @@ logger.debug(f"Context state: {context}")
 
 - [AGENT_TASK_LIFECYCLE.md](AGENT_TASK_LIFECYCLE.md) - Agent and task lifecycle details
 - [EXECUTION_FLOW.md](EXECUTION_FLOW.md) - Complete execution flow
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions

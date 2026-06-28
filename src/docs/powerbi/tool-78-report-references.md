@@ -1,16 +1,17 @@
-# Tool 78 - Report References Tool
+# Tool 78 - report references tool
 
 **What it is:** Extracts the mapping between report visuals and the measures/tables they use, generating a cross-reference matrix with direct page URLs for impact analysis.
 
-> **Status: Disabled by default.** Requires Microsoft Fabric PBIR format reports. Enable in seeds if needed.
+> [!IMPORTANT]
+> Disabled by default. Requires Microsoft Fabric PBIR format reports. Enable in seeds if needed.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 When an SA modifies a measure during migration, they need to know which report pages will be affected. Power BI Desktop can show this, but only per-report and manually. This tool scans all reports associated with a semantic model and produces a complete dependency map.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Impact analysis before migration:** "If I change [Total Revenue], which 12 report pages break?"
 - **Unused measure detection:** Find measures referenced by zero reports - safe to deprioritize
@@ -18,13 +19,13 @@ When an SA modifies a measure during migration, they need to know which report p
 
 ---
 
-## Fabric-Only Requirement
+## Fabric-only requirement
 
 Requires Fabric reports in **PBIR format** (Power BI Enhanced Report Format). Classic `.pbix` files uploaded to Power BI Service are not supported. Reports must be in a Fabric workspace and in the new PBIR format.
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `GET /groups/{groupId}/items/{itemId}/getDefinition` (report definition)
 Docs: [Fabric - Get Item Definition](https://learn.microsoft.com/en-us/rest/api/fabric/core/items/get-item-definition)
@@ -53,7 +54,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Output (Markdown)
+## Example output (Markdown)
 
 ```markdown
 ## Sales Dashboard - Revenue Overview
@@ -79,3 +80,13 @@ See [Authentication Setup](./01-authentication-setup.md).
 - Provide `dataset_id` (not `report_id`) to automatically discover and scan all reports that use the semantic model
 - The direct page URLs in the output let you immediately open the affected page in Power BI to verify impact
 - If a customer is on legacy Power BI Service (not Fabric), this tool returns empty results - Tool 72 can be used to find measure usage instead
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md)
+- [Tool 76 - hierarchies tool](./tool-76-hierarchies.md)
+- [Tool 77 - field parameters and calculation groups](./tool-77-field-parameters.md)
+
+Back to the [Power BI integration hub](./README.md).

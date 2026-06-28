@@ -1,14 +1,14 @@
-# Tool 73 - Measure Conversion Pipeline
+# Tool 73 - measure conversion pipeline
 
 **What it is:** Extracts DAX measures from a Power BI semantic model and converts them to your chosen output format - Unity Catalog Metrics YAML, Databricks SQL, or DAX (reformatted).
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Power BI measures encode business logic (revenue calculations, KPIs, ratios) in DAX. When migrating to Databricks, you need that logic in a format Databricks understands. This tool bridges the gap: it connects live to the Power BI API, pulls all measures, and converts them.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Migration teams** need measure definitions extracted before they can build UC Metric Views
 - **Documentation** - generates a complete inventory of all measures in a model with their SQL equivalents
@@ -16,9 +16,9 @@ Power BI measures encode business logic (revenue calculations, KPIs, ratios) in 
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Connect to PBI Execute Queries API
     ↓
 Run EVALUATE INFO.MEASURES() - fetch all measures + DAX expressions
@@ -30,7 +30,7 @@ Emit in target format (UC Metrics YAML / SQL / DAX)
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `POST /groups/{groupId}/datasets/{datasetId}/executeQueries`
 DAX: `EVALUATE INFO.MEASURES()`
@@ -61,7 +61,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -89,7 +89,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## In the UCMV Pipeline
+## In the UCMV pipeline
 
 Tool 73 is Phase 1 of the full migration. Its output (`measures_json`) feeds directly into:
 - **Tool 87** (Measure Allocator - groups measures to fact tables)
@@ -102,4 +102,14 @@ Tool 73 is Phase 1 of the full migration. Its output (`measures_json`) feeds dir
 
 - Also supports YAML as inbound format - useful if you already have measure definitions in YAML and want to convert to SQL
 - For the full UCMV pipeline, use this alongside Tool 74 (M-Query) and Tool 75 (Relationships)
-- See [UCMV Migration Guide](./ucmv-migration-guide.md) for the complete flow
+- See the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) for the complete flow
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 74 - M-Query conversion pipeline](./tool-74-mquery-conversion.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

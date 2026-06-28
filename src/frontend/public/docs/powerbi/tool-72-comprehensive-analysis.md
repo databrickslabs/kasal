@@ -1,14 +1,14 @@
-# Tool 72 - Power BI Comprehensive Analysis
+# Tool 72 - Power BI comprehensive analysis
 
 **What it is:** An all-in-one tool that takes a natural language question, generates a DAX query from it, executes it live against your Power BI semantic model, and returns the answer - with automatic self-correction if the generated DAX fails.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Business analysts want to ask "What were total sales by region last quarter?" and get an answer without knowing DAX or needing access to Power BI Desktop. Power BI's own Q&A feature is limited to a fixed set of pre-trained question patterns. This tool uses an LLM to generate arbitrary DAX from any question, executes it via the Power BI Execute Queries API, and retries intelligently when the generated query fails.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Non-technical users** can explore Power BI data with plain English
 - **SAs demoing Databricks** can answer live customer questions from their PBI model without writing DAX manually
@@ -17,9 +17,9 @@ Business analysts want to ask "What were total sales by region last quarter?" an
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 User question
     ↓
 Extract model context (measures, tables, relationships from TMDL / DAX APIs)
@@ -37,7 +37,7 @@ Return results + retry history + visual references (which reports use these meas
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `POST /groups/{groupId}/datasets/{datasetId}/executeQueries`
 Docs: [Datasets - ExecuteQueries](https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/execute-queries)
@@ -71,7 +71,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -104,7 +104,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Output
+## Example output
 
 ```markdown
 **Question**: What are total sales by region for 2024?
@@ -138,7 +138,7 @@ Reports using these measures:
 
 ---
 
-## When to Use vs Other Tools
+## When to use versus other tools
 
 | Scenario | Tool |
 |----------|------|
@@ -154,3 +154,13 @@ Reports using these measures:
 - Self-correction handles table name errors, syntax errors, and measure reference issues - but not authentication or timeout errors
 - Maximum 20 measures/tables sent to LLM context to avoid token limits on very large models
 - All retry attempts and the final query are included in the output for debugging
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
+- [Tool 82 - DAX executor](./tool-82-dax-executor.md)
+
+Back to the [Power BI integration hub](./README.md).

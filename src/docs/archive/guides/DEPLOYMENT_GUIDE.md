@@ -4,7 +4,7 @@ This guide explains how to deploy your application to Databricks Apps.
 
 ## Prerequisites
 
-1. **Build the frontend**: Run `python build.py` to create the `frontend_static` directory
+1. **Build the frontend**: Run `python src/build.py` to create the `frontend_static` directory
 2. **Configure app.yaml**: Ensure `app.yaml` exists in the root directory with proper OAuth scopes
 3. **Databricks CLI**: Ensure the Databricks CLI is installed and configured
 
@@ -12,10 +12,10 @@ This guide explains how to deploy your application to Databricks Apps.
 
 ```bash
 # First, build the frontend
-python build.py
+python src/build.py
 
 # Then deploy the application
-python deploy.py --app-name my-kasal-app --user-name your.email@company.com
+python src/deploy.py --app-name my-kasal-app --user-name your.email@company.com
 ```
 
 ## OAuth Scopes
@@ -53,7 +53,7 @@ OAuth scopes must be configured in the Databricks Apps UI after deployment, not 
 
 ### Required OAuth Scopes Setup
 
-1. Deploy your application using `python deploy.py`
+1. Deploy your application using `python src/deploy.py`
 2. Navigate to your Databricks workspace → "Apps" → [Your App] → "Authorization"
 3. Configure the required OAuth scopes based on your tools:
 
@@ -111,10 +111,10 @@ oauth_scopes:
 
 ```bash
 # Build the frontend
-python build.py
+python src/build.py
 
 # Deploy the application
-python deploy.py \
+python src/deploy.py \
   --app-name kasal-production \
   --user-name admin@company.com \
   --description "Production Kasal AI Agent Platform" \

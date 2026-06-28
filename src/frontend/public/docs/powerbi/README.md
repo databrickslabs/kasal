@@ -1,62 +1,74 @@
-# Power BI Integration - Documentation Hub
+# Power BI integration
+
+The toolkit for migrating Power BI semantic models to Databricks Unity Catalog and running live analytics against Power BI data.
 
 Kasal provides a complete toolkit for migrating Power BI semantic models to Databricks Unity Catalog and for running live analytics against Power BI data. This section covers everything from first-time authentication setup to the full UCMV migration pipeline.
 
----
+## In this section
 
-## What Can You Do?
+- [What you can do](#what-you-can-do)
+- [Quick navigation](#quick-navigation)
+- [Tool map](#tool-map)
+- [Authentication at a glance](#authentication-at-a-glance)
 
-| Use Case | Tools | Guide |
+## What you can do
+
+The tables below map common goals to the tools and guide that cover them.
+
+| Use case | Tools | Guide |
 |----------|-------|-------|
-| **Answer business questions** from PBI with natural language | 72, 79, 80, 81 | [**Analytics Q&A Case Study**](./powerbi-analytics-qa-case-study.md) ← start here |
-| **Migrate measures** (DAX → SQL / UC Metrics) | 73, 74, 75, 86-90 | [UCMV Migration Guide](./ucmv-migration-guide.md) |
-| **Execute a known DAX query** | 82 | [Tool 82](./tool-82-dax-executor.md) |
-| **Migrate Fabric hierarchies** | 76 | [Tool 76](./tool-76-hierarchies.md) |
-| **Migrate Fabric field parameters / calc groups** | 77 | [Tool 77](./tool-77-field-parameters.md) |
-| **Understand report-to-measure dependencies** | 78 | [Tool 78](./tool-78-report-references.md) |
+| Answer business questions from PBI with natural language | 72, 79, 80, 81 | [Analytics Q&A case study](./powerbi-analytics-qa-case-study.md) |
+| Migrate measures (DAX to SQL / UC Metrics) | 73, 74, 75, 86-90 | [UCMV migration guide](./ucmv-migration-guide.md) |
+| Execute a known DAX query | 82 | [Tool 82 - DAX executor](./tool-82-dax-executor.md) |
+| Migrate Fabric hierarchies | 76 | [Tool 76 - hierarchies](./tool-76-hierarchies.md) |
+| Migrate Fabric field parameters / calc groups | 77 | [Tool 77 - field parameters](./tool-77-field-parameters.md) |
+| Understand report-to-measure dependencies | 78 | [Tool 78 - report references](./tool-78-report-references.md) |
 
----
-
-## Quick Navigation
+## Quick navigation
 
 ### Setup
-- [Authentication & Service Principal Setup](./01-authentication-setup.md) ← **Start here**
-- [Simple Migration Story](./02-simple-migration-story.md)
 
-### Case Studies & Examples
-- [**Power BI Analytics Q&A — Full Case Study**](./powerbi-analytics-qa-case-study.md) — 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
-- [Example Crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) — import-ready, credentials scrubbed
-- [Context Enrichment Config Example](../powerbi-context-enrichment-example.json) — copy-paste reference for all 6 enrichment fields
+- [Authentication and service principal setup](./01-authentication-setup.md) — start here
+- [Simple migration story](./02-simple-migration-story.md)
 
-### Analytics / Q&A Tools
-- [Tool 72 - Comprehensive Analysis](./tool-72-comprehensive-analysis.md)
-- [Tool 79 - Semantic Model Fetcher](./tool-79-semantic-model-fetcher.md)
-- [Tool 80 - DAX Generator](./tool-80-dax-generator.md)
-- [Tool 81 - Metadata Reducer](./tool-81-metadata-reducer.md)
-- [Tool 82 - DAX Executor](./tool-82-dax-executor.md)
+### Case studies and examples
 
-### Migration Tools (Extraction)
-- [Tool 73 - Measure Conversion Pipeline](./tool-73-measure-conversion.md)
-- [Tool 74 - M-Query Conversion Pipeline](./tool-74-mquery-conversion.md)
-- [Tool 75 - Relationships Tool](./tool-75-relationships.md)
-- [Tool 76 - Hierarchies Tool](./tool-76-hierarchies.md) *(Fabric only)*
-- [Tool 77 - Field Parameters & Calculation Groups](./tool-77-field-parameters.md) *(Fabric only)*
-- [Tool 78 - Report References Tool](./tool-78-report-references.md) *(Fabric only, disabled by default)*
+- [Power BI analytics Q&A — full case study](./powerbi-analytics-qa-case-study.md) — 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
+- [Example crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) — import-ready, credentials scrubbed
+- [Context enrichment config example](../powerbi-context-enrichment-example.json) — copy-paste reference for all 6 enrichment fields
 
-### UC Metric View Generation
-- [Tool 85 - DAX to SQL Translator](./tool-85-dax-to-sql-translator.md)
-- [Tool 86 - UC Metric View Generator](./tool-86-uc-metric-view-generator.md)
-- [Tool 87 - PBI Measure Allocator](./tool-87-measure-allocator.md)
-- [Tool 88 - Metric View Deployer](./tool-88-metric-view-deployer.md)
-- [Tool 89 - Config Generator](./tool-89-config-generator.md)
-- [Tool 90 - Pipeline Config Generator](./tool-90-pipeline-config-generator.md)
-- [End-to-End UCMV Migration Guide](./ucmv-migration-guide.md)
+### Analytics and Q&A tools
 
----
+- [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md)
+- [Tool 79 - semantic model fetcher](./tool-79-semantic-model-fetcher.md)
+- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
+- [Tool 81 - metadata reducer](./tool-81-metadata-reducer.md)
+- [Tool 82 - DAX executor](./tool-82-dax-executor.md)
 
-## Tool Map
+### Migration tools (extraction)
 
-```
+- [Tool 73 - measure conversion pipeline](./tool-73-measure-conversion.md)
+- [Tool 74 - M-Query conversion pipeline](./tool-74-mquery-conversion.md)
+- [Tool 75 - relationships tool](./tool-75-relationships.md)
+- [Tool 76 - hierarchies tool](./tool-76-hierarchies.md) (Fabric only)
+- [Tool 77 - field parameters and calculation groups](./tool-77-field-parameters.md) (Fabric only)
+- [Tool 78 - report references tool](./tool-78-report-references.md) (Fabric only, disabled by default)
+
+### UC Metric View generation
+
+- [Tool 85 - DAX to SQL translator](./tool-85-dax-to-sql-translator.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [Tool 87 - PBI measure allocator](./tool-87-measure-allocator.md)
+- [Tool 88 - metric view deployer](./tool-88-metric-view-deployer.md)
+- [Tool 89 - config generator](./tool-89-config-generator.md)
+- [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+## Tool map
+
+The two paths below show how the tools chain together for analytics and for migration.
+
+```text
 ANALYTICS PATH (answer questions from live PBI data)
 ─────────────────────────────────────────────────────────────────
   Tool 79: Fetch & cache model metadata
@@ -92,14 +104,24 @@ MIGRATION PATH (move PBI semantic model → Databricks UC Metric Views)
   Tool 88: Dry-run validate → human approval → deploy
 ```
 
----
+## Authentication at a glance
 
-## Authentication at a Glance
+Each tool group uses one of three service principal types, summarized below.
 
-| SP Type | Used By | Key Permission |
+| SP type | Used by | Key permission |
 |---------|---------|----------------|
 | Non-Admin SP (workspace member) | Tools 72, 73, 75, 79, 80, 81, 82 | `Dataset.Read.All` |
 | Admin SP (tenant-wide) | Tool 74, Tool 90 | `Tenant.Read.All` (Admin Portal required) |
 | Fabric SP | Tools 76, 77, 78 | `SemanticModel.ReadWrite.All` |
 
-See [Authentication Setup](./01-authentication-setup.md) for step-by-step instructions.
+See [Authentication and service principal setup](./01-authentication-setup.md) for step-by-step instructions.
+
+## Related
+
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Simple migration story](./02-simple-migration-story.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+- [Pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)
+
+Back to the [documentation hub](../README.md).

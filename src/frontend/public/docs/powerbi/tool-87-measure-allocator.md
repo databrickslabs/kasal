@@ -1,14 +1,14 @@
-# Tool 87 - PBI Measure Allocator
+# Tool 87 - PBI measure allocator
 
 **What it is:** Groups Power BI measures into their correct fact tables based on DAX expression analysis. A pre-processing step for Tool 86 when measures don't already have allocation metadata.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tool 86 (UC Metric View Generator) organizes measures per fact table - one UC Metric View per fact table. To do this, it needs to know which measures belong to which fact table. When measures come from Tool 73 with a `proposed_allocation` field already populated, Tool 86 uses that directly. When they don't have allocations (raw output from the PBI API), Tool 87 fills that gap.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Pre-flight for Tool 86:** Without measure allocations, Tool 86 may generate a single merged YAML or miss measures entirely
 - **Automated grouping:** Parses DAX `Table[Column]` references to identify which fact table each measure primarily draws from
@@ -16,9 +16,9 @@ Tool 86 (UC Metric View Generator) organizes measures per fact table - one UC Me
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Input: measures_json (raw, no allocations) + mquery_json (fact table definitions)
     ↓
 Parse mquery_json: identify fact tables (tables with SUM + GROUP BY in transpiled SQL)
@@ -43,9 +43,9 @@ Return measures_json with proposed_allocation field added
 
 ---
 
-## Example Crew Position
+## Example crew position
 
-```
+```text
 Tool 73 (extract measures - raw, no allocations)
 Tool 74 (extract M-Query)
     ↓
@@ -56,7 +56,7 @@ Tool 86 (generate UC Metric Views - now measures have allocations)
 
 ---
 
-## Example Output
+## Example output
 
 ```json
 {
@@ -100,3 +100,13 @@ Tool 86 (generate UC Metric Views - now measures have allocations)
 - `confidence: none` measures (like display-only color/format measures) are expected - they will be skipped or flagged by Tool 86
 - `confidence: medium` measures (used across multiple fact tables) should be reviewed by the SA - assign them to the primary fact table in the config
 - When Tool 73 output already includes `proposed_allocation` (from the PBI model's own table assignments), skip Tool 87
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 73 - measure conversion pipeline](./tool-73-measure-conversion.md)
+- [Tool 74 - M-Query conversion pipeline](./tool-74-mquery-conversion.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).
