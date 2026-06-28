@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.crewai.services.crew_memory_service import (
+from src.engines.crewai.memory.crew_memory_service import (
     CrewMemoryService,
     generate_crew_id,
     setup_storage_directory,

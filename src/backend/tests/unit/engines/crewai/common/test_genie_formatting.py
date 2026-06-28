@@ -4,7 +4,7 @@ call patterns produce identical results."""
 
 from types import SimpleNamespace
 
-from src.engines.crewai.common.genie_formatting import (
+from src.engines.crewai.kernel.genie_formatting import (
     _genie_space_id_from_url,
     append_genie_mcp_formatting,
     apply_genie_mcp_space_id,

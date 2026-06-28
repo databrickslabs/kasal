@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any
 
-from src.engines.crewai.flow.modules.callback_manager import CallbackManager
+from src.engines.crewai.paths.flow.modules.callback_manager import CallbackManager
 
 
 class TestCallbackManager:
@@ -29,7 +29,7 @@ class TestCallbackManager:
     @pytest.fixture
     def mock_crewai_event_bus(self):
         """Mock CrewAI event bus."""
-        with patch('src.engines.crewai.flow.modules.callback_manager.crewai_event_bus') as mock_bus:
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.crewai_event_bus') as mock_bus:
             mock_bus.register = Mock()
             yield mock_bus
 
@@ -181,7 +181,7 @@ class TestCallbackManager:
     def test_init_callbacks_general_exception(self, mock_job_id):
         """Test callback initialization with general exception."""
         # Patch the handlers list initialization to raise an exception in the try block
-        with patch('src.engines.crewai.flow.modules.callback_manager.CallbackManager.ensure_event_listeners_registered') as mock_ensure:
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.CallbackManager.ensure_event_listeners_registered') as mock_ensure:
             mock_ensure.side_effect = Exception("General error during initialization")
             
             # Mock callbacks to be created successfully
@@ -302,7 +302,7 @@ class TestCallbackManager:
 
     def test_ensure_event_listeners_registered_general_error(self, mock_crewai_event_bus):
         """Test event listeners registration with general error."""
-        with patch('src.engines.crewai.flow.modules.callback_manager.crewai_event_bus', side_effect=Exception("General error")):
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.crewai_event_bus', side_effect=Exception("General error")):
             listener = Mock()
             listeners = [listener]
             
@@ -610,7 +610,7 @@ class TestCallbackManager:
         }
         
         # Simulate the trace cleanup logic path
-        with patch('src.engines.crewai.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
             CallbackManager.cleanup_callbacks(callbacks)
             
             # Should call cleanup on event streaming callback
@@ -628,7 +628,7 @@ class TestCallbackManager:
             'agent_trace': agent_trace_cb
         }
         
-        with patch('src.engines.crewai.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
             CallbackManager.cleanup_callbacks(callbacks)
             
             # Should log info about trace processing
@@ -647,7 +647,7 @@ class TestCallbackManager:
         }
         
         # Mock logger to raise exception in trace cleanup section
-        with patch('src.engines.crewai.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
             # Make the trace processing line raise an exception
             mock_logger.info.side_effect = [None, None, Exception("Trace error")]
             
@@ -707,7 +707,7 @@ class TestCallbackManager:
         # Create listener that will cause exception during enumeration
         listeners = ["invalid_listener"]  # String instead of proper object
         
-        with patch('src.engines.crewai.flow.modules.callback_manager.enumerate', side_effect=Exception("Major enumeration error")):
+        with patch('src.engines.crewai.paths.flow.modules.callback_manager.enumerate', side_effect=Exception("Major enumeration error")):
             CallbackManager.ensure_event_listeners_registered(listeners)
             
             # Should handle major exception gracefully without crashing

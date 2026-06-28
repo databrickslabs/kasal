@@ -20,9 +20,20 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 
 from .base_exporter import BaseExporter
+from .secret_hints import SECRET_KEY_HINTS as _SECRET_KEY_HINTS
 from .yaml_generator import YAMLGenerator
 
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
+# The ONE portable A2UI composer (stdlib-only), shared with the live app and
+# vendored verbatim into every export so generative UI never forks into a second
+# implementation. ``parents[3]`` is ``src/backend/src``.
+SHARED_A2UI_DIR = Path(__file__).parents[3] / "shared" / "a2ui"
+# The ONE shared frontend A2UI renderer (self-contained React+TS module). Vendored
+# verbatim into the export so the deployed UI draws surfaces with the SAME renderer
+# as Kasal chat. ``parents[5]`` is the top-level ``src/`` (alongside ``frontend/``).
+SHARED_A2UI_FRONTEND_DIR = (
+    Path(__file__).parents[5] / "frontend" / "src" / "shared" / "a2ui"
+)
 # Standalone tool implementations bundled into the app (no Kasal `src.*` deps).
 BUNDLED_TOOLS_DIR = Path(__file__).parent / "templates" / "_app_bundled_tools"
 # Kasal's runtime custom-tool implementations (some are self-contained).
@@ -94,16 +105,8 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
 _TOOL_ALIASES = {"DallETool": "Dall-E Tool", "GmailTool": "Gmail"}
 
 # Config keys that look like secrets are never baked into the export — the
-# deployed app reads them from env vars / OBO instead.
-_SECRET_KEY_HINTS = (
-    "api_key",
-    "apikey",
-    "secret",
-    "password",
-    "token",
-    "pat",
-    "credential",
-)
+# deployed app reads them from env vars / OBO instead. ``_SECRET_KEY_HINTS`` is
+# imported at the top from the shared ``secret_hints`` single source of truth.
 
 # OS/editor junk that must never be emitted into the exported project (and which
 # would crash the UTF-8 template read if walked).
@@ -127,7 +130,9 @@ class DatabricksAppExporter(BaseExporter):
         super().__init__()
         self.yaml_generator = YAMLGenerator()
 
-    async def export(self, crew_data: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    async def export(
+        self, crew_data: Dict[str, Any], options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         crew_name = crew_data.get("name", "crew")
         agents = crew_data.get("agents", [])
         tasks = crew_data.get("tasks", [])
@@ -147,8 +152,14 @@ class DatabricksAppExporter(BaseExporter):
         # Deploy-time selections (set by the one-click deploy); fall back to the
         # workspace's configured catalog/schema for plain downloads.
         experiment_id = options.get("experiment_id") or ""
-        catalog = options.get("databricks_catalog") or crew_data.get("databricks_catalog") or ""
-        schema = options.get("databricks_schema") or crew_data.get("databricks_schema") or ""
+        catalog = (
+            options.get("databricks_catalog")
+            or crew_data.get("databricks_catalog")
+            or ""
+        )
+        schema = (
+            options.get("databricks_schema") or crew_data.get("databricks_schema") or ""
+        )
 
         tools = self._get_unique_tools(agents, tasks)
         sanitized = self._sanitize_name(crew_name)
@@ -161,7 +172,9 @@ class DatabricksAppExporter(BaseExporter):
             "{{APP_NAME}}": app_name,
             "{{BUNDLE_NAME}}": bundle_name,
             "{{DISPLAY_NAME}}": display_name,
-            "{{DESCRIPTION}}": (f"CrewAI crew '{display_name}' deployed as a Databricks App."),
+            "{{DESCRIPTION}}": (
+                f"CrewAI crew '{display_name}' deployed as a Databricks App."
+            ),
             "{{NAME}}": app_name,
             "{{INPUT_KEY}}": input_key,
             "{{CREW_PURPOSE}}": self._crew_purpose(display_name, tasks),
@@ -172,6 +185,12 @@ class DatabricksAppExporter(BaseExporter):
             # THIS crew's tasks (crews are generated dynamically — no static
             # examples). JSON array literal; "[]" hides the suggestion row.
             "{{STARTER_PROMPTS_JSON}}": self._starter_prompts(crew_data, tasks),
+            # Workspace deck/quiz theme palettes (deliverable -> palette) from the
+            # UIConfigurator, so the deployed app's themes match this workspace's
+            # live chat. JSON object literal ("{}" = use the built-in themes only).
+            "{{WORKSPACE_THEMES_JSON}}": json.dumps(
+                crew_data.get("a2ui_themes") or {}, ensure_ascii=False
+            ),
             "{{MODEL_OVERRIDE}}": repr(model_override),
             "{{ENABLE_OBO}}": "True" if include_obo else "False",
             "{{MCP_SERVERS}}": self._mcp_block(mcp_servers),
@@ -239,6 +258,15 @@ class DatabricksAppExporter(BaseExporter):
                 content = content.replace(token, value)
             files.append({"path": rel, "content": content, "type": self._ftype(rel)})
 
+        # 1b. Vendor the shared A2UI composer + bake this workspace's resolved UI
+        #     config (catalog/directives/enabled) under agent_server/a2ui/ so the
+        #     deployed generative UI uses the SAME composer as live Kasal chat.
+        files.extend(await self._a2ui_vendor_files(crew_data))
+
+        # 1c. Vendor the shared FRONTEND renderer verbatim under frontend/src/a2ui/
+        #     so the deployed UI draws surfaces with the SAME renderer as live chat.
+        files.extend(await self._a2ui_frontend_files())
+
         # 2. Generated crew config (read at runtime by agent_server/agent.py).
         files.append(
             {
@@ -253,7 +281,10 @@ class DatabricksAppExporter(BaseExporter):
             {
                 "path": "config/tasks.yaml",
                 "content": self.yaml_generator.generate_tasks_yaml(
-                    tasks, agents, include_comments=include_comments, include_guardrails=True
+                    tasks,
+                    agents,
+                    include_comments=include_comments,
+                    include_guardrails=True,
                 ),
                 "type": "yaml",
             }
@@ -264,7 +295,9 @@ class DatabricksAppExporter(BaseExporter):
         if include_custom_tools:
             bundled = await self._bundle_tool_files(tools)
             if bundled:
-                files.append({"path": "tools/__init__.py", "content": "", "type": "python"})
+                files.append(
+                    {"path": "tools/__init__.py", "content": "", "type": "python"}
+                )
                 files.extend(bundled)
 
         return {
@@ -299,7 +332,9 @@ class DatabricksAppExporter(BaseExporter):
         slug = slug[:30].strip("-")
         return slug or "agent-crew"
 
-    def _detect_input_key(self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]) -> str:
+    def _detect_input_key(
+        self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]
+    ) -> str:
         """Infer the crew input key from ``{placeholder}`` tokens, default ``topic``."""
         pattern = re.compile(r"\{(\w+)\}")
         scan = [
@@ -318,7 +353,9 @@ class DatabricksAppExporter(BaseExporter):
         """A short description of what the crew does, for the conversation layer."""
         parts = [display_name]
         for task in tasks:
-            text = (task.get("description") or task.get("expected_output") or "").strip()
+            text = (
+                task.get("description") or task.get("expected_output") or ""
+            ).strip()
             if text:
                 parts.append(text)
         purpose = " ".join(parts)
@@ -370,7 +407,9 @@ class DatabricksAppExporter(BaseExporter):
                 hint = f"Prefer surfaceKind '{kind}'."
                 break
         else:
-            structured = any(t.get("output_pydantic") or t.get("output_json") for t in tasks)
+            structured = any(
+                t.get("output_pydantic") or t.get("output_json") for t in tasks
+            )
             hint = (
                 "The output is structured data; prefer a 'dashboard' with Table/Chart/KeyValue."
                 if structured
@@ -379,7 +418,9 @@ class DatabricksAppExporter(BaseExporter):
         # Safe to embed in a triple-quoted Python string.
         return hint.replace('"""', "'''").replace("\\", " ")
 
-    def _starter_prompts(self, crew_data: Dict[str, Any], tasks: List[Dict[str, Any]]) -> str:
+    def _starter_prompts(
+        self, crew_data: Dict[str, Any], tasks: List[Dict[str, Any]]
+    ) -> str:
         """JSON array of crew-relevant example prompts for the UI empty state.
 
         Derived from the crew's own task descriptions so the suggestions reflect
@@ -392,7 +433,9 @@ class DatabricksAppExporter(BaseExporter):
         prompts: List[str] = []
         seen = set()
         for task in tasks:
-            text = (task.get("description") or task.get("expected_output") or "").strip()
+            text = (
+                task.get("description") or task.get("expected_output") or ""
+            ).strip()
             if not text:
                 continue
             # First sentence, collapsed to a single line.
@@ -410,7 +453,6 @@ class DatabricksAppExporter(BaseExporter):
             if len(prompts) >= 3:
                 break
         return json.dumps(prompts, ensure_ascii=False)
-
 
     def _mcp_block(self, mcp_servers: List[Dict[str, Any]]) -> str:
         """Emit (name, url, transport) tuples for the crew's MCP servers.
@@ -430,14 +472,18 @@ class DatabricksAppExporter(BaseExporter):
                 transport = "streamable-http"
             else:
                 transport = (
-                    "streamable-http" if server.get("server_type") == "streamable" else "sse"
+                    "streamable-http"
+                    if server.get("server_type") == "streamable"
+                    else "sse"
                 )
             lines.append(f'    ("{name}", "{url}", "{transport}"),')
         return ("\n".join(lines) + "\n") if lines else ""
 
     def _spec_for(self, title: str) -> Optional[Dict[str, Any]]:
         """Return the bundle spec for a tool title (resolving class-name aliases)."""
-        return _BUNDLEABLE_TOOLS.get(title) or _BUNDLEABLE_TOOLS.get(_TOOL_ALIASES.get(title, ""))
+        return _BUNDLEABLE_TOOLS.get(title) or _BUNDLEABLE_TOOLS.get(
+            _TOOL_ALIASES.get(title, "")
+        )
 
     def _tool_imports(self, tools: List[str], include_custom: bool) -> str:
         imports: List[str] = []
@@ -467,7 +513,9 @@ class DatabricksAppExporter(BaseExporter):
             clean[key] = value
         return clean
 
-    def _factory_expr(self, title: str, spec: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+    def _factory_expr(
+        self, title: str, spec: Dict[str, Any], cfg: Dict[str, Any]
+    ) -> str:
         """Build the tool constructor call, baking in the crew's non-secret config."""
         cls = spec["class"]
         if spec.get("special") == "genie":
@@ -509,7 +557,9 @@ class DatabricksAppExporter(BaseExporter):
                 )
         return ("\n".join(lines) + "\n") if lines else ""
 
-    def _extra_deps(self, tools: List[str], include_custom: bool, has_mcp: bool = False) -> str:
+    def _extra_deps(
+        self, tools: List[str], include_custom: bool, has_mcp: bool = False
+    ) -> str:
         seen: set = set()
         lines: List[str] = []
         deps: List[str] = []
@@ -560,10 +610,102 @@ class DatabricksAppExporter(BaseExporter):
             if key not in keys:
                 keys.append(key)
         lines = [f"# {key}=" for key in keys]
-        return ("\n".join(lines) + "\n") if lines else "# (none required for this crew)\n"
+        return (
+            ("\n".join(lines) + "\n") if lines else "# (none required for this crew)\n"
+        )
 
     def _ftype(self, rel_path: str) -> str:
         return _EXT_TYPE.get(Path(rel_path).suffix, "text")
+
+    async def _a2ui_vendor_files(
+        self, crew_data: Dict[str, Any]
+    ) -> List[Dict[str, str]]:
+        """Vendor the ONE shared A2UI composer + bake the workspace's resolved config.
+
+        Ships ``agent_server/a2ui/`` = the portable composer (``__init__.py`` +
+        ``compose.py``, copied verbatim from ``src.shared.a2ui``) plus two baked
+        data files: ``catalog.json`` (the catalog the composer may use, resolved
+        from this workspace's UIConfig) and ``config.json`` ({enabled, directives}).
+        The deployed ``agent.py`` imports this module instead of carrying its own
+        copy, so live Kasal chat and the exported app share one implementation.
+        Resolution happens in CrewExportService via the shared resolvers; here we
+        only fall back to the full bundled catalog for plain exports.
+        """
+        files: List[Dict[str, str]] = []
+        for name in ("__init__.py", "compose.py"):
+            src = SHARED_A2UI_DIR / name
+            try:
+                async with aiofiles.open(src, "r", encoding="utf-8") as f:
+                    code = await f.read()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"A2UI shared source missing: {src} ({exc})")
+                continue
+            files.append(
+                {"path": f"agent_server/a2ui/{name}", "content": code, "type": "python"}
+            )
+        catalog = crew_data.get("a2ui_catalog")
+        if not catalog:
+            try:
+                catalog = json.loads(
+                    (SHARED_A2UI_DIR / "catalog.json").read_text(encoding="utf-8")
+                )
+            except Exception:  # noqa: BLE001
+                catalog = {}
+        config = {
+            "enabled": bool(crew_data.get("a2ui_enabled", True)),
+            "directives": crew_data.get("a2ui_directives") or {},
+        }
+        files.append(
+            {
+                "path": "agent_server/a2ui/catalog.json",
+                "content": json.dumps(catalog, indent=2, ensure_ascii=False),
+                "type": "json",
+            }
+        )
+        files.append(
+            {
+                "path": "agent_server/a2ui/config.json",
+                "content": json.dumps(config, indent=2, ensure_ascii=False),
+                "type": "json",
+            }
+        )
+        return files
+
+    async def _a2ui_frontend_files(self) -> List[Dict[str, str]]:
+        """Vendor the shared frontend A2UI renderer verbatim into the export.
+
+        Copies the whole self-contained ``src/frontend/src/shared/a2ui`` tree (its
+        own ``lib/`` + ``ui/``, relative imports only) to ``frontend/src/a2ui/`` so
+        the deployed app renders surfaces with the SAME components Kasal chat uses —
+        no drifted second copy. Unit-test files are skipped (the export only builds).
+        The drifted template copies are removed from the template tree so only this
+        vendored set ships.
+        """
+        files: List[Dict[str, str]] = []
+        base = SHARED_A2UI_FRONTEND_DIR
+        if not base.is_dir():
+            self.logger.warning(f"Shared frontend A2UI module missing: {base}")
+            return files
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            if ".test." in path.name or path.name in _SKIP_FILES:
+                continue
+            rel = path.relative_to(base).as_posix()
+            try:
+                async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                    content = await f.read()
+            except (UnicodeDecodeError, ValueError):
+                self.logger.warning(f"Skipping non-text A2UI frontend file: {rel}")
+                continue
+            files.append(
+                {
+                    "path": f"frontend/src/a2ui/{rel}",
+                    "content": content,
+                    "type": self._ftype(rel),
+                }
+            )
+        return files
 
     async def _bundle_tool_files(self, tools: List[str]) -> List[Dict[str, str]]:
         """Emit self-contained impls for the bundled tools the crew uses."""
@@ -587,6 +729,8 @@ class DatabricksAppExporter(BaseExporter):
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(f"Could not read bundled tool {filename}: {exc}")
                 continue
-            files.append({"path": f"tools/{filename}", "content": code, "type": "python"})
+            files.append(
+                {"path": f"tools/{filename}", "content": code, "type": "python"}
+            )
             emitted.add(filename)
         return files

@@ -909,3 +909,40 @@ async def test_get_flow_executions_by_flow_error():
                return_value=mock_flow_svc):
         with pytest.raises(RuntimeError):
             await svc.get_flow_executions_by_flow("flow-1")
+
+
+# ── Light agent ("chat" mode): service delegates to the engine ───────────────
+# The CrewAI-specific work (agent build, kickoff, trace emission) lives in the
+# engine runner (src/engines/crewai/execution_runner.run_light_agent); the
+# service only resolves the engine and delegates, mirroring how
+# prepare_and_run_crew delegates the crew path to engine.run_execution. The
+# runner's own behavior is covered in
+# tests/unit/engines/crewai/test_execution_runner_light_agent.py.
+
+@pytest.mark.asyncio
+async def test_run_light_agent_execution_delegates_to_engine():
+    """The service resolves the CrewAI engine and hands the light run off to
+    engine.run_light_agent_execution — it does NOT execute CrewAI itself."""
+    svc = CrewAIExecutionService()
+    exec_id = f"light-{uuid.uuid4()}"
+    config = make_config(
+        agents_yaml={"agent_a1": {"id": "agent_a1", "role": "Assistant", "goal": "g",
+                                  "backstory": "b", "tools": [], "tool_configs": {"k": 1}}},
+        tasks_yaml={"task_t1": {"id": "task_t1", "description": "Answer: hello"}},
+    )
+    ctx = make_group_context(["g1"])
+
+    engine = MagicMock()
+    engine.run_light_agent_execution = AsyncMock(
+        return_value={"execution_id": exec_id, "status": ExecutionStatus.COMPLETED.value}
+    )
+    prepare_mock = AsyncMock(return_value=engine)
+
+    with patch.object(svc, "_prepare_engine", prepare_mock):
+        result = await svc.run_light_agent_execution(exec_id, config, group_context=ctx)
+
+    assert result["status"] == ExecutionStatus.COMPLETED.value
+    prepare_mock.assert_awaited_once_with(config)
+    engine.run_light_agent_execution.assert_awaited_once_with(
+        execution_id=exec_id, config=config, group_context=ctx, session=None
+    )

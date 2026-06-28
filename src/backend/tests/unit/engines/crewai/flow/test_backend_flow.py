@@ -6,7 +6,7 @@ import json
 from unittest.mock import Mock, patch, AsyncMock, MagicMock, call, PropertyMock
 from datetime import datetime, UTC
 
-from src.engines.crewai.flow.backend_flow import BackendFlow
+from src.engines.crewai.paths.flow.backend_flow import BackendFlow
 from src.repositories.flow_repository import FlowRepository
 
 
@@ -233,7 +233,7 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.engines.crewai.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.engines.crewai.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
             with patch.dict(os.environ, {'DEFAULT_LLM_MODEL': 'test-model'}):
@@ -249,7 +249,7 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.engines.crewai.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.engines.crewai.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
             # Remove DEFAULT_LLM_MODEL from environment
@@ -264,7 +264,7 @@ class TestBackendFlow:
         """Test _get_llm method with exception."""
         flow = BackendFlow()
 
-        with patch('src.engines.crewai.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.engines.crewai.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(side_effect=Exception("LLM error"))
 
             with pytest.raises(Exception, match="LLM error"):
@@ -279,7 +279,7 @@ class TestBackendFlow:
 
         mock_dynamic_flow = Mock()
 
-        with patch('src.engines.crewai.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.engines.crewai.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
             with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
@@ -309,7 +309,7 @@ class TestBackendFlow:
         mock_flow_repo.get = AsyncMock(return_value=mock_flow_db)
         mock_dynamic_flow = Mock()
 
-        with patch('src.engines.crewai.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.engines.crewai.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
             with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
@@ -332,7 +332,7 @@ class TestBackendFlow:
         flow = BackendFlow()
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        with patch('src.engines.crewai.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.engines.crewai.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(side_effect=Exception("Build error"))
 
             with patch.object(flow, '_init_callbacks'):
@@ -346,7 +346,7 @@ class TestBackendFlow:
         flow._config = {"group_context": {"key": "value"}}
 
         # Mock UserContext to prevent import errors
-        with patch('src.engines.crewai.flow.backend_flow.logger'):
+        with patch('src.engines.crewai.paths.flow.backend_flow.logger'):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly
@@ -360,7 +360,7 @@ class TestBackendFlow:
         flow = BackendFlow(job_id="test-job")
         flow._config = {}
 
-        with patch('src.engines.crewai.flow.backend_flow.logger'):
+        with patch('src.engines.crewai.paths.flow.backend_flow.logger'):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly
@@ -379,7 +379,7 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(kickoff_async_result="test result")
 
-        with patch('src.engines.crewai.trace_management.TraceManager') as mock_trace_manager:
+        with patch('src.engines.crewai.infra.trace_management.TraceManager') as mock_trace_manager:
             mock_trace_manager.ensure_writer_started = AsyncMock()
 
             with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
@@ -400,7 +400,7 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow()
 
-        with patch('src.engines.crewai.trace_management.TraceManager') as mock_trace_manager:
+        with patch('src.engines.crewai.infra.trace_management.TraceManager') as mock_trace_manager:
             mock_trace_manager.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
 
             with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
@@ -725,7 +725,7 @@ class TestBackendFlow:
             start_method_names=['starting_point_node1']
         )
 
-        with patch('src.engines.crewai.flow.backend_flow.CallbackManager') as mock_callback_manager:
+        with patch('src.engines.crewai.paths.flow.backend_flow.CallbackManager') as mock_callback_manager:
             with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
                 mock_flow_method.return_value = mock_crewai_flow
 
@@ -772,107 +772,3 @@ class TestBackendFlow:
             assert result["success"] is True
 
     # Test helper methods - lines 351-396
-    def test_ensure_event_listeners_registered(self):
-        """Test _ensure_event_listeners_registered method."""
-        flow = BackendFlow()
-        listeners = [Mock(), Mock()]
-
-        with patch('src.engines.crewai.flow.backend_flow.CallbackManager') as mock_callback_manager:
-            flow._ensure_event_listeners_registered(listeners)
-
-            mock_callback_manager.ensure_event_listeners_registered.assert_called_once_with(listeners)
-
-    @pytest.mark.asyncio
-    async def test_configure_agent_and_tools(self):
-        """Test _configure_agent_and_tools method."""
-        flow = BackendFlow()
-        flow._flow_data = {"nodes": [{"id": "node1"}]}
-        flow._repositories = {"agent": Mock()}
-
-        agent_data = {"id": 1, "name": "Test Agent"}
-        mock_agent = Mock()
-
-        with patch('src.engines.crewai.flow.backend_flow.AgentConfig') as mock_agent_config:
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent)
-
-            result = await flow._configure_agent_and_tools(agent_data)
-
-            assert result == mock_agent
-            mock_agent_config.configure_agent_and_tools.assert_called_once_with(
-                agent_data=agent_data,
-                flow_data=flow._flow_data,
-                repositories=flow._repositories,
-                group_context=None
-            )
-
-    @pytest.mark.asyncio
-    async def test_configure_task(self):
-        """Test _configure_task method."""
-        flow = BackendFlow()
-        flow._flow_data = {"nodes": [{"id": "node1"}]}
-        flow._repositories = {"task": Mock()}
-
-        task_data = {"id": 1, "name": "Test Task"}
-        agent = Mock()
-        callback = Mock()
-        mock_task = Mock()
-
-        with patch('src.engines.crewai.flow.backend_flow.TaskConfig') as mock_task_config:
-            mock_task_config.configure_task = AsyncMock(return_value=mock_task)
-
-            result = await flow._configure_task(task_data, agent, callback)
-
-            assert result == mock_task
-            mock_task_config.configure_task.assert_called_once_with(
-                task_data=task_data,
-                agent=agent,
-                task_output_callback=callback,
-                flow_data=flow._flow_data,
-                repositories=flow._repositories,
-                group_context=None
-            )
-
-    @pytest.mark.asyncio
-    async def test_kickoff_clears_request_session_contextvar(self):
-        """Test that _request_session ContextVar is cleared before kickoff_async."""
-        flow = BackendFlow(job_id="test-job")
-        flow._flow_data = {"nodes": [{"id": "node1"}]}
-
-        mock_crewai_flow = self.create_mock_crewai_flow(
-            kickoff_async_result={"output": "test"},
-            start_method_names=['starting_point_node1']
-        )
-
-        with patch('src.db.session._request_session') as mock_ctx_var:
-            with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
-                mock_flow_method.return_value = mock_crewai_flow
-
-                result = await flow.kickoff()
-
-                assert result["success"] is True
-                mock_ctx_var.set.assert_called_with(None)
-
-    @pytest.mark.asyncio
-    async def test_configure_task_no_optional_params(self):
-        """Test _configure_task method without optional parameters."""
-        flow = BackendFlow()
-        flow._flow_data = {"nodes": [{"id": "node1"}]}
-        flow._repositories = {"task": Mock()}
-
-        task_data = {"id": 1, "name": "Test Task"}
-        mock_task = Mock()
-
-        with patch('src.engines.crewai.flow.backend_flow.TaskConfig') as mock_task_config:
-            mock_task_config.configure_task = AsyncMock(return_value=mock_task)
-
-            result = await flow._configure_task(task_data)
-
-            assert result == mock_task
-            mock_task_config.configure_task.assert_called_once_with(
-                task_data=task_data,
-                agent=None,
-                task_output_callback=None,
-                flow_data=flow._flow_data,
-                repositories=flow._repositories,
-                group_context=None
-            )

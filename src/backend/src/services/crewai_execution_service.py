@@ -21,7 +21,7 @@ from src.repositories.execution_repository import ExecutionRepository
 from src.engines.factory import EngineFactory
 from src.engines.crewai.crewai_engine_service import CrewAIEngineService
 from src.services.execution_status_service import ExecutionStatusService
-from src.engines.crewai.crewai_flow_service import CrewAIFlowService
+from src.engines.crewai.paths.flow.crewai_flow_service import CrewAIFlowService
 from src.utils.user_context import GroupContext
 from src.db.session import request_scoped_session
 from src.services.agent_service import AgentService
@@ -363,11 +363,11 @@ class CrewAIExecutionService:
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
             result = await engine.run_execution(execution_id, execution_config, group_context, session)
-            
+
             # Return the execution ID - do NOT update status to COMPLETED here
             # as the execution is running asynchronously and will be updated by the engine
             return {"execution_id": execution_id, "status": ExecutionStatus.RUNNING.value}
-            
+
         except Exception as e:
             # Update status to FAILED
             await ExecutionStatusService.update_status(
@@ -376,7 +376,34 @@ class CrewAIExecutionService:
                 message=f"Crew execution failed: {str(e)}"
             )
             raise
-    
+
+    async def run_light_agent_execution(
+        self,
+        execution_id: str,
+        config: CrewConfig,
+        group_context: GroupContext = None,
+        session = None
+    ) -> Dict[str, Any]:
+        """Thin service-layer delegate for the "chat" (light) single-agent path.
+
+        Mirrors how :meth:`prepare_and_run_crew` delegates the crew path to
+        ``engine.run_execution``: this resolves the CrewAI engine and hands off
+        to ``engine.run_light_agent_execution``. All CrewAI-specific work — agent
+        build, ``Agent.kickoff_async``, and tool-activity trace emission — lives
+        in the engine (``src/engines/crewai/execution_runner.run_light_agent``),
+        keeping the service free of engine internals. The engine runner runs the
+        agent IN-PROCESS (no subprocess spin-up) and writes its own terminal
+        status, so a sub-second answer is fetchable via the REST poller even if
+        the SSE listener attaches late.
+        """
+        engine = await self._prepare_engine(config)
+        return await engine.run_light_agent_execution(
+            execution_id=execution_id,
+            config=config,
+            group_context=group_context,
+            session=session,
+        )
+
     async def _prepare_engine(self, config: CrewConfig) -> Any:
         """
         Prepare the engine for execution.

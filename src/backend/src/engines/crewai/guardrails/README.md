@@ -2,9 +2,78 @@
 
 This directory contains guardrail implementations for CrewAI tasks.
 
+## Layout
+
+```
+guardrails/
+├── base_guardrail.py        # BaseGuardrail abstract base
+├── guardrail_factory.py     # GuardrailFactory — type → class dispatch
+├── guardrail_wrapper.py     # Wraps a guardrail for CrewAI task validation
+├── guardrail_model.py
+├── core/                    # Reusable, domain-agnostic guardrails
+│   ├── minimum_number_guardrail.py
+│   ├── llm_injection_guardrail.py
+│   └── self_reflection_guardrail.py
+└── demo/                    # Domain demo guardrails (data_processing table family)
+    ├── company_count_guardrail.py
+    ├── data_processing_guardrail.py
+    ├── empty_data_processing_guardrail.py
+    ├── data_processing_count_guardrail.py
+    └── company_name_not_null_guardrail.py
+```
+
+`GuardrailFactory.create_guardrail()` dispatches on the `type` field and supports
+**8 guardrail types** (3 reusable in `core/`, 5 demo in `demo/`).
+
 ## Available Guardrails
 
-### Company Count Guardrail
+### Reusable guardrails (`core/`)
+
+#### Minimum Number Guardrail
+
+Validates that the task output contains at least a minimum number of items.
+
+**Configuration:**
+```json
+{
+  "type": "minimum_number",
+  "min_count": 50
+}
+```
+
+#### LLM Injection Check Guardrail
+
+Opt-in security guardrail (`LLMInjectionGuardrail`). Sends the task output to an LLM
+that classifies it as `SAFE` or `INJECTION`; an `INJECTION` verdict fails validation and
+CrewAI retries. Fails open on LLM error. See `README_SECURITY_COMPLIANCE.md`.
+
+**Configuration:**
+```json
+{
+  "type": "prompt_injection_check",
+  "llm_model": "databricks-claude-sonnet-4-5"
+}
+```
+
+#### Self-Reflection Guardrail
+
+Opt-in security guardrail (`SelfReflectionGuardrail`). Asks an LLM whether the output
+deviated from the original task goal; a `FAIL` verdict triggers a retry. Fails open on
+LLM error.
+
+**Configuration:**
+```json
+{
+  "type": "self_reflection",
+  "llm_model": "databricks-claude-sonnet-4-5"
+}
+```
+
+### Demo guardrails (`demo/`)
+
+These are coupled to the `data_processing` demo table (see schema below).
+
+#### Company Count Guardrail
 
 Validates that the task output contains a minimum number of companies.
 
@@ -16,7 +85,7 @@ Validates that the task output contains a minimum number of companies.
 }
 ```
 
-### Data Processing Guardrail
+#### Data Processing Guardrail
 
 Validates that a specific record in the database has been processed (processed = true).
 
@@ -113,10 +182,14 @@ WHERE company_name IS NULL;
 
 ## How to Add a New Guardrail
 
-1. Create a new Python file in this directory with your guardrail class
+1. Create a new Python file for your guardrail class. Put domain-agnostic guardrails in
+   `core/`; put demo/data-coupled guardrails in `demo/`. Subclass `BaseGuardrail`.
 2. Implement a validation method that returns a tuple of `(bool, result_or_error)`
-3. Add your new guardrail class to the `__init__.py` export list
-4. Update the `task_adapter.py` file to handle your new guardrail type
+3. Add an import + `__all__` entry for your class in `__init__.py` (under the matching
+   `core` or `demo` block)
+4. Register a `type` → class branch in `GuardrailFactory.create_guardrail()`
+   (`guardrail_factory.py`) — this is the single dispatch point used to instantiate
+   guardrails from a task's `guardrail` config
 
 ## Full Example
 
@@ -132,7 +205,7 @@ task_config = {
 }
 
 # Using the guardrail in code
-from src.engines.crewai.helpers.task_adapter import create_task
+from src.engines.crewai.paths.crew.task_adapter import create_task
 
 task = await create_task(
     task_key="find_tech_companies",

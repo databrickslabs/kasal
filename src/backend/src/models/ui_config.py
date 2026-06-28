@@ -25,8 +25,11 @@ class UIConfig(Base):
     # renderer unless an admin explicitly turns this off.
     enabled = Column(Boolean, default=True, nullable=False)
 
-    # Which component catalog agents may use: "minimal" | "basic" | "custom".
-    catalog_type = Column(String(50), default="minimal", nullable=False)
+    # Which component catalog agents may use: "full" | "minimal" | "custom".
+    # Defaults to "full" (the full catalog) so saving a config doesn't silently strip
+    # rich surfaces; "minimal" is an explicit opt-in restriction. (Legacy rows stored
+    # as "basic" still resolve to the full catalog — see resolve_catalog.)
+    catalog_type = Column(String(50), default="full", nullable=False)
     # Custom catalog JSON (only used when catalog_type == "custom").
     catalog_json = Column(Text, nullable=True)
     # Renderer style overrides (accent color, density, theme) as JSON.

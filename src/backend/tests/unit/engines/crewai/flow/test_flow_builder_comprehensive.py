@@ -71,7 +71,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_no_flow_data(self, mock_repositories):
         """Test build_flow raises ValueError when no flow data provided."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         with pytest.raises(ValueError, match="No flow data provided"):
             await FlowBuilder.build_flow(None, mock_repositories)
@@ -79,7 +79,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_empty_flow_data(self, mock_repositories):
         """Test build_flow raises ValueError when flow data is empty."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         with pytest.raises(ValueError, match="No flow data provided"):
             await FlowBuilder.build_flow({}, mock_repositories)
@@ -87,7 +87,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_no_starting_points(self, mock_repositories):
         """Test build_flow raises ValueError when no starting points defined."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         flow_data = {
             'flow_config': {
@@ -103,7 +103,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_with_string_flow_config(self, mock_repositories):
         """Test build_flow handles JSON string flow_config."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         import json
 
         task_id = str(uuid.uuid4())
@@ -123,7 +123,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_with_checkpoint_edge(self, mock_repositories):
         """Test build_flow enables persistence when checkpoint edge exists."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -139,8 +139,8 @@ class TestFlowBuilder:
         }
 
         # Mock the process methods to avoid complex setup
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowConfigManager') as mock_config_manager, \
-             patch('src.engines.crewai.flow.modules.flow_builder.FlowProcessorManager') as mock_processor:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowConfigManager') as mock_config_manager, \
+             patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowProcessorManager') as mock_processor:
             mock_config_manager.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_processor.process_starting_points = AsyncMock(return_value=[])
             mock_processor.process_listeners = AsyncMock(return_value=[])
@@ -155,7 +155,7 @@ class TestFlowBuilder:
     @pytest.mark.asyncio
     async def test_build_flow_with_resume_parameters(self, mock_repositories, mock_callbacks, mock_group_context):
         """Test build_flow handles resume parameters correctly."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -177,8 +177,8 @@ class TestFlowBuilder:
         mock_repositories['execution_history'].get_execution_by_id = AsyncMock(return_value=mock_execution)
         mock_repositories['execution_trace'].get_crew_outputs_for_resume = AsyncMock(return_value={})
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowConfigManager') as mock_config_manager, \
-             patch('src.engines.crewai.flow.modules.flow_builder.FlowProcessorManager') as mock_processor:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowConfigManager') as mock_config_manager, \
+             patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowProcessorManager') as mock_processor:
             mock_config_manager.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_processor.process_starting_points = AsyncMock(return_value=[])
             mock_processor.process_listeners = AsyncMock(return_value=[])
@@ -200,7 +200,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_with_none(self):
         """Test _apply_state_operations handles None input."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_flow = MagicMock()
         # Should not raise
@@ -208,7 +208,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_with_reads(self):
         """Test _apply_state_operations handles state reads."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_flow = MagicMock()
         mock_flow.state = {'test_var': 'test_value'}
@@ -222,7 +222,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_with_writes_value(self):
         """Test _apply_state_operations handles state writes with direct value."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_flow = MagicMock()
         mock_flow.state = {}
@@ -236,7 +236,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_with_writes_expression(self):
         """Test _apply_state_operations handles state writes with expression."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_flow = MagicMock()
         mock_flow.state = {'x': 5}
@@ -250,7 +250,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_with_object_state(self):
         """Test _apply_state_operations handles object-based state."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         class MockState:
             def __init__(self):
@@ -270,7 +270,7 @@ class TestFlowBuilder:
 
     def test_apply_state_operations_expression_error(self):
         """Test _apply_state_operations handles expression evaluation errors."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_flow = MagicMock()
         mock_flow.state = {}
@@ -290,7 +290,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_basic(self):
         """Test basic dynamic flow creation."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         # Create mock task and agent
         mock_agent = MagicMock()
@@ -306,7 +306,7 @@ class TestCreateDynamicFlow:
             ('starting_point_0', ['task-1'], [mock_task], 'Test Crew', MagicMock())
         ]
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
@@ -326,7 +326,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_with_state(self):
         """Test dynamic flow creation with state configuration."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -347,7 +347,7 @@ class TestCreateDynamicFlow:
             },
         }
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
@@ -367,7 +367,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_with_persistence(self):
         """Test dynamic flow creation with persistence enabled."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -387,7 +387,7 @@ class TestCreateDynamicFlow:
             },
         }
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_method)
 
@@ -408,7 +408,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_with_listeners(self):
         """Test dynamic flow creation with listener crews."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -425,7 +425,7 @@ class TestCreateDynamicFlow:
             ('listener_0', 'crew-2', ['task-2'], [mock_task], 'Listener Crew', ['task-1'], 'NONE', MagicMock())
         ]
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_start_method = _real_async_method()
             mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
@@ -453,7 +453,7 @@ class TestCreateDynamicFlow:
         The comparison uses < (not <=) because resume_from is the sequence of the
         crew TO RUN, not the last completed crew.
         """
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -468,7 +468,7 @@ class TestCreateDynamicFlow:
 
         checkpoint_outputs = {'Start Crew': 'Previous output'}
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_skip_method = _real_async_method()
             mock_factory.create_skipped_crew_method = MagicMock(return_value=mock_skip_method)
 
@@ -491,7 +491,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_with_routers(self):
         """Test dynamic flow creation with routers."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -513,7 +513,7 @@ class TestCreateDynamicFlow:
             }
         ]
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_start_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
 
@@ -533,7 +533,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_listener_with_and_condition(self):
         """Test dynamic flow creation with AND condition listener."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -551,7 +551,7 @@ class TestCreateDynamicFlow:
             ('listener_0', 'crew-3', ['task-3'], [mock_task], 'Listener Crew', ['task-1', 'task-2'], 'AND', MagicMock())
         ]
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_start_method = _real_async_method()
             mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
@@ -573,7 +573,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_listener_with_or_condition(self):
         """Test dynamic flow creation with OR condition listener."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -591,7 +591,7 @@ class TestCreateDynamicFlow:
             ('listener_0', 'crew-3', ['task-3'], [mock_task], 'Listener Crew', ['task-1', 'task-2'], 'OR', MagicMock())
         ]
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             mock_start_method = _real_async_method()
             mock_listener_method = _real_async_method()
             mock_factory.create_starting_point_crew_method = MagicMock(return_value=mock_start_method)
@@ -613,7 +613,7 @@ class TestCreateDynamicFlow:
     @pytest.mark.asyncio
     async def test_create_dynamic_flow_skipped_listener(self):
         """Test dynamic flow creation with skipped listener for checkpoint resume."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -635,7 +635,7 @@ class TestCreateDynamicFlow:
             'Listener Crew': 'Previous listener output'
         }
 
-        with patch('src.engines.crewai.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.modules.flow_builder.FlowMethodFactory') as mock_factory:
             # All factory methods must return real functions (not Mocks) so the
             # dynamic Flow class passes pydantic v2.11 field validation.
             mock_factory.create_starting_point_crew_method = MagicMock(side_effect=_real_async_method)

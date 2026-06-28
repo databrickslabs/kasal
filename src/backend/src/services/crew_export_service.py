@@ -13,6 +13,7 @@ from src.engines.crewai.exporters import (
     DatabricksNotebookExporter,
     PythonProjectExporter,
 )
+from src.engines.crewai.exporters.secret_hints import SECRET_KEY_HINTS
 from src.repositories.agent_repository import AgentRepository
 from src.repositories.crew_repository import CrewRepository
 from src.repositories.task_repository import TaskRepository
@@ -144,6 +145,11 @@ class CrewExportService:
             group_context
         )
 
+        # Workspace Predefined-UI (A2UI) config, resolved with the SHARED
+        # resolvers so the deployed app's generative UI matches this workspace's
+        # live chat (same catalog + per-deliverable directives + enabled flag).
+        a2ui = await self._get_a2ui_config(group_context)
+
         return {
             "id": str(crew.id),
             "name": crew.name,
@@ -168,7 +174,72 @@ class CrewExportService:
             "reasoning_config": crew.reasoning_config,
             "manager_llm": crew.manager_llm,
             "memory": crew.memory if crew.memory is not None else True,
+            # Baked into the export so the deployed composer honors this
+            # workspace's catalog choice + per-deliverable directives + on/off.
+            "a2ui_enabled": a2ui["a2ui_enabled"],
+            "a2ui_catalog": a2ui["a2ui_catalog"],
+            "a2ui_directives": a2ui["a2ui_directives"],
+            "a2ui_themes": a2ui["a2ui_themes"],
         }
+
+    async def _get_a2ui_config(
+        self, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
+        """Resolve the workspace's Predefined-UI (A2UI) config for export.
+
+        Returns ``{a2ui_enabled, a2ui_catalog, a2ui_directives}`` — the enabled
+        flag, the catalog the composer may use (resolved from the workspace's
+        catalog_type/catalog_json), and the per-deliverable directives map. Uses
+        the SHARED resolvers (``src.shared.a2ui.compose``) so the live app and the
+        exported app resolve config identically. Non-fatal: on any error, defaults
+        to enabled + the full bundled catalog + no directives.
+        """
+        from src.shared.a2ui.compose import (
+            load_catalog,
+            resolve_catalog,
+            resolve_directives,
+            resolve_themes,
+        )
+
+        default_catalog = load_catalog()
+        result: Dict[str, Any] = {
+            "a2ui_enabled": True,
+            "a2ui_catalog": default_catalog,
+            "a2ui_directives": {},
+            "a2ui_themes": {},
+        }
+        try:
+            from src.services.ui_config_service import UIConfigService
+
+            group_id = group_context.primary_group_id if group_context else None
+            cfg = await UIConfigService(self.session, group_id=group_id).get_config()
+            cfg_dict = {
+                "id": getattr(cfg, "id", None),
+                "catalog_type": getattr(cfg, "catalog_type", None),
+                "catalog_json": getattr(cfg, "catalog_json", None),
+                "style_json": getattr(cfg, "style_json", None),
+            }
+            result["a2ui_enabled"] = bool(cfg.enabled)
+            result["a2ui_catalog"] = resolve_catalog(cfg_dict, default_catalog)
+            result["a2ui_directives"] = resolve_directives(cfg_dict)
+            # Themes are frontend-only; gate on enabled to mirror the live app's
+            # useA2uiThemes (which returns null when Predefined UI is disabled).
+            result["a2ui_themes"] = (
+                resolve_themes(cfg_dict) if result["a2ui_enabled"] else {}
+            )
+            logger.info(
+                "Export: A2UI config resolved (enabled=%s, components=%d, "
+                "directives=%d, themes=%d)",
+                result["a2ui_enabled"],
+                len(result["a2ui_catalog"].get("components", {})),
+                len(result["a2ui_directives"]),
+                len(result["a2ui_themes"]),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Export: could not resolve A2UI config, using defaults: {e}"
+            )
+        return result
 
     async def _get_databricks_catalog_schema(
         self, group_context: Optional[GroupContext] = None
@@ -307,15 +378,8 @@ class CrewExportService:
 
     # Config keys that look like secrets — never exported (the deployed app
     # reads these from env vars / OBO instead of baking them into the project).
-    _SECRET_CONFIG_HINTS = (
-        "api_key",
-        "apikey",
-        "secret",
-        "password",
-        "token",
-        "pat",
-        "credential",
-    )
+    # Single source of truth shared with the Databricks App exporter.
+    _SECRET_CONFIG_HINTS = SECRET_KEY_HINTS
 
     def _safe_tool_config(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Strip secret-looking keys from a tool's stored config for export."""

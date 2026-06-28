@@ -3,7 +3,7 @@ import json
 from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any
 
-from src.engines.crewai.guardrails.data_processing_guardrail import DataProcessingGuardrail
+from src.engines.crewai.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
 
 
 class TestDataProcessingGuardrail:

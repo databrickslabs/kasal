@@ -8,13 +8,13 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 # Path to the module-level helper used by validate()
-_RUN_COMPLETION = "src.engines.crewai.guardrails.llm_injection_guardrail._run_completion"
+_RUN_COMPLETION = "src.engines.crewai.guardrails.core.llm_injection_guardrail._run_completion"
 
 
 def _make_guardrail(config=None):
     """Create a guardrail with _run_completion mocked."""
     cfg = config or {"llm_model": "databricks-test-model"}
-    from src.engines.crewai.guardrails.llm_injection_guardrail import LLMInjectionGuardrail
+    from src.engines.crewai.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
     return LLMInjectionGuardrail(cfg)
 
 
@@ -117,7 +117,7 @@ class TestLLMInjectionGuardrailValidate:
 class TestLLMInjectionGuardrailFactoryRegistration:
     def test_factory_creates_correct_type(self):
         from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
-        from src.engines.crewai.guardrails.llm_injection_guardrail import LLMInjectionGuardrail
+        from src.engines.crewai.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
         guardrail = GuardrailFactory.create_guardrail(
             {"type": "prompt_injection_check", "llm_model": "databricks-test-model"}
         )

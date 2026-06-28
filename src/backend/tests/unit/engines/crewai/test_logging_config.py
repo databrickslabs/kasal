@@ -11,7 +11,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, patch, call, AsyncMock, PropertyMock
 
-from src.engines.crewai.logging_config import (
+from src.engines.crewai.infra.logging_config import (
     ExecutionContextFormatter,
     ExecutionLogsDatabaseHandler,
     set_execution_context,

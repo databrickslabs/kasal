@@ -831,6 +831,35 @@ async def _ensure_crew_columns(conn) -> None:
         logger.warning(f"Could not ensure crews.reasoning_config column: {e}")
 
 
+async def _ensure_ui_config_columns(conn) -> None:
+    """Idempotently add the Predefined-UI columns to ui_config. The table itself is
+    created via create_all, but create_all never ALTERs an existing table — so DBs
+    created before catalog_json/style_json existed would silently drop a workspace's
+    A2UI catalog + branding on save/reload. Safe to run every startup (nullable TEXT)."""
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    columns = ("catalog_json", "style_json")
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(ui_config)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (create_all handles fresh DBs)
+            for col in columns:
+                if col not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE ui_config ADD COLUMN {col} TEXT"
+                    )
+                    logger.info(f"Added ui_config.{col} column (SQLite self-heal)")
+        else:
+            for col in columns:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE ui_config ADD COLUMN IF NOT EXISTS {col} TEXT"
+                )
+            logger.info("Ensured ui_config catalog_json/style_json columns")
+    except Exception as e:
+        logger.warning(f"Could not ensure ui_config columns: {e}")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -1075,6 +1104,7 @@ async def init_db() -> None:
                     await _ensure_chat_sessions_columns(conn)
                     await _ensure_crew_feedback_table(conn)
                     await _ensure_crew_columns(conn)
+                    await _ensure_ui_config_columns(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

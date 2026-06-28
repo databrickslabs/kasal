@@ -431,7 +431,7 @@ class TestOtelShutdownOnError:
         mock_otel_tracing.shutdown_provider = mock_shutdown_provider
 
         with patch.dict("sys.modules", {
-            "src.engines.crewai.logging_config": mock_logging_config,
+            "src.engines.crewai.infra.logging_config": mock_logging_config,
             "crewai": MagicMock(),
             "crewai.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
             "crewai.events": MagicMock(),

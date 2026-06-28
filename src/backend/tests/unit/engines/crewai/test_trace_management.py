@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.crewai.trace_management import (
+from src.engines.crewai.infra.trace_management import (
     TraceManager
 )
 

@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Tuple, List, Optional
 
 from src.schemas.execution import CrewConfig
-from src.engines.crewai.helpers.conversion_helpers import extract_crew_yaml_data
+from src.engines.crewai.paths.crew.conversion_helpers import extract_crew_yaml_data
 from src.core.logger import LoggerManager
 
 

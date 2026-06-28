@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import hashlib
 import json
 
-from src.engines.crewai.services.crew_memory_service import CrewMemoryService
+from src.engines.crewai.memory.crew_memory_service import CrewMemoryService
 from src.engines.crewai.memory.memory_backend_factory import DatabricksIndexValidationError
 
 
@@ -184,7 +184,7 @@ class TestCreateMemoryBackendsErrorHandling:
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
             with patch(
-                'src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends',
+                'src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_memory_backends',
                 new_callable=AsyncMock
             ) as mock_factory:
                 mock_factory.side_effect = DatabricksIndexValidationError(
@@ -214,7 +214,7 @@ class TestCreateMemoryBackendsErrorHandling:
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
             with patch(
-                'src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_memory_backends',
+                'src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_memory_backends',
                 new_callable=AsyncMock,
                 return_value={'short_term': MagicMock()}
             ):

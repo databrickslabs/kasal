@@ -88,6 +88,12 @@ class DispatcherRequest(BaseModel):
         default_factory=list,
         description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the generated crew's run",
     )
+    chat_mode_type: Optional[Literal["chat", "research", "deep"]] = Field(
+        "chat",
+        description="ChatMode answer mode: 'chat' = single light agent (Agent.kickoff_async, "
+        "no crew/planning/reasoning); 'research' = crew with reasoning; 'deep' = crew with "
+        "planning + reasoning. Defaults to 'chat' (the fast single-agent path).",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

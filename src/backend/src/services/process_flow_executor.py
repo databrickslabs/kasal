@@ -199,7 +199,7 @@ def run_flow_in_process(
         }
 
     # Configure logging
-    from src.engines.crewai.logging_config import (
+    from src.engines.crewai.infra.logging_config import (
         configure_subprocess_logging,
         suppress_stdout_stderr,
         restore_stdout_stderr
@@ -324,7 +324,7 @@ def run_flow_in_process(
             try:
                 async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
 
-                from src.engines.crewai.trace_management import TraceManager
+                from src.engines.crewai.infra.trace_management import TraceManager
                 from src.engines.crewai.callbacks.logging_callbacks import (
                     AgentTraceEventListener,
                     TaskCompletionEventListener
@@ -553,7 +553,7 @@ def run_flow_in_process(
             # Now run the actual flow execution
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+                from src.engines.crewai.paths.flow.flow_runner_service import FlowRunnerService
 
                 async for session in get_smart_db_session():
                     flow_runner = FlowRunnerService(session)
@@ -786,7 +786,7 @@ def run_flow_in_process(
 
                 # CRITICAL: Stop TraceManager writer tasks first - these keep the subprocess alive
                 try:
-                    from src.engines.crewai.trace_management import TraceManager
+                    from src.engines.crewai.infra.trace_management import TraceManager
                     async_logger.info("[FLOW_SUBPROCESS] Stopping TraceManager writer tasks...")
                     loop.run_until_complete(TraceManager.stop_writer())
                     async_logger.info("[FLOW_SUBPROCESS] TraceManager writer tasks stopped")

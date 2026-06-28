@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, call, PropertyMock
 from contextlib import contextmanager
 from datetime import datetime
 
-from src.engines.crewai.crew_logger import CrewLogger, CrewLoggerHandler
+from src.engines.crewai.infra.crew_logger import CrewLogger, CrewLoggerHandler
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def reset_singleton():
 @pytest.fixture
 def crew_logger_instance(mock_logger_manager):
     """Create a CrewLogger instance with mocked dependencies."""
-    with patch("src.engines.crewai.crew_logger.LoggerManager") as mock_lm:
+    with patch("src.engines.crewai.infra.crew_logger.LoggerManager") as mock_lm:
         mock_lm.get_instance.return_value = mock_logger_manager
         
         # Reset singleton
@@ -59,7 +59,7 @@ class TestCrewLogger:
     
     def test_singleton_pattern(self, mock_logger_manager):
         """Test that CrewLogger follows singleton pattern."""
-        with patch("src.engines.crewai.crew_logger.LoggerManager") as mock_lm:
+        with patch("src.engines.crewai.infra.crew_logger.LoggerManager") as mock_lm:
             mock_lm.get_instance.return_value = mock_logger_manager
             
             # Reset singleton
@@ -101,7 +101,7 @@ class TestCrewLogger:
     def test_module_coverage_verification(self):
         """Verify module constants and coverage."""
         # Simple test to verify module is loaded and accessible
-        from src.engines.crewai.crew_logger import logger
+        from src.engines.crewai.infra.crew_logger import logger
         
         # Test the logger exists
         assert logger is not None
@@ -110,7 +110,7 @@ class TestCrewLogger:
         """Test setup for job functionality."""
         job_id = "test_job_123"
         
-        with patch("src.engines.crewai.crew_logger.CrewLoggerHandler") as mock_handler_class:
+        with patch("src.engines.crewai.infra.crew_logger.CrewLoggerHandler") as mock_handler_class:
             mock_handler = MagicMock()
             mock_handler_class.return_value = mock_handler
             
@@ -126,7 +126,7 @@ class TestCrewLogger:
         job_id = "test_job_123"
         
         # Setup a job first
-        with patch("src.engines.crewai.crew_logger.CrewLoggerHandler") as mock_handler_class:
+        with patch("src.engines.crewai.infra.crew_logger.CrewLoggerHandler") as mock_handler_class:
             mock_handler = MagicMock()
             mock_handler_class.return_value = mock_handler
             
@@ -169,7 +169,7 @@ class TestCrewLoggerHandler:
             exc_info=None
         )
         
-        with patch("src.engines.crewai.crew_logger.enqueue_log") as mock_enqueue:
+        with patch("src.engines.crewai.infra.crew_logger.enqueue_log") as mock_enqueue:
             handler.emit(record)
             mock_enqueue.assert_called_once_with(
                 execution_id=job_id,
@@ -194,6 +194,6 @@ class TestCrewLoggerHandler:
             exc_info=None
         )
         
-        with patch("src.engines.crewai.crew_logger.enqueue_log"):
+        with patch("src.engines.crewai.infra.crew_logger.enqueue_log"):
             # Should not raise exception even with format error
             handler.emit(record)

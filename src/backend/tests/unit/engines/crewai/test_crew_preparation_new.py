@@ -7,7 +7,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.engines.crewai.crew_preparation import (
+from src.engines.crewai.paths.crew.crew_preparation import (
     CrewPreparation,
     validate_crew_config,
     handle_crew_error,
@@ -160,9 +160,9 @@ class TestCrewPreparationExecute:
         mock_crew.kickoff_async = AsyncMock(return_value=mock_result)  # CrewAI 1.14.5 uses async kickoff
         cp.crew = mock_crew
 
-        with patch("src.engines.crewai.crew_preparation.process_crew_output",
+        with patch("src.engines.crewai.paths.crew.crew_preparation.process_crew_output",
                    new_callable=AsyncMock) as mock_process, \
-             patch("src.engines.crewai.crew_preparation.is_data_missing", return_value=False):
+             patch("src.engines.crewai.paths.crew.crew_preparation.is_data_missing", return_value=False):
             mock_process.return_value = mock_result
             result = await cp.execute()
 
@@ -176,9 +176,9 @@ class TestCrewPreparationExecute:
         mock_crew.kickoff = AsyncMock(return_value={"result": "output"})
         cp.crew = mock_crew
 
-        with patch("src.engines.crewai.crew_preparation.process_crew_output",
+        with patch("src.engines.crewai.paths.crew.crew_preparation.process_crew_output",
                    new_callable=AsyncMock) as mock_process, \
-             patch("src.engines.crewai.crew_preparation.is_data_missing", return_value=True):
+             patch("src.engines.crewai.paths.crew.crew_preparation.is_data_missing", return_value=True):
             mock_process.return_value = {"result": "output"}
             result = await cp.execute()
 
@@ -445,30 +445,6 @@ class TestLookupKasalAgentUUID:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# CrewPreparation._attach_knowledge_sources (deprecated no-op)
-# ---------------------------------------------------------------------------
-
-class TestAttachKnowledgeSources:
-    @pytest.mark.asyncio
-    async def test_deprecated_noop(self):
-        config = {"agents": [], "tasks": []}
-        cp = CrewPreparation(config=config)
-        # Should not raise, just log
-        await cp._attach_knowledge_sources()
-
-
-# ---------------------------------------------------------------------------
-# CrewPreparation._initialize_agent_knowledge (deprecated no-op)
-# ---------------------------------------------------------------------------
-
-class TestInitializeAgentKnowledge:
-    @pytest.mark.asyncio
-    async def test_deprecated_noop(self):
-        config = {"agents": [], "tasks": []}
-        cp = CrewPreparation(config=config)
-        await cp._initialize_agent_knowledge({})
-
 
 # ---------------------------------------------------------------------------
 # CrewPreparation.prepare – full flow mocked
@@ -587,7 +563,7 @@ class TestCreateAgents:
 
         mock_agent = MagicMock()
         with patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.engines.crewai.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
@@ -611,7 +587,7 @@ class TestCreateAgents:
 
         mock_agent = MagicMock()
         with patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.engines.crewai.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
@@ -635,7 +611,7 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         with patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.engines.crewai.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
@@ -656,7 +632,7 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         with patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.engines.crewai.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
@@ -680,7 +656,7 @@ class TestCreateAgents:
         mcp_requirements = {"ag1": [{"name": "server1", "url": "http://server1"}]}
 
         with patch("src.engines.crewai.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.engines.crewai.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value=mcp_requirements)
@@ -724,7 +700,7 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -753,7 +729,7 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -798,7 +774,7 @@ class TestCreateTasks:
         cp = CrewPreparation(config=config)
         cp.agents = {"ag1": MagicMock()}
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.side_effect = Exception("task creation error")
             result = await cp._create_tasks()
 
@@ -830,7 +806,7 @@ class TestCreateTasks:
         task2 = MagicMock()
         task2.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.side_effect = [task1, task2]
             result = await cp._create_tasks()
 
@@ -863,8 +839,8 @@ class TestCreateTasks:
         task2.context = None
         task2.agent = mock_agent
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct, \
-             patch("src.engines.crewai.crew_preparation.Task") as mock_task_cls_module, \
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct, \
+             patch("src.engines.crewai.paths.crew.crew_preparation.Task") as mock_task_cls_module, \
              patch("crewai.Task") as mock_task_cls_crewai:
             mock_ct.side_effect = [task1, task2]
             completion_task = MagicMock()
@@ -913,7 +889,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -949,7 +925,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -989,7 +965,7 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.engines.crewai.helpers.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch("src.engines.crewai.paths.crew.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
