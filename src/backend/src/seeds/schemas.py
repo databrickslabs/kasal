@@ -1,8 +1,15 @@
 """
-Seed the schemas table with the top 10 most useful CrewAI output schemas.
+Seed the schemas table with CrewAI output schemas for flow routing.
 
-Based on common production use cases: content creation, research, support,
-email automation, report generation, and decision-making workflows.
+Every schema here describes the structured output of an ENTIRE crew/workload run
+(one object per kickoff, assigned to the final task via output_pydantic) — not
+per-row or content detail. Fields are deliberately routing-friendly: categorical
+strings, booleans, and numbers that a flow Router condition can branch on
+(e.g. status == "failed", rows_inserted > 0, risk_level == "high").
+
+Content-generation schemas (article/email/report bodies, free-text summaries) were
+intentionally left out: their fields are prose you cannot route on. Add those per
+task as needed; this seed set targets decision/outcome workloads.
 """
 import logging
 from datetime import datetime
@@ -13,168 +20,275 @@ from src.models.schema import Schema
 
 logger = logging.getLogger(__name__)
 
-# Top 10 business-friendly schemas for CrewAI tasks
+# Schema names that earlier seed versions created but that don't describe a routable
+# whole-crew outcome. Removed from the DB on seed so the picker stays focused.
+OBSOLETE_SCHEMA_NAMES = [
+    "Article", "Summary", "Analysis", "SearchResults", "Recommendation",
+    "ActionItems", "Email", "Report", "QA",
+]
+
+# Whole-crew workload outcomes with routing-friendly fields.
 SAMPLE_SCHEMAS = [
+    # ── Action / automation outcomes ────────────────────────────────────────────
     {
-        "name": "Article",
-        "description": "Content creation - blogs, articles, social posts, documentation",
+        "name": "OperationResult",
+        "description": "Action workloads - outcome of an operation (DB writes, API calls, jobs)",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "title": {"type": "string"},
-                "content": {"type": "string"},
-                "summary": {"type": "string"},
-                "tags": {"type": "array", "items": {"type": "string"}}
+                "success": {"type": "boolean"},
+                "status": {"type": "string"},
+                "rows_affected": {"type": "integer"},
+                "records_processed": {"type": "integer"},
+                "error_count": {"type": "integer"},
+                "message": {"type": "string"}
             },
-            "required": ["title", "content"]
+            "required": ["status", "success"]
         }
     },
     {
-        "name": "Summary",
-        "description": "Summarization - distill content into key points and takeaways",
+        "name": "DataLoadResult",
+        "description": "ETL / data loading - row counts for an insert/update workload",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "title": {"type": "string"},
-                "key_points": {"type": "array", "items": {"type": "string"}},
-                "conclusion": {"type": "string"}
+                "table": {"type": "string"},
+                "rows_inserted": {"type": "integer"},
+                "rows_updated": {"type": "integer"},
+                "rows_failed": {"type": "integer"},
+                "status": {"type": "string"},
+                "success": {"type": "boolean"}
             },
-            "required": ["key_points"]
+            "required": ["status", "rows_inserted"]
         }
     },
+
+    # ── Classification / triage outcomes ────────────────────────────────────────
     {
-        "name": "Analysis",
-        "description": "Research & analysis - findings, insights, and next steps",
+        "name": "SupportTicketTriage",
+        "description": "Customer support - classify & route an incoming ticket",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "subject": {"type": "string"},
-                "findings": {"type": "array", "items": {"type": "string"}},
-                "insights": {"type": "array", "items": {"type": "string"}},
-                "next_steps": {"type": "array", "items": {"type": "string"}}
+                "category": {"type": "string"},
+                "priority": {"type": "string"},
+                "sentiment": {"type": "string"},
+                "requires_human": {"type": "boolean"},
+                "suggested_team": {"type": "string"}
             },
-            "required": ["findings"]
+            "required": ["category", "priority"]
         }
     },
     {
-        "name": "SearchResults",
-        "description": "Research output - search findings with sources and references",
+        "name": "SentimentAnalysis",
+        "description": "CX & social - overall sentiment of the analyzed input",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "sentiment": {"type": "string"},
+                "score": {"type": "number"}
+            },
+            "required": ["sentiment"]
+        }
+    },
+    {
+        "name": "IntentClassification",
+        "description": "Conversational - classify user intent for routing",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string"},
+                "confidence": {"type": "number"},
+                "fallback": {"type": "boolean"}
+            },
+            "required": ["intent"]
+        }
+    },
+    {
+        "name": "CustomerFeedback",
+        "description": "CX - categorize feedback with sentiment and NPS",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "sentiment": {"type": "string"},
+                "nps_score": {"type": "integer"},
+                "action_required": {"type": "boolean"}
+            },
+            "required": ["sentiment"]
+        }
+    },
+
+    # ── Research / retrieval outcomes ───────────────────────────────────────────
+    {
+        "name": "WebSearchResult",
+        "description": "Web search - outcome of an online search (counts, top hit, relevance)",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
-                "results": {"type": "array", "items": {"type": "string"}},
-                "sources": {"type": "array", "items": {"type": "string"}}
+                "results_found": {"type": "integer"},
+                "has_results": {"type": "boolean"},
+                "answer_found": {"type": "boolean"},
+                "top_result_url": {"type": "string"},
+                "top_result_title": {"type": "string"},
+                "relevance_score": {"type": "number"}
             },
-            "required": ["results"]
+            "required": ["query", "results_found", "has_results"]
         }
     },
+
+    # ── Decision / approval outcomes ────────────────────────────────────────────
     {
-        "name": "Recommendation",
-        "description": "Decision-making - recommendations with reasoning and confidence",
+        "name": "ApprovalDecision",
+        "description": "Operations - approve / reject / route for human review",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "recommendation": {"type": "string"},
-                "reasoning": {"type": "string"},
-                "alternatives": {"type": "array", "items": {"type": "string"}},
-                "confidence": {"type": "string"}
+                "decision": {"type": "string"},
+                "confidence": {"type": "number"}
             },
-            "required": ["recommendation", "reasoning"]
+            "required": ["decision"]
         }
     },
     {
-        "name": "ActionItems",
-        "description": "Planning - tasks, to-dos, action items with priority",
+        "name": "LeadQualification",
+        "description": "Sales - qualify and score an inbound lead",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "items": {"type": "array", "items": {"type": "string"}},
-                "priority": {"type": "string"},
-                "owner": {"type": "string"},
-                "deadline": {"type": "string"}
+                "qualified": {"type": "boolean"},
+                "score": {"type": "integer"},
+                "tier": {"type": "string"},
+                "estimated_value": {"type": "number"}
             },
-            "required": ["items"]
+            "required": ["qualified", "score"]
         }
     },
     {
-        "name": "Email",
-        "description": "Email automation - subject, body, and tone for outreach",
+        "name": "ResumeScreening",
+        "description": "HR/recruiting - screen a candidate against a role",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
-                "subject": {"type": "string"},
-                "body": {"type": "string"},
-                "tone": {"type": "string"},
-                "call_to_action": {"type": "string"}
+                "candidate_name": {"type": "string"},
+                "match_score": {"type": "integer"},
+                "recommended": {"type": "boolean"},
+                "decision": {"type": "string"}
             },
-            "required": ["subject", "body"]
-        }
-    },
-    {
-        "name": "Report",
-        "description": "Comprehensive report - sections, conclusions, recommendations",
-        "schema_type": "schema",
-        "schema_definition": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "executive_summary": {"type": "string"},
-                "sections": {"type": "array", "items": {"type": "string"}},
-                "conclusion": {"type": "string"},
-                "recommendations": {"type": "array", "items": {"type": "string"}}
-            },
-            "required": ["title", "sections"]
-        }
-    },
-    {
-        "name": "QA",
-        "description": "Question-answer - for support, FAQs, and knowledge queries",
-        "schema_type": "schema",
-        "schema_definition": {
-            "type": "object",
-            "properties": {
-                "question": {"type": "string"},
-                "answer": {"type": "string"},
-                "sources": {"type": "array", "items": {"type": "string"}},
-                "confidence": {"type": "string"}
-            },
-            "required": ["question", "answer"]
+            "required": ["match_score", "decision"]
         }
     },
     {
         "name": "Evaluation",
-        "description": "Scoring & review - assessments, lead scoring, ratings",
+        "description": "Scoring & review - overall score and verdict for the subject",
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
             "properties": {
                 "subject": {"type": "string"},
                 "score": {"type": "integer"},
-                "criteria": {"type": "array", "items": {"type": "string"}},
-                "pros": {"type": "array", "items": {"type": "string"}},
-                "cons": {"type": "array", "items": {"type": "string"}},
                 "verdict": {"type": "string"}
             },
-            "required": ["subject", "verdict"]
+            "required": ["verdict"]
+        }
+    },
+
+    # ── Risk / compliance / finance outcomes ────────────────────────────────────
+    {
+        "name": "RiskAssessment",
+        "description": "Risk/compliance - score and classify risk for escalation",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "risk_level": {"type": "string"},
+                "risk_score": {"type": "integer"},
+                "requires_escalation": {"type": "boolean"}
+            },
+            "required": ["risk_level"]
+        }
+    },
+    {
+        "name": "ContentModeration",
+        "description": "Trust & safety - flag content and decide an action",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "flagged": {"type": "boolean"},
+                "category": {"type": "string"},
+                "severity": {"type": "string"},
+                "action": {"type": "string"}
+            },
+            "required": ["flagged", "action"]
+        }
+    },
+    {
+        "name": "FraudCheck",
+        "description": "Security - flag suspected fraud and recommend an action",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "is_fraud": {"type": "boolean"},
+                "risk_score": {"type": "integer"},
+                "recommended_action": {"type": "string"}
+            },
+            "required": ["is_fraud", "recommended_action"]
+        }
+    },
+    {
+        "name": "ExpenseApproval",
+        "description": "Finance - check an expense against policy and approve",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number"},
+                "category": {"type": "string"},
+                "policy_compliant": {"type": "boolean"},
+                "approval_status": {"type": "string"}
+            },
+            "required": ["amount", "approval_status"]
+        }
+    },
+    {
+        "name": "InvoiceData",
+        "description": "Finance/AP - extracted invoice header for downstream routing",
+        "schema_type": "schema",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                "vendor": {"type": "string"},
+                "invoice_number": {"type": "string"},
+                "total_amount": {"type": "number"},
+                "currency": {"type": "string"},
+                "status": {"type": "string"}
+            },
+            "required": ["vendor", "total_amount"]
         }
     }
 ]
 
 
 async def seed_async():
-    """Seed schemas into the database."""
+    """Seed schemas into the database (upsert by name) and prune obsolete ones."""
     logger.info("Seeding schemas...")
 
     schemas_added = 0
     schemas_updated = 0
+    schemas_removed = 0
 
     for schema_data in SAMPLE_SCHEMAS:
         try:
@@ -206,7 +320,24 @@ async def seed_async():
         except Exception as e:
             logger.error(f"Error processing schema {schema_data['name']}: {e}")
 
-    logger.info(f"Schemas: {schemas_added} added, {schemas_updated} updated")
+    # Prune schemas from earlier seed versions that no longer fit the routing model.
+    for name in OBSOLETE_SCHEMA_NAMES:
+        try:
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(Schema).filter(Schema.name == name)
+                )
+                existing = result.scalars().first()
+                if existing:
+                    await session.delete(existing)
+                    await session.commit()
+                    schemas_removed += 1
+        except Exception as e:
+            logger.error(f"Error removing obsolete schema {name}: {e}")
+
+    logger.info(
+        f"Schemas: {schemas_added} added, {schemas_updated} updated, {schemas_removed} removed"
+    )
 
 
 async def seed():

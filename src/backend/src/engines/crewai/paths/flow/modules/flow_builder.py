@@ -533,6 +533,25 @@ class FlowBuilder:
             method_to_sequence[sp_method_name] = sp_sequence
             logger.info(f"  Mapped method '{sp_method_name}' to sequence {sp_sequence}")
 
+        # Map each router route's target task IDs → the route-listener method that
+        # runs that branch. A listener wired after a router branch (e.g. a final
+        # "report" crew listening to both branch crews) lists those branch tasks in
+        # its listenToTaskIds. Without this map the resolution below finds no match
+        # and falls back to the start method, so the listener fires in PARALLEL with
+        # the router instead of after the branch. The naming here must match the
+        # route-listener creation further down: f"route_{router_name}_{route_name}_{i}".
+        route_task_to_method = {}
+        for _ri, _router_config in enumerate(routers):
+            _r_name = _router_config.get('name', f'router_{_ri}')
+            for _route_name, _route_tasks in _router_config.get('routes', {}).items():
+                _route_method = f"route_{_r_name}_{_route_name}_{_ri}"
+                for _rt in _route_tasks:
+                    _tid = _rt.get('id') if isinstance(_rt, dict) else None
+                    if _tid is not None:
+                        route_task_to_method[str(_tid)] = _route_method
+        if route_task_to_method:
+            logger.info(f"  Router route target task→method map: {route_task_to_method}")
+
         # listener_crews is a list of tuples:
         # (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type, crew_data)
         for listener_info in listener_crews:
@@ -598,6 +617,17 @@ class FlowBuilder:
                                 method_names.append(ol_method_name)
                                 logger.info(f"  Found listener {ol_method_name} (crew '{ol_crew_name}') matches listen target {ol_task_id}")
                             break
+
+            # Finally, check router route targets so a listener chained AFTER a router
+            # branch triggers when that branch's crew finishes — not when the router's
+            # source crew finishes. This is additive (a route task id is owned only by
+            # its route listener), and for an OR listener spanning multiple branches it
+            # collects every branch method so or_(...) fires after whichever ran.
+            for listen_id in listen_to_task_ids:
+                rt_method = route_task_to_method.get(str(listen_id))
+                if rt_method and rt_method not in method_names:
+                    method_names.append(rt_method)
+                    logger.info(f"  Found router route method {rt_method} matches listen target {listen_id}")
 
             logger.info(f"  Matched {len(method_names)} methods: {method_names}")
 
@@ -959,8 +989,22 @@ class FlowBuilder:
                                 s = s.strip()
                                 return (s.startswith('{') and s.endswith('}')) or (s.startswith('[') and s.endswith(']'))
 
+                            # Prefer the declared structured output (output_pydantic /
+                            # output_json) when present: a task with a declared schema yields a
+                            # CrewOutput whose .pydantic / .json_dict holds typed fields. Routing
+                            # on these is deterministic, so router conditions resolve reliably
+                            # instead of depending on ad-hoc raw-text JSON parsing below.
+                            if getattr(result_obj, 'pydantic', None) is not None:
+                                try:
+                                    merge_parsed_json(result_obj.pydantic.model_dump(), "crew output (pydantic)")
+                                except (AttributeError, Exception) as parse_err:
+                                    logger.debug(f"Could not read pydantic crew output: {parse_err}")
+
+                            elif getattr(result_obj, 'json_dict', None):
+                                merge_parsed_json(result_obj.json_dict, "crew output (json_dict)")
+
                             # If result has a 'raw' attribute (CrewOutput), try to parse it as JSON
-                            if hasattr(result_obj, 'raw'):
+                            elif hasattr(result_obj, 'raw'):
                                 try:
                                     raw_str = strip_code_fences(str(result_obj.raw))
                                     if looks_like_json(raw_str):
@@ -1150,7 +1194,13 @@ class FlowBuilder:
                             if previous_output:
                                 logger.info(f"📥 RECEIVED PREVIOUS OUTPUT FROM ROUTER:")
                                 logger.info(f"  Output: {str(previous_output)[:200]}...")
-                                self.state['previous_output'] = previous_output
+                                # Serialize before storing — @persist JSON-serializes the
+                                # whole state and a raw CrewOutput is not serializable.
+                                self.state['previous_output'] = (
+                                    previous_output.raw
+                                    if hasattr(previous_output, 'raw') and previous_output.raw
+                                    else (str(previous_output) if previous_output is not None else previous_output)
+                                )
                             else:
                                 logger.info("📭 No previous output received from router")
 
@@ -1281,7 +1331,11 @@ class FlowBuilder:
 
                             result = await crew.kickoff_async()
                             logger.info(f"Route listener kickoff_async completed, result type: {type(result)}")
-                            return result
+                            # Return a serializable value (not a raw CrewOutput): downstream
+                            # listeners store this in state, which @persist JSON-serializes.
+                            if hasattr(result, 'raw') and result.raw:
+                                return result.raw
+                            return str(result) if result is not None else result
 
                         route_listener_method.__name__ = route_listener_method_name
                         route_listener_method.__qualname__ = route_listener_method_name
@@ -1319,8 +1373,23 @@ class FlowBuilder:
         if persistence_enabled:
             try:
                 from crewai.flow.persistence import persist
-                DynamicFlow = persist()(DynamicFlow)
-                logger.info("✅ Applied @persist decorator for flow state checkpointing")
+                # Persist flow state into Kasal's OWN database (SQLite in dev,
+                # Lakebase/Postgres in prod) instead of CrewAI's default stray SQLite
+                # file, so checkpoints survive restarts and are queryable by the app.
+                try:
+                    from src.engines.crewai.paths.flow.kasal_flow_persistence import (
+                        KasalFlowPersistence,
+                    )
+                    DynamicFlow = persist(persistence=KasalFlowPersistence())(DynamicFlow)
+                    logger.info("✅ Applied @persist decorator (Kasal DB-backed flow state persistence)")
+                except Exception as kasal_err:
+                    # Fall back to CrewAI's default persistence so flows still run
+                    # (resume durability is reduced) rather than failing the build.
+                    logger.warning(
+                        f"Kasal DB-backed persistence unavailable, falling back to default: {kasal_err}"
+                    )
+                    DynamicFlow = persist()(DynamicFlow)
+                    logger.info("✅ Applied @persist decorator for flow state checkpointing (default backend)")
             except ImportError as e:
                 logger.warning(f"Could not import persist decorator (may require CrewAI 0.98.0+): {e}")
             except Exception as e:

@@ -518,8 +518,12 @@ class TestKickoffAsync:
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="done")
 
+        # No id available via any access path: attribute raises, model_dump has no
+        # 'id', subscript raises -> flow_uuid should resolve to None (no crash).
         state_mock = MagicMock()
         type(state_mock).id = PropertyMock(side_effect=RuntimeError("no id"))
+        state_mock.model_dump.return_value = {}
+        state_mock.__getitem__.side_effect = KeyError("id")
         mock_crewai_flow.state = state_mock
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \

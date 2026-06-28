@@ -46,7 +46,8 @@ class FakeSession:
             def first(self):
                 return SimpleNamespace(id=uuid.uuid4()) if self.count > 0 else None
             def fetchall(self):
-                return [(uuid.uuid4(),)] * self.count
+                # (id, job_id) — force-delete now selects both columns
+                return [(uuid.uuid4(), f"job-{i}") for i in range(self.count)]
         return R(self.execution_count)
     async def commit(self):
         self.committed = True

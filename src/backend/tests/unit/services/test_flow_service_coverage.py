@@ -544,23 +544,21 @@ async def test_force_delete_flow_with_executions_success():
     svc = make_service(session=session)
     flow_id = uuid.uuid4()
 
-    check_result = MagicMock()
-    check_result.first.return_value = (str(flow_id),)
+    # Content-aware mock: robust to the number of child-table deletes performed
+    # before the executionhistory delete.
+    rows = [(1, "job-1"), (2, "job-2")]
 
-    find_result = MagicMock()
-    find_result.fetchall.return_value = [(1,), (2,)]
+    def _execute(query, params=None):
+        sql = str(query)
+        r = MagicMock()
+        r.rowcount = 0
+        if "FROM flows" in sql and "SELECT" in sql:
+            r.first.return_value = (str(flow_id),)
+        elif "FROM executionhistory" in sql and "SELECT" in sql:
+            r.fetchall.return_value = rows
+        return r
 
-    trace_result = MagicMock()
-    trace_result.rowcount = 3
-
-    exec_result = MagicMock()
-    exec_result.rowcount = 2
-
-    delete_result = MagicMock()
-
-    session.execute = AsyncMock(side_effect=[
-        check_result, find_result, trace_result, exec_result, delete_result
-    ])
+    session.execute = AsyncMock(side_effect=_execute)
 
     result = await svc.force_delete_flow_with_executions(flow_id)
     assert result is True
@@ -642,22 +640,21 @@ async def test_force_delete_with_group_check_success():
     svc = make_service(session=session)
     flow_id = uuid.uuid4()
 
-    check_result = MagicMock()
-    check_result.first.return_value = (str(flow_id), "g1")
-
-    find_result = MagicMock()
+    # Content-aware mock: robust to the number of child-table deletes performed
+    # before the executionhistory delete.
     rows = [(1, "job-1"), (2, "job-2")]
-    find_result.fetchall.return_value = rows
 
-    trace_result = MagicMock()
-    trace_result.rowcount = 2
+    def _execute(query, params=None):
+        sql = str(query)
+        r = MagicMock()
+        r.rowcount = 0
+        if "FROM flows" in sql and "SELECT" in sql:
+            r.first.return_value = (str(flow_id), "g1")
+        elif "FROM executionhistory" in sql and "SELECT" in sql:
+            r.fetchall.return_value = rows
+        return r
 
-    exec_result = MagicMock()
-    delete_result = MagicMock()
-
-    session.execute = AsyncMock(side_effect=[
-        check_result, find_result, trace_result, exec_result, delete_result
-    ])
+    session.execute = AsyncMock(side_effect=_execute)
 
     group_ctx = make_group_context(group_ids=["g1"])
     result = await svc.force_delete_flow_with_executions_with_group_check(flow_id, group_ctx)

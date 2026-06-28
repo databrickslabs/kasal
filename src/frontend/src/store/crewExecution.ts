@@ -306,6 +306,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       if (selectedCrewSequence !== undefined && selectedCrewSequence !== null) {
         console.log('[CrewExecution] Resuming from crew sequence:', selectedCrewSequence);
       }
+
+      // Pre-mark crews completed BEFORE the chosen resume point as green, so the
+      // already-done nodes show completed immediately (only the chosen node onward runs).
+      const completedCrewNames = (checkpoint.crew_checkpoints || [])
+        .filter(cc => (selectedCrewSequence === undefined || selectedCrewSequence === null)
+          ? true
+          : cc.sequence < selectedCrewSequence)
+        .map(cc => cc.crew_name);
+      if (completedCrewNames.length > 0) {
+        console.log('[CrewExecution] Pre-marking completed crews green on resume:', completedCrewNames);
+        useFlowExecutionStore.getState().seedCompletedCrews(completedCrewNames);
+      }
+
       await executeFlow(nodes, edges, checkpoint.flow_uuid, checkpoint.execution_id, savedFlowId, selectedCrewSequence);
     }
   },

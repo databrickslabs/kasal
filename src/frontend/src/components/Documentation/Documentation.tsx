@@ -23,7 +23,7 @@ import {
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import mermaid from 'mermaid';
 
 interface DocSection {
@@ -37,6 +37,12 @@ const docSections: DocSection[] = [
     items: [
       { label: 'Why Kasal', file: 'WHY_KASAL' },
       { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
+    ],
+  },
+  {
+    label: 'Flows',
+    items: [
+      { label: 'Flow Routing & Output Schemas', file: 'flow-routing' },
     ],
   },
   {
@@ -113,7 +119,10 @@ const docSections: DocSection[] = [
 ];
 
 const Documentation: React.FC = () => {
-  const [currentDoc, setCurrentDoc] = useState<string>('README');
+  const location = useLocation();
+  // Allow deep-linking to a specific doc via /docs/<file> (e.g. /docs/flow-routing).
+  const docFromPath = location.pathname.replace(/^\/docs\/?/, '');
+  const [currentDoc, setCurrentDoc] = useState<string>(docFromPath || 'README');
   const [docContent, setDocContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [openSections, setOpenSections] = useState<{ [key: string]: boolean }>({
@@ -131,6 +140,16 @@ const Documentation: React.FC = () => {
   useEffect(() => {
     loadDocument(currentDoc);
   }, [currentDoc]);
+
+  // Deep-link support: when the URL path changes (e.g. opened from a "Learn more"
+  // link), select that doc. Sidebar clicks don't change the path, so they're safe.
+  useEffect(() => {
+    const d = location.pathname.replace(/^\/docs\/?/, '');
+    if (d && d !== currentDoc) {
+      setCurrentDoc(d);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   // Initialize Mermaid diagrams whenever the markdown content changes
   useEffect(() => {
