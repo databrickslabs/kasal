@@ -456,7 +456,11 @@ class LightAgentService:
                         model=getattr(config, "model", None),
                         group_id=group_id,
                     ),
-                    timeout=30,
+                    # The local model needs headroom to emit a full surface (e.g. a
+                    # multi-slide presentation deck) as valid JSON; 30s was too tight
+                    # and silently dropped to plain text. Still bounded so a hung
+                    # compose never wedges the terminal status.
+                    timeout=60,
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}
