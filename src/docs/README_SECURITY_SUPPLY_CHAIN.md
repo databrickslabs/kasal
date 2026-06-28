@@ -1,4 +1,13 @@
-# Supply Chain Security: Threat Landscape & Future Work
+# Supply chain security: threat landscape and future work
+
+How the litellm supply chain compromise affects Kasal, and the dependency-layer defenses proposed in response.
+
+- [The litellm / TeamPCP incident](#the-litellm--teampcp-incident)
+- [Kasal's current exposure](#kasals-current-exposure)
+- [Threat model gap: supply chain attacks](#threat-model-gap-supply-chain-attacks)
+- [Future work: proposed mitigations](#future-work-proposed-mitigations)
+- [Indicators of compromise (IoCs)](#indicators-of-compromise-iocs)
+- [Summary: priority stack rank](#summary-priority-stack-rank)
 
 **Context:** On March 24, 2026, Endor Labs identified that `litellm` versions 1.82.7 and 1.82.8
 on PyPI contained malicious code injected by the threat actor **TeamPCP**. litellm is a core
@@ -6,14 +15,14 @@ Kasal dependency used for LLM provider routing. This document analyses the threa
 Kasal's current exposure, and proposes concrete mitigations as future work.
 
 Related documents:
-- **README_SECURITY_COMPLIANCE.md** — prompt injection and agentic security guardrails
-- **README_SECURITY_GUARDRAILS_TESTGUIDE.md** — manual and automated test guide
+- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md) — prompt injection and agentic security guardrails
+- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md) — manual and automated test guide
 
 ---
 
-## The litellm / TeamPCP Incident
+## The litellm / TeamPCP incident
 
-### What Happened
+### What happened
 
 `litellm==1.82.7` and `1.82.8` were published to PyPI on March 24, 2026 with a backdoor
 injected into `litellm/proxy/proxy_server.py` at lines 128–139 — code that does not exist in
@@ -25,7 +34,7 @@ Version 1.82.8 added a second vector: a `litellm_init.pth` file placed in `site-
 Python's `site.py` processes automatically at **every interpreter startup**, even if litellm is
 never explicitly imported.
 
-### What the Payload Does
+### What the payload does
 
 The attack runs in three stages:
 
@@ -42,7 +51,7 @@ The attack runs in three stages:
    ("System Telemetry Service") that polls `checkmarx.zone/raw` every 50 minutes and executes
    downloaded binaries.
 
-### Additional Details (Sonatype Analysis, March 24 2026)
+### Additional details (Sonatype analysis, March 24 2026)
 
 The Sonatype Security Research team independently analysed the same attack and added several
 details not covered by the Endor Labs report:
@@ -96,21 +105,23 @@ maximally efficient to compromise.
 
 ---
 
-## Kasal's Current Exposure
+## Kasal's current exposure
 
-### Are we directly affected?
+### Are we directly affected
 
-**No.** Kasal pins litellm to an exact version:
+**No.** Kasal pins litellm to an exact version. Dependencies are managed with `uv` —
+declared in `src/backend/pyproject.toml` and locked (with sha256 hashes) in
+`src/backend/uv.lock`. There is **no `requirements.txt`**.
 
-```
-litellm==1.74.9   # in src/requirements.txt and pyproject.toml
+```text
+litellm==1.74.9   # pyproject.toml; sha256 hash-pinned for sdist + wheel in uv.lock
 ```
 
 `1.74.9` predates the compromise window (`1.82.7`/`1.82.8` published March 24, 2026).
 As long as the lock is not bumped past `1.82.6` (the last known-clean release), Kasal is not
 directly exposed.
 
-### Would our existing security guardrails have caught it?
+### Would our existing security guardrails have caught it
 
 **No — they solve a different problem.** Kasal's security work (Phases 1–5, documented in
 `README_SECURITY_COMPLIANCE.md`) protects against **prompt injection attacks**: malicious
@@ -133,8 +144,11 @@ require distinct defenses:
   reducing what the credential harvester would find
 - API keys are stored in the database encrypted, not as plain environment variables
 - The version pin at `1.74.9` is exact (`==`), not a range (`>=`)
+- `uv.lock` pins a sha256 hash for litellm's sdist and wheel (and the full transitive
+  graph), so `uv sync` rejects a re-uploaded wheel whose content hash doesn't match —
+  this already covers much of Tier 1.1 / 2.4 below
 
-### Developer Machine Risk (separate from the deployed app)
+### Developer machine risk (separate from the deployed app)
 
 Even though the *deployed* Kasal app is safe, any **developer** who ran
 `pip install litellm==1.82.7` or `1.82.8` locally — e.g. to test a litellm bump — would have
@@ -159,7 +173,7 @@ those credentials actively used within seconds of install.
 
 ---
 
-## Threat Model Gap: Supply Chain Attacks
+## Threat model gap: supply chain attacks
 
 The current Kasal security model has **no defenses in the dependency supply chain layer**.
 This is the gap. The attack surface includes:
@@ -173,41 +187,37 @@ TeamPCP has now demonstrated active targeting of all four of these surfaces.
 
 ---
 
-## Future Work: Proposed Mitigations
+## Future work: proposed mitigations
 
 The proposals below are grouped by implementation effort. None are currently implemented.
 
 ---
 
-### Tier 1 — Low Effort, High Impact (hours of work)
+### Tier 1 — low effort, high impact (hours of work)
 
-#### 1.1 Hash Pinning in requirements.txt
+#### 1.1 Enforce uv's hash verification (largely already in place)
 
-**Problem:** `litellm==1.74.9` pins the version but not the wheel content. PyPI allows a
-maintainer to re-upload different content for the same version. TeamPCP regenerated the wheel's
-`RECORD` file with the backdoored content's hash — standard `pip install` integrity checks pass.
+**Status:** ✅ Mostly satisfied. Kasal already uses `uv`, and `uv.lock` records a sha256
+hash for every package (direct and transitive), including litellm's sdist and wheel. `uv sync`
+refuses to install a wheel whose content hash doesn't match the lock — even if the version
+string is identical. This is the same protection `pip install --require-hashes` provides.
 
-**Proposal:** Add `--hash` constraints to `requirements.txt` using `pip-compile`:
+**Problem (residual):** The guarantee only holds if installs always go through
+`uv sync` against the committed `uv.lock`. Any path that bypasses the lock (e.g. a manual
+`uv pip install litellm@latest`, or an unpinned ad-hoc install) loses hash verification.
+PyPI allows a maintainer to re-upload different content for the same version; TeamPCP
+regenerated the wheel's `RECORD` file so a plain `pip install` integrity check would pass.
 
-```bash
-pip-compile --generate-hashes requirements.in > requirements.txt
-```
+**Proposal:** Make `uv sync` (with `--locked`/`--frozen` in CI) the only sanctioned install
+path, and gate CI on `uv lock --locked` so the committed lock can never drift from
+`pyproject.toml`. Never hand-edit `uv.lock`.
 
-This produces entries like:
-```
-litellm==1.74.9 \
-    --hash=sha256:abc123... \
-    --hash=sha256:def456...
-```
-
-`pip install --require-hashes` then refuses to install any wheel whose hash doesn't match —
-even if the version string is identical.
-
-**Benefit:** Full stop against version re-upload attacks. Zero runtime overhead.
+**Benefit:** Closes the version re-upload vector for the full dependency graph. Zero runtime
+overhead.
 
 ---
 
-#### 1.2 `.pth` File Integrity Check at Container Start
+#### 1.2 The .pth file integrity check at container start
 
 **Problem:** `litellm==1.82.8` drops a `litellm_init.pth` file in `site-packages` that fires on
 every Python invocation. This vector is invisible to version checks — only a file system scan
@@ -228,7 +238,7 @@ if unexpected:
 
 ---
 
-#### 1.3 litellm Source Integrity Check at Boot
+#### 1.3 litellm source integrity check at boot
 
 **Problem:** The injected code in `proxy_server.py` is not detectable from the version number
 alone — it requires comparing file content against the known-good source.
@@ -254,15 +264,15 @@ This could be extended to a manifest of critical files across all security-relev
 
 ---
 
-#### 1.4 Dependency Diff in PR Review
+#### 1.4 Dependency diff in PR review
 
-**Problem:** When a developer bumps litellm from `1.74.9` to `1.82.x`, the PR shows one line
-changed in `requirements.txt`. There is no automatic visibility into what changed in the package
-itself, what new transitive dependencies were introduced, or whether the maintainer account
-was recently compromised.
+**Problem:** When a developer bumps litellm from `1.74.9` to `1.82.x`, the PR shows the version
+change in `pyproject.toml` plus the regenerated hashes in `uv.lock`. There is no automatic
+visibility into what changed in the package itself, what new transitive dependencies were
+introduced, or whether the maintainer account was recently compromised.
 
-**Proposal:** A PR check (GitHub Action) that on any change to `requirements.txt` or
-`pyproject.toml`:
+**Proposal:** A PR check (GitHub Action) that on any change to `pyproject.toml` or
+`uv.lock`:
 1. Renders a human-readable diff of added/changed/removed packages including transitive deps
 2. Links each bumped package to its PyPI changelog and recent commit history
 3. Flags packages where the maintainer account changed recently (detectable via PyPI API)
@@ -271,9 +281,9 @@ was recently compromised.
 
 ---
 
-### Tier 2 — Medium Effort, High Impact (days of work)
+### Tier 2 — medium effort, high impact (days of work)
 
-#### 2.1 PyPI Internal Proxy (mirror the npm policy)
+#### 2.1 PyPI internal proxy (mirror the npm policy)
 
 **Problem:** Databricks has already mandated an internal npm proxy (configured locally, not
 committed) that blocks packages newer than 7 days. PyPI has no equivalent yet — packages are fetched
@@ -300,7 +310,7 @@ attacks, not just litellm.
 
 ---
 
-#### 2.2 Network Egress Policy
+#### 2.2 Network egress policy
 
 **Problem:** Even if the payload runs, the exfiltration step requires an outbound HTTPS POST to
 `models.litellm.cloud`. In a Kubernetes deployment, this can be blocked at the network layer.
@@ -319,7 +329,7 @@ restriction.
 
 ---
 
-#### 2.3 Extend SecretLeakDetector to Environment Variables at Startup
+#### 2.3 Extend SecretLeakDetector to environment variables at startup
 
 **Problem:** The existing `SecretLeakDetector` scans agent outputs for leaked credentials. It
 does not scan the runtime environment itself. If Kasal is ever deployed with overly permissive
@@ -345,21 +355,22 @@ misconfigurations before they become blast radius.
 
 ---
 
-#### 2.4 Full Dependency Lock File with Transitive Hashes
+#### 2.4 Full dependency lock file with transitive hashes (already in place)
 
-**Problem:** `requirements.txt` pins direct dependencies but not the full transitive graph.
-litellm itself has ~40 transitive dependencies — any of those could be the vector in a future
-attack. `openai`, `anthropic`, `httpx`, `pydantic` are all high-value targets.
+**Status:** ✅ Satisfied. `uv.lock` already covers every package in the dependency graph —
+direct and transitive — each with a sha256 hash. litellm itself has ~40 transitive
+dependencies (`openai`, `anthropic`, `httpx`, `pydantic` are all high-value targets); all of
+them are hash-pinned in the lock.
 
-**Proposal:** Adopt `uv` or `pip-compile` with `--generate-hashes` to produce a complete
-lock file covering every package in the dependency graph. This is stricter than Tier 1.1 (which
-only hashes direct dependencies) and covers the full attack surface.
+**Residual work:** Ensure CI installs strictly from the lock (`uv sync --frozen`) so the
+transitive hashes are actually enforced on every build, not just present in the file. This is
+the same enforcement gap noted in Tier 1.1.
 
 ---
 
-### Tier 3 — Significant Effort (weeks of work)
+### Tier 3 — significant effort (weeks of work)
 
-#### 3.1 Runtime Behavioral Monitoring (eBPF / Falco)
+#### 3.1 Runtime behavioral monitoring (eBPF / Falco)
 
 **Proposal:** Deploy Falco (or Tetragon) in the Kasal Kubernetes cluster with rules that alert on:
 
@@ -385,7 +396,7 @@ only hashes direct dependencies) and covers the full attack surface.
 
 ---
 
-#### 3.2 Isolated Subprocess for litellm
+#### 3.2 Isolated subprocess for litellm
 
 **Problem:** litellm runs in the same Python process as Kasal's application code, meaning a
 compromised litellm has full access to all loaded secrets, tokens, and file system paths.
@@ -401,7 +412,7 @@ a compromised litellm can only steal what was explicitly passed to it.
 
 ---
 
-#### 3.3 SBOM Generation and Continuous Monitoring
+#### 3.3 SBOM generation and continuous monitoring
 
 **Proposal:** Generate a Software Bill of Materials (SBOM) for every Kasal release in CycloneDX
 or SPDX format, and subscribe it to a vulnerability feed (Endor Labs, Snyk, OSV). When a new
@@ -413,7 +424,7 @@ rather than requiring manual awareness.
 
 ---
 
-## Indicators of Compromise (IoCs)
+## Indicators of compromise (IoCs)
 
 If you suspect a compromised litellm was ever installed in any Kasal environment, check for:
 
@@ -439,7 +450,7 @@ kubectl get pods -n kube-system | grep node-setup
 ```
 
 Compromised wheel hashes (do not install):
-```
+```text
 litellm-1.82.7: sha256=8395c3268d5c5dbae1c7c6d4bb3c318c752ba4608cfcd90eb97ffb94a910eac2
 litellm-1.82.8: sha256=d2a0d5f564628773b6af7b9c11f6b86531a875bd2d186d7081ab62748a800ebb
 ```
@@ -448,7 +459,7 @@ Last known-clean version: `litellm==1.82.6` (published 2026-03-22, verified by E
 
 ---
 
-## Summary: Priority Stack Rank
+## Summary: priority stack rank
 
 | # | Proposal | Effort | Impact | Covers |
 |---|----------|--------|--------|--------|
@@ -468,3 +479,10 @@ Last known-clean version: `litellm==1.82.6` (published 2026-03-22, verified by E
 Databricks has already mandated for npm. It is the supply chain equivalent of what our prompt
 injection guardrails do for agentic attacks — a structural defense that applies to the whole
 class, not just the specific known instance.
+
+## Related
+
+- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md) — how Kasal's runtime guardrails map to Databricks AI security guidance
+- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md) — verify each guardrail manually and with automated tests
+
+Back to the [documentation hub](./README.md).

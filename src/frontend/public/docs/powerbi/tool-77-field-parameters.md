@@ -1,10 +1,10 @@
-# Tool 77 - Field Parameters & Calculation Groups
+# Tool 77 - field parameters and calculation groups
 
 **What it is:** Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models and generates Unity Catalog SQL views and metadata tables that replicate the same dynamic switching behavior.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Field Parameters and Calculation Groups are advanced Fabric features:
 - **Field Parameters** let report users switch between measures dynamically (e.g. show Revenue, Profit, or Units Sold in the same chart)
@@ -12,7 +12,7 @@ Field Parameters and Calculation Groups are advanced Fabric features:
 
 Neither has a direct equivalent in Unity Catalog. This tool creates SQL UNION views that approximate the same functionality.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Feature parity:** Customers who rely heavily on Field Parameters need an equivalent in the migrated layer
 - **Documentation:** Even if the exact behavior can't be replicated, documenting which measures participate in which parameter helps SAs plan the migration
@@ -20,14 +20,14 @@ Neither has a direct equivalent in Unity Catalog. This tool creates SQL UNION vi
 
 ---
 
-## Fabric-Only Requirement
+## Fabric-only requirement
 
 Same as Tool 76 - requires Microsoft Fabric workspace and TMDL format.
 Classic Power BI Service workspaces are not supported.
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `GET /groups/{groupId}/items/{itemId}/getDefinition` (Fabric REST API)
 Docs: [Fabric - Get Item Definition](https://learn.microsoft.com/en-us/rest/api/fabric/core/items/get-item-definition)
@@ -57,7 +57,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -84,7 +84,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Output
+## Example output
 
 ```sql
 -- Field Parameter: Measure Selector
@@ -114,3 +114,13 @@ FROM my_catalog.raw.fact_sales WHERE year = YEAR(CURRENT_DATE) - 1;
 - Not part of the core UCMV pipeline - run alongside it when the customer has Field Parameters or Calculation Groups
 - The SQL equivalents approximate the behavior but don't replicate the interactive switching (that's a frontend/BI tool concern)
 - Very complex NAMEOF() and SELECTEDMEASURE() patterns may need manual refinement
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 76 - hierarchies tool](./tool-76-hierarchies.md)
+- [Tool 78 - report references tool](./tool-78-report-references.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

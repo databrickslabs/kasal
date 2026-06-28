@@ -1,14 +1,14 @@
-# Tool 90 - Pipeline Config Generator
+# Tool 90 - pipeline config generator
 
 **What it is:** Calls 4 Power BI APIs directly - no LLM, no intermediation - and produces a complete `pipeline_config.json` with all 26 keys for Tool 86. This is the recommended starting point for a new migration.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 The `pipeline_config.json` that Tool 86 needs is complex (26 keys, nested structures, business-domain inputs). Generating it by hand from scratch takes hours. Tool 90 calls the PBI APIs and auto-fills ~70% of the config with real data from the model, leaving only the genuinely ambiguous parts (SWITCH decompositions, filter sets) for the SA to fill manually.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Config authoring cold start:** Instead of a blank JSON with 26 empty keys, the SA gets a populated draft with real table names, relationship keys, column metadata, and TODO markers
 - **Accuracy:** Data comes directly from PBI APIs - no guessing, no manual lookup of workspace/dataset IDs, column names, or relationship definitions
@@ -16,11 +16,11 @@ The `pipeline_config.json` that Tool 86 needs is complex (26 keys, nested struct
 
 ---
 
-## Why Two Service Principals?
+## Why two service principals
 
 The 4 APIs Tool 90 calls have different permission requirements:
 
-| API Call | SP Needed | What It Gets |
+| API call | SP needed | What it gets |
 |----------|-----------|-------------|
 | `INFO.VIEW.RELATIONSHIPS()` | Non-Admin SP | Table relationships → `join_key_map`, `enrichment_joins` |
 | `$SYSTEM.MDSCHEMA_MEASURES` | Non-Admin SP | All measures + DAX → `switch_decompositions` skeletons, `filter_sets` |
@@ -48,7 +48,7 @@ You **must** configure both SPs. See [Authentication Setup](./01-authentication-
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -77,9 +77,9 @@ You **must** configure both SPs. See [Authentication Setup](./01-authentication-
 
 ---
 
-## What Gets Auto-Filled vs Manual (Real Example: SC Reporting, 471 measures)
+## What gets auto-filled versus manual (real example: SC Reporting, 471 measures)
 
-| Config Key | Auto-fill Status | SA Action |
+| Config key | Auto-fill status | SA action |
 |------------|-----------------|-----------|
 | `join_key_map` | ✅ 26 entries | Review, trim extras, add composite keys |
 | `enrichment_joins` | ✅ 32 entries | Review, pick which need enrichment |
@@ -99,7 +99,7 @@ Typical result: **11 keys auto-filled, 4 need review, 11 need manual domain know
 
 ---
 
-## Workflow After Running Tool 90
+## Workflow after running Tool 90
 
 1. Download the proposed config from Tool 90 output
 2. Open `proposed_pipeline_config.json` in an editor
@@ -109,7 +109,7 @@ Typical result: **11 keys auto-filled, 4 need review, 11 need manual domain know
 6. Iterate: use **Tool 89** (gap analysis) to prioritize which config keys unlock the most additional measures
 7. When rate is acceptable → Tool 88 dry-run → approve → deploy
 
-See [UCMV Migration Guide](./ucmv-migration-guide.md) for the full iterative workflow.
+See the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) for the full iterative workflow.
 
 ---
 
@@ -117,4 +117,14 @@ See [UCMV Migration Guide](./ucmv-migration-guide.md) for the full iterative wor
 
 - Run Tool 90 **before** Tools 73/74/75 - the config it produces is needed by Tool 86, but Tool 90 itself calls the PBI APIs independently
 - If you've already run Tools 73/74/75, use Tool 89 instead - it proposes config from their JSON without additional API calls
-- See [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) for detailed explanations of every config key
+- See the [pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) for detailed explanations of every config key
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 89 - config generator](./tool-89-config-generator.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

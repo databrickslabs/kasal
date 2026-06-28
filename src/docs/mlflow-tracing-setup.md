@@ -1,4 +1,4 @@
-# MLflow Tracing in Kasal — Setup & Requirements
+# MLflow tracing in Kasal — setup and requirements
 
 Kasal can export every crew and flow execution to **MLflow Tracing** so you get a
 full, expandable span tree (`agent → task → tool / llm`) for each run, viewable in
@@ -121,7 +121,7 @@ experiment id, so a bare `/ml/experiments?o=...` URL only shows the experiment l
 
 Watch the crew/subprocess log when you run a workflow. A healthy run shows, in order:
 
-```
+```text
 [SUBPROCESS] MLflow enabled_for_workspace=True
 [SUBPROCESS] MLflow auth env — host=yes, spn_id=yes, spn_cred=yes
 [SUBPROCESS] MLflow experiment set: /Shared/kasal-crew-execution-traces (ID: <id>)
@@ -148,5 +148,8 @@ back from Databricks immediately after upload and confirms the span data persist
 
 ## Related
 
-- [Lakebase Setup](lakebase-deployment) — persistence for crews, agents, tasks and run history
-- [Solution Architecture](ARCHITECTURE_GUIDE)
+- [Lakebase setup for Kasal](./lakebase-deployment.md) — persistence for crews, agents, tasks, and run history
+- [Crew export and deployment](./crew-export-deployment.md) — deployed apps that emit traces
+- [Solution architecture guide](./ARCHITECTURE_GUIDE.md) — where tracing fits the platform
+
+Back to the [documentation hub](./README.md).

@@ -1,14 +1,14 @@
-# Tool 85 - DAX to SQL Translator
+# Tool 85 - DAX to SQL translator
 
 **What it is:** A standalone, deterministic DAX-to-Spark-SQL translator using 14+ pattern-based rules. No LLM, no external API calls - just deterministic regex translation.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 The DAX-to-SQL translation engine inside Tool 86 (UC Metric View Generator) is also exposed as a standalone tool. This lets you translate individual measures without running the full UCMV pipeline - useful for testing, debugging, or building custom workflows.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Iterative testing:** Translate one or a few measures and inspect the SQL before committing to a full run
 - **Custom integration:** Use the translation output in your own pipeline instead of Tool 86's YAML output
@@ -16,9 +16,9 @@ The DAX-to-SQL translation engine inside Tool 86 (UC Metric View Generator) is a
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Input: JSON array of {measure_name, dax_expression}
     ↓
 Pattern matching against 14+ regex rules (in priority order)
@@ -40,9 +40,9 @@ No API calls. No LLM. Pure deterministic transformation.
 
 ---
 
-## Supported DAX Patterns
+## Supported DAX patterns
 
-| Pattern | Example DAX | SQL Output |
+| Pattern | Example DAX | SQL output |
 |---------|-------------|------------|
 | Simple SUM | `SUM(T[col])` | `SUM(source.col)` |
 | CALCULATE+SUM | `CALCULATE(SUM(T[col]))` | `SUM(source.col)` |
@@ -58,7 +58,7 @@ No API calls. No LLM. Pure deterministic transformation.
 
 ---
 
-## Example Input
+## Example input
 
 ```json
 [
@@ -80,7 +80,7 @@ No API calls. No LLM. Pure deterministic transformation.
 ]
 ```
 
-## Example Output
+## Example output
 
 ```json
 {
@@ -123,3 +123,13 @@ No API calls. No LLM. Pure deterministic transformation.
 - This is the same engine that runs inside Tool 86 - if Tool 86 marks something untranslatable, Tool 85 will too
 - For measures Tool 85 cannot handle, Tool 86 offers an LLM fallback (`use_llm_fallback: true`)
 - Use this for a quick "what's my translation rate?" check before committing to a full UCMV generation run
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [Tool 73 - measure conversion pipeline](./tool-73-measure-conversion.md)
+- [Pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

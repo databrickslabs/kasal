@@ -1,10 +1,12 @@
-# Lakebase Setup for Kasal
+# Lakebase setup for Kasal
+
+Configure Kasal to use managed Lakebase PostgreSQL so crews, agents, tasks, and run history persist across Databricks Apps restarts.
 
 By default, Kasal uses SQLite stored inside the Databricks Apps container. **SQLite is wiped on every restart or redeployment.** Lakebase provides managed PostgreSQL that lives outside the container — crews, agents, tasks, and run history all persist across restarts.
 
 ---
 
-## Prerequisites
+## Before you begin
 
 - Databricks CLI (`databricks`) installed and configured
 - A Databricks workspace with Lakebase enabled
@@ -30,7 +32,7 @@ Note the `read_write_dns` hostname from the output — you'll need it in Step 3.
 
 ---
 
-## Step 2 — Create the `kasal` database
+## Step 2 — Create the kasal database
 
 ```bash
 databricks psql kasal-db -- -c "CREATE DATABASE kasal;"
@@ -62,7 +64,7 @@ databricks secrets list-secrets kasal
 
 ---
 
-## Step 4 — Configure `src/app.yaml`
+## Step 4 — Configure src/app.yaml
 
 Uncomment the Lakebase sections and fill in your values:
 
@@ -126,3 +128,13 @@ SELECT
 ```
 
 Data should survive app restarts and redeployments.
+
+---
+
+## Related
+
+- [Crew export and deployment](./crew-export-deployment.md) — deploy a crew as a Databricks App
+- [MLflow tracing in Kasal](./mlflow-tracing-setup.md) — persist execution traces
+- [Solution architecture guide](./ARCHITECTURE_GUIDE.md) — where persistence fits the platform
+
+Back to the [documentation hub](./README.md).

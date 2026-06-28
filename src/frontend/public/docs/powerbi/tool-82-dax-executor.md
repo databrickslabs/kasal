@@ -1,14 +1,14 @@
-# Tool 82 - Power BI DAX Executor
+# Tool 82 - Power BI DAX executor
 
 **What it is:** Executes a pre-written DAX `EVALUATE` statement directly against a Power BI semantic model and returns the results. No LLM, no retries.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tools 72 and 80 generate DAX from natural language. But sometimes you already *have* the DAX - you wrote it, copied it from Power BI Desktop, or validated it previously. In that case, you don't need LLM generation. Tool 82 is the lightweight execution-only tool.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Known DAX execution:** Run a tested, known-good query programmatically without LLM overhead
 - **Integration workflows:** After Tool 80 produces a DAX query, save it and re-run via Tool 82 on future calls (faster, no LLM cost)
@@ -16,9 +16,9 @@ Tools 72 and 80 generate DAX from natural language. But sometimes you already *h
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Receive DAX EVALUATE statement as plain text
     ↓
 Authenticate to Power BI Execute Queries API
@@ -32,7 +32,7 @@ Simple. No generation, no retries, no hallucination detection.
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `POST /groups/{groupId}/datasets/{datasetId}/executeQueries`
 Docs: [Datasets - ExecuteQueries](https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/execute-queries)
@@ -64,7 +64,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -91,7 +91,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example DAX Queries
+## Example DAX queries
 
 ```dax
 -- Simple measure
@@ -117,7 +117,7 @@ CALCULATETABLE(
 
 ---
 
-## When to Use vs Other Tools
+## When to use versus other tools
 
 | Scenario | Use |
 |----------|-----|
@@ -132,3 +132,13 @@ CALCULATETABLE(
 - The DAX query must be a complete `EVALUATE` statement - partial expressions like `[Total Revenue]` will fail
 - No retry on failure - if the query errors, fix it and re-run
 - Results are bounded by Power BI's default row limit for Execute Queries API
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md)
+- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+
+Back to the [Power BI integration hub](./README.md).

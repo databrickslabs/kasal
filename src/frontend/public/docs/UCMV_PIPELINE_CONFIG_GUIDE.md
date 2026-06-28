@@ -1,6 +1,8 @@
-# UC Metric View Pipeline — Config JSON Guide
+# UC Metric View pipeline — config JSON guide
 
-## What Gets Automated vs. What Needs Human Input
+Reference for every config key in the UCMV pipeline: which keys are auto-extracted from Power BI APIs and which require human domain knowledge.
+
+## What gets automated vs. what needs human input
 
 The UCMV pipeline has two phases: **Config Proposer** (automated extraction from PBI APIs) and **UCMV Generator** (metric view generation from config). The Config Proposer auto-fills ~70% of the config. The remaining ~30% requires human domain knowledge and **cannot be fully automated**.
 
@@ -8,7 +10,7 @@ This document explains what needs manual configuration, why, and how to fill it 
 
 ---
 
-## Config Keys That ARE Automated
+## Config keys that are automated
 
 These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA):
 
@@ -23,9 +25,9 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 
 ---
 
-## Config Keys That CANNOT Be Fully Automated
+## Config keys that cannot be fully automated
 
-### 1. `filter_sets`
+### filter_sets
 
 **What**: Named collections of filter values used in CALCULATE/FILTER expressions.
 
@@ -48,7 +50,7 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 
 ---
 
-### 2. `switch_decompositions`
+### switch_decompositions
 
 **What**: Manual decomposition of `SWITCH(TRUE(), SELECTEDVALUE(...) = "X", expr, ...)` DAX patterns into individual metric view measures.
 
@@ -88,7 +90,7 @@ The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and e
 
 ---
 
-### 3. `source_table` in `join_key_map`
+### source_table in join_key_map
 
 **What**: The physical 3-level Databricks table name for each dimension table used in joins.
 
@@ -116,7 +118,7 @@ The MQuery transpiler extracts source tables for **fact tables** (which have `Va
 
 ---
 
-### 4. `source_table` and `target_fact` in `fact_join_map`
+### source_table and target_fact in fact_join_map
 
 **What**: Cross-fact join configuration for union-mode or source-embed joins.
 
@@ -148,7 +150,7 @@ The Config Proposer can detect that two fact tables reference the same physical 
 
 ---
 
-### 5. `manual_overrides`
+### manual_overrides
 
 **What**: Hand-written SQL expressions for measures where automated DAX-to-SQL translation fails.
 
@@ -178,7 +180,7 @@ The LLM fallback can translate some of these, but for business-critical measures
 
 ---
 
-### 6. `switch_join_alias` and `switch_join_col`
+### switch_join_alias and switch_join_col
 
 **What**: The default dimension join alias and column used for SWITCH decomposition FILTER clauses.
 
@@ -211,3 +213,11 @@ The LLM fallback can translate some of these, but for business-critical measures
 | `switch_join_alias/col` | No | Low | Identify the SWITCH dimension |
 
 The HITL review step between Config Proposer and UCMV Generator is where this manual enrichment happens. The Config Proposer flags what's missing; the human fills in the gaps.
+
+## See also
+
+- [Power BI tools reference](./powerbi/README.md) — the tools that extract and translate PBI metadata
+- [Example crews and flows](./examples/README.md) — importable UCMV pipeline definitions
+- [PowerBI / UCMV / Genie / dashboard tooling roadmap](./README_ARCHITECTURE_PBI_UCMV_ROADMAP.md) — architecture and next-release plan
+
+Back to the [documentation hub](./README.md).
