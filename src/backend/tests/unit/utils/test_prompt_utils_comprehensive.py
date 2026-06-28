@@ -205,7 +205,11 @@ class TestRobustJsonParser:
             result = robust_json_parser(fixable_json)
         
         assert result == {"key": "value"}
-        assert "Extracted JSON from code block" in caplog.text
+        # The balanced-brace recovery now resolves a fenced {...} object before the
+        # dedicated code-block branch runs (and the brace path logs only on
+        # failure), so the reliable signal that a recovery path was taken is the
+        # recovery-entry log rather than the code-block-specific message.
+        assert "Initial JSON parsing failed" in caplog.text
 
     def test_robust_json_parser_nested_objects_with_arrays(self):
         """Test robust_json_parser with complex nested structures."""

@@ -141,7 +141,7 @@ class TestDefaultModelsDataStructure:
         """Test that all providers are known."""
         valid_providers = {
             "openai", "anthropic", "gemini",
-            "ollama", "databricks", "deepseek",
+            "ollama", "databricks", "deepseek", "vllm",
         }
         for model_key, model_data in DEFAULT_MODELS.items():
             assert model_data["provider"] in valid_providers, (
