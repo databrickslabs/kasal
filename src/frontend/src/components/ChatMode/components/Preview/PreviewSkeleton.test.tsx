@@ -64,3 +64,40 @@ describe('PreviewSkeleton', () => {
     expect(screen.getByText('Thinking…')).toBeInTheDocument(); // live pulse at the tail
   });
 });
+
+describe('PreviewSkeleton — running prop (live vs ended-but-docked)', () => {
+  it('defaults to running: live label, WORKING badge, busy, ticking elapsed', () => {
+    render(<PreviewSkeleton steps={[]} />);
+    const pane = screen.getByLabelText('Building preview');
+    expect(pane).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Running agent…')).toBeInTheDocument();
+    expect(screen.getByText('WORKING')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-skeleton-elapsed')).toBeInTheDocument();
+  });
+
+  it('running={false}: relabels to "Run activity", drops the WORKING badge, elapsed and busy state', () => {
+    render(<PreviewSkeleton steps={[]} running={false} />);
+    // The pane no longer claims to be running.
+    const pane = screen.getByLabelText('Run activity');
+    expect(pane).toHaveAttribute('aria-busy', 'false');
+    expect(screen.getByText('Run activity')).toBeInTheDocument();
+    expect(screen.queryByText('Running agent…')).not.toBeInTheDocument();
+    expect(screen.queryByText('WORKING')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Building preview')).not.toBeInTheDocument();
+    // No ticking elapsed timer once the run has ended.
+    expect(screen.queryByTestId('preview-skeleton-elapsed')).not.toBeInTheDocument();
+  });
+
+  it('running={false} with no steps shows "No activity" (not the live "Starting…")', () => {
+    render(<PreviewSkeleton steps={[]} running={false} />);
+    expect(screen.getByText('No activity')).toBeInTheDocument();
+    expect(screen.queryByText('Starting…')).not.toBeInTheDocument();
+  });
+
+  it('running={false} with steps drops the " so far" suffix from the step count', () => {
+    const steps: RunStep[] = [{ id: '1', label: 'Memory', timestamp: 1 }];
+    render(<PreviewSkeleton steps={steps} running={false} />);
+    expect(screen.getByText('1 step')).toBeInTheDocument();
+    expect(screen.queryByText('1 step so far')).not.toBeInTheDocument();
+  });
+});
