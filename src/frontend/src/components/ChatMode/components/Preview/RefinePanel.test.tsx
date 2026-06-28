@@ -69,6 +69,18 @@ describe('RefinePanel', () => {
     expect(p.onClose).toHaveBeenCalled();
   });
 
+  it('styles the AI button neutral when disabled and accent when enabled (no faded-accent smear)', () => {
+    renderPanel();
+    const updateBtn = screen.getByText('Update with AI');
+    // Disabled → neutral grey background, not a faded accent.
+    expect(updateBtn.style.backgroundColor).toBe('var(--bg-primary)');
+    expect(updateBtn.style.color).toBe('var(--text-muted)');
+    // Enabled → solid accent fill with white text.
+    fireEvent.change(screen.getByLabelText('Target slide count'), { target: { value: '12' } });
+    expect(updateBtn.style.backgroundColor).toBe('var(--accent)');
+    expect(updateBtn.style.color).toBe('rgb(255, 255, 255)');
+  });
+
   it('compiles a toggled switch setting into the directive', () => {
     const p = renderPanel();
     // Turn OFF the "open with a title slide" switch.
