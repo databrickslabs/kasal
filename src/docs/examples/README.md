@@ -1,8 +1,9 @@
-# Kasal Example Crews & Flows
+# Kasal example crews and flows
 
 Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View (UCMV) migration pipeline.
 
-> **Recommended path**: Use the **BI Specialist workspace** (built into Kasal) for zero-config setup.
+> [!TIP]
+> Use the **BI Specialist workspace** (built into Kasal) for zero-config setup.
 > All 9 pipeline crews are pre-seeded with tools enabled — just fill in your credentials.
 >
 > These JSON files are for users who want to **customise** beyond the defaults or import
@@ -10,7 +11,7 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 
 ---
 
-## How to Import
+## How to import
 
 1. Go to **Crews** or **Flows** in the Kasal UI
 2. Click **Import** and upload the JSON file
@@ -19,9 +20,9 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 
 ---
 
-## Available Crew Templates
+## Available crew templates
 
-### UCMV Generation Pipeline
+### UCMV generation pipeline
 
 | File | Tool | Purpose |
 |------|------|---------|
@@ -30,7 +31,7 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 | `crew_ucmv_quality_validator.json` | 91 | Validate translated measures against original DAX |
 | `crew_metric_view_deployer.json` | 88 | Deploy UCMV definitions to Databricks |
 
-### Genie Space & Dashboard Pipeline
+### Genie Space and dashboard pipeline
 
 | File | Tool | Purpose |
 |------|------|---------|
@@ -46,13 +47,13 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 |------|------|---------|
 | `crew_pbi_analyst_qa.json` | 72 | Natural language queries against Power BI datasets |
 
-### Combined Pipelines (single import)
+### Combined pipelines (single import)
 
 | File | Crews | Purpose |
 |------|-------|---------|
 | `crew_ucmv_deploy_genie_space_pipeline.json` | 88+93+92 | Deploy UCMVs then create Genie Space |
 
-### Flow Definitions
+### Flow definitions
 
 | File | Purpose |
 |------|---------|
@@ -60,7 +61,7 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 | `flow_ucmv_plus_validation.json` | UCMV pipeline with inline validation |
 | `flow_pbi_to_dashboard_pipeline.json` | References → Visual Mapper → Dashboard Creator |
 
-### Reference Data
+### Reference data
 
 | File | Purpose |
 |------|---------|
@@ -69,7 +70,7 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 
 ---
 
-## Required Credentials
+## Required credentials
 
 | Placeholder | Where to find it |
 |-------------|-----------------|
@@ -79,11 +80,20 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 | `<YOUR_DATABRICKS_PAT>` | Databricks → User settings → Developer → Access tokens |
 | `<YOUR_DATABRICKS_WORKSPACE>` | Your Databricks workspace URL |
 
+> [!IMPORTANT]
 > Store credentials in Kasal **Settings → API Keys** — never hardcode them in crew configs.
 
 ---
 
-## Local Utility Scripts
+## Local utility scripts
 
-For running the UCMV pipeline locally without the Kasal UI, see
-[`examples/uc_metric_view_migration/`](../../examples/uc_metric_view_migration/).
+For running the UCMV pipeline locally without the Kasal UI, use the
+`examples/uc_metric_view_migration/` directory in the repository.
+
+## Related
+
+- [UC Metric View pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) — config reference for these crews
+- [Power BI tools reference](../powerbi/README.md) — the tools used by the pipeline
+- [Genie superstore insights blueprint](../Blueprints/Genie_as_Backend%20_for_Agent_Workflows/README.md) — a worked Genie-backed example
+
+Back to the [documentation hub](../README.md).

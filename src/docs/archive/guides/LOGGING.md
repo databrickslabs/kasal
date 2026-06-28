@@ -24,7 +24,8 @@ backend/
 │   ├── core/
 │   │   └── logger.py      # Logger utilities
 │   └── engines/crewai/
-│       └── crew_logger.py # CrewAI-specific logging
+│       └── infra/
+│           └── crew_logger.py # CrewAI-specific logging
 ├── logs/                  # Log files (gitignored)
 │   ├── kasal.2023-06-15.log
 │   ├── kasal.error.2023-06-15.log
@@ -209,7 +210,7 @@ async def lifespan(app: FastAPI):
 The CrewAI engine has specialized logging for AI operations:
 
 ```python
-# In backend/src/engines/crewai/crew_logger.py
+# In backend/src/engines/crewai/infra/crew_logger.py
 class CrewLogger:
     def log_agent_start(self, agent_name: str, task: str):
         logger.info(f"Agent {agent_name} starting task: {task}")

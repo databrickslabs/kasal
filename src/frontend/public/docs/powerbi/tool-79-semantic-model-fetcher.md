@@ -1,14 +1,14 @@
-# Tool 79 - Semantic Model Fetcher
+# Tool 79 - semantic model fetcher
 
 **What it is:** Fetches and caches the full metadata of a Power BI semantic model - measures, tables, columns, relationships, sample data - using a 3-tier fallback to maximize what it can extract.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tools 80 (DAX Generator) and 81 (Metadata Reducer) both need model context to work well. Fetching that context is non-trivial: different PBI API tiers expose different levels of detail. Tool 79 handles this complexity once and caches the result, so subsequent calls in the same session don't repeat the API roundtrips.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Separation of concerns:** Decouple model fetching from DAX generation - you can fetch once, then ask many questions
 - **Caching:** Same-day cache means fast response for the second, third question about the same model
@@ -16,9 +16,9 @@ Tools 80 (DAX Generator) and 81 (Metadata Reducer) both need model context to wo
 
 ---
 
-## 3-Tier Extraction
+## 3-tier extraction
 
-| Tier | API | What It Provides | Requires |
+| Tier | API | What it provides | Requires |
 |------|-----|-----------------|----------|
 | 1 (best) | Fabric TMDL `getDefinition` | Full model: measures, columns, relationships, hierarchies | Fabric workspace |
 | 2 | Admin Scanner `scanResult` | Measures, tables, columns, M-Query | Admin SP |
@@ -26,7 +26,7 @@ Tools 80 (DAX Generator) and 81 (Metadata Reducer) both need model context to wo
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 - Tier 1: [Fabric - Get Item Definition](https://learn.microsoft.com/en-us/rest/api/fabric/core/items/get-item-definition)
 - Tier 2: [Admin - GetScanResult](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-get-scan-result)
@@ -56,7 +56,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew (Multi-Step Q&A)
+## Example crew (multi-step Q&A)
 
 ```json
 {
@@ -114,3 +114,13 @@ This JSON is passed as `model_context_json` to Tool 80 (DAX Generator) or Tool 8
 - Cache is per-day - same workspace+dataset within the same calendar day reuses the cache automatically
 - For multi-question workflows, always use Tool 79 → 81 → 80 (not Tool 72 each time) to avoid repeated API calls
 - The output JSON can be large for complex models (hundreds of measures) - Tool 81 reduces it to question-relevant subset before sending to the LLM
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 81 - metadata reducer](./tool-81-metadata-reducer.md)
+- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+
+Back to the [Power BI integration hub](./README.md).

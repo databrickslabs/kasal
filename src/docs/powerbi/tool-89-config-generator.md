@@ -1,14 +1,14 @@
-# Tool 89 - Config Generator
+# Tool 89 - config generator
 
 **What it is:** Takes the JSON outputs already extracted by Tools 73, 74, and 75, and proposes a `pipeline_config.json` for Tool 86 - with auto-filled keys, gap analysis, and confidence scores.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tool 86 (UC Metric View Generator) accepts a `config_json` parameter with up to 26 keys that control join mappings, filter sets, column overrides, and more. Authoring this config manually from scratch is the biggest bottleneck in the migration. Tool 89 automates the first draft by analyzing the extracted data.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Config authoring from extracted JSON:** When Tools 73/74/75 have already run and their JSON is available, Tool 89 proposes the config without going back to the PBI API
 - **Gap analysis:** Shows exactly which config keys are auto-filled, which need review, and which require domain knowledge - so the SA knows what to work on next
@@ -16,9 +16,9 @@ Tool 86 (UC Metric View Generator) accepts a `config_json` parameter with up to 
 
 ---
 
-## Tool 89 vs Tool 90
+## Tool 89 versus Tool 90
 
-| | Tool 89 | Tool 90 |
+| Aspect | Tool 89 | Tool 90 |
 |---|---------|---------|
 | Input | Pre-extracted JSON from Tools 73/74/75 | Live PBI API calls |
 | PBI credentials needed | No | Yes (two SPs) |
@@ -44,9 +44,9 @@ Use Tool 89 when you already have the JSON. Use Tool 90 when you want to go dire
 
 ---
 
-## Example Crew Position
+## Example crew position
 
-```
+```text
 Tool 73 + Tool 74 + Tool 75 (run first - extraction phase)
     ↓
 Tool 89 (propose config from their JSON outputs)   ← this tool
@@ -58,7 +58,7 @@ Tool 86 (generate UC Metric Views with the config)
 
 ---
 
-## Example Output
+## Example output
 
 ```json
 {
@@ -95,4 +95,14 @@ Tool 86 (generate UC Metric Views with the config)
 - `switch_decompositions` and `filter_sets` always require manual input - they encode business domain knowledge that can't be extracted from code
 - The `gap_analysis.manual_required` list is your SA's work queue for the Human Review phase
 - After the SA fills in the TODOs, run Tool 86 - if translation rate is below target, re-run Tool 89 gap analysis on the improved config to see what's still missing
-- See [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) for what each config key means
+- See the [pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) for what each config key means
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [Pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

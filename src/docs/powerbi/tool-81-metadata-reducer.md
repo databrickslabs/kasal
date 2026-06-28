@@ -1,14 +1,14 @@
-# Tool 81 - Power BI Metadata Reducer
+# Tool 81 - Power BI metadata reducer
 
 **What it is:** Takes the full model context JSON (from Tool 79) and a user question, then uses fuzzy matching and LLM-assisted selection to return only the tables, measures, and relationships relevant to that specific question.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 A large Power BI model can have 300+ measures and 50+ tables. Sending all of that to an LLM for DAX generation creates two problems: token limits (the context exceeds what the LLM can process) and accuracy problems (the LLM gets distracted by irrelevant measures and generates incorrect queries). Tool 81 solves this by filtering the model to only what matters for the question.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Token limit:** Large models can't be passed wholesale to an LLM; reduction makes it feasible
 - **Accuracy:** Focused context produces more accurate DAX - fewer irrelevant measures means fewer hallucinated references
@@ -16,9 +16,9 @@ A large Power BI model can have 300+ measures and 50+ tables. Sending all of tha
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Receive full model_context_json (from Tool 79) + user_question
     ↓
 Fuzzy matching: find measures/tables whose names overlap with question keywords
@@ -46,11 +46,11 @@ Return reduced model_context_json (10-20 measures vs 300+)
 
 ---
 
-## Example Crew Position
+## Example crew position
 
 Always placed between Tool 79 and Tool 80:
 
-```
+```text
 Tool 79 (fetch full model)
     ↓
 Tool 81 (reduce to question-relevant subset)   ← this tool
@@ -66,3 +66,12 @@ Tool 80 (generate DAX from reduced context)
 - Without LLM selection, uses fuzzy matching only - faster but slightly less accurate
 - The reduced output is a valid `model_context_json` that Tool 80 accepts directly
 - Does not make any PBI API calls - works entirely on the JSON from Tool 79
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 79 - semantic model fetcher](./tool-79-semantic-model-fetcher.md)
+- [Tool 80 - DAX generator](./tool-80-dax-generator.md)
+- [Power BI analytics Q&A case study](./powerbi-analytics-qa-case-study.md)
+
+Back to the [Power BI integration hub](./README.md).

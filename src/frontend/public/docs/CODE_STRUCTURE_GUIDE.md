@@ -1,8 +1,14 @@
-## Code Structure
+# Code structure
 A fast, skimmable map of the repository to help you find the right place quickly.
 
-### Repository layout
-```
+- [Repository layout](#repository-layout)
+- [Development conventions](#development-conventions-back-end)
+- [Configuration quick reference](#configuration-quick-reference)
+- [Engines and orchestration](#engines-and-orchestration)
+- [Quick links](#quick-links)
+
+## Repository layout
+```text
 
 ├── README.md
 └── src/
@@ -14,7 +20,7 @@ A fast, skimmable map of the repository to help you find the right place quickly
     └── manifest.yaml       # App metadata
 ```
 
-### Backend (src/backend/src)
+## Backend (src/backend/src)
 - main.py: FastAPI app bootstrap, CORS, middleware, startup/shutdown, scheduler, API router registration
 - api/: HTTP routers per domain (agents, crews, executions, tools, models, engine-config, etc.)
 - services/: Business logic & orchestration
@@ -31,7 +37,7 @@ A fast, skimmable map of the repository to help you find the right place quickly
 - utils/: Helpers (user_context.py, databricks_url_utils.py, etc.)
 - seeds/, scripts/, dependencies/: Seeders, scripts, DI helpers
 
-### Frontend (src/frontend)
+## Frontend (src/frontend)
 - CRA + TypeScript app
 - src/config/api/ApiConfig.ts: API base URL selection and Axios client
 - src/api/*Service.ts: API clients per domain (Agents, Crews, Executions, Models, Tools, etc.)
@@ -42,30 +48,30 @@ A fast, skimmable map of the repository to help you find the right place quickly
 - src/utils/, src/theme/: Utilities and theme
 - public/: Static assets (docs copied to /docs here)
 
-### Key entry points
+## Key entry points
 - Backend app starts in main.py (includes api_router with prefix from settings)
 - Frontend docs are served from /docs (markdown files copied there at build)
 
-### Routers (where to look)
+## Routers (where to look)
 Common examples under src/backend/src/api/:
 - agents_router.py, crews_router.py, executions_router.py, execution_logs_router.py, execution_trace_router.py
 - engine_config_router.py, models_router.py, tools_router.py, schemas_router.py
 - databricks_*_router.py (secrets, knowledge, connection)
 
-### Database & migrations
+## Database and migrations
 - DB sessions configured in src/backend/src/db/session.py
 - Alembic configuration via alembic.ini (root) and migrations/ (root)
 - Models aggregated in src/backend/src/db/all_models.py
 
-### Configuration & logging
+## Configuration and logging
 - src/backend/src/config/settings.py: env-driven settings (CORS, DB URIs, docs flags, seeding)
 - src/backend/src/config/logging.py and src/backend/src/core/logger.py: centralized logging
 
-### Core & engines
+## Core and engines
 - src/backend/src/core/llm_manager.py: provider/model selection, streaming options
 - src/backend/src/engines/crewai/*: crew preparation, execution runner, callbacks, memory/tool adapters
 
-### Tips: how to trace a feature
+## How to trace a feature
 1) Start at the router file for the endpoint.
 2) Open the called service and scan business logic.
 3) Inspect repository methods and related models.
@@ -118,7 +124,7 @@ Common examples under src/backend/src/api/:
 
 ### Services (selected)
 - services/execution_service.py: high-level execution orchestration
-- services/crewai_execution_service.py, engines/crewai/execution_runner.py: CrewAI integration points
+- services/crewai_execution_service.py, engines/crewai/paths/crew/execution_runner.py: CrewAI integration points
 - services/scheduler_service.py: background scheduling
 - services/documentation_embedding_service.py: embeddings for better generation
 
@@ -153,13 +159,16 @@ Notes:
 
 ---
 
-## Engines & orchestration
+## Engines and orchestration
 
 - Engine selection: src/backend/src/engines/engine_factory.py
-- CrewAI integration lives under src/backend/src/engines/crewai/
-  - crew_preparation.py: build agents, tools, memory for a run
-  - execution_runner.py: run loop, callbacks/guardrails
-  - trace_management.py: hook into tracing pipeline
+- CrewAI integration lives under src/backend/src/engines/crewai/, organized into:
+  paths/ (per-execution flavours), kernel/ (agent/task builders, security, tooling helpers),
+  infra/ (logging, tracing, mlflow), memory/, guardrails/, callbacks/, config/, tools/, exporters/
+  - paths/crew/crew_preparation.py: build agents, tools, memory for a run
+  - paths/crew/execution_runner.py: run loop, callbacks/guardrails
+  - paths/flow/: flow assembly and runner services; paths/light_agent/: lightweight single-agent path
+  - infra/trace_management.py: hook into tracing pipeline
 
 Memory/model caveat:
 - Known limitation for specific Databricks models (Claude / GPT‑OSS) on entity extraction
@@ -210,4 +219,15 @@ Memory/model caveat:
 - Compose routers: src/backend/src/api/__init__.py
 - Settings: src/backend/src/config/settings.py
 - Sessions: src/backend/src/db/session.py
-- CrewAI runner: src/backend/src/engines/crewai/execution_runner.py
+- CrewAI runner: src/backend/src/engines/crewai/paths/crew/execution_runner.py
+
+---
+
+## See also
+- [Architecture guide](./ARCHITECTURE_GUIDE.md)
+- [Developer guide](./DEVELOPER_GUIDE.md)
+- [API endpoints reference](./api_endpoints.md)
+- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
+- [Why Kasal](./WHY_KASAL.md)
+
+Back to the [documentation hub](./README.md).

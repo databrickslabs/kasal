@@ -1,4 +1,6 @@
-# Genie Superstore Insights Blueprint
+# Genie superstore insights blueprint
+
+Integrate Databricks Genie with Kasal agent workflows to retrieve enterprise data and generate business insights from the Superstore dataset.
 
 This blueprint demonstrates how to integrate **Databricks Genie with Kasal agent workflows** to retrieve enterprise data and generate business insights.
 
@@ -6,7 +8,7 @@ The workflow retrieves structured sales data from a Genie Space connected to Uni
 
 ---
 
-# Architecture Overview
+## Architecture overview
 
 The workflow follows this architecture:
 
@@ -18,29 +20,21 @@ The workflow follows this architecture:
 
 ---
 
-# Blueprint Components
+## Blueprint components
 
 This blueprint contains the following documentation:
 
-### 1️⃣ Creating a Genie Space
+### Creating a Genie Space
 
-How to create and configure a Genie Space connected to the Superstore dataset.
+How to create and configure a Genie Space connected to the Superstore dataset. See [Creating a Genie Space for the Superstore dataset](./create_genie_space.md).
 
-➡ See:  
-`create-genie-space.md`
+### Kasal agent workflow
 
----
-
-### 2️⃣ Kasal Agent Workflow
-
-How to import and run the Kasal workflow that uses Genie as backend.
-
-➡ See:  
-`kasal-agent-workflow.md`
+How to import and run the Kasal workflow that uses Genie as backend. See [Running the Kasal agent workflow](./kasal-agent-workflow.md).
 
 ---
 
-# Example Use Case
+## Example use case
 
 Example business question:
 
@@ -54,7 +48,7 @@ The workflow retrieves the data from Genie and produces:
 
 ---
 
-# Enterprise Extensions
+## Enterprise extensions
 
 This blueprint can be extended with:
 
@@ -65,8 +59,16 @@ This blueprint can be extended with:
 
 ---
 
-# Files Included
+## Files included
 
 - `workflow.json` – importable Kasal workflow
-- `create-genie-space.md` – Genie setup guide
-- `kasal-agent-workflow.md` – Kasal workflow instructions
+- [Creating a Genie Space for the Superstore dataset](./create_genie_space.md) – Genie setup guide
+- [Running the Kasal agent workflow](./kasal-agent-workflow.md) – Kasal workflow instructions
+
+## Related
+
+- [Creating a Genie Space for the Superstore dataset](./create_genie_space.md) — set up the Genie backend
+- [Running the Kasal agent workflow](./kasal-agent-workflow.md) — build and run the workflow
+- [Example crews and flows](../../examples/README.md) — more importable templates
+
+Back to the [documentation hub](../../README.md).

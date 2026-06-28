@@ -1,28 +1,28 @@
-# Kasal End‑User Tutorial — Build a Blog Workflow (with Catalog)
+# Kasal end-user tutorial: build a blog workflow
 
-Audience: End users (marketers, PMs, analysts) creating multi‑agent workflows — no admin setup required
+By the end of this tutorial you'll have built and run a multi-agent blog-production workflow in Kasal, then customized it from the Catalog — no admin setup required.
 
-Status: Screenshot‑ready script (placeholders provided); suitable for website docs or in‑product walkthrough
+- [Before you begin](#before-you-begin)
+- [Chapter 1: first contact](#chapter-1-first-contact)
+- [Chapter 2: build the team](#chapter-2-build-the-team)
+- [Chapter 3: first execution](#chapter-3-first-execution)
+- [Chapter 4: catalog](#chapter-4-catalog)
+- [Chapter 5: collaboration and sharing](#chapter-5-collaboration-and-sharing)
+- [Next steps](#next-steps)
 
-Prerequisites:
-- You can access the Kasal app (local or hosted)
-- Recommended route: http://localhost:3000/workflow
-- You have permissions to create agents, tasks, and crews (default end‑user role)
+## Before you begin
 
-Contents
-- Chapter 1: First Contact — Orientation and first agent
-- Chapter 2: Build the Team — Writer and Editor + pipeline
-- Chapter 3: First Execution — Run and iterate in Chat
-- Chapter 4: Catalog — Discover, import, and customize templates
-- Chapter 5: Collaboration — Save, share, and version
+This tutorial is for end users (marketers, PMs, analysts) creating multi-agent workflows; it is a screenshot-ready script with placeholders, suitable for website docs or an in-product walkthrough. Before you start:
 
-Notes for screenshots
-- Use images under src/docs/images/. Suggested filenames are included below as placeholders.
-- Capture the UI with consistent light/dark theme and window size.
+- You can access the Kasal app (local or hosted).
+- Recommended route: `http://localhost:3000/workflow`.
+- You have permissions to create agents, tasks, and crews (default end-user role).
+
+Screenshots use images under `src/docs/images/`; suggested filenames appear below as placeholders. Capture the UI with a consistent light/dark theme and window size.
 
 ---
 
-## Chapter 1 — First Contact
+## Chapter 1: first contact
 Scene: Sarah discovers Kasal and wants to automate content creation.
 
 1) Open the Workflow Designer
@@ -59,7 +59,7 @@ Callouts
 
 ---
 
-## Chapter 2 — Build the Team
+## Chapter 2: build the team
 Scene: Sarah expands the team with Writer and Editor.
 
 4) Add the Writer agent
@@ -105,7 +105,7 @@ Callouts
 
 ---
 
-## Chapter 3 — First Execution
+## Chapter 3: first execution
 Scene: Sarah runs the workflow and iterates quickly.
 
 7) Configure the Crew
@@ -139,7 +139,7 @@ Callouts
 
 ---
 
-## Chapter 4 — Catalog (Discover, Import, Customize)
+## Chapter 4: catalog
 Scene: Sarah jumpstarts production by using Catalog templates.
 
 10) Browse the Catalog
@@ -192,7 +192,7 @@ Callouts
 
 ---
 
-## Chapter 5 — Collaboration & Sharing
+## Chapter 5: collaboration and sharing
 Scene: Sarah shares the workflow and builds a repeatable practice.
 
 16) Save, share, and version
@@ -215,7 +215,7 @@ Callouts
 
 ---
 
-## Checklist — What you’ve learned
+## Checklist: what you’ve learned
 - Create agents and tasks, and connect them into a crew
 - Run a sequential multi‑agent pipeline via Chat and iterate
 - Discover templates in the Catalog and import them to your canvas
@@ -227,4 +227,7 @@ Callouts
 - Add approval gates (human‑in‑the‑loop) between Draft and Edit
 - Create a library of presets for different industries or tones
 - Ask an admin to enable any enterprise features you need (quotas, model defaults, etc.)
+- Explore the rest of the [documentation hub](./README.md) for deployment, API, and admin guides.
+
+Back to the [documentation hub](./README.md).
 

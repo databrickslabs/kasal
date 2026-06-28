@@ -1,14 +1,29 @@
-# Power BI Analytics Q&A — Case Study & Setup Guide
+# Power BI analytics Q&A case study and setup guide
 
-Natural language questions against a live Power BI semantic model, answered with DAX — no SQL, no exports, no manual measure lookup. This guide walks through the full setup: crew architecture, credential wiring, and — most importantly — **context enrichment** that makes the difference between a tool that technically works and one your analysts actually love.
+Natural language questions against a live Power BI semantic model, answered with DAX — no SQL, no exports, no manual measure lookup.
 
----
+This guide walks through the full setup: crew architecture, credential wiring, and — most importantly — **context enrichment** that makes the difference between a tool that technically works and one your analysts actually love.
 
-## The 3-Agent Crew Architecture
+- [Before you begin](#before-you-begin)
+- [The 3-agent crew architecture](#the-3-agent-crew-architecture)
+- [Quick start — import the example crew](#quick-start--import-the-example-crew)
+- [Context enrichment — the real power](#context-enrichment--the-real-power)
+- [Where to configure these fields in Kasal](#where-to-configure-these-fields-in-kasal)
+- [Full working configuration example](#full-working-configuration-example)
+- [Troubleshooting context issues](#troubleshooting-context-issues)
+
+## Before you begin
+
+- A Non-Admin service principal with `Dataset.Read.All` ([authentication setup](./01-authentication-setup.md)) — admin permissions are not required for Q&A
+- The Power BI workspace GUID and dataset GUID for the model you want to query
+- A Databricks workspace URL and token for the LLM that generates DAX
+- A running Kasal instance where you can import and run a crew
+
+## The 3-agent crew architecture
 
 The example crew (`crew_pbi_analyst_qa.json`) uses three agents in sequence:
 
-```
+```text
 User question: "What is my total sampling per customer and material?"
           │
           ▼
@@ -48,15 +63,13 @@ User question: "What is my total sampling per customer and material?"
                   Answer + data table
 ```
 
-**Why three agents instead of one (Tool 72)?**
-Tool 72 does everything in a single call — great for one-off questions. The 3-agent crew shines when:
+Why three agents instead of one (Tool 72)? Tool 72 does everything in a single call — great for one-off questions. The 3-agent crew shines when:
+
 - You have a large semantic model (400+ measures) — the Reducer cuts context by 80%
 - You're running multiple questions in a session — model fetch is cached, so agents 2+3 skip the API call
 - You want to customize the reduction step independently (e.g. apply custom `visible_tables` filtering)
 
----
-
-## Quick Start — Import the Example Crew
+## Quick start — import the example crew
 
 1. Download [`crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) from the examples folder
 2. In Kasal UI → **Crews** → **Import** → select the file
@@ -64,7 +77,7 @@ Tool 72 does everything in a single call — great for one-off questions. The 3-
 4. Set `user_question` as an execution input variable
 5. Click **Run**
 
-### Minimum Required Credentials (per task)
+### Minimum required credentials (per task)
 
 | Field | Where | Value |
 |-------|-------|-------|
@@ -76,18 +89,17 @@ Tool 72 does everything in a single call — great for one-off questions. The 3-
 | `llm_workspace_url` | Task 3 (DAX tool) | `https://<your-workspace>.azuredatabricks.net` |
 | `llm_token` | Task 3 (DAX tool) | Databricks PAT |
 
-> The SP needs **Dataset.Read.All** in your Power BI workspace. Admin permissions are NOT required for Q&A.
+The SP needs **Dataset.Read.All** in your Power BI workspace. Admin permissions are not required for Q&A.
 
----
-
-## Context Enrichment — The Real Power
+## Context enrichment — the real power
 
 This is what separates a passable demo from a production-grade analytics assistant. The DAX Generator (Tool 80) accepts six context enrichment fields that are configured once in the tool's task form and then automatically applied to every question.
 
-### The Transformation in Practice
+### The transformation in practice
 
-**Without context enrichment:**
-```
+Without context enrichment:
+
+```text
 User asks:  "What is the number of customers with Complete CGR in the Italian BU in week 1?"
 
 Tool needs: "What is [num_customers] in [Initial_Sizing]
@@ -96,10 +108,12 @@ Tool needs: "What is [num_customers] in [Initial_Sizing]
              AND [Initial_Sizing][Week] = 1
              AND [Initial_Sizing][Mandatory_Version] IN ('Landline','Mobile')?"
 ```
+
 Without context, the LLM would hallucinate measure names, get the table wrong, and miss the implicit Mandatory_Version filter entirely.
 
-**With context enrichment:**
-```
+With context enrichment:
+
+```text
 User asks:   "What is the number of customers with Complete CGR in the Italian BU in week 1?"
 
 Tool resolves automatically:
@@ -110,11 +124,9 @@ Tool resolves automatically:
   Mandatory_Version filter → auto-applied from active_filters          (active_filters)
 ```
 
----
+### Field-by-field reference
 
-### Field-by-Field Reference
-
-#### `business_mappings` — natural language → DAX filter expressions
+#### business_mappings: natural language to DAX filter expressions
 
 Maps phrases your users actually say to the DAX filter expressions that evaluate them. The tool applies these automatically via `TREATAS` or `FILTER`.
 
@@ -134,9 +146,7 @@ Maps phrases your users actually say to the DAX filter expressions that evaluate
 
 **How to build yours**: Open Power BI Desktop → Data view → note the exact table and column names → map your team's language to those names.
 
----
-
-#### `field_synonyms` — alternative names for measures and columns
+#### field_synonyms: alternative names for measures and columns
 
 Your users say "revenue" but the measure is named "Total Net Sales". Define the mapping here.
 
@@ -153,9 +163,7 @@ Your users say "revenue" but the measure is named "Total Net Sales". Define the 
 
 **Rule of thumb**: Add synonyms for every measure or column that has an "internal" name that differs from how your business talks about it.
 
----
-
-#### `active_filters` — implicit context from the current view
+#### active_filters: implicit context from the current view
 
 Simulates the Power BI slicer/page-level filter state. These filters are **automatically applied** to every DAX query, even if the user doesn't mention them.
 
@@ -170,13 +178,11 @@ Use case: Your analysts always work within a specific fiscal year or product lin
 
 **Format**: The tool accepts both single values (`"Fiscal_Year": 2025`) and lists (`"Mandatory_Version": ["Landline", "Mobile"]`).
 
----
-
-#### `context_knowledge` — domain knowledge as plain text
+#### context_knowledge: domain knowledge as plain text
 
 Free-text explanation of business rules, calculation logic, or model-specific gotchas. This goes directly into the LLM prompt.
 
-```
+```text
 "context_knowledge": "Complete CGR means the customer completed the full CGR
 onboarding process. Partial CGR means they started but did not finish.
 Revenue is always reported net of VAT. The Week column is an ISO week number,
@@ -186,13 +192,11 @@ not a sequential counter. BU values match country names (e.g. 'Italy',
 
 When to add something here: any time the LLM generates a plausible-looking query that returns wrong results because it misunderstood a business term.
 
----
-
-#### `reference_dax` — working DAX examples
+#### reference_dax: working DAX examples
 
 Paste one or more verified, working DAX EVALUATE statements. The LLM uses them as syntax and pattern reference — dramatically reducing hallucination on complex measures.
 
-```
+```text
 "reference_dax": "
 EVALUATE
 SUMMARIZECOLUMNS(
@@ -214,9 +218,7 @@ CALCULATETABLE(
 
 **Tip**: Start with 2–3 representative queries that cover your main measure types (simple aggregation, filtered, time-intelligence). The LLM generalises from these patterns.
 
----
-
-#### `visible_tables` — scope the model to relevant tables
+#### visible_tables: scope the model to relevant tables
 
 For large models (100+ tables), limit which tables the Reducer and Generator consider. Dramatically reduces token usage and hallucination risk.
 
@@ -226,9 +228,7 @@ For large models (100+ tables), limit which tables the Reducer and Generator con
 
 If not set, all tables are in scope. Set this to the 5–15 tables your Q&A use case actually touches.
 
----
-
-#### `conversation_history` — multi-turn context
+#### conversation_history: multi-turn context
 
 Pass previous Q&A pairs so the LLM understands follow-up questions ("break that down by region", "same thing but for last month").
 
@@ -248,13 +248,11 @@ Pass previous Q&A pairs so the LLM understands follow-up questions ("break that 
 
 In an agent workflow, append each Q&A pair to this list between runs to maintain session context.
 
----
-
-## Where to Configure These Fields in Kasal
+## Where to configure these fields in Kasal
 
 Context enrichment fields are set on the **Task 3 node** (Run PowerBI DAX Generation Tool) in the crew canvas:
 
-```
+```text
 Crew canvas
   └── Task node: "Run PowerBI DAX Generation Tool..."
         └── Tool config (gear icon / edit panel)
@@ -272,20 +270,17 @@ Crew canvas
 
 All fields accept direct JSON input in the Kasal tool config panel. The `user_question` field should be set to `{user_question}` to map it from the execution input form.
 
----
-
-## Full Working Configuration Example
+## Full working configuration example
 
 See [`../powerbi-context-enrichment-example.json`](../powerbi-context-enrichment-example.json) for a complete, copy-paste-ready configuration showing all fields together.
 
 The CGR customer analysis example in that file covers a real scenario:
+
 - Question: *"What is the number of customers with Complete CGR in the Italian BU in week 1?"*
 - Model: telecom semantic model with `Initial_Sizing`, customer tables, and time dimensions
 - All six enrichment fields configured end-to-end
 
----
-
-## Troubleshooting Context Issues
+## Troubleshooting context issues
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -296,10 +291,11 @@ The CGR customer analysis example in that file covers a real scenario:
 | Slow / high token usage | Full model context passed to generator | Enable Tool 81 (Reducer) and set `visible_tables` |
 | Follow-up question ignores previous answer | `conversation_history` not updated | Append each Q&A pair to history between calls |
 
----
+## Next steps
 
-## Next Steps
+- **More complex models**: see [Tool 79 - semantic model fetcher](./tool-79-semantic-model-fetcher.md) for caching large models (400+ measures)
+- **Reduce cost and latency**: see [Tool 81 - metadata reducer](./tool-81-metadata-reducer.md) for aggressive context reduction strategies
+- **Migrate measures to UC**: see the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) to translate those measures to Unity Catalog Metric Views
+- **Single-question shortcut**: see [Tool 72 - comprehensive analysis](./tool-72-comprehensive-analysis.md) for the all-in-one alternative
 
-- **More complex models**: See [Tool 79 - Semantic Model Fetcher](./tool-79-semantic-model-fetcher.md) for caching large models (400+ measures)
-- **Reduce cost & latency**: See [Tool 81 - Metadata Reducer](./tool-81-metadata-reducer.md) for aggressive context reduction strategies
-- **Migrate measures to UC**: Once you know your model well from Q&A, run the [UCMV Migration](./ucmv-migration-guide.md) to translate those measures to Unity Catalog Metric Views
+Back to the [Power BI integration hub](./README.md).

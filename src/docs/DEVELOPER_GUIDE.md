@@ -1,7 +1,14 @@
-## Developer Guide
+# Developer guide
 Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day workflows.
 
-### Components you'll touch
+- [Components you'll touch](#components-youll-touch)
+- [Before you begin](#before-you-begin)
+- [Developer architecture overview](#developer-architecture-overview)
+- [Backend architecture](#backend-architecture)
+- [Frontend architecture](#frontend-architecture)
+- [End-to-end flow](#end-to-end-flow)
+
+## Components you'll touch
 - **Frontend (React SPA)**: UI, designer, monitoring
 - **API (FastAPI)**: REST endpoints and validation
 - **Services**: Orchestration and business logic
@@ -9,19 +16,19 @@ Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day wor
 - **Engines (CrewAI)**: Agent/flow preparation and execution
 - **Data & Storage**: SQLAlchemy models/sessions, embeddings, volumes
 
-### Requirements
+## Before you begin
 Tools and versions you need before running the stack.
 - Python 3.9+
 - Node.js 18+
 - Postgres (recommended) or SQLite for local dev
 - Databricks access if exercising Databricks features
-## Developer Architecture Overview  
+## Developer architecture overview  
 This section gives developers a high-level view of the front end and back end. It explains core components and shows how to understand and trace them.
 
-## Backend Architecture  
+## Backend architecture  
 The backend uses FastAPI with a clean layered structure. It separates HTTP routing, business services, repositories, and SQLAlchemy models.
 
-### Core Components  
+### Core components  
 - API Routers: src/backend/src/api/* map HTTP endpoints to service calls.  
 - Services: src/backend/src/services/* implement business logic and transactions.  
 - Repositories: src/backend/src/repositories/* handle database CRUD.  
@@ -30,7 +37,7 @@ The backend uses FastAPI with a clean layered structure. It separates HTTP routi
 - DB/Session: src/backend/src/db/* configures sessions and Alembic migrations.  
 - Config/Security: src/backend/src/config/* and src/backend/src/dependencies/* provide settings and auth.
 
-### Typical Request Flow  
+### Typical request flow  
 A request passes through router, service, repository, and database. LLM calls route through the LLM manager when needed.
 
 ```mermaid
@@ -58,14 +65,14 @@ sequenceDiagram
     R-->>C: HTTP Response
 ```
 
-### How to Understand Backend Components  
+### How to understand backend components  
 - Start at the router file for the endpoint path.  
 - Open the service it calls and read business logic.  
 - Inspect repository methods and referenced models.  
 - Check schema types for request and response contracts.  
 - Review unit tests under `src/backend/tests` for examples.
 
-### Example: Minimal Endpoint Wiring  
+### Example: minimal endpoint wiring  
 This shows a typical router, service, and repository connection.
 
 ```python
@@ -86,10 +93,10 @@ class ItemRepository(BaseRepository[Item]):
     ...
 ```
 
-## Frontend Architecture  
+## Frontend architecture  
 The frontend is a React + TypeScript application. It organizes UI components, API clients, state stores, hooks, and utilities.
 
-### Core Components  
+### Core components  
 - API Clients: src/frontend/src/api/* wrap HTTP calls with typed methods.  
 - UI Components: src/frontend/src/components/* render views and dialogs.  
 - Hooks: src/frontend/src/hooks/* encapsulate logic and side effects.  
@@ -97,7 +104,7 @@ The frontend is a React + TypeScript application. It organizes UI components, AP
 - Types/Config: src/frontend/src/types/* and src/frontend/src/config/* provide typing and environment.  
 - Utils: src/frontend/src/utils/* offer reusable helpers.
 
-### UI Data Flow  
+### UI data flow  
 Components call hooks, which use stores and API clients. Responses update state and re-render the UI.
 
 ```mermaid
@@ -111,14 +118,14 @@ flowchart LR
     C --> A
 ```
 
-### How to Understand Frontend Components  
+### How to understand frontend components  
 - Locate the component rendering the feature.  
 - Check its hook usage and props.  
 - Open the API client method it calls.  
 - Review the store slice it reads or writes.  
 - Inspect related types in src/frontend/src/types.
 
-### Example: Calling an API From a Component  
+### Example: calling an API from a component  
 A component loads items using an API service and updates local state.
 
 ```ts
@@ -137,9 +144,20 @@ const ItemView: React.FC<{ id: string }> = ({ id }) => {
 };
 ```
 
-## End-to-End flow
+## End-to-end flow
 This ties front end and back end with shared contracts. It helps new developers trace a feature quickly.
 
 - Frontend Component → Hook → Store/API Client → Backend Router → Service → Repository → DB.  
 - Shared types and response shapes live in frontend types and backend schemas.  
 - Tests in src/backend/tests and frontend __tests__ show usage patterns.
+
+---
+
+## Related
+- [Code structure guide](./CODE_STRUCTURE_GUIDE.md)
+- [Architecture guide](./ARCHITECTURE_GUIDE.md)
+- [API endpoints reference](./api_endpoints.md)
+- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
+- [Why Kasal](./WHY_KASAL.md)
+
+Back to the [documentation hub](./README.md).

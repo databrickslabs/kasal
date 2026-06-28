@@ -1,14 +1,14 @@
-# Tool 76 - Power BI Hierarchies Tool
+# Tool 76 - Power BI hierarchies tool
 
 **What it is:** Extracts hierarchy definitions from a Microsoft Fabric semantic model and generates Unity Catalog dimension views with `hierarchy_path` columns.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Hierarchies (e.g. Country → Region → City, or Year → Quarter → Month) are a core Power BI UX feature that enables drill-down in reports. When migrating, these hierarchies need to be represented in Unity Catalog so downstream BI tools can reproduce the same drill-down behavior.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Drill-down preservation:** Converts PBI hierarchy definitions into SQL views with concatenated `hierarchy_path` columns that downstream tools can filter on
 - **Documentation:** Generates `_metadata_hierarchies` tables documenting all hierarchy levels
@@ -16,7 +16,7 @@ Hierarchies (e.g. Country → Region → City, or Year → Quarter → Month) ar
 
 ---
 
-## Fabric-Only Requirement
+## Fabric-only requirement
 
 This tool uses the Fabric API `getDefinition` endpoint which returns semantic model definitions in TMDL (Tabular Model Definition Language) format. **This only works with Microsoft Fabric workspaces**, not classic Power BI Service workspaces.
 
@@ -24,7 +24,7 @@ If your customer is on legacy PBI Service (not Fabric), this tool will not work 
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `GET /groups/{groupId}/items/{itemId}/getDefinition` (Fabric REST API)
 Docs: [Fabric - Get Item Definition](https://learn.microsoft.com/en-us/rest/api/fabric/core/items/get-item-definition)
@@ -54,7 +54,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -80,7 +80,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Output
+## Example output
 
 ```sql
 -- Dimension View: Geography hierarchy
@@ -107,3 +107,13 @@ INSERT INTO my_catalog.dimensions._metadata_hierarchies VALUES
 - Not in the standard UCMV pipeline (Tools 73→86) - run this separately if the customer needs drill-down hierarchies in UC
 - The `_metadata_hierarchies` table is useful for BI tools that can read hierarchy metadata programmatically
 - Hidden levels (used in PBI for internal calculations) are excluded by default
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 77 - field parameters and calculation groups](./tool-77-field-parameters.md)
+- [Tool 78 - report references tool](./tool-78-report-references.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

@@ -17,10 +17,10 @@ Kasal is an AI agent workflow orchestration platform that transforms complex AI 
 git clone <repository-url>
 cd kasal
 
-# Backend setup (required)
-source venv/bin/activate  # From project root
+# Backend setup (required) — Python deps are managed with uv (no requirements.txt)
 cd src/backend
-./run.sh sqlite  # SQLite for development
+uv sync            # install dependencies (creates .venv)
+./run.sh sqlite    # SQLite for development (run.sh runs `uv sync` for you)
 
 # Frontend setup (optional - only if working on UI)
 cd src/frontend
@@ -76,7 +76,7 @@ All project documentation including architecture guides, best practices, and dep
 ## Development Workflow
 
 ### 1. Before You Start
-- Read `src/docs/ARCHITECTURE.md` and `src/docs/BEST_PRACTICES.md`
+- Read `src/docs/ARCHITECTURE_GUIDE.md` and `src/docs/DEVELOPER_GUIDE.md`
 - Understand this is an **agentic orchestration platform** - familiarize yourself with AI agent concepts
 - Review existing code in the area you plan to work on
 
@@ -84,17 +84,14 @@ All project documentation including architecture guides, best practices, and dep
 
 **Backend Development:**
 ```bash
-# Activate environment
-source venv/bin/activate  # From project root
-
-# Start development server
+# Start development server (run.sh runs `uv sync` for you)
 cd src/backend
 ./run.sh sqlite  # or ./run.sh for PostgreSQL
 
 # Code quality (run before committing)
-python -m black src tests && python -m isort src tests
-python -m mypy src
-python -m flake8 src tests
+uv run black src tests && uv run isort src tests
+uv run mypy src
+uv run flake8 src tests
 ```
 
 **Database Changes:**
@@ -218,7 +215,7 @@ npm run test:e2e # Cypress for end-to-end testing
 ## Common Gotchas & Important Notes
 
 ### Critical Requirements
-- **Always activate venv**: `source venv/bin/activate` from project root
+- **Dependencies via uv**: run `uv sync` in `src/backend` (uv manages the `.venv`); there is no `requirements.txt`. Prefix tools with `uv run`
 - **Database migrations**: Required for any model changes
 - **Type safety**: Use TypeScript/Python type hints extensively
 - **Async operations**: All database calls must be async
@@ -234,10 +231,10 @@ npm run test:e2e # Cypress for end-to-end testing
 ## Documentation Requirements
 
 ### Must Read Before Contributing
-1. **`src/docs/ARCHITECTURE.md`** - System architecture and patterns
-2. **`src/docs/GETTING_STARTED.md`** - Detailed setup instructions
-3. **`src/docs/BEST_PRACTICES.md`** - Development guidelines
-4. **`src/docs/CREWAI_ENGINE.md`** - AI engine specifics (if working on agents)
+1. **`src/docs/ARCHITECTURE_GUIDE.md`** - System architecture and patterns
+2. **`src/docs/DEVELOPER_GUIDE.md`** - Detailed setup and extension patterns
+3. **`src/docs/CODE_STRUCTURE_GUIDE.md`** - Where things live and how to navigate the repo
+4. **`src/docs/crewai-engine-refactor-proposal.md`** - CrewAI engine layout (if working on agents)
 
 ### When Contributing
 - Update relevant documentation for new features

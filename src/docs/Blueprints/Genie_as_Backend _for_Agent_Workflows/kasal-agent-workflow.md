@@ -1,5 +1,13 @@
 
-# Running the Kasal Agent Workflow
+# Running the Kasal agent workflow
+
+Build and run a Genie-backed Kasal workflow that retrieves Superstore data, analyzes it, and produces a business-ready summary.
+
+## Before you begin
+
+- A Genie Space connected to the Superstore dataset (see [Creating a Genie Space for the Superstore dataset](./create_genie_space.md))
+- Access to the Kasal Workflow Designer
+- The GenieTool enabled for your workspace
 
 This guide explains how to run the **Genie-backed Kasal workflow** for the Superstore dataset.
 
@@ -11,7 +19,7 @@ Retrieve → Analyze → Write
 
 ---
 
-# Workflow Overview
+## Workflow overview
 
 The workflow uses four agents:
 
@@ -24,13 +32,13 @@ The workflow uses four agents:
 
 ---
 
-# Chapter 1 — Open the Workflow Designer
+## Chapter 1 — Open the workflow designer
 
 **Scene:** Sarah wants to answer a business question using sales data from the Superstore dataset.
 
 To begin, she opens the **Kasal Workflow Designer**.
 
-## Expected Result
+### Expected result
 
 You should see a **blank workflow canvas** with:
 
@@ -39,13 +47,13 @@ You should see a **blank workflow canvas** with:
 - Catalog
 - Chat panel
 
-## Screenshot
+### Screenshot
 
 ![Workflow Designer](images/workflow-designer-blank.png)
 
 ---
 
-# Chapter 2 — Create the Agents
+## Chapter 2 — Create the agents
 
 Sarah creates a small team of specialized agents.
 
@@ -53,7 +61,7 @@ Each agent has a clearly defined responsibility.
 
 ---
 
-## Agent 1 — Query Planner
+### Agent 1 — Query Planner
 
 Click:
 
@@ -79,7 +87,7 @@ Screenshot:
 
 ---
 
-## Agent 2 — Genie Retriever
+### Agent 2 — Genie Retriever
 
 Click:
 
@@ -111,7 +119,7 @@ Note: Ensure the Genie tool integration is enabled for this agent.
 
 ---
 
-## Agent 3 — Data Analyst
+### Agent 3 — Data Analyst
 
 Click:
 
@@ -133,7 +141,7 @@ Save the agent.
 
 ---
 
-## Agent 4 — Business Writer
+### Agent 4 — Business Writer
 
 Click:
 
@@ -155,7 +163,7 @@ Save the agent.
 
 ---
 
-# Chapter 3 — Add Tasks and Build the Workflow
+## Chapter 3 — Add tasks and build the workflow
 
 Sarah now creates the pipeline that connects the agents.
 
@@ -163,7 +171,7 @@ The workflow consists of four tasks.
 
 ---
 
-## Task 1 — Plan Genie Query
+### Task 1 — Plan Genie query
 
 Click:
 
@@ -185,7 +193,7 @@ Connect this task to the Query Planner agent.
 
 ---
 
-## Task 2 — Retrieve Data from Genie
+### Task 2 — Retrieve data from Genie
 
 Create another task.
 
@@ -209,7 +217,7 @@ Connect this task to Genie Retriever.
 
 ---
 
-## Task 3 — Post-process & Extract Insights
+### Task 3 — Post-process and extract insights
 
 Title: Post-process & Extract Insights
 
@@ -227,7 +235,7 @@ Connect this task to Data Analyst.
 
 ---
 
-## Task 4 — Write Executive Summary
+### Task 4 — Write executive summary
 
 Title: Write Executive Summary
 
@@ -245,7 +253,7 @@ Connect this task to Business Writer.
 
 ---
 
-# Connect the Workflow
+## Connect the workflow
 
 Link the tasks in order:
 
@@ -255,7 +263,7 @@ Plan Genie Query → Retrieve Data from Genie → Post-process & Extract Insight
 
 ---
 
-# Chapter 4 — Run the Workflow
+## Chapter 4 — Run the workflow
 
 Select your desired LLM model and click on the execution button
 
@@ -279,7 +287,7 @@ The workflow produces:
 
 ---
 
-# Enterprise Extensions
+## Enterprise extensions
 
 This workflow pattern can be extended to support enterprise analytics use cases such as:
 
@@ -290,7 +298,7 @@ This workflow pattern can be extended to support enterprise analytics use cases 
 
 ---
 
-# Chapter 5 — Inspect the Workflow Trace and Export Results
+## Chapter 5 — Inspect the workflow trace and export results
 
 After the workflow finishes running, Kasal provides detailed trace information that allows you to inspect how each agent executed its task and what outputs were produced at each stage.
 
@@ -302,7 +310,7 @@ This is particularly useful for:
 
 ---
 
-## Step 1 — Open the Execution Trace
+### Step 1 — Open the execution trace
 
 After the workflow finishes running, click the **Trace** button in the execution panel.
 
@@ -310,7 +318,7 @@ The trace view shows the internal execution flow of the workflow.
 
 ---
 
-## Step 2 — Inspect Each Workflow Step
+### Step 2 — Inspect each workflow step
 
 In the trace interface you can inspect each task executed by the agents.
 
@@ -338,7 +346,7 @@ This trace view allows you to verify that:
 
 ---
 
-## Step 3 — View the Final Result
+### Step 3 — View the final result
 
 Once the workflow finishes executing, the final result appears in the **Output panel**.
 
@@ -352,7 +360,7 @@ The output typically contains:
 
 ---
 
-## Step 4 — Export the Results as PDF
+### Step 4 — Export the results as PDF
 
 Kasal allows you to export the workflow output.
 
@@ -366,7 +374,7 @@ This feature allows teams to easily distribute results to:
 
 ---
 
-## Result
+### Result
 
 You now have a complete workflow that:
 
@@ -377,3 +385,11 @@ You now have a complete workflow that:
 5. produces a **shareable PDF report**
 
 This pattern demonstrates how Kasal workflows can transform enterprise data into actionable business insights.
+
+## Next steps
+
+- [Genie superstore insights blueprint](./README.md) — the full blueprint overview
+- [Creating a Genie Space for the Superstore dataset](./create_genie_space.md) — set up the Genie backend
+- [Crew export and deployment](../../crew-export-deployment.md) — ship this workflow as a Databricks App
+
+Back to the [documentation hub](../../README.md).

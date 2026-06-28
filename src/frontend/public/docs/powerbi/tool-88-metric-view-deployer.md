@@ -1,14 +1,14 @@
-# Tool 88 - Metric View Deployer
+# Tool 88 - metric view deployer
 
 **What it is:** Validates or deploys the UC Metric View YAML + SQL output from Tool 86 to a Databricks workspace via the UC REST API. Dry-run is the default - no deployment happens unless explicitly requested.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Tool 86 generates the YAML and SQL. Tool 88 is the "last mile" - it takes that output and either validates it (dry-run) or executes the `CREATE METRIC VIEW` statements in Databricks. The dry-run default gives the SA and customer an opportunity to review before anything is deployed.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Safe deployment:** Dry-run by default means no accidental production deployments
 - **YAML validation:** Checks structure, SQL syntax, and naming conventions before touching Databricks
@@ -17,9 +17,9 @@ Tool 86 generates the YAML and SQL. Tool 88 is the "last mile" - it takes that o
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Input: yaml_specs_json + sql_specs_json (from Tool 86 output)
     ↓
 If dry_run=true:
@@ -57,7 +57,7 @@ If dry_run=false:
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -98,7 +98,7 @@ For live deployment (after customer approval):
 
 ---
 
-## Example Output (Dry Run)
+## Example output (dry run)
 
 ```json
 {
@@ -131,15 +131,13 @@ For live deployment (after customer approval):
 
 ---
 
-## After Deployment
+## After deployment
 
 Verify the deployed metric views with:
 ```sql
 SHOW METRIC VIEWS IN my_catalog.metrics;
 SELECT MEASURE(Total_Revenue) FROM my_catalog.metrics.fact_sales_uc_metric_view GROUP BY Region;
 ```
-
-Or use the `deploy_test.py` script from the examples directory for smoke testing.
 
 ---
 
@@ -148,3 +146,12 @@ Or use the `deploy_test.py` script from the examples directory for smoke testing
 - Always run dry-run first and share the validation report with the customer before deploying
 - `409 Conflict` responses are handled automatically with an update attempt - safe to re-deploy after config changes
 - If a metric view fails to deploy, the others continue - per-view error reporting lets you fix and re-run specific views
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

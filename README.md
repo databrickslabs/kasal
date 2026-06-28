@@ -53,7 +53,7 @@ Create your first agent workflow in under 2 minutes:
 | **[Solution Architecture](src/docs/ARCHITECTURE_GUIDE.md)** | Layers, lifecycles, and platform integration |
 | **[Code Structure](src/docs/CODE_STRUCTURE_GUIDE.md)** | Where things live and how to navigate the repo |
 | **[Developer Guide](src/docs/DEVELOPER_GUIDE.md)** | Local setup, config, and extension patterns |
-| **[API Reference](src/docs/API_REFERENCE.md)** | REST endpoints, payloads, and errors |
+| **[API Reference](src/docs/api_endpoints.md)** | REST endpoints, payloads, and errors |
 
 ### More Documentation
 - **[Docs Hub](src/docs/README.md)** - Documentation index

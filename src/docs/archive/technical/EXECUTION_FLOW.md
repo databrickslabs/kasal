@@ -195,7 +195,7 @@ async def execute_agents(
 
 ### Step 5: Crew Preparation
 
-**Location**: `src/backend/src/engines/crewai/crew_preparation.py`
+**Location**: `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`
 
 ```python
 class CrewPreparation:
@@ -224,7 +224,7 @@ class CrewPreparation:
 
 ### Step 6: Execution Runner
 
-**Location**: `src/backend/src/engines/crewai/execution_runner.py`
+**Location**: `src/backend/src/engines/crewai/paths/crew/execution_runner.py`
 
 ```python
 async def run_crew(
@@ -856,6 +856,4 @@ export interface Trace {
 
 - [EVENT_TRACING.md](EVENT_TRACING.md) - Event capture details
 - [AGENT_TASK_LIFECYCLE.md](AGENT_TASK_LIFECYCLE.md) - Agent/task details
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [CREWAI_ENGINE.md](CREWAI_ENGINE.md) - Engine architecture
-- [UI_COMPONENTS.md](UI_COMPONENTS.md) - Frontend component architecture
+- [CrewAI engine layout](../../crewai-engine-refactor-proposal.md) - Engine architecture

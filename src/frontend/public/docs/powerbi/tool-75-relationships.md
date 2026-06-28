@@ -1,14 +1,14 @@
-# Tool 75 - Power BI Relationships Tool
+# Tool 75 - Power BI relationships tool
 
 **What it is:** Extracts the relationship graph from a Power BI semantic model and generates Unity Catalog `FOREIGN KEY` constraint DDL statements.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Power BI models define star/snowflake schema relationships between fact and dimension tables. These relationships are implicit in the model but need to be explicitly declared in Unity Catalog for lineage tracking, documentation, and to enable auto-join detection in Tool 86 (UC Metric View Generator).
 
-## What Problem It Solves
+## What problem it solves
 
 - **Join detection for UCMV:** Tool 86 uses relationships to automatically discover which dimension tables to join to each fact table - without Tool 75, the SA has to specify joins manually in the config
 - **Schema documentation:** Foreign key constraints in UC (even `NOT ENFORCED`) appear in Unity Catalog lineage and serve as self-documenting schema
@@ -16,9 +16,9 @@ Power BI models define star/snowflake schema relationships between fact and dime
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Connect to PBI Execute Queries API
     ↓
 Execute: EVALUATE INFO.VIEW.RELATIONSHIPS()
@@ -30,7 +30,7 @@ Generate: ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... NOT ENFORCED
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses: `POST /groups/{groupId}/datasets/{datasetId}/executeQueries`
 DAX: `EVALUATE INFO.VIEW.RELATIONSHIPS()`
@@ -61,7 +61,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -87,7 +87,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 ---
 
-## Example Output
+## Example output
 
 ```sql
 -- Relationship: Sales[CustomerID] → Customer[CustomerID]
@@ -107,7 +107,7 @@ NOT ENFORCED;
 
 ---
 
-## In the UCMV Pipeline
+## In the UCMV pipeline
 
 Tool 75 output (`relationships_json`) is **optional but highly recommended** for Tool 86. When provided:
 - Tool 86 automatically detects `enrichment_joins` (LEFT JOINs to dimension tables)
@@ -121,3 +121,13 @@ Tool 75 output (`relationships_json`) is **optional but highly recommended** for
 - FK constraints in Unity Catalog are `NOT ENFORCED` - they don't prevent bad data but provide metadata and enable lineage
 - System tables like `LocalDateTable_*` are skipped by default - they are PBI internal tables with no equivalent in Databricks
 - Inactive relationships (used in specific CALCULATE/USERELATIONSHIP DAX) are excluded by default; enable `include_inactive: true` if needed
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [Tool 90 - pipeline config generator](./tool-90-pipeline-config-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

@@ -1,23 +1,23 @@
-# Tool 74 - M-Query Conversion Pipeline
+# Tool 74 - M-Query conversion pipeline
 
 **What it is:** Extracts Power Query (M-Query) table source expressions from a Power BI model using the Admin Scanner API, then converts them to Databricks SQL `CREATE VIEW` statements.
 
 ---
 
-## Why It Exists
+## Why it exists
 
 Power BI semantic models don't just contain measures - they also define *where the data comes from* through M-Query expressions. These can be native SQL queries, Databricks catalog references, SQL Server connections, static tables, and more. When you migrate to Databricks, you need these source definitions recreated as SQL views in Unity Catalog. This tool automates that extraction and conversion.
 
-## What Problem It Solves
+## What problem it solves
 
 - **Without this tool:** An SA has to manually open Power BI Desktop for each table, read the M-Query expression, translate it to SQL, and create the view - hours of repetitive work per model
 - **With this tool:** The Admin Scanner API returns all M-Query expressions in one call; the tool converts them automatically
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 Connect to PBI Admin Scanner API (PostWorkspaceInfo)
     ↓
 Scan workspace metadata → extract all M-Query expressions per table
@@ -32,7 +32,7 @@ Emit CREATE VIEW statements for Unity Catalog
 
 ---
 
-## Microsoft API Reference
+## Microsoft API reference
 
 Uses (3-step process):
 1. `POST /admin/workspaces/getInfo` - initiate scan
@@ -66,9 +66,9 @@ This is the most complex auth setup - see [Authentication Setup](./01-authentica
 | `llm_token` | No | PAT for LLM |
 | `llm_model` | No | Model endpoint name |
 
-## Supported M-Query Expression Types
+## Supported M-Query expression types
 
-| Expression Type | Conversion Method | Example Output |
+| Expression type | Conversion method | Example output |
 |----------------|-------------------|----------------|
 | `Value.NativeQuery` | Direct SQL extraction | `CREATE VIEW ... AS SELECT ...` |
 | `DatabricksMultiCloud.Catalogs` | Direct catalog reference | `CREATE VIEW ... AS SELECT * FROM catalog.schema.table` |
@@ -78,7 +78,7 @@ This is the most complex auth setup - see [Authentication Setup](./01-authentica
 
 ---
 
-## Example Crew
+## Example crew
 
 ```json
 {
@@ -104,7 +104,7 @@ This is the most complex auth setup - see [Authentication Setup](./01-authentica
 
 ---
 
-## Example Output
+## Example output
 
 ```sql
 -- Table: Fact_Sales (NativeQuery)
@@ -120,7 +120,7 @@ SELECT * FROM my_catalog.raw.dim_customer;
 
 ---
 
-## In the UCMV Pipeline
+## In the UCMV pipeline
 
 Tool 74 is Phase 1 of the migration alongside Tool 73. Its output (`mquery_json`) feeds:
 - **Tool 86** (UC Metric View Generator) - source SQL for each fact table
@@ -134,3 +134,13 @@ Tool 74 is Phase 1 of the migration alongside Tool 73. Its output (`mquery_json`
 - **Admin API is required** - this cannot be done with a non-admin SP
 - If the Admin Portal settings haven't propagated yet (wait 15 min), you will get `401 Unauthorized`
 - Very complex M-Query transformations (custom functions, nested let expressions) benefit from enabling LLM fallback (`use_llm: true`)
+
+## See also
+
+- [Power BI integration hub](./README.md)
+- [Authentication and service principal setup](./01-authentication-setup.md)
+- [Tool 73 - measure conversion pipeline](./tool-73-measure-conversion.md)
+- [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
+- [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
+
+Back to the [Power BI integration hub](./README.md).

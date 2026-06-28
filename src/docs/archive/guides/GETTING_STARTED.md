@@ -165,5 +165,5 @@ If you encounter issues:
 
 ## Next Steps
 
-- Learn about [Kasal Architecture](ARCHITECTURE.md)
-- Explore the [CrewAI Engine](CREWAI_ENGINE.md) integration 
+- Learn about [Kasal Architecture](../../ARCHITECTURE_GUIDE.md)
+- Explore the [CrewAI Engine](../../crewai-engine-refactor-proposal.md) integration 

@@ -1,4 +1,4 @@
-# Kasal API Endpoints Reference
+# Kasal API endpoints reference
 
 Complete reference for all available API endpoints in the Kasal platform.
 
@@ -8,34 +8,34 @@ Complete reference for all available API endpoints in the Kasal platform.
 
 All API endpoints use the following base URL structure:
 
-```
+```text
 https://<your-app>.databricksapps.com/api/v1
 ```
 
 **Example:**
-```
+```text
 https://<your-app>.aws.databricksapps.com/api/v1/executions
 ```
 
 **Local Development:**
-```
+```text
 http://localhost:8000/api/v1
 ```
 
 ---
 
-## Table of Contents
+## Table of contents
 
 - [Authentication](#authentication)
-- [Crews (Workflows)](#crews-workflows)
+- [Crews (workflows)](#crews-workflows)
 - [Agents](#agents)
 - [Tasks](#tasks)
 - [Tools](#tools)
 - [Executions](#executions)
 - [Models](#models)
-- [API Keys](#api-keys)
-- [Power BI Integration](#power-bi-integration)
-- [Health & Status](#health--status)
+- [API keys](#api-keys)
+- [Power BI integration](#power-bi-integration)
+- [Health and status](#health-and-status)
 
 ---
 
@@ -49,15 +49,15 @@ http://localhost:8000/api/v1
 | `POST` | `/auth/refresh` | Refresh JWT token |
 
 **Authentication Header:**
-```
+```text
 Authorization: Bearer <JWT_TOKEN>
 ```
 
 ---
 
-## Crews (Workflows)
+## Crews (workflows)
 
-### Crew Management
+### Crew management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -68,7 +68,7 @@ Authorization: Bearer <JWT_TOKEN>
 | `DELETE` | `/crews/{id}` | Delete crew |
 | `POST` | `/crews/{id}/duplicate` | Duplicate crew with new name |
 
-### Crew Execution
+### Crew execution
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -77,7 +77,7 @@ Authorization: Bearer <JWT_TOKEN>
 | `GET` | `/crews/{id}/status` | Get crew execution status |
 | `POST` | `/crews/{id}/stop` | Stop running crew |
 
-### Crew Export/Import
+### Crew export/import
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -129,7 +129,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ## Tools
 
-### Tool Management
+### Tool management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -139,7 +139,7 @@ Authorization: Bearer <JWT_TOKEN>
 | `POST` | `/tools/{id}/enable` | Enable tool for workspace |
 | `POST` | `/tools/{id}/disable` | Disable tool for workspace |
 
-### Tool Categories
+### Tool categories
 
 **Available Tool Types:**
 - `ai`: AI-powered tools (Dall-E, Perplexity)
@@ -153,7 +153,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ## Executions
 
-### Execution Management
+### Execution management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -162,9 +162,10 @@ Authorization: Bearer <JWT_TOKEN>
 | `GET` | `/executions/{id}/status` | Get execution status |
 | `GET` | `/executions/{id}/logs` | Get execution logs |
 | `POST` | `/executions/{id}/stop` | Stop running execution |
+| `POST` | `/executions/{id}/force-stop` | Force-stop a running execution |
 | `DELETE` | `/executions/{id}` | Delete execution record |
 
-### Execution Status Values
+### Execution status values
 
 - `pending`: Execution queued
 - `running`: Execution in progress
@@ -172,11 +173,28 @@ Authorization: Bearer <JWT_TOKEN>
 - `failed`: Execution failed with error
 - `stopped`: Execution manually stopped
 
+### Execution traces
+
+Trace records capture per-agent / per-task events for a run.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/traces` | List execution traces |
+| `GET` | `/traces/{trace_id}` | Get a single trace item |
+| `GET` | `/traces/execution/{run_id}` | Traces for a run (by run id) |
+| `GET` | `/traces/job/{job_id}` | Traces for a job (by job id) |
+| `GET` | `/traces/job/{job_id}/crew-node-states` | Crew node states for a job |
+| `GET` | `/traces/job/{job_id}/task-states` | Task states for a job |
+| `POST` | `/traces` | Create a trace record |
+| `DELETE` | `/traces/{trace_id}` | Delete a trace item |
+| `DELETE` | `/traces/execution/{run_id}` | Delete traces for a run |
+| `DELETE` | `/traces/job/{job_id}` | Delete traces for a job |
+
 ---
 
 ## Models
 
-### Model Configuration
+### Model configuration
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -195,9 +213,9 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-## API Keys
+## API keys
 
-### API Key Management
+### API key management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -224,9 +242,9 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-## Power BI Integration
+## Power BI integration
 
-### Power BI Configuration
+### Power BI configuration
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -253,7 +271,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-## Health & Status
+## Health and status
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -264,9 +282,9 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-## Common Response Formats
+## Common response formats
 
-### Success Response
+### Success response
 
 ```json
 {
@@ -276,7 +294,7 @@ Authorization: Bearer <JWT_TOKEN>
 }
 ```
 
-### Error Response
+### Error response
 
 ```json
 {
@@ -293,7 +311,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 For list endpoints that support pagination:
 
-```
+```text
 GET /crews?page=1&limit=50&sort=created_at&order=desc
 ```
 
@@ -305,7 +323,7 @@ GET /crews?page=1&limit=50&sort=created_at&order=desc
 
 ---
 
-## Rate Limiting
+## Rate limiting
 
 **Default Limits:**
 - Anonymous: 100 requests/hour
@@ -313,7 +331,7 @@ GET /crews?page=1&limit=50&sort=created_at&order=desc
 - Enterprise: 10,000 requests/hour
 
 **Rate Limit Headers:**
-```
+```text
 X-RateLimit-Limit: 1000
 X-RateLimit-Remaining: 999
 X-RateLimit-Reset: 1609459200
@@ -321,7 +339,7 @@ X-RateLimit-Reset: 1609459200
 
 ---
 
-## Memory Management
+## Memory management
 
 ### GET /api/v1/memory/{crew_id}
 **Get crew memory (short-term and long-term)**
@@ -358,11 +376,11 @@ Response: 204 No Content
 
 ---
 
-## WebSocket Endpoints
+## WebSocket endpoints
 
-### Real-Time Execution Updates
+### Real-time execution updates
 
-```
+```text
 ws://localhost:8000/ws/executions/{execution_id}
 ```
 
@@ -381,7 +399,7 @@ ws://localhost:8000/ws/executions/{execution_id}
 
 ## Examples
 
-### Create and Execute a Crew
+### Create and execute a crew
 
 ```bash
 # 1. Create a crew
@@ -409,7 +427,7 @@ curl -X GET http://localhost:8000/api/v1/executions/exec_456/status \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Configure Power BI Tool in Task
+### Configure Power BI tool in task
 
 ```bash
 # Create task with PowerBI configuration
@@ -423,12 +441,12 @@ curl -X POST http://localhost:8000/api/v1/tasks \
     "tools": [71],
     "tool_configs": {
       "PowerBIAnalysisTool": {
-        "tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
-        "client_id": "7b597aac-de00-44c9-8e2a-3d2c345c36a9",
-        "semantic_model_id": "a17de62e-8dc0-4a8a-acaa-2a9954de8c75",
-        "workspace_id": "bcb084ed-f8c9-422c-b148-29839c0f9227",
+        "tenant_id": "<tenant-id>",
+        "client_id": "<client-id>",
+        "semantic_model_id": "<semantic-model-id>",
+        "workspace_id": "<workspace-id>",
         "auth_method": "service_principal",
-        "databricks_job_id": 365257288725339
+        "databricks_job_id": "<databricks-job-id>"
       }
     }
   }'
@@ -436,7 +454,7 @@ curl -X POST http://localhost:8000/api/v1/tasks \
 
 ---
 
-## Error Codes
+## Error codes
 
 | Code | Description |
 |------|-------------|
@@ -453,7 +471,7 @@ curl -X POST http://localhost:8000/api/v1/tasks \
 
 ---
 
-## SDK Examples
+## SDK examples
 
 ### Python SDK
 
@@ -511,14 +529,18 @@ console.log('Result:', result.output);
 
 ---
 
-## Additional Resources
+## Additional resources
 
 - **API Playground**: `/api/playground`
 - **OpenAPI Schema**: `/api/openapi.json`
 - **Swagger UI**: `/api/docs`
 - **ReDoc**: `/api/redoc`
 
-For more information, see:
-- [Power BI Integration Guide](powerbi_integration.md)
-- [Tool Configuration Guide](powerbi_analysis_tool_setup.md)
-- [Crew Deployment Guide](crew_export_deployment.md)
+## See also
+- [Power BI tools reference](./powerbi/README.md)
+- [Power BI comprehensive analysis tool](./powerbi/tool-72-comprehensive-analysis.md)
+- [Crew export and deployment guide](./crew-export-deployment.md)
+- [Developer guide](./DEVELOPER_GUIDE.md)
+- [Architecture guide](./ARCHITECTURE_GUIDE.md)
+
+Back to the [documentation hub](./README.md).

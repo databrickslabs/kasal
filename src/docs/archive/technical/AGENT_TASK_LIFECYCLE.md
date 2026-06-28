@@ -64,7 +64,7 @@ class Agent(Base):
 
 ### CrewAI Agents (Runtime Objects)
 
-**Location**: `src/backend/src/engines/crewai/helpers/agent_helpers.py`
+**Location**: `src/backend/src/engines/crewai/paths/crew/agent_adapter.py`
 
 ```python
 from crewai import Agent
@@ -132,7 +132,7 @@ Frontend sends agent configuration:
 
 ### 2. Preparation Phase
 
-**Location**: `src/backend/src/engines/crewai/crew_preparation.py`
+**Location**: `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`
 
 ```python
 async def _prepare_agents(self):
@@ -207,7 +207,7 @@ Frontend sends task configuration:
 
 ### 2. Task Creation
 
-**Location**: `src/backend/src/engines/crewai/helpers/task_helpers.py`
+**Location**: `src/backend/src/engines/crewai/paths/crew/task_adapter.py`
 
 ```python
 async def create_task(task_key, task_config, agent, tools):
@@ -493,4 +493,3 @@ logger.debug(f"Agent '{agent.role}' executing with {'tools' if agent.tools else 
 
 - [EVENT_TRACING.md](EVENT_TRACING.md) - Event capture and tracing
 - [EXECUTION_FLOW.md](EXECUTION_FLOW.md) - Complete execution flow
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
