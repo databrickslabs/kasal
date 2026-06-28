@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, within, act } from '@testing-library/react';
-import { renderWithChatTheme as render } from '../../chatTestRender';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';

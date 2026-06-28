@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { GenieTraceDetail, GenieAnswerCard, matchesGenieDetail } from './GenieTraceDetail';
 import { findInlineTraceRenderer } from './registry';
-import { renderWithChatTheme as render } from '../../../chatTestRender';
 
 // A full Genie tool result, in the labeled-section format the backend
 // (genie_tool.py) emits. "Open in Genie:" is on its own line here so it parses
@@ -116,7 +115,7 @@ describe('GenieTraceDetail (expanded pill view)', () => {
     expect(screen.getAllByText('120').length).toBeGreaterThan(0);
   });
 
-  it('falls back to a raw text block when Query Results is not a markdown table', () => {
+  it('falls back to a <pre> when Query Results is not a markdown table', () => {
     render(<GenieTraceDetail detail={'SQL Query:\nSELECT 1\n\nQuery Results:\nno rows returned'} />);
     expect(screen.getByText('no rows returned')).toBeInTheDocument();
   });

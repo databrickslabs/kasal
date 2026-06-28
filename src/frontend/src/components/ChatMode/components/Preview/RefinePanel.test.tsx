@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import RefinePanel from './RefinePanel';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 
 const baseProps = {
   deliverable: 'presentation',

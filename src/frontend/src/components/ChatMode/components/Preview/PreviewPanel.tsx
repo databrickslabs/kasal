@@ -1,7 +1,4 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { Menu, MenuItem } from '@mui/material';
-import Box from '@mui/material/Box';
-import { buttonResetSx, pulseSx } from '../../chatSx';
 import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
 import { toSurface } from '../../utils/surfaceAdapter';
 import { themeToDeck, getDeckTheme, DEFAULT_DECK_THEME_ID } from '../../../../shared/a2ui';
@@ -119,36 +116,6 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   return surface ? { type: 'ui', data: JSON.stringify(surface) } : null;
 }
 
-// Shared toolbar button styles — ALWAYS spread into a fresh `sx` literal at the
-// call site (`sx={{ ...iconBtnSx }}`), never passed directly, so inferred string
-// props don't widen out of SxProps. `iconBtnSx`: the 28×28 icon buttons;
-// `pillBtnSx`: the labelled Activity/Customize pills (caller adds bg + active color).
-const iconBtnSx = {
-  ...buttonResetSx,
-  width: 28,
-  height: 28,
-  borderRadius: '8px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  transition: 'color 0.15s, background-color 0.15s',
-  color: 'text.disabled',
-  '&:hover': { opacity: 0.7 },
-};
-const pillBtnSx = {
-  ...buttonResetSx,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 0.75,
-  height: 28,
-  px: 1.25,
-  borderRadius: '8px',
-  fontSize: 12,
-  fontWeight: 500,
-  transition: 'color 0.15s, background-color 0.15s',
-  '&:hover': { opacity: 0.8 },
-};
-
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat, embedded }) => {
   const [refineOpen, setRefineOpen] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
@@ -260,17 +227,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   };
 
   return (
-    <Box
-      component="aside"
+    <aside
       ref={asideRef}
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
+      className="flex flex-col h-full"
+      style={{
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
         minWidth: '300px',
-        backgroundColor: 'background.default',
-        ...(chatCollapsed ? {} : { borderLeft: 1, borderColor: 'divider' }),
+        backgroundColor: 'var(--bg-primary)',
+        borderLeft: chatCollapsed ? 'none' : '1px solid var(--border-color)',
       }}
     >
       {/* Header — hidden entirely in full screen for a chrome-free view (exit with
@@ -278,42 +242,34 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           provides its own title bar + controls, so a second header would just
           stack and steal vertical height (forcing a scroll). */}
       {!fullscreen && !embedded && (
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          px: 2,
-          py: 1.5,
-          flexShrink: 0,
-          borderBottom: 1,
-          borderColor: 'divider',
-        }}
+      <div
+        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border-color)' }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <div className="flex items-center gap-2">
           {/* Toggle chat button — only when there's a chat column beside the pane */}
           {onToggleChat && (
-          <Box
-            component="button"
+          <button
             onClick={onToggleChat}
-            sx={{ ...iconBtnSx }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
             title={chatCollapsed ? 'Show chat' : 'Hide chat'}
           >
             {/* The preview sits to the RIGHT of the chat, so expanding it to
                 full width grows LEFTWARD: "hide chat" points left (◀◀), and
                 restoring the chat points right (▶▶). */}
-            <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               {chatCollapsed ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" />
               ) : (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
               )}
-            </Box>
-          </Box>
+            </svg>
+          </button>
           )}
-          <Box
-            component="svg"
-            sx={{ width: 16, height: 16, color: 'primary.main' }}
+          <svg
+            className="w-4 h-4"
+            style={{ color: 'var(--accent)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -324,149 +280,173 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               strokeLinejoin="round"
               d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125"
             />
-          </Box>
-          <Box
-            component="span"
-            sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary' }}
+          </svg>
+          <span
+            className="text-sm font-medium"
+            style={{ color: 'var(--text-primary)' }}
           >
             {content.title || 'App'}
-          </Box>
-          <Box
-            component="span"
-            sx={{
-              fontSize: 10,
-              px: 0.75,
-              py: 0.25,
-              borderRadius: '4px',
-              fontFamily: 'monospace',
-              color: 'text.disabled',
-              backgroundColor: (t) => t.chat.bgSecondary,
+          </span>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+            style={{
+              color: 'var(--text-muted)',
+              backgroundColor: 'var(--bg-secondary)',
             }}
           >
             {content.type.toUpperCase()}
-          </Box>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
           {history && history.length > 1 && onNavigate && (() => {
             const current = index ?? history.length - 1;
             return (
-              <Box
-                sx={{ display: 'flex', alignItems: 'center', gap: 0.25, mr: 0.5, borderRadius: '8px', backgroundColor: (t) => t.chat.bgSecondary }}
+              <div
+                className="flex items-center gap-0.5 mr-1 rounded-lg"
+                style={{ backgroundColor: 'var(--bg-secondary)' }}
               >
-                <Box
-                  component="button"
+                <button
                   onClick={() => onNavigate(current - 1)}
                   disabled={current <= 0}
-                  sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.3, cursor: 'not-allowed' } }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--text-muted)' }}
                   title="Previous output"
                   aria-label="Previous output"
                 >
-                  <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                  </Box>
-                </Box>
-                <Box
-                  component="span"
-                  sx={{ fontSize: 11, fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums', px: 0.5, userSelect: 'none', color: 'text.disabled' }}
+                  </svg>
+                </button>
+                <span
+                  className="text-[11px] font-mono tabular-nums px-1 select-none"
+                  style={{ color: 'var(--text-muted)' }}
                   title="Task output (latest shown first)"
                 >
                   {current + 1}/{history.length}
-                </Box>
-                <Box
-                  component="button"
+                </span>
+                <button
                   onClick={() => onNavigate(current + 1)}
                   disabled={current >= history.length - 1}
-                  sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.3, cursor: 'not-allowed' } }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--text-muted)' }}
                   title="Next output"
                   aria-label="Next output"
                 >
-                  <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </Box>
-                </Box>
-              </Box>
+                  </svg>
+                </button>
+              </div>
             );
           })()}
           {runSteps.length > 0 && (
-            <Box
-              component="button"
+            <button
               onClick={toggleActivity}
-              sx={{ ...pillBtnSx, color: activityOpen ? 'primary.main' : 'text.secondary', backgroundColor: (t) => t.chat.bgSecondary }}
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+              style={{
+                color: activityOpen ? 'var(--accent)' : 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-secondary)',
+              }}
               title="Show the run activity timeline (steps + context)"
               aria-pressed={activityOpen}
             >
-              <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008zM8.25 6.75h12M8.25 12h12m-12 5.25h12" />
-              </Box>
+              </svg>
               Activity
-            </Box>
+            </button>
           )}
           {onRefine && (
-            <Box
-              component="button"
+            <button
               onClick={() => setRefineOpen((v) => !v)}
-              sx={{ ...pillBtnSx, color: refineOpen ? 'primary.main' : 'text.secondary', backgroundColor: (t) => t.chat.bgSecondary }}
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+              style={{
+                color: refineOpen ? 'var(--accent)' : 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-secondary)',
+              }}
               title="Customize the look and content of this result"
             >
-              <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </Box>
+              </svg>
               Customize
-            </Box>
+            </button>
           )}
-          <Box
-            component="button"
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => setDownloadAnchor(e.currentTarget)}
-            disabled={downloading}
-            sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.4, cursor: 'wait' } }}
-            title="Download"
-            aria-label="Download"
-            aria-haspopup="menu"
-          >
-            <Box
-              component="svg"
-              sx={{ width: 16, height: 16, ...(downloading ? pulseSx : {}) }}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+          {/* The download is a small menu (PDF / PowerPoint) anchored under its
+              button. `downloadAnchor` doubles as the open flag; a transparent
+              backdrop catches the click-away to close. */}
+          <div className="relative">
+            <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => setDownloadAnchor(e.currentTarget)}
+              disabled={downloading}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-40 disabled:cursor-wait"
+              style={{ color: 'var(--text-muted)' }}
+              title="Download"
+              aria-label="Download"
+              aria-haspopup="menu"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </Box>
-          </Box>
-          <Menu
-            anchorEl={downloadAnchor}
-            open={Boolean(downloadAnchor)}
-            onClose={() => setDownloadAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          >
-            <MenuItem onClick={() => runDownload('pdf')}>PDF</MenuItem>
-            <MenuItem onClick={() => runDownload('pptx')}>PowerPoint</MenuItem>
-          </Menu>
+              <svg
+                className={`w-4 h-4 ${downloading ? 'animate-pulse' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </button>
+            {Boolean(downloadAnchor) && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setDownloadAnchor(null)} />
+                <div
+                  role="menu"
+                  className="kasal-popover absolute right-0 top-full mt-1 z-50 min-w-[8rem] rounded-lg py-1"
+                  style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => runDownload('pdf')}
+                    className="block w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-rail-hover)]"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => runDownload('pptx')}
+                    className="block w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-rail-hover)]"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    PowerPoint
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           {!embedded && (
-          <Box
-            component="button"
+          <button
             onClick={enterFullscreen}
-            sx={{ ...iconBtnSx }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
             title="Full screen"
             aria-label="Full screen"
           >
-            <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25h-4.5m4.5 0v4.5m0-4.5L15 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-            </Box>
-          </Box>
+            </svg>
+          </button>
           )}
           {!embedded && (
-          <Box
-            component="button"
+          <button
             onClick={onClose}
-            sx={{ ...iconBtnSx }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
             title="Close preview"
           >
-            <Box
-              component="svg"
-              sx={{ width: 16, height: 16 }}
+            <svg
+              className="w-4 h-4"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -477,11 +457,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
                 strokeLinejoin="round"
                 d="M6 18L18 6M6 6l12 12"
               />
-            </Box>
-          </Box>
+            </svg>
+          </button>
           )}
-        </Box>
-      </Box>
+        </div>
+      </div>
       )}
 
       {/* Customize panel — instant "Look" (deterministic) + AI "Content" refine */}
@@ -502,78 +482,76 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           activity list or a step's context (LogSurface, minHeight:100%) is open it
           REPLACES the deliverable, and those need the natural scrolling box —
           otherwise the fit container collapses/clips them to an empty pane. */}
-      <Box
+      <div
         data-testid="preview-body"
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          ...(fitDeck && !activityOpen && !activeStep
-            ? { overflow: 'hidden', display: 'flex', flexDirection: 'column' }
-            : { overflow: 'auto' }),
-        }}
+        className={`flex-1 min-h-0 ${
+          fitDeck && !activityOpen && !activeStep
+            ? 'overflow-hidden flex flex-col'
+            : 'overflow-auto'
+        }`}
       >
         {/* Run activity — collapsed above the result so it's never lost. The list
             shows plain-English steps; clicking one opens its context full-page. */}
         {runSteps.length > 0 && !fullscreen && (
-          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <div style={{ borderBottom: '1px solid var(--border-color)' }}>
             {activeStep ? (
               // Detail header: a Back affordance to return to the step list.
-              <Box
-                component="button"
+              <button
                 type="button"
                 onClick={() => setActiveStep(null)}
-                sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 0.75, width: '100%', px: 2, py: 1, textAlign: 'left', fontSize: 11, fontWeight: 500, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
+                className="flex items-center gap-1.5 w-full px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+                style={{ color: 'var(--text-muted)' }}
                 aria-label="Back to the run activity"
               >
-                <Box component="svg" sx={{ width: 12, height: 12, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                </Box>
+                </svg>
                 Back · {friendlyStep(activeStep.label)}
-              </Box>
+              </button>
             ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Box
-                  component="button"
+              <div className="flex items-center">
+                <button
                   type="button"
                   onClick={toggleActivity}
-                  sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 0.75, flex: 1, px: 2, py: 1, textAlign: 'left', fontSize: 11, fontWeight: 500, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
+                  className="flex items-center gap-1.5 flex-1 px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-muted)' }}
                   aria-expanded={activityOpen}
                 >
-                  <Box
-                    component="svg"
-                    sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  <svg
+                    className="w-3 h-3 flex-shrink-0 transition-transform"
+                    style={{ transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </Box>
+                  </svg>
                   Run activity · {runSteps.length} step{runSteps.length === 1 ? '' : 's'}
-                </Box>
+                </button>
                 {onMoveActivityToChat && (
-                  <Box
-                    component="button"
+                  <button
                     type="button"
                     onClick={onMoveActivityToChat}
-                    sx={{ ...buttonResetSx, px: 1.5, py: 1, fontSize: 11, flexShrink: 0, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
+                    className="px-3 py-2 text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+                    style={{ color: 'var(--text-muted)' }}
                     title="Show the activity in the chat instead"
                   >
                     Show in chat
-                  </Box>
+                  </button>
                 )}
-              </Box>
+              </div>
             )}
             {activityOpen && !activeStep && (
-              <Box sx={{ px: 2, pb: 1.5 }}>
+              <div className="px-4 pb-3">
                 <ThinkingStream steps={runSteps} onSelect={setActiveStep} />
-              </Box>
+              </div>
             )}
-          </Box>
+          </div>
         )}
         {/* A chosen step's context, on its own full page (replaces the deliverable
             and fills the pane). */}
         {activeStep && (
-          <Box data-testid="run-step-context" sx={{ minHeight: '100%' }}>
+          <div data-testid="run-step-context" style={{ minHeight: '100%' }}>
             <LogSurface body={activeStep.detail || ''} />
-          </Box>
+          </div>
         )}
         {/* When the activity is open (list or detail) it REPLACES the deliverable
             — the pane shows one or the other, never stacked. */}
@@ -587,15 +565,15 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           // A deck gets a flex-fill wrapper + `fit` so it letterboxes to the height;
           // other surfaces render naturally inside the scrolling content area.
           fitDeck ? (
-            <Box sx={{ flex: 1, minHeight: 0, display: 'flex', p: 1.5 }}>
+            <div className="flex-1 min-h-0 flex p-3">
               <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads fit />
-            </Box>
+            </div>
           ) : (
             <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
           )
         )}
-      </Box>
-    </Box>
+      </div>
+    </aside>
   );
 };
 

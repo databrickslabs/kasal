@@ -1,8 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Box from '@mui/material/Box';
-import { chatMarkdownSx } from '../../chatSx';
 
 interface HelpCardProps {
   content: string;
@@ -10,21 +8,17 @@ interface HelpCardProps {
 
 const HelpCard: React.FC<HelpCardProps> = ({ content }) => {
   return (
-    <Box
-      data-testid="help-card"
-      sx={{
-        borderRadius: '12px',
-        p: 2,
-        my: 1.5,
-        backgroundColor: 'background.paper',
-        border: 1,
-        borderColor: 'divider',
+    <div
+      className="rounded-xl p-4 my-3"
+      style={{
+        backgroundColor: 'var(--bg-input)',
+        border: '1px solid var(--border-color)',
       }}
     >
-      <Box sx={{ ...chatMarkdownSx, maxWidth: 'none' }}>
+      <div className="prose prose-sm max-w-none">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </Box>
-    </Box>
+      </div>
+    </div>
   );
 };
 

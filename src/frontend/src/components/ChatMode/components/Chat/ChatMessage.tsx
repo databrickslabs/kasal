@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import Box from '@mui/material/Box';
-import { buttonResetSx, fadeInSx } from '../../chatSx';
+import { Maximize2 } from 'lucide-react';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
 import {
   CatalogListResult,
@@ -31,43 +30,8 @@ import CrewActionsBar from '../Cards/CrewActionsBar';
 import { DetectedVariable } from '../../utils/variableDetector';
 import { type Surface } from '../../../../shared/a2ui';
 import { useExecutionStore } from '../../store/executionStore';
-import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import A2uiSurface from './A2uiSurface';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
-
-/**
- * 12px / 14px ring spinner used in the card "save" button + the trace pills.
- * The Tailwind `border-t-transparent` utility is `!important` (the chat scopes
- * every utility with `important: '.kasal-chat-root'`), so it always beat the
- * inline accent top-border — i.e. the top has always rendered transparent;
- * reproduced faithfully here. Spread into a `<Box>`'s sx and add width/height
- * (+ `flexShrink: 0` for the trace pills).
- */
-const cardSpinnerSx = {
-  borderRadius: '9999px',
-  border: '2px solid',
-  borderColor: 'divider',
-  borderTopColor: 'transparent',
-  animation: 'kasalSpin 1s linear infinite',
-  '@keyframes kasalSpin': { to: { transform: 'rotate(360deg)' } },
-} as const;
-
-/**
- * Tailwind `animate-bounce`, reproduced for the assistant "typing" dots (no
- * shared atom exists for bounce). Spread into each dot's sx; the 2nd/3rd dots
- * add their own `animationDelay`.
- */
-const bounceDotSx = {
-  width: 6,
-  height: 6,
-  borderRadius: '9999px',
-  backgroundColor: 'primary.main',
-  animation: 'kasalBounce 1s infinite',
-  '@keyframes kasalBounce': {
-    '0%, 100%': { transform: 'translateY(-25%)', animationTimingFunction: 'cubic-bezier(0.8, 0, 1, 1)' },
-    '50%': { transform: 'none', animationTimingFunction: 'cubic-bezier(0, 0, 0.2, 1)' },
-  },
-} as const;
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -102,6 +66,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   // (it shows a compact "opened in panel" note instead) so it isn't visible twice.
   const previewPaneOpen = useExecutionStore((s) => s.previewPaneOpen);
   const previewSourceMessageId = useExecutionStore((s) => s.previewSourceMessageId);
+
   const renderRichContent = () => {
     if (!message.resultType || !message.resultData) return null;
 
@@ -246,44 +211,29 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         // a "Show here" action (which closes the pane) stands in for it.
         if (previewPaneOpen && previewSourceMessageId === message.id) {
           return (
-            <Box
-              sx={{
-                mt: 1.5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                borderRadius: '8px',
-                px: 1.5,
-                py: 1,
-                fontSize: 12,
-                backgroundColor: 'background.default',
-                border: 1,
-                borderColor: 'divider',
-                color: 'text.secondary',
+            <div
+              className="mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+              style={{
+                backgroundColor: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-secondary)',
               }}
             >
-              <OpenInFullIcon sx={{ fontSize: 15, color: 'primary.main' }} />
+              <Maximize2 size={15} className="flex-shrink-0" style={{ color: 'var(--accent)' }} />
               <span>Opened in the side panel</span>
-              <Box
-                component="button"
+              <button
                 type="button"
                 onClick={() => useExecutionStore.getState().clearPreview()}
-                sx={{
-                  ...buttonResetSx,
-                  ml: 'auto',
-                  fontWeight: 500,
-                  transition: 'color 0.15s, background-color 0.15s',
-                  color: 'primary.main',
-                  '&:hover': { opacity: 0.8 },
-                }}
+                className="ml-auto font-medium transition-colors hover:opacity-80"
+                style={{ color: 'var(--accent)' }}
               >
                 Show here
-              </Box>
-            </Box>
+              </button>
+            </div>
           );
         }
         return (
-          <Box sx={{ mt: 1.5 }}>
+          <div className="mt-3">
             <A2uiSurface
               surface={a2uiSurface}
               onExpand={() =>
@@ -297,7 +247,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               // PDF alongside the shared PowerPoint export.
               onDownloadPdf={() => downloadSurfacePdf(a2uiSurface, 'presentation')}
             />
-          </Box>
+          </div>
         );
       }
       default:
@@ -311,98 +261,86 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
   if (isSystem) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', my: 2, ...fadeInSx }}>
-        <Box
-          component="span"
-          sx={{
-            fontSize: 11,
-            px: 1.5,
-            py: 0.75,
-            borderRadius: '9999px',
-            fontWeight: 500,
-            color: 'text.disabled',
-            backgroundColor: (t) => t.chat.bgSecondary,
+      <div className="flex justify-center my-4 animate-fade-in">
+        <span
+          className="text-[11px] px-3 py-1.5 rounded-full font-medium"
+          style={{
+            color: 'var(--text-muted)',
+            backgroundColor: 'var(--bg-secondary)',
           }}
         >
           {message.content}
-        </Box>
-      </Box>
+        </span>
+      </div>
     );
   }
 
   if (isUser) {
     const attachments = message.attachments || [];
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2.5, px: 2, ...fadeInSx }}>
-        <Box sx={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.75 }}>
-          <Box
-            sx={{
-              borderRadius: '24px',
-              borderBottomRightRadius: '8px',
-              px: 2.5,
-              py: 1.5,
-              backgroundColor: (t) => t.chat.bgUserMsg,
-            }}
+      <div className="flex justify-end mb-5 px-4 animate-fade-in">
+        <div className="max-w-[75%] flex flex-col items-end gap-1.5">
+          <div
+            className="rounded-3xl rounded-br-lg px-5 py-3"
+            style={{ backgroundColor: 'var(--bg-user-msg)' }}
           >
-            <Box sx={{ fontSize: 15, lineHeight: 1.625, color: 'text.primary' }}>
+            <div className="text-[15px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
               {message.content}
-            </Box>
-          </Box>
+            </div>
+          </div>
           {attachments.length > 0 && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, justifyContent: 'flex-end' }}>
+            <div className="flex flex-wrap gap-1.5 justify-end">
               {attachments.map((name, i) => (
-                <Box
-                  component="span"
+                <span
                   key={`${name}-${i}`}
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    borderRadius: '8px',
-                    px: 1,
-                    py: 0.5,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    backgroundColor: (t) => t.chat.bgSecondary,
-                    color: 'text.secondary',
-                  }}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium"
+                  style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                   title={name}
                 >
-                  <Box component="svg" sx={{ width: 12, height: 12, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                  <svg className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                  </Box>
-                  <Box component="span" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</Box>
-                </Box>
+                  </svg>
+                  <span className="max-w-[160px] truncate">{name}</span>
+                </span>
               ))}
-            </Box>
+            </div>
           )}
-        </Box>
-      </Box>
+        </div>
+      </div>
     );
   }
 
   // Assistant message
   return (
-    <Box sx={{ mb: 2.5, px: 2, ...fadeInSx }}>
-      <Box sx={{ maxWidth: '85%' }}>
+    <div className="mb-5 px-4 animate-fade-in">
+      <div className="max-w-[85%]">
         {/* Loading indicator */}
         {message.isStreaming && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1, ml: 0.5 }}>
-            <Box sx={{ ...bounceDotSx }} />
-            <Box sx={{ ...bounceDotSx, animationDelay: '0.15s' }} />
-            <Box sx={{ ...bounceDotSx, animationDelay: '0.3s' }} />
-          </Box>
+          <div className="flex items-center gap-1.5 mb-2 ml-1">
+            <div
+              className="w-1.5 h-1.5 rounded-full animate-bounce"
+              style={{ backgroundColor: 'var(--accent)' }}
+            />
+            <div
+              className="w-1.5 h-1.5 rounded-full animate-bounce"
+              style={{ backgroundColor: 'var(--accent)', animationDelay: '0.15s' }}
+            />
+            <div
+              className="w-1.5 h-1.5 rounded-full animate-bounce"
+              style={{ backgroundColor: 'var(--accent)', animationDelay: '0.3s' }}
+            />
+          </div>
         )}
 
         {message.content && (
-          <Box sx={{ fontSize: 15, lineHeight: 1.7, color: 'text.primary' }}>
+          <div className="text-[15px] leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
             <MessageContent content={message.content} />
-          </Box>
+          </div>
         )}
 
         {renderRichContent()}
-      </Box>
-    </Box>
+      </div>
+    </div>
   );
 };
 
@@ -608,108 +546,101 @@ export const GenerationCompleteCard: React.FC<{
   const { groups, orphanTasks } = groupTasksUnderAgents(agents, tasks);
 
   return (
-    <Box sx={{ mt: 1.5, '& > * + *': { mt: 1.5 } }}>
+    <div className="mt-3 space-y-3">
       {/* Header: agent count + subtle "save to catalog" bookmark */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 0.5 }}>
+      <div className="flex items-center justify-between px-1">
         {agents.length > 0 || tasks.length > 0 ? (
-          <Box
-            sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.disabled' }}
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
           >
             {[
               agents.length > 0 ? `${agents.length} Agent${agents.length > 1 ? 's' : ''}` : '',
               tasks.length > 0 ? `${tasks.length} Task${tasks.length > 1 ? 's' : ''}` : '',
             ].filter(Boolean).join(' · ')}
-          </Box>
+          </div>
         ) : <span />}
 
         {canSave && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <div className="flex items-center gap-1.5">
             {saveState === 'saved' && (
-              <Box component="span" sx={{ fontSize: 10, color: 'text.disabled' }}>
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Saved “{savedName}” to catalog
-              </Box>
+              </span>
             )}
             {saveState === 'exists' && (
-              <Box component="span" sx={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.disabled' }}>
+              <span className="text-[10px] flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
                 Already in catalog
-                <Box
-                  component="button"
+                <button
                   type="button"
                   onClick={() => handleSave(true)}
-                  sx={{ ...buttonResetSx, fontWeight: 500, transition: 'opacity 0.15s', color: 'primary.main', '&:hover': { opacity: 0.7 } }}
+                  className="font-medium transition-opacity hover:opacity-70"
+                  style={{ color: 'var(--accent)' }}
                 >
                   Overwrite
-                </Box>
-              </Box>
+                </button>
+              </span>
             )}
             {saveState === 'error' && (
-              <Box component="span" sx={{ fontSize: 10, color: '#fb7185' }}>
+              <span className="text-[10px]" style={{ color: 'var(--bad, #fb7185)' }}>
                 Couldn’t save — try again
-              </Box>
+              </span>
             )}
-            <Box
-              component="button"
+            <button
               type="button"
               onClick={() => handleSave()}
               disabled={saveState === 'saving' || saveState === 'saved'}
               title={saveState === 'saved' ? 'Saved to catalog' : 'Save this crew to the catalog'}
               aria-label={saveState === 'saved' ? 'Saved to catalog' : 'Save crew to catalog'}
-              sx={{
-                ...buttonResetSx,
-                width: 24,
-                height: 24,
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'color 0.15s, background-color 0.15s',
-                color: saveState === 'saved' ? 'primary.main' : 'text.disabled',
-                '&:hover': { opacity: 0.7 },
-              }}
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:opacity-70 disabled:cursor-default"
+              style={{ color: saveState === 'saved' ? 'var(--accent)' : 'var(--text-muted)' }}
             >
               {saveState === 'saving' ? (
-                <Box sx={{ ...cardSpinnerSx, width: 14, height: 14 }} />
+                <div
+                  className="w-3.5 h-3.5 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+                />
               ) : (
-                <Box
-                  component="svg"
-                  sx={{ width: 16, height: 16 }}
+                <svg
+                  className="w-4 h-4"
                   viewBox="0 0 24 24"
                   fill={saveState === 'saved' ? 'currentColor' : 'none'}
                   stroke="currentColor"
                   strokeWidth={2}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
-                </Box>
+                </svg>
               )}
-            </Box>
-          </Box>
+            </button>
+          </div>
         )}
-      </Box>
+      </div>
 
       {/* Crew: each agent with its assigned task(s) nested beneath it */}
       {groups.map(({ agent, agentIndex, tasks: agentTasks }) => (
-        <Box key={`agent-${agentIndex}`} sx={{ '& > * + *': { mt: 1 } }}>
+        <div key={`agent-${agentIndex}`} className="space-y-2">
           <AgentRow agent={agent} index={agentIndex} toolNameMap={toolNameMap} taskCount={agentTasks.length} />
           {agentTasks.length > 0 && (
-            <Box sx={{ ml: 1.5, pl: 1.5, '& > * + *': { mt: 1 }, borderLeft: 2, borderColor: 'divider' }}>
+            <div className="ml-3 pl-3 space-y-2" style={{ borderLeft: '2px solid var(--border-color)' }}>
               {agentTasks.map(({ task, taskIndex }) => (
                 <TaskRow key={`task-${taskIndex}`} task={task} index={taskIndex} toolNameMap={toolNameMap} />
               ))}
-            </Box>
+            </div>
           )}
-        </Box>
+        </div>
       ))}
 
       {/* Tasks with no resolvable agent (or a tasks-only crew) — never dropped */}
       {orphanTasks.length > 0 && (
         <>
-          <Box
-            sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', px: 0.5, mt: 0.5, color: 'text.disabled' }}
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wider px-1 mt-1"
+            style={{ color: 'var(--text-muted)' }}
           >
             {agents.length > 0
               ? 'Other tasks'
               : `${orphanTasks.length} Task${orphanTasks.length > 1 ? 's' : ''}`}
-          </Box>
+          </div>
           {orphanTasks.map(({ task, taskIndex }) => (
             <TaskRow key={`orphan-${taskIndex}`} task={task} index={taskIndex} toolNameMap={toolNameMap} />
           ))}
@@ -719,7 +650,7 @@ export const GenerationCompleteCard: React.FC<{
       {/* Genie Space selector + Run — only when GenieTool is in the crew's tools.
           Genie crews aren't auto-run; the user picks a space here then runs. */}
       {showGenieSelector && onExecute && (
-        <Box sx={{ pt: 0.5, '& > * + *': { mt: 1 } }}>
+        <div className="pt-1 space-y-2">
           <GenieSpaceSelector
             value={selectedSpaceId}
             onChange={(v) => {
@@ -727,8 +658,7 @@ export const GenerationCompleteCard: React.FC<{
               persistGenie({ spaceId: v });
             }}
           />
-          <Box
-            component="button"
+          <button
             type="button"
             onClick={() => {
               // Button is disabled until a space is chosen and after it runs,
@@ -738,35 +668,17 @@ export const GenerationCompleteCard: React.FC<{
               onExecute(data, selectedSpaceId);
             }}
             disabled={!selectedSpaceId || ran}
-            sx={{
-              ...buttonResetSx,
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 1,
-              borderRadius: '8px',
-              px: 1.5,
-              py: 1,
-              fontSize: 14,
-              fontWeight: 500,
-              transition: 'all 0.15s',
-              backgroundColor: (t) => t.chat.bgSecondary,
-              color: 'text.secondary',
-              border: 1,
-              borderColor: 'divider',
-              '&:hover': { opacity: 0.8 },
-              '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
-            }}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
           >
-            <Box component="svg" sx={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
-            </Box>
+            </svg>
             {ran ? 'Running…' : selectedSpaceId ? 'Run crew' : 'Select a Genie space to run'}
-          </Box>
-        </Box>
+          </button>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 
@@ -803,14 +715,14 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
       : undefined;
   if (Inline) {
     return (
-      <Box sx={{ px: 2, my: 0.5, ...fadeInSx }}>
+      <div className="px-4 my-1 animate-fade-in">
         <Inline
           detail={data.detail as string}
           label={data.label}
           sublabel={data.sublabel}
           durationMs={data.durationMs}
         />
-      </Box>
+      </div>
     );
   }
 
@@ -823,37 +735,27 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
       : null;
 
   return (
-    <Box sx={{ px: 2, my: 0.5, ...fadeInSx }}>
-      <Box
-        component="button"
+    <div className="px-4 my-1 animate-fade-in">
+      <button
         type="button"
         onClick={() => hasDetail && setOpen((v) => !v)}
+        className="flex items-center gap-2 text-left rounded-lg px-3 py-1.5 w-full max-w-[85%] transition-colors hover:opacity-90"
         disabled={!hasDetail}
-        sx={{
-          ...buttonResetSx,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          textAlign: 'left',
-          borderRadius: '8px',
-          px: 1.5,
-          py: 0.75,
-          width: '100%',
-          maxWidth: '85%',
-          transition: 'color 0.15s, background-color 0.15s',
-          backgroundColor: (t) => t.chat.bgSecondary,
-          border: 1,
-          borderColor: 'divider',
+        style={{
+          backgroundColor: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
           cursor: hasDetail ? 'pointer' : 'default',
-          '&:hover': { opacity: 0.9 },
         }}
       >
         {isPending ? (
-          <Box sx={{ ...cardSpinnerSx, width: 12, height: 12, flexShrink: 0 }} />
+          <div
+            className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
+            style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+          />
         ) : (
-          <Box
-            component="svg"
-            sx={{ width: 14, height: 14, flexShrink: 0, color: data.kind === 'event' ? 'text.disabled' : 'primary.main' }}
+          <svg
+            className="w-3.5 h-3.5 flex-shrink-0"
+            style={{ color: data.kind === 'event' ? 'var(--text-muted)' : 'var(--accent)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -864,38 +766,41 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
             ) : (
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             )}
-          </Box>
+          </svg>
         )}
-        <Box component="span" sx={{ fontSize: 12, fontWeight: 500, color: 'text.primary' }}>
+        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
           {data.label}
-        </Box>
+        </span>
         {data.sublabel && (
-          <Box component="span" sx={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280, color: 'text.disabled' }}>
+          <span className="text-xs font-mono truncate max-w-[280px]" style={{ color: 'var(--text-muted)' }}>
             {data.sublabel}
-          </Box>
+          </span>
         )}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto', flexShrink: 0 }}>
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
           {durationLabel && (
-            <Box component="span" sx={{ fontSize: 10, fontFamily: 'monospace', color: 'text.disabled' }}>
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
               · {durationLabel}
-            </Box>
+            </span>
           )}
           {hasDetail && (
-            <Box
-              component="svg"
-              sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            <svg
+              className="w-3 h-3 flex-shrink-0 transition-transform"
+              style={{
+                color: 'var(--text-muted)',
+                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </Box>
+            </svg>
           )}
-        </Box>
-      </Box>
-      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indent={1.5} />}
-    </Box>
+        </div>
+      </button>
+      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indentClass="ml-3" />}
+    </div>
   );
 };
 
@@ -910,51 +815,38 @@ const TraceGroupChild: React.FC<{ data: TraceEntryData }> = ({ data }) => {
 
   return (
     <div>
-      <Box
-        component="button"
+      <button
         type="button"
         onClick={() => hasDetail && setOpen((v) => !v)}
         disabled={!hasDetail}
-        sx={{
-          ...buttonResetSx,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          textAlign: 'left',
-          borderRadius: '6px',
-          px: 1,
-          py: 0.5,
-          width: '100%',
-          transition: 'color 0.15s, background-color 0.15s',
-          cursor: hasDetail ? 'pointer' : 'default',
-          '&:hover': { opacity: 0.9 },
-        }}
+        className="flex items-center gap-2 text-left rounded-md px-2 py-1 w-full transition-colors hover:opacity-90"
+        style={{ cursor: hasDetail ? 'pointer' : 'default' }}
       >
-        <Box
-          component="span"
-          sx={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'text.primary' }}
+        <span
+          className="text-xs font-mono truncate flex-1"
+          style={{ color: 'var(--text-primary)' }}
         >
           {text}
-        </Box>
+        </span>
         {durationLabel && (
-          <Box component="span" sx={{ fontSize: 10, fontFamily: 'monospace', flexShrink: 0, color: 'text.disabled' }}>
+          <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
             · {durationLabel}
-          </Box>
+          </span>
         )}
         {hasDetail && (
-          <Box
-            component="svg"
-            sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          <svg
+            className="w-3 h-3 flex-shrink-0 transition-transform"
+            style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </Box>
+          </svg>
         )}
-      </Box>
-      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indent={1} />}
+      </button>
+      {open && data.detail && <TraceDetail detail={data.detail} label={data.label} indentClass="ml-2" />}
     </div>
   );
 };
@@ -976,92 +868,84 @@ export const TraceGroupMessage: React.FC<{ label: string; traces: TraceEntryData
   const anyPending = traces.some((t) => t.kind === 'tool_call' && t.durationMs === undefined);
 
   return (
-    <Box sx={{ px: 2, my: 0.5, ...fadeInSx }}>
-      <Box
-        component="button"
+    <div className="px-4 my-1 animate-fade-in">
+      <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        sx={{
-          ...buttonResetSx,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          textAlign: 'left',
-          borderRadius: '8px',
-          px: 1.5,
-          py: 0.75,
-          width: '100%',
-          maxWidth: '85%',
-          transition: 'color 0.15s, background-color 0.15s',
-          backgroundColor: (t) => t.chat.bgSecondary,
-          border: 1,
-          borderColor: 'divider',
+        className="flex items-center gap-2 text-left rounded-lg px-3 py-1.5 w-full max-w-[85%] transition-colors hover:opacity-90"
+        style={{
+          backgroundColor: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
           cursor: 'pointer',
-          '&:hover': { opacity: 0.9 },
         }}
       >
         {anyPending ? (
-          <Box data-testid="trace-group-spinner" sx={{ ...cardSpinnerSx, width: 12, height: 12, flexShrink: 0 }} />
+          <div
+            data-testid="trace-group-spinner"
+            className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
+            style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+          />
         ) : (
-          <Box
-            component="svg"
-            sx={{ width: 14, height: 14, flexShrink: 0, color: 'primary.main' }}
+          <svg
+            className="w-3.5 h-3.5 flex-shrink-0"
+            style={{ color: 'var(--accent)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-          </Box>
+          </svg>
         )}
-        <Box component="span" sx={{ fontSize: 12, fontWeight: 500, color: 'text.primary' }}>
+        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
           {label}
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto', flexShrink: 0 }}>
-          <Box component="span" sx={{ fontSize: 12, fontFamily: 'monospace', color: 'text.disabled' }}>
+        </span>
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+          <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
             · {count} calls
-          </Box>
+          </span>
           {totalMs > 0 && totalLabel && (
-            <Box component="span" sx={{ fontSize: 10, fontFamily: 'monospace', color: 'text.disabled' }}>
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
               · {totalLabel}
-            </Box>
+            </span>
           )}
-          <Box
-            component="svg"
-            sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          <svg
+            className="w-3 h-3 flex-shrink-0 transition-transform"
+            style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </Box>
-        </Box>
-      </Box>
+          </svg>
+        </div>
+      </button>
       {open && (
-        <Box
-          sx={{ mt: 0.5, ml: 1.5, display: 'flex', flexDirection: 'column', gap: 0.25, maxWidth: '85%', borderRadius: '8px', p: 0.5, backgroundColor: (t) => t.chat.bgSecondary, border: 1, borderColor: 'divider' }}
+        <div
+          className="mt-1 ml-3 flex flex-col gap-0.5 max-w-[85%] rounded-lg p-1"
+          style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
         >
           {traces.map((t, i) => (
             <TraceGroupChild key={i} data={t} />
           ))}
-        </Box>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
-  <Box
-    component="svg"
-    sx={{ width: 14, height: 14, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+  <svg
+    className="w-3.5 h-3.5 flex-shrink-0 transition-transform"
+    style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
     fill="none"
     viewBox="0 0 24 24"
     stroke="currentColor"
     strokeWidth={2}
   >
     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-  </Box>
+  </svg>
 );
 
 const AgentRow: React.FC<{
@@ -1079,61 +963,62 @@ const AgentRow: React.FC<{
   const hasDetails = Boolean(goal || backstory || tools.length > 0);
 
   return (
-    <Box
-      sx={{ borderRadius: '12px', p: 1.5, backgroundColor: (t) => t.chat.bgSecondary, border: 1, borderColor: 'divider' }}
+    <div
+      className="rounded-xl p-3"
+      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
     >
-      <Box
-        component="button"
+      <button
         type="button"
         onClick={() => hasDetails && setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full text-left"
         disabled={!hasDetails}
-        sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 1, width: '100%', textAlign: 'left', cursor: hasDetails ? 'pointer' : 'default' }}
+        style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       >
         {hasDetails && <Chevron open={open} />}
-        <Box component="svg" sx={{ width: 16, height: 16, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" />
-        </Box>
-        <Box component="span" sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <Box component="span" sx={{ fontSize: 14, fontWeight: 600, lineHeight: 1.375, color: 'text.primary' }}>{name}</Box>
+        </svg>
+        <span className="flex flex-col min-w-0">
+          <span className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-primary)' }}>{name}</span>
           {role && role !== name && (
-            <Box component="span" sx={{ fontSize: 12, lineHeight: 1.375, color: 'text.disabled' }}>{role}</Box>
+            <span className="text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>{role}</span>
           )}
-        </Box>
+        </span>
         {taskCount != null && taskCount > 0 && (
-          <Box
-            component="span"
-            sx={{ fontSize: 10, px: 1, py: 0.25, borderRadius: '9999px', ml: 'auto', flexShrink: 0, alignSelf: 'flex-start', color: 'text.disabled', backgroundColor: 'background.default', border: 1, borderColor: 'divider' }}
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full ml-auto flex-shrink-0 self-start"
+            style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
           >
             {taskCount} task{taskCount > 1 ? 's' : ''}
-          </Box>
+          </span>
         )}
-      </Box>
+      </button>
       {open && (
-        <Box sx={{ mt: 1, ml: 3, '& > * + *': { mt: 0.5 } }}>
+        <div className="mt-2 ml-6 space-y-1">
           {goal && (
             <div>
-              <Box component="span" sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'text.disabled' }}>Goal: </Box>
-              <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>{goal}</Box>
+              <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Goal: </span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{goal}</span>
             </div>
           )}
           {backstory && (
             <div>
-              <Box component="span" sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'text.disabled' }}>Backstory: </Box>
-              <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>{backstory}</Box>
+              <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Backstory: </span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{backstory}</span>
             </div>
           )}
           {tools.length > 0 && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, pt: 0.5 }}>
+            <div className="flex flex-wrap gap-1 pt-1">
               {tools.map((t, j) => (
-                <Box component="span" key={j} sx={{ fontSize: 10, px: 0.75, py: 0.25, borderRadius: '4px', backgroundColor: 'background.default', color: 'text.disabled' }}>
+                <span key={j} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
                   {resolveToolName(t, toolNameMap)}
-                </Box>
+                </span>
               ))}
-            </Box>
+            </div>
           )}
-        </Box>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 
@@ -1150,48 +1035,49 @@ const TaskRow: React.FC<{
   const hasDetails = Boolean(description || expectedOutput || taskTools.length > 0);
 
   return (
-    <Box
-      sx={{ borderRadius: '12px', p: 1.5, backgroundColor: (t) => t.chat.bgSecondary, border: 1, borderColor: 'divider' }}
+    <div
+      className="rounded-xl p-3"
+      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
     >
-      <Box
-        component="button"
+      <button
         type="button"
         onClick={() => hasDetails && setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full text-left"
         disabled={!hasDetails}
-        sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 1, width: '100%', textAlign: 'left', cursor: hasDetails ? 'pointer' : 'default' }}
+        style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       >
         {hasDetails && <Chevron open={open} />}
-        <Box component="svg" sx={{ width: 16, height: 16, flexShrink: 0, color: 'text.disabled' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-muted)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75" />
-        </Box>
-        <Box component="span" sx={{ fontSize: 14, fontWeight: 600, color: 'text.primary' }}>{name}</Box>
-      </Box>
+        </svg>
+        <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{name}</span>
+      </button>
       {open && (
-        <Box sx={{ mt: 1, ml: 3, '& > * + *': { mt: 0.5 } }}>
+        <div className="mt-2 ml-6 space-y-1">
           {description && (
             <div>
-              <Box component="span" sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'text.disabled' }}>Description: </Box>
-              <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>{description}</Box>
+              <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Description: </span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{description}</span>
             </div>
           )}
           {expectedOutput && (
             <div>
-              <Box component="span" sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'text.disabled' }}>Expected output: </Box>
-              <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>{expectedOutput}</Box>
+              <span className="text-[10px] font-semibold uppercase" style={{ color: 'var(--text-muted)' }}>Expected output: </span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{expectedOutput}</span>
             </div>
           )}
           {taskTools.length > 0 && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, pt: 0.5 }}>
+            <div className="flex flex-wrap gap-1 pt-1">
               {taskTools.map((t, j) => (
-                <Box component="span" key={j} sx={{ fontSize: 10, px: 0.75, py: 0.25, borderRadius: '4px', backgroundColor: 'background.default', color: 'text.disabled' }}>
+                <span key={j} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
                   {resolveToolName(t, toolNameMap)}
-                </Box>
+                </span>
               ))}
-            </Box>
+            </div>
           )}
-        </Box>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 

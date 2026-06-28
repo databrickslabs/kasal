@@ -1,8 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import McpPicker from './McpPicker';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
 
@@ -59,21 +58,6 @@ describe('McpPicker', () => {
     expect(screen.getByText('MCP')).toBeInTheDocument();
     expect(screen.getByText('My MCP')).toBeInTheDocument();
     expect(screen.getByText('Disabled MCP')).toBeInTheDocument();
-  });
-
-  it('opens upward by default (input pinned to the bottom)', async () => {
-    render(<McpPicker />);
-    await openPicker();
-    // Positioned via sx: anchored to the trigger's bottom edge → opens upward.
-    const menu = screen.getByRole('menu', { name: 'MCP picker' });
-    expect(menu).toHaveStyle({ bottom: '100%' });
-  });
-
-  it('opens downward when menuPlacement="down" (centered/landing input)', async () => {
-    render(<McpPicker menuPlacement="down" />);
-    await openPicker();
-    const menu = screen.getByRole('menu', { name: 'MCP picker' });
-    expect(menu).toHaveStyle({ top: '100%' });
   });
 
   it('does NOT browse the Databricks catalog (that lives in Configuration → MCP)', async () => {

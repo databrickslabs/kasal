@@ -1,8 +1,7 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import PreviewSkeleton, { shouldShowPreviewSkeleton, friendlyStep } from './PreviewSkeleton';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 import type { RunStep } from './RunTimeline';
 
 describe('shouldShowPreviewSkeleton', () => {

@@ -1,5 +1,4 @@
 import React from 'react';
-import Box from '@mui/material/Box';
 import MessageContent from '../MessageContent';
 
 /** Whether this trace is a Serper ("Search the internet") JSON result. */
@@ -75,29 +74,20 @@ export const SerperResultCard: React.FC<{
   label?: string;
   sublabel?: string;
   durationMs?: number;
-  indent?: number;
-}> = ({ detail, indent = 1.5 }) => {
+  indentClass?: string;
+}> = ({ detail, indentClass = 'ml-3' }) => {
   const md = formatSerper(detail);
   if (!md) return null;
   return (
-    <Box
-      sx={{
-        mt: 0.5,
-        ml: indent,
-        maxWidth: '85%',
-        borderRadius: '4px',
-        p: 1.5,
-        maxHeight: 384,
-        overflowY: 'auto',
-        fontSize: 14,
-        lineHeight: 1.625,
-        color: 'text.primary',
-        backgroundColor: 'background.default',
-        border: 1,
-        borderColor: 'divider',
+    <div
+      className={`mt-1 ${indentClass} max-w-[85%] rounded p-3 max-h-96 overflow-y-auto text-sm leading-relaxed`}
+      style={{
+        color: 'var(--text-primary)',
+        backgroundColor: 'var(--bg-primary)',
+        border: '1px solid var(--border-color)',
       }}
     >
       <MessageContent content={md} />
-    </Box>
+    </div>
   );
 };

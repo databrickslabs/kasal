@@ -21,10 +21,6 @@ import { parseUiDocument, extractDocSummary } from './utils/surfaceAdapter';
 import type { Surface } from '../../shared/a2ui';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
-import { ThemeProvider } from '@mui/material/styles';
-import Box from '@mui/material/Box';
-import { buttonResetSx, inputResetSx } from './chatSx';
-import { createChatTheme } from './chatTheme';
 import './chat.css';
 
 export interface TraceEntry {
@@ -669,8 +665,6 @@ const ChatWorkspace: React.FC = () => {
   useEffect(() => {
     useAppStore.getState().setTheme(kasalIsDarkMode ? 'dark' : 'light');
   }, [kasalIsDarkMode]);
-  // The chat-mode MUI theme (replaces chat.css CSS vars), tracking dark mode.
-  const chatTheme = useMemo(() => createChatTheme(kasalIsDarkMode ? 'dark' : 'light'), [kasalIsDarkMode]);
 
   // --- Initialize stores on mount ---
   useEffect(() => {
@@ -1941,50 +1935,29 @@ const ChatWorkspace: React.FC = () => {
   }, [renamingSessionId, renameValue]);
 
   return (
-    // ThemeProvider: the chat-mode MUI theme (replaces chat.css's CSS variables).
-    // It only governs MUI components — the Tailwind-styled shell below is untouched
-    // until each piece is migrated to sx, so the two coexist during the migration.
-    // id = appStore theming hook; class = the Tailwind/CSS scope (see tailwind.config).
-    <ThemeProvider theme={chatTheme}>
-    <Box
-      id="kasal-chat-root"
-      className="kasal-chat-root"
-      sx={{ height: '100%', width: '100%', display: 'flex', backgroundColor: 'background.default' }}
-    >
+    <div id="kasal-chat-root" className="kasal-chat-root h-full w-full flex" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Sidebar */}
       {sidebarOpen && (
-        <Box
-          component="aside"
-          sx={{ width: 256, display: 'flex', flexDirection: 'column', flexShrink: 0, backgroundColor: (t) => t.chat.bgRail }}
+        <aside
+          className="w-64 flex flex-col flex-shrink-0"
+          style={{ backgroundColor: 'var(--bg-rail)' }}
         >
           {/* New Chat button — soft filled chip */}
-          <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5 }}>
-            <Box
-              component="button"
+          <div className="px-3 pt-3 pb-1">
+            <button
               onClick={handleNewChat}
-              sx={{
-                ...buttonResetSx,
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.25,
-                px: 1.5,
-                py: 1.25,
-                borderRadius: '12px',
-                fontSize: 14,
-                fontWeight: 500,
-                backgroundColor: (t) => t.chat.bgSecondary,
-                color: 'text.primary',
-                transition: 'background-color 0.15s ease',
-                '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
+              className="kasal-newchat w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
               }}
             >
-              <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </Box>
+              </svg>
               New Chat
-            </Box>
-          </Box>
+            </button>
+          </div>
 
           {/* Saved catalog library (Crews / Flows) — replaces /list commands */}
           <CatalogLibrary
@@ -1996,188 +1969,135 @@ const ChatWorkspace: React.FC = () => {
 
           {/* Section label */}
           {sessions.length > 0 && (
-            <Box sx={{ px: 1.5, pt: 2, pb: 0.5 }}>
-              <Box
-                component="span"
-                sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.disabled' }}
+            <div className="px-3 pt-4 pb-1">
+              <span
+                className="text-[10px] font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--text-muted)' }}
               >
                 Recent
-              </Box>
-            </Box>
+              </span>
+            </div>
           )}
 
           {/* Session list */}
-          <Box sx={{ flex: 1, overflowY: 'auto', px: 1, pb: 1 }}>
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
             {sessions.map((s) => {
               const isActive = s.id === currentSessionId;
               return (
-              <Box key={s.id} sx={{ position: 'relative' }}>
+              <div key={s.id} className="relative">
                 {renamingSessionId === s.id ? (
-                  <Box
-                    component="input"
+                  <input
                     autoFocus
                     value={renameValue}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRenameValue(e.target.value)}
+                    onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={handleFinishRename}
-                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    onKeyDown={(e) => {
                       if (e.key === 'Enter') handleFinishRename();
                       if (e.key === 'Escape') { setRenamingSessionId(null); setRenameValue(''); }
                     }}
-                    sx={{
-                      ...inputResetSx,
-                      width: '100%',
-                      px: 1.5,
-                      py: 1,
-                      my: 0.25,
-                      borderRadius: '8px',
-                      fontSize: 14,
-                      backgroundColor: 'background.paper',
-                      color: 'text.primary',
-                      border: 1,
-                      borderColor: 'divider',
-                      transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
-                      '&:focus': { borderColor: 'primary.main', boxShadow: '0 0 0 2px rgba(255, 54, 33, 0.22)' },
+                    className="kasal-rename-input w-full px-3 py-2 my-0.5 rounded-lg text-sm"
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
                     }}
                   />
                 ) : (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 0.5,
-                      borderRadius: '8px',
-                      my: 0.25,
-                      backgroundColor: isActive ? (t) => t.chat.bgActiveChip : 'transparent',
-                      transition: 'background-color 0.15s ease',
-                      '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
-                      '&:hover .session-title': { color: 'text.primary' },
-                      '&:hover .session-kebab': { opacity: 1 },
+                  <div
+                    className="kasal-session flex items-center gap-1 rounded-lg my-0.5 group"
+                    style={{
+                      backgroundColor: isActive ? 'var(--bg-active-chip)' : 'transparent',
                     }}
                   >
-                    <Box
-                      component="button"
+                    <button
                       onClick={() => handleSwitchSession(s.id)}
-                      onContextMenu={(e: React.MouseEvent<HTMLButtonElement>) => {
+                      onContextMenu={(e) => {
                         e.preventDefault();
                         setContextMenu({ sessionId: s.id, x: e.clientX, y: e.clientY });
                       }}
-                      sx={{
-                        ...buttonResetSx,
-                        flex: 1,
-                        textAlign: 'left',
-                        pl: 1.5,
-                        pr: 0.5,
-                        py: 1,
-                        fontSize: 14,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                        color: isActive ? 'text.primary' : 'text.secondary',
+                      className="flex-1 text-left pl-3 pr-1 py-2 text-sm truncate min-w-0"
+                      style={{
+                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                       }}
                       title={s.title}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <div className="flex items-center gap-1.5">
                         <SessionSpinner sessionId={s.id} />
-                        <Box className="session-title" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, ...(isActive ? { fontWeight: 500 } : {}) }}>{s.title}</Box>
-                      </Box>
-                    </Box>
+                        <div className={`kasal-session-title truncate text-[13px] ${isActive ? 'font-medium' : ''}`}>{s.title}</div>
+                      </div>
+                    </button>
                     {/* Kebab menu button */}
-                    <Box
-                      component="button"
-                      className="session-kebab"
-                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    <button
+                      onClick={(e) => {
                         e.stopPropagation();
                         const rect = (e.target as HTMLElement).getBoundingClientRect();
                         setContextMenu({ sessionId: s.id, x: rect.right, y: rect.bottom });
                       }}
-                      sx={{
-                        ...buttonResetSx,
-                        flexShrink: 0,
-                        width: 28,
-                        height: 28,
-                        mr: 0.75,
-                        borderRadius: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: 0,
-                        transition: 'opacity 0.15s',
-                        color: 'text.disabled',
-                        '&:hover': { backgroundColor: (t) => t.chat.bgRailHover },
-                      }}
+                      className="flex-shrink-0 w-7 h-7 mr-1.5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--bg-rail-hover)]"
+                      style={{ color: 'var(--text-muted)' }}
                       title="Options"
                     >
-                      <Box component="svg" sx={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                         <circle cx="12" cy="6" r="1.5" />
                         <circle cx="12" cy="12" r="1.5" />
                         <circle cx="12" cy="18" r="1.5" />
-                      </Box>
-                    </Box>
-                  </Box>
+                      </svg>
+                    </button>
+                  </div>
                 )}
-              </Box>
+              </div>
               );
             })}
-          </Box>
+          </div>
 
           {/* Context menu */}
           {contextMenu && (
             <>
-              <Box data-testid="context-menu-backdrop" sx={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setContextMenu(null)} />
-              <Box
-                sx={{
-                  position: 'fixed',
-                  zIndex: 50,
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  py: 0.5,
+              <div data-testid="context-menu-backdrop" className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+              <div
+                className="kasal-popover fixed z-50 rounded-xl overflow-hidden py-1"
+                style={{
                   left: contextMenu.x,
                   top: contextMenu.y,
-                  backgroundColor: 'background.paper',
-                  border: 1,
-                  borderColor: 'divider',
-                  boxShadow: (t) => t.chat.shadowPopover,
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1px solid var(--border-color)',
                 }}
               >
-                <Box
-                  component="button"
+                <button
                   onClick={() => {
                     const session = sessions.find((s) => s.id === contextMenu.sessionId);
                     if (session) handleStartRename(session.id, session.title);
                   }}
-                  sx={{ ...buttonResetSx, width: '100%', textAlign: 'left', px: 2, py: 1, fontSize: 14, transition: 'opacity 0.15s', color: 'text.primary', '&:hover': { opacity: 0.8 } }}
+                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-primary)' }}
                 >
                   Rename
-                </Box>
-                <Box
-                  component="button"
+                </button>
+                <button
                   onClick={() => handleDeleteSession(contextMenu.sessionId)}
-                  sx={{ ...buttonResetSx, width: '100%', textAlign: 'left', px: 2, py: 1, fontSize: 14, transition: 'opacity 0.15s', color: '#ef4444', '&:hover': { opacity: 0.8 } }}
+                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
+                  style={{ color: '#ef4444' }}
                 >
                   Delete
-                </Box>
-              </Box>
+                </button>
+              </div>
             </>
           )}
-        </Box>
+        </aside>
       )}
 
       {/* Main content — chat panel */}
       {/* Chat hides full-screen ONLY for a real deliverable the user collapsed to;
           the build skeleton never hides chat — the activity must stay visible. */}
       {!(chatCollapsed && previewPaneOpen && previewContent) && (
-        <Box
-          component="main"
-          sx={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
-        >
+        <main className="flex-1 flex flex-col overflow-hidden relative" style={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%' }}>
           {/* The sidebar toggle + Databricks wordmark now live in the app top bar
               (ChatModeHeaderSlot), so the main area no longer renders its own
               header — this keeps it vertically stable when the sidebar toggles. */}
 
           {/* Chat container — the reopen-preview pill is rendered inside it,
               anchored above the composer, so it never overlaps the input. */}
-          <Box sx={{ flex: 1, overflow: 'hidden' }}>
+          <div className="flex-1 overflow-hidden">
             <ChatContainer
               messages={messages}
               hydrating={hydrating}
@@ -2230,8 +2150,8 @@ const ChatWorkspace: React.FC = () => {
                 }
               }}
             />
-          </Box>
-        </Box>
+          </div>
+        </main>
       )}
 
       {/* Preview panel — right side. Opt-in: shown only when the user opened it. */}
@@ -2271,8 +2191,7 @@ const ChatWorkspace: React.FC = () => {
         />
       )}
 
-    </Box>
-    </ThemeProvider>
+    </div>
   );
 };
 
@@ -2281,19 +2200,10 @@ const SessionSpinner: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasActive = useExecutionStore((s) => s.hasActiveExecution(sessionId));
   if (!hasActive) return null;
   return (
-    <Box
+    <div
       aria-hidden="true"
-      sx={{
-        width: 8,
-        height: 8,
-        borderRadius: '9999px',
-        border: '1px solid',
-        borderColor: 'primary.main',
-        borderTopColor: 'transparent',
-        flexShrink: 0,
-        animation: 'kasalSpin 1s linear infinite',
-        '@keyframes kasalSpin': { to: { transform: 'rotate(360deg)' } },
-      }}
+      className="w-2 h-2 rounded-full border border-t-transparent animate-spin flex-shrink-0"
+      style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
     />
   );
 };
