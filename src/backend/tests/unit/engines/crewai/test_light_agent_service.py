@@ -164,10 +164,10 @@ async def test_preamble_builds_transcript_excluding_current_turn():
     """Prior turns become a transcript; the current turn (last user row + its
     Thinking.../[ui-card] placeholders) and placeholder rows are excluded."""
     messages = [
-        _msg("user", "my name is nehme tohme"),
+        _msg("user", "my name is ada lovelace"),
         _msg("assistant", "Thinking..."),
         _msg("assistant", "[ui-card]"),
-        _msg("assistant", "Hello Nehme Tohme! Nice to meet you."),
+        _msg("assistant", "Hello Ada Lovelace! Nice to meet you."),
         _msg("user", "who am i"),            # <- current turn (last user)
         _msg("assistant", "Thinking..."),
     ]
@@ -177,8 +177,8 @@ async def test_preamble_builds_transcript_excluding_current_turn():
         out = await LightAgentService()._conversation_preamble(
             config, ctx, "g1", lambda *_: None
         )
-    assert "User: my name is nehme tohme" in out
-    assert "Assistant: Hello Nehme Tohme! Nice to meet you." in out
+    assert "User: my name is ada lovelace" in out
+    assert "Assistant: Hello Ada Lovelace! Nice to meet you." in out
     assert "who am i" not in out          # current turn excluded
     assert "Thinking..." not in out and "[ui-card]" not in out
 
@@ -188,7 +188,7 @@ async def test_preamble_keeps_user_facts_when_bloated_by_assistant_output():
     """A user fact stated early must survive even when many large assistant turns
     follow — user turns are never dropped, old assistant turns are."""
     big = "X" * 5000  # bloated assistant output
-    messages = [_msg("user", "my name is nehme tohme")]
+    messages = [_msg("user", "my name is ada lovelace")]
     for i in range(12):
         messages.append(_msg("assistant", f"{big} deck {i}"))
         messages.append(_msg("user", f"make slide {i}"))
@@ -202,7 +202,7 @@ async def test_preamble_keeps_user_facts_when_bloated_by_assistant_output():
             config, ctx, "g1", lambda *_: None
         )
     # The early name fact is retained despite the bloat...
-    assert "User: my name is nehme tohme" in out
+    assert "User: my name is ada lovelace" in out
     # ...all the intermediate user instructions are retained too...
     assert "User: make slide 0" in out
     assert "User: make slide 11" in out
@@ -244,7 +244,7 @@ async def test_preamble_best_effort_on_repo_failure():
 @pytest.mark.asyncio
 async def test_preamble_empty_when_no_prior_turns():
     """First message of a session → only the current user row exists → no preamble."""
-    messages = [_msg("user", "my name is nehme tohme"), _msg("assistant", "Thinking...")]
+    messages = [_msg("user", "my name is ada lovelace"), _msg("assistant", "Thinking...")]
     p_sess, p_repo = _history_patches(messages)
     config, ctx = _cfg_ctx()
     with p_sess, p_repo:

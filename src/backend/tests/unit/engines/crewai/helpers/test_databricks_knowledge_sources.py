@@ -10,7 +10,6 @@ import os
 import sys
 
 # Add the backend src directory to the path
-sys.path.insert(0, '/Users/nehme.tohme/workspace/kasal/src/backend')
 
 # NOTE: process_knowledge_sources removed - using DatabricksKnowledgeSearchTool instead
 # from src.engines.crewai.paths.crew.agent_adapter import create_agent
