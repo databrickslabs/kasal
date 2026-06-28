@@ -112,7 +112,7 @@ class ExecutionStatusService:
                         # Content-gated: a non-A2UI result returns None and is stored
                         # verbatim, and any error leaves the result untouched.
                         try:
-                            from src.engines.crewai.helpers.ui_document import (
+                            from src.engines.crewai.exporters.ui_document import (
                                 normalize_ui_document,
                             )
 

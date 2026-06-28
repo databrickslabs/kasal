@@ -16,11 +16,11 @@ def _no_session_patch():
 
 @pytest.mark.asyncio
 async def test_agent_helper_skips_session_without_mcp_servers():
-    from src.engines.crewai.helpers.agent_adapter import create_agent
+    from src.engines.crewai.paths.crew.agent_adapter import create_agent
 
     mock_llm = MagicMock()
     with patch(
-        "src.engines.crewai.common.agent_builder.Agent", return_value=MagicMock()
+        "src.engines.crewai.kernel.agent_builder.Agent", return_value=MagicMock()
     ), patch(
         "src.core.llm_manager.LLMManager.configure_crewai_llm",
         new_callable=AsyncMock, return_value=mock_llm,
@@ -36,7 +36,7 @@ async def test_agent_helper_skips_session_without_mcp_servers():
 
 @pytest.mark.asyncio
 async def test_task_helper_skips_session_without_mcp_servers():
-    from src.engines.crewai.helpers import task_adapter
+    from src.engines.crewai.paths.crew import task_adapter
 
     mock_agent = MagicMock()
     mock_agent.role = "R"

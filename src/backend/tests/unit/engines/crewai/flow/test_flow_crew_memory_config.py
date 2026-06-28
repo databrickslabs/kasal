@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.crewai.flow.modules.flow_methods import configure_flow_crew_memory
+from src.engines.crewai.paths.flow.modules.flow_methods import configure_flow_crew_memory
 
 
 def _agent(role="Researcher", model="databricks-gpt-5"):
@@ -28,7 +28,7 @@ async def test_no_active_config_falls_back_to_default_and_wires_memory():
     Memory and the memory tools fail with "CHROMA_OPENAI_API_KEY is not set"."""
     configured = {"memory": MagicMock(name="Memory")}
     with patch(
-        "src.engines.crewai.services.crew_memory_service.CrewMemoryService"
+        "src.engines.crewai.memory.crew_memory_service.CrewMemoryService"
     ) as MockSvc, patch(
         "src.engines.crewai.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:
@@ -66,7 +66,7 @@ async def test_backend_config_wires_unified_memory():
     configured_kwargs = {"memory": MagicMock(name="Memory")}
 
     with patch(
-        "src.engines.crewai.services.crew_memory_service.CrewMemoryService"
+        "src.engines.crewai.memory.crew_memory_service.CrewMemoryService"
     ) as MockSvc, patch(
         "src.engines.crewai.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:
@@ -105,7 +105,7 @@ async def test_backend_config_error_falls_back_gracefully():
     """If unified storage creation raises, we don't blow up the flow crew."""
     backend_cfg = {"backend_type": "lakebase", "lakebase_config": {"memory_table": "crew_memory"}}
     with patch(
-        "src.engines.crewai.services.crew_memory_service.CrewMemoryService"
+        "src.engines.crewai.memory.crew_memory_service.CrewMemoryService"
     ) as MockSvc, patch(
         "src.engines.crewai.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:

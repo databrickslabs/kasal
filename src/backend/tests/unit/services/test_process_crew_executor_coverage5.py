@@ -34,11 +34,11 @@ class TestRunCrewInProcessDirect:
     def _make_base_patches(self):
         """Create a context manager that patches all subprocess imports."""
         return [
-            patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+            patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                   return_value=MagicMock()),
-            patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+            patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))),
-            patch("src.engines.crewai.logging_config.restore_stdout_stderr"),
+            patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"),
         ]
 
     def test_database_type_existing_in_env(self):
@@ -91,11 +91,11 @@ class TestRunCrewInProcessDirect:
         mock_alive_child.kill = MagicMock()
 
         # Patch the subprocess to avoid actually spawning crew infrastructure
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil, \
              patch("psutil.wait_procs", return_value=([], [mock_alive_child])):
@@ -114,11 +114,11 @@ class TestRunCrewInProcessDirect:
         """cleanup_async_db_connections exception in finally is handled."""
         from src.services.process_crew_executor import run_crew_in_process
 
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=MagicMock(info=MagicMock(), error=MagicMock())), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections",
                    side_effect=RuntimeError("cleanup failed")), \
              patch("psutil.Process") as mock_psutil:
@@ -145,11 +145,11 @@ class TestRunCrewInProcessDirect:
         mock_subprocess_logger.warning = MagicMock()
         mock_subprocess_logger.handlers = []
 
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=mock_subprocess_logger), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil, \
              patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \

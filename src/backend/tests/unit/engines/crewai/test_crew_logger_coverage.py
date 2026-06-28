@@ -6,7 +6,7 @@ import pytest
 import logging
 from unittest.mock import MagicMock, patch
 
-from src.engines.crewai.crew_logger import CrewLogger, CrewLoggerHandler
+from src.engines.crewai.infra.crew_logger import CrewLogger, CrewLoggerHandler
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def reset_singleton():
 
 
 def make_logger():
-    with patch("src.engines.crewai.crew_logger.LoggerManager") as mock_lm:
+    with patch("src.engines.crewai.infra.crew_logger.LoggerManager") as mock_lm:
         mock_mgr = MagicMock()
         mock_mgr.crew = MagicMock()
         mock_lm.get_instance.return_value = mock_mgr
@@ -94,7 +94,7 @@ def test_cleanup_for_job_restore_exception():
         "original_print_method": original_print,
     }
 
-    with patch('src.engines.crewai.crew_logger.Printer') as MockPrinter:
+    with patch('src.engines.crewai.infra.crew_logger.Printer') as MockPrinter:
         # Simulate error when setting Printer.print
         type(MockPrinter).print = property(
             fget=lambda self: original_print,
@@ -115,7 +115,7 @@ def test_patch_printer_exception():
     job_id = "job_patch_error"
     crew._active_jobs[job_id] = {"handler": MagicMock(), "original_print_method": None}
 
-    with patch('src.engines.crewai.crew_logger.Printer', side_effect=Exception("Printer unavailable")):
+    with patch('src.engines.crewai.infra.crew_logger.Printer', side_effect=Exception("Printer unavailable")):
         # Should not raise
         try:
             crew._patch_printer(job_id)
@@ -152,16 +152,16 @@ def test_crew_logger_handler_emit_with_group_context():
 
 def test_patch_printer_custom_print_called():
     """Test _patch_printer patches Printer and custom_print works."""
-    from src.engines.crewai.crew_logger import CrewLogger
+    from src.engines.crewai.infra.crew_logger import CrewLogger
     crew = make_logger()
     job_id = "job_patch_test"
     crew._active_jobs[job_id] = {"handler": MagicMock(), "original_print_method": None}
 
-    with patch('src.engines.crewai.crew_logger.Printer') as MockPrinter:
+    with patch('src.engines.crewai.infra.crew_logger.Printer') as MockPrinter:
         original_print = MagicMock()
         MockPrinter.print = original_print
 
-        with patch('src.engines.crewai.crew_logger.enqueue_log'):
+        with patch('src.engines.crewai.infra.crew_logger.enqueue_log'):
             crew._patch_printer(job_id)
 
             # Now call the patched print method
@@ -184,11 +184,11 @@ def test_patch_printer_setup_for_job_full():
     crew = make_logger()
     job_id = "job_full_test"
 
-    with patch('src.engines.crewai.crew_logger.Printer') as MockPrinter:
-        with patch('src.engines.crewai.crew_logger.CrewLoggerHandler') as MockHandler:
+    with patch('src.engines.crewai.infra.crew_logger.Printer') as MockPrinter:
+        with patch('src.engines.crewai.infra.crew_logger.CrewLoggerHandler') as MockHandler:
             mock_handler = MagicMock()
             MockHandler.return_value = mock_handler
-            with patch('src.engines.crewai.crew_logger.enqueue_log'):
+            with patch('src.engines.crewai.infra.crew_logger.enqueue_log'):
                 crew.setup_for_job(job_id)
                 assert job_id in crew._active_jobs
 
@@ -204,7 +204,7 @@ def test_cleanup_for_job_restores_printer():
         "original_print_method": original_print,
     }
 
-    with patch('src.engines.crewai.crew_logger.Printer') as MockPrinter:
+    with patch('src.engines.crewai.infra.crew_logger.Printer') as MockPrinter:
         crew.cleanup_for_job(job_id)
         assert job_id not in crew._active_jobs
 
@@ -217,7 +217,7 @@ def test_capture_stdout_stderr_no_output():
     job_id = "job_capture_empty"
     crew._active_jobs[job_id] = {"handler": MagicMock(), "original_print_method": None}
 
-    with patch('src.engines.crewai.crew_logger.enqueue_log'):
+    with patch('src.engines.crewai.infra.crew_logger.enqueue_log'):
         with crew.capture_stdout_stderr(job_id):
             pass  # No output
 
@@ -230,7 +230,7 @@ def test_capture_stdout_stderr_with_output():
     mock_handler.group_context = None
     crew._active_jobs[job_id] = {"handler": mock_handler, "original_print_method": None}
 
-    with patch('src.engines.crewai.crew_logger.enqueue_log') as mock_enqueue:
+    with patch('src.engines.crewai.infra.crew_logger.enqueue_log') as mock_enqueue:
         with crew.capture_stdout_stderr(job_id):
             import sys as _sys
             print("CREW OUTPUT LINE 1")
@@ -246,7 +246,7 @@ def test_capture_stdout_stderr_with_stderr():
     mock_handler.group_context = None
     crew._active_jobs[job_id] = {"handler": mock_handler, "original_print_method": None}
 
-    with patch('src.engines.crewai.crew_logger.enqueue_log'):
+    with patch('src.engines.crewai.infra.crew_logger.enqueue_log'):
         with crew.capture_stdout_stderr(job_id):
             import sys as _sys
             print("stderr message", file=_sys.stderr)

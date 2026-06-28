@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 # Helper: suppress the logger so tests stay silent
 # ---------------------------------------------------------------------------
-LOGGER_PATCH = "src.engines.crewai.guardrails.company_name_not_null_guardrail.logger"
+LOGGER_PATCH = "src.engines.crewai.guardrails.demo.company_name_not_null_guardrail.logger"
 BASE_GUARDRAIL_PATCH = "src.engines.crewai.guardrails.base_guardrail.BaseGuardrail.__init__"
 
 
@@ -20,7 +20,7 @@ class TestCompanyNameNotNullGuardrailInit:
     """Tests for __init__ of CompanyNameNotNullGuardrail."""
 
     def _import(self):
-        from src.engines.crewai.guardrails.company_name_not_null_guardrail import (
+        from src.engines.crewai.guardrails.demo.company_name_not_null_guardrail import (
             CompanyNameNotNullGuardrail,
         )
         return CompanyNameNotNullGuardrail
@@ -66,7 +66,7 @@ class TestCompanyNameNotNullGuardrailValidate:
     """Tests for validate method of CompanyNameNotNullGuardrail."""
 
     def _make_guardrail(self):
-        from src.engines.crewai.guardrails.company_name_not_null_guardrail import (
+        from src.engines.crewai.guardrails.demo.company_name_not_null_guardrail import (
             CompanyNameNotNullGuardrail,
         )
         return CompanyNameNotNullGuardrail(config={})
@@ -116,7 +116,7 @@ class TestCompanyNameNotNullGuardrailValidate:
 
     def test_validate_exception_returns_invalid(self):
         """If an unexpected exception occurs, validate returns valid=False with feedback."""
-        from src.engines.crewai.guardrails.company_name_not_null_guardrail import (
+        from src.engines.crewai.guardrails.demo.company_name_not_null_guardrail import (
             CompanyNameNotNullGuardrail,
         )
 

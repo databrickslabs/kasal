@@ -3,9 +3,9 @@ agents — both now go through the shared common builders (build_agent_kwargs +
 inject_security_preamble). Regression tests for the flow/crew alignment."""
 from types import SimpleNamespace
 
-from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
-from src.engines.crewai.common.agent_builder import build_agent_kwargs
-from src.engines.crewai.common.agent_security import (
+from src.engines.crewai.paths.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.kernel.agent_builder import build_agent_kwargs
+from src.engines.crewai.kernel.agent_security import (
     _build_security_preamble,
     inject_security_preamble,
 )

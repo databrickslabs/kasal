@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowUp, Check, ChevronDown, Download, Moon, MoreVertical, PanelLeft, PanelLeftClose, Palette, Pencil, Plus, Sparkles, Square, Sun, Trash2 } from 'lucide-react'
-import { sendMessage, fetchProgress, cancelTurn } from './api'
+import { sendMessage, fetchProgress, fetchA2ui, cancelTurn } from './api'
 import type { Surface } from './a2ui/types'
 import { A2UIRenderer } from './a2ui/A2UIRenderer'
 import { Button } from '@/components/ui/button'
@@ -14,21 +14,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { downloadElementPng, downloadPptx } from '@/lib/download'
-import { mdComponents, linkifyCitations } from '@/lib/markdown'
+import { downloadElementPng } from '@/a2ui/lib/download'
+import { mdComponents, linkifyCitations } from '@/a2ui/lib/markdown'
 import {
   DECK_THEMES,
   DECK_THEME_KEY,
   DEFAULT_DECK_THEME_ID,
   DeckThemeContext,
-  getDeckTheme,
-} from '@/lib/deckThemes'
+  themeToDeck,
+} from '@/a2ui/lib/deckThemes'
+// Aliased: `Palette` is also the lucide-react icon imported above.
+import type { DeckTheme, Palette as ThemePalette } from '@/a2ui/lib/deckThemes'
 import { cn } from '@/lib/utils'
 
 interface Msg {
   role: 'user' | 'assistant'
   text: string
   a2ui?: Surface
+  // Stable id so the out-of-band A2UI poll can patch THIS message when its surface
+  // arrives, even if the user has sent more messages meanwhile.
+  id?: string
 }
 
 interface Session {
@@ -60,6 +65,31 @@ const newId = () =>
 // (empty array => no suggestion row is shown). See databricks_app_exporter._starter_prompts.
 const STARTER_PROMPTS: string[] = {{STARTER_PROMPTS_JSON}}
 
+// Workspace deck/quiz theme palettes from the UIConfigurator (deliverable ->
+// palette), baked at export time. "{}" when the workspace is unconfigured or
+// Predefined UI is disabled → built-in themes only (today's behavior). The cast
+// is robust to the stored Theme type carrying keys beyond the renderer Palette.
+const WORKSPACE_THEMES = {{WORKSPACE_THEMES_JSON}} as Record<string, ThemePalette>
+
+// The theme list + default id for a deliverable. When the workspace has branded
+// that deliverable, its palette leads the picker (labelled "Workspace") and is the
+// default; otherwise fall back to the built-in DECK_THEMES (midnight default). So
+// a deployed app's decks/quizzes match this workspace's live chat out of the box,
+// while users can still switch among the built-ins.
+function themesFor(deliverable: string): { themes: DeckTheme[]; defaultId: string } {
+  const ws = WORKSPACE_THEMES[deliverable]
+  if (!ws) return { themes: DECK_THEMES, defaultId: DEFAULT_DECK_THEME_ID }
+  const wsTheme: DeckTheme = {
+    ...themeToDeck(ws),
+    id: `workspace-${deliverable}`,
+    name: 'Workspace',
+  }
+  return { themes: [wsTheme, ...DECK_THEMES], defaultId: wsTheme.id }
+}
+
+const resolveTheme = (themes: DeckTheme[], id: string): DeckTheme =>
+  themes.find((t) => t.id === id) ?? themes[0]
+
 function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -82,16 +112,18 @@ const Prose = ({ text }: { text: string }) => (
 )
 
 // A presentation surface: ONE theme across all slides (default Midnight),
-// switchable via the Customize button; the choice persists and drives the
-// PowerPoint export.
+// switchable via the Customize button; the choice persists and drives the deck's
+// PowerPoint export (the download button lives inside the shared SlideDeck, so it
+// behaves identically here and in Kasal chat — one implementation).
 function PresentationSurface({ surface }: { surface: Surface }) {
+  const { themes, defaultId } = themesFor('presentation')
   const [themeId, setThemeId] = useState(
-    () => localStorage.getItem(DECK_THEME_KEY) || DEFAULT_DECK_THEME_ID,
+    () => localStorage.getItem(DECK_THEME_KEY) || defaultId,
   )
   useEffect(() => {
     localStorage.setItem(DECK_THEME_KEY, themeId)
   }, [themeId])
-  const theme = getDeckTheme(themeId)
+  const theme = resolveTheme(themes, themeId)
   return (
     <Card className="mt-3 overflow-hidden">
       <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
@@ -102,7 +134,7 @@ function PresentationSurface({ surface }: { surface: Surface }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {DECK_THEMES.map((t) => (
+            {themes.map((t) => (
               <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
                 <span className="size-3 rounded-full" style={{ background: t.accent }} />
                 {t.name}
@@ -111,14 +143,6 @@ function PresentationSurface({ surface }: { surface: Surface }) {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 text-xs"
-          onClick={() => downloadPptx(surface, theme)}
-        >
-          <Download className="size-3.5" /> PowerPoint
-        </Button>
       </div>
       <div className="bg-card p-5">
         <DeckThemeContext.Provider value={theme}>
@@ -132,13 +156,14 @@ function PresentationSurface({ surface }: { surface: Surface }) {
 // A quiz surface: a theme picker (same palette as decks) wrapping the interactive
 // quiz; the choice persists. Mirrors PresentationSurface, minus the PPTX export.
 function QuizSurface({ surface }: { surface: Surface }) {
+  const { themes, defaultId } = themesFor('quiz')
   const [themeId, setThemeId] = useState(
-    () => localStorage.getItem(QUIZ_THEME_KEY) || DEFAULT_DECK_THEME_ID,
+    () => localStorage.getItem(QUIZ_THEME_KEY) || defaultId,
   )
   useEffect(() => {
     localStorage.setItem(QUIZ_THEME_KEY, themeId)
   }, [themeId])
-  const theme = getDeckTheme(themeId)
+  const theme = resolveTheme(themes, themeId)
   return (
     <Card className="mt-3 overflow-hidden">
       <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
@@ -149,7 +174,7 @@ function QuizSurface({ surface }: { surface: Surface }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {DECK_THEMES.map((t) => (
+            {themes.map((t) => (
               <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
                 <span className="size-3 rounded-full" style={{ background: t.accent }} />
                 {t.name}
@@ -221,6 +246,9 @@ export default function App() {
   const activeIdRef = useRef(activeId)
   // One AbortController per in-flight session, so Stop can abort the right turn.
   const ctrls = useRef<Map<string, AbortController>>(new Map())
+  // One AbortController per session's out-of-band A2UI poll, so a new turn (or
+  // Stop) cancels the prior turn's poll — the surface always lands on its message.
+  const a2uiCtrls = useRef<Map<string, AbortController>>(new Map())
   // Whether the thread is scrolled to (near) the bottom. We only auto-scroll
   // when it is, so we never yank the user back down while they read history.
   const atBottomRef = useRef(true)
@@ -317,6 +345,33 @@ export default function App() {
     setSessions((prev) => prev.map((s) => (s.id === activeId ? updater(s) : s)))
   }
 
+  // Poll for a turn's out-of-band A2UI surface and attach it to its message.
+  // Bounded so a never-arriving surface can't poll forever; stops on ready/none.
+  async function pollA2ui(convId: string, msgId: string, signal: AbortSignal) {
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1200))
+      if (signal.aborted) return
+      const { status, surface } = await fetchA2ui(convId, signal)
+      if (status === 'ready' && surface) {
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === convId
+              ? {
+                  ...s,
+                  messages: s.messages.map((m) =>
+                    m.id === msgId ? { ...m, a2ui: surface } : m,
+                  ),
+                }
+              : s,
+          ),
+        )
+        return
+      }
+      if (status === 'none') return // composed, but no rich surface for this turn
+    }
+  }
+
   async function submit(text: string) {
     const q = text.trim()
     if (!q || pending.has(activeId)) return
@@ -334,13 +389,30 @@ export default function App() {
     setSessionPending(convId, true)
     try {
       const reply = await sendMessage(q, convId, ctrl.signal, mode)
+      const msgId = newId()
       setSessions((prev) =>
         prev.map((s) =>
           s.id === convId
-            ? { ...s, messages: [...s.messages, { role: 'assistant', text: reply.text, a2ui: reply.a2ui }] }
+            ? {
+                ...s,
+                messages: [
+                  ...s.messages,
+                  { role: 'assistant', text: reply.text, a2ui: reply.a2ui, id: msgId },
+                ],
+              }
             : s,
         ),
       )
+      // The rich surface is composed out-of-band so this answer returns fast; poll
+      // for it and attach it to the message when ready. (If an older server already
+      // inlined it via reply.a2ui, skip the poll.) A fresh controller, replacing
+      // any prior poll for this session, keeps the surface bound to its message.
+      if (!reply.a2ui) {
+        a2uiCtrls.current.get(convId)?.abort()
+        const pollCtrl = new AbortController()
+        a2uiCtrls.current.set(convId, pollCtrl)
+        void pollA2ui(convId, msgId, pollCtrl.signal)
+      }
     } catch (e: any) {
       // A user-initiated Stop aborts the fetch — that's not an error to show.
       if (e?.name !== 'AbortError' && activeIdRef.current === convId) {
@@ -357,6 +429,7 @@ export default function App() {
   function stop() {
     const id = activeId
     ctrls.current.get(id)?.abort()
+    a2uiCtrls.current.get(id)?.abort() // also stop polling for this turn's surface
     cancelTurn(id)
   }
 

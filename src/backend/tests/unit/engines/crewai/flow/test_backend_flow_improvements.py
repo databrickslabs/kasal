@@ -12,7 +12,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
 from datetime import datetime
 
-from src.engines.crewai.flow.backend_flow import BackendFlow
+from src.engines.crewai.paths.flow.backend_flow import BackendFlow
 
 
 # Mock classes
@@ -271,7 +271,7 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.crewai.trace_management.TraceManager') as MockTraceManager:
+             patch('src.engines.crewai.infra.trace_management.TraceManager') as MockTraceManager:
 
             mock_flow_method.return_value = mock_crewai_flow
             MockTraceManager.ensure_writer_started = AsyncMock()
@@ -291,7 +291,7 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.crewai.trace_management.TraceManager') as MockTraceManager:
+             patch('src.engines.crewai.infra.trace_management.TraceManager') as MockTraceManager:
 
             mock_flow_method.return_value = mock_crewai_flow
             MockTraceManager.ensure_writer_started = AsyncMock()
@@ -311,7 +311,7 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.crewai.trace_management.TraceManager') as MockTraceManager:
+             patch('src.engines.crewai.infra.trace_management.TraceManager') as MockTraceManager:
 
             mock_flow_method.return_value = mock_crewai_flow
             MockTraceManager.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
@@ -331,7 +331,7 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.crewai.trace_management.TraceManager') as MockTraceManager:
+             patch('src.engines.crewai.infra.trace_management.TraceManager') as MockTraceManager:
 
             mock_flow_method.return_value = mock_crewai_flow
             MockTraceManager.ensure_writer_started = AsyncMock()

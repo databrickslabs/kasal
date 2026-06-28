@@ -4,7 +4,7 @@ import json
 import asyncio
 from typing import Dict, Any, List
 
-from src.engines.crewai.helpers.task_adapter import (
+from src.engines.crewai.paths.crew.task_adapter import (
     is_data_missing,
     get_pydantic_class_from_name,
     create_task
@@ -45,7 +45,7 @@ class TestGetPydanticClassFromName:
     """Test the get_pydantic_class_from_name function"""
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_success(self, mock_uow_class):
         """Test successful class retrieval"""
         # Setup mock schema
@@ -70,7 +70,7 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "TestSchema"
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_not_found(self, mock_uow_class):
         """Test when schema is not found"""
         # Setup UoW mock with async context manager
@@ -84,7 +84,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_with_schema(self, mock_uow_class):
         """Test when UnitOfWork returns a valid schema"""
         # Setup schema mock
@@ -108,7 +108,7 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "TestSchema"
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_invalid_schema_definition(self, mock_uow_class):
         """Test when schema definition is invalid"""
         # Setup schema with invalid definition
@@ -126,7 +126,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_none_schema_definition(self, mock_uow_class):
         """Test when schema definition is None"""
         # Setup schema with None definition
@@ -144,7 +144,7 @@ class TestGetPydanticClassFromName:
         assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_complex_types(self, mock_uow_class):
         """Test schema with complex field types"""
         # Setup schema with complex types
@@ -193,7 +193,7 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "ComplexSchema"
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_field_error(self, mock_uow_class):
         """Test when field definition causes an error"""
         # Setup schema with problematic field
@@ -214,7 +214,7 @@ class TestGetPydanticClassFromName:
         mock_uow.schema_repository.find_by_name.return_value = mock_schema
         
         # Mock create_model to raise an exception
-        with patch('src.engines.crewai.helpers.task_adapter.create_model') as mock_create:
+        with patch('src.engines.crewai.paths.crew.task_adapter.create_model') as mock_create:
             mock_create.side_effect = Exception("Field error")
             
             result = await get_pydantic_class_from_name("ProblematicSchema")
@@ -222,7 +222,7 @@ class TestGetPydanticClassFromName:
             assert result is None
     
     @pytest.mark.asyncio
-    @patch('src.engines.crewai.helpers.task_adapter.UnitOfWork')
+    @patch('src.engines.crewai.paths.crew.task_adapter.UnitOfWork')
     async def test_get_pydantic_class_from_name_general_exception(self, mock_uow_class):
         """Test when a general exception occurs"""
         # Setup UoW mock to raise exception when entering context
@@ -264,7 +264,7 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_basic(self, mock_task_config, mock_agent, mock_tools_list):
         """Test basic task creation"""
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -307,10 +307,10 @@ class TestCreateTask:
         mock_pydantic_class = MagicMock()
         mock_pydantic_class.__name__ = "TestOutputModel"
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_class:
+             patch('src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_class:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -351,7 +351,7 @@ class TestCreateTask:
             "output_file": "/some/path/output.md"
         }
 
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
 
@@ -388,7 +388,7 @@ class TestCreateTask:
             "markdown": True
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -430,7 +430,7 @@ class TestCreateTask:
             "output_json": "schema.json"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -472,7 +472,7 @@ class TestCreateTask:
             "output_json": "false"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -508,7 +508,7 @@ class TestCreateTask:
             "expected_output": "Test output"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -545,7 +545,7 @@ class TestCreateTask:
             "guardrail": {"type": "test"}
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
@@ -599,7 +599,7 @@ class TestCreateTask:
             "guardrail": {"type": "test"}
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
@@ -653,7 +653,7 @@ class TestCreateTask:
             "guardrail": {"type": "test"}
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
              patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
@@ -711,10 +711,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -762,10 +762,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -806,10 +806,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -850,10 +850,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -894,10 +894,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -937,10 +937,10 @@ class TestCreateTask:
         
         mock_tool_service = AsyncMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -978,10 +978,10 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
         mock_tool_factory = MagicMock()
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.engines.crewai.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -1016,7 +1016,7 @@ class TestCreateTask:
             "expected_output": "Test output"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp:
             
@@ -1044,12 +1044,12 @@ class TestCreateTask:
             "output_pydantic": "TestModel"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
-             patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter, \
-             patch('src.engines.crewai.helpers.model_conversion_handler.configure_output_json_approach') as mock_configure_json:
+             patch('src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
+             patch('src.engines.crewai.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter, \
+             patch('src.engines.crewai.kernel.model_conversion_handler.configure_output_json_approach') as mock_configure_json:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -1096,11 +1096,11 @@ class TestCreateTask:
             "output_pydantic": "TestModel"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
-             patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter:
+             patch('src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
+             patch('src.engines.crewai.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()
@@ -1147,11 +1147,11 @@ class TestCreateTask:
             "output_pydantic": "TestModel"
         }
         
-        with patch('src.engines.crewai.helpers.task_adapter.Task') as mock_task_class, \
+        with patch('src.engines.crewai.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
-             patch('src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter:
+             patch('src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_class, \
+             patch('src.engines.crewai.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_get_converter:
             
             # Setup UoW to return empty MCP servers
             mock_uow_instance = AsyncMock()

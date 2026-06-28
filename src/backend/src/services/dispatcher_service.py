@@ -1244,6 +1244,9 @@ Please analyze this message and provide your intent classification."""
                         disable_memory=request.disable_memory,
                         mcp_servers=request.mcp_servers or [],
                         agentbricks_endpoints=request.agentbricks_endpoints or [],
+                        # ChatMode answer mode (chat|research|deep) → drives
+                        # reasoning/planning/execution_type at config-build time.
+                        chat_mode_type=request.chat_mode_type or "chat",
                     )
                     # Spawn progressive generation in background
                     asyncio.create_task(

@@ -265,9 +265,9 @@ class TaskGenerationService:
         logger.info("Using prompt template for generate_task from database")
 
         # NOTE: the generation template is format-neutral (content/structure only,
-        # never HTML/CSS/JS). Output formatting is owned entirely by the UI-document
-        # emission (apply_ui_emission) at execution time, so no per-call directive is
-        # prepended here.
+        # never HTML/CSS/JS). Output formatting is owned entirely by the shared A2UI
+        # composer (a2ui_runner), which composes a surface post-execution, so no
+        # per-call directive is prepended here.
 
         # Include agent context inline in the system prompt if provided (no external retrieval)
         if request.agent:

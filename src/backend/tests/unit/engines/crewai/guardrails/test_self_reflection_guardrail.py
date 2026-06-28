@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 
 # _run_completion is imported by self_reflection_guardrail from llm_injection_guardrail.
 # We patch it at the *import site* in self_reflection_guardrail.
-_RUN_COMPLETION = "src.engines.crewai.guardrails.self_reflection_guardrail._run_completion"
+_RUN_COMPLETION = "src.engines.crewai.guardrails.core.self_reflection_guardrail._run_completion"
 
 
 def _make_guardrail(config=None):
     """Create a guardrail."""
     cfg = config or {"llm_model": "databricks-test-model"}
-    from src.engines.crewai.guardrails.self_reflection_guardrail import SelfReflectionGuardrail
+    from src.engines.crewai.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
     return SelfReflectionGuardrail(cfg)
 
 
@@ -128,7 +128,7 @@ class TestSelfReflectionGuardrailValidate:
 class TestSelfReflectionGuardrailFactoryRegistration:
     def test_factory_creates_correct_type(self):
         from src.engines.crewai.guardrails.guardrail_factory import GuardrailFactory
-        from src.engines.crewai.guardrails.self_reflection_guardrail import SelfReflectionGuardrail
+        from src.engines.crewai.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
         guardrail = GuardrailFactory.create_guardrail({
             "type": "self_reflection",
             "llm_model": "databricks-test-model",

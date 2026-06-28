@@ -612,12 +612,12 @@ class TestUiDocumentNormalizationOnWrite:
         )
         norm = (
             patch(
-                "src.engines.crewai.helpers.ui_document.normalize_ui_document",
+                "src.engines.crewai.exporters.ui_document.normalize_ui_document",
                 side_effect=RuntimeError("boom"),
             )
             if normalize_raises
             else patch(
-                "src.engines.crewai.helpers.ui_document.normalize_ui_document",
+                "src.engines.crewai.exporters.ui_document.normalize_ui_document",
                 return_value=normalize_return,
             )
         )

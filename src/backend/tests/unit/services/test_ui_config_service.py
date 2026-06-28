@@ -24,7 +24,7 @@ async def test_get_config_returns_enabled_default_when_missing():
 
     assert out.enabled is True
     assert out.group_id == "g1"
-    assert out.catalog_type == "minimal"
+    assert out.catalog_type == "full"
 
 
 @pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def test_get_config_returns_existing_row():
         repo = AsyncMock()
         Repo.return_value = repo
         cfg = UIConfig(
-            id=5, group_id="g1", enabled=True, catalog_type="basic",
+            id=5, group_id="g1", enabled=True, catalog_type="full",
             catalog_json=None, style_json='{"accent":"#fff"}',
         )
         repo.get_for_group = AsyncMock(return_value=cfg)
@@ -45,7 +45,7 @@ async def test_get_config_returns_existing_row():
 
     assert out.id == 5
     assert out.enabled is True
-    assert out.catalog_type == "basic"
+    assert out.catalog_type == "full"
 
 
 @pytest.mark.asyncio
@@ -82,10 +82,10 @@ async def test_update_config_updates_existing_row():
         repo.get_for_group = AsyncMock(return_value=existing)
 
         svc = UIConfigService(session, group_id="g1")
-        body = UIConfigUpdate(enabled=True, catalog_type="basic", catalog_json=None, style_json=None)
+        body = UIConfigUpdate(enabled=True, catalog_type="full", catalog_json=None, style_json=None)
         out = await svc.update_config(body)
 
     session.add.assert_not_called()  # row already existed
     assert existing.enabled is True
-    assert existing.catalog_type == "basic"
+    assert existing.catalog_type == "full"
     assert out.id == 3

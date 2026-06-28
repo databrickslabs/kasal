@@ -263,7 +263,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_database_url_env_var(self):
         """Test that DATABASE_URL environment variable is used directly when set."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         with patch.dict(os.environ, {"DATABASE_URL": "postgresql://testuser@testhost:5432/testdb"}):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
@@ -274,7 +274,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_strips_asyncpg_from_settings_database_uri(self):
         """Test that +asyncpg is stripped from settings.DATABASE_URI when DATABASE_URL is not set."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Create a mock settings object with postgresql+asyncpg URI
         mock_settings = MagicMock()
@@ -291,7 +291,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_strips_aiosqlite_from_settings_database_uri(self):
         """Test that +aiosqlite is stripped from settings.DATABASE_URI when DATABASE_URL is not set."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Create a mock settings object with sqlite+aiosqlite URI
         mock_settings = MagicMock()
@@ -308,7 +308,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_handles_both_async_drivers(self):
         """Test that both +asyncpg and +aiosqlite are handled in replacement logic."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Test various URI formats
         test_cases = [
@@ -331,7 +331,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_falls_back_to_sqlite_on_import_error(self):
         """Test that when settings import fails, it falls back to SQLite."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
         import importlib
 
         with patch.dict(os.environ, {}, clear=True):  # Clear DATABASE_URL
@@ -348,7 +348,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_preserves_database_url_env_over_settings(self):
         """Test that DATABASE_URL environment variable takes precedence over settings.DATABASE_URI."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Set DATABASE_URL env var - this takes precedence, settings never consulted
         with patch.dict(os.environ, {"DATABASE_URL": "postgresql://env@envhost:5432/envdb"}):
@@ -360,7 +360,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_group_context_dict(self):
         """Test initialization with group context as dict."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         group_context = {
             "primary_group_id": "test-group-id",
@@ -381,7 +381,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_group_context_object(self):
         """Test initialization with group context as object."""
-        from src.engines.crewai.logging_config import ExecutionLogsDatabaseHandler
+        from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Create a mock group context object
         mock_group_context = MagicMock()

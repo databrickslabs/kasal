@@ -122,11 +122,11 @@ class TestInitialize:
             "src.engines.crewai.crewai_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.crewai.crew_logger.crew_logger",
+            "src.engines.crewai.infra.crew_logger.crew_logger",
             side_effect=Exception("boom"),
         ):
             # Force the import inside initialize() to fail
-            with patch.dict("sys.modules", {"src.engines.crewai.crew_logger": None}):
+            with patch.dict("sys.modules", {"src.engines.crewai.infra.crew_logger": None}):
                 result = await service.initialize()
                 assert result is False
 
@@ -450,55 +450,3 @@ class TestRunFlow:
 
 
 # ---------------------------------------------------------------------------
-# _execute_flow()
-# ---------------------------------------------------------------------------
-
-class TestExecuteFlow:
-
-    @pytest.mark.asyncio
-    async def test_successful_flow_sets_result(self, service):
-        mock_flow = MagicMock()
-        mock_flow.kickoff = AsyncMock(return_value="result_data")
-
-        service._running_jobs["f1"] = {"start_time": datetime.now(UTC)}
-
-        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
-            await service._execute_flow("f1", mock_flow)
-            assert service._running_jobs["f1"]["result"] == "result_data"
-
-    @pytest.mark.asyncio
-    async def test_failed_flow_updates_status(self, service):
-        mock_flow = MagicMock()
-        mock_flow.kickoff = AsyncMock(side_effect=Exception("flow crash"))
-
-        service._running_jobs["f2"] = {"start_time": datetime.now(UTC)}
-
-        with patch.object(
-            service, "_update_execution_status", new_callable=AsyncMock
-        ) as mock_update:
-            await service._execute_flow("f2", mock_flow)
-            mock_update.assert_any_call(
-                "f2",
-                ExecutionStatus.FAILED.value,
-                "Flow execution failed: flow crash",
-            )
-
-    @pytest.mark.asyncio
-    async def test_sets_end_time_in_finally(self, service):
-        mock_flow = MagicMock()
-        mock_flow.kickoff = AsyncMock(return_value="ok")
-
-        service._running_jobs["f3"] = {"start_time": datetime.now(UTC)}
-
-        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
-            await service._execute_flow("f3", mock_flow)
-            assert "end_time" in service._running_jobs["f3"]
-
-    @pytest.mark.asyncio
-    async def test_no_error_when_job_not_in_running_jobs(self, service):
-        mock_flow = MagicMock()
-        mock_flow.kickoff = AsyncMock(return_value="ok")
-
-        with patch.object(service, "_update_execution_status", new_callable=AsyncMock):
-            # Should not raise even though "ghost" is not in _running_jobs
-            await service._execute_flow("ghost", mock_flow)

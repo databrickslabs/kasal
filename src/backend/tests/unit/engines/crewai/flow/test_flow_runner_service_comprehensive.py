@@ -19,7 +19,7 @@ import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
-from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+from src.engines.crewai.paths.flow.flow_runner_service import FlowRunnerService
 from src.schemas.flow_execution import FlowExecutionStatus
 
 
@@ -30,12 +30,12 @@ class TestFlowRunnerServiceInit:
         """Test initialization with database session."""
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService'):
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 service = FlowRunnerService(mock_session)
 
         assert service.db == mock_session
@@ -44,12 +44,12 @@ class TestFlowRunnerServiceInit:
         """Test FlowRunnerService __init__ creates all repository instances"""
         mock_db = Mock()
 
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_flow_exec_service:
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository') as mock_flow_repo:
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository') as mock_task_repo:
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository') as mock_agent_repo:
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository') as mock_tool_repo:
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository') as mock_crew_repo:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_flow_exec_service:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository') as mock_flow_repo:
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository') as mock_task_repo:
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository') as mock_agent_repo:
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository') as mock_tool_repo:
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository') as mock_crew_repo:
                                 service = FlowRunnerService(mock_db)
 
                                 # Verify all repositories were created with the database session
@@ -64,12 +64,12 @@ class TestFlowRunnerServiceInit:
         """Test FlowRunnerService __init__ stores all attributes correctly"""
         mock_db = Mock()
 
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService'):
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 service = FlowRunnerService(mock_db)
 
                                 # Check all attributes are stored
@@ -95,12 +95,12 @@ class TestCreateFlowExecution:
     @pytest.fixture
     def service(self, mock_session):
         """Create FlowRunnerService instance."""
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_service:
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_service:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 svc = FlowRunnerService(mock_session)
                                 svc.flow_execution_service = mock_exec_service.return_value
                                 return svc
@@ -207,12 +207,12 @@ class TestRunFlow:
     @pytest.fixture
     def service(self, mock_session):
         """Create FlowRunnerService instance."""
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository') as mock_flow_repo:
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository') as mock_flow_repo:
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 svc = FlowRunnerService(mock_session)
                                 svc.flow_execution_service = mock_exec_svc.return_value
                                 svc.flow_repo = mock_flow_repo.return_value
@@ -377,19 +377,19 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_success(self, mock_session):
         """Test successful dynamic flow execution."""
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
 
-                with patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend:
+                with patch('src.engines.crewai.paths.flow.backend_flow.BackendFlow') as mock_backend:
                     mock_flow = MagicMock()
                     mock_flow.kickoff = AsyncMock(return_value={
                         'success': True,
@@ -397,7 +397,7 @@ class TestRunDynamicFlow:
                     })
                     mock_backend.return_value = mock_flow
 
-                    with patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
                             service = FlowRunnerService(mock_session)
 
@@ -414,24 +414,24 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_kickoff_error(self, mock_session):
         """Test handling of kickoff error."""
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
 
-                with patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend:
+                with patch('src.engines.crewai.paths.flow.backend_flow.BackendFlow') as mock_backend:
                     mock_flow = MagicMock()
                     mock_flow.kickoff = AsyncMock(side_effect=Exception("Kickoff failed"))
                     mock_backend.return_value = mock_flow
 
-                    with patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
                             service = FlowRunnerService(mock_session)
 
@@ -449,19 +449,19 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_run_dynamic_flow_with_flow_uuid(self, mock_session):
         """Test dynamic flow execution returns flow_uuid for checkpointing."""
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
 
-                with patch('src.engines.crewai.flow.backend_flow.BackendFlow') as mock_backend:
+                with patch('src.engines.crewai.paths.flow.backend_flow.BackendFlow') as mock_backend:
                     mock_flow = MagicMock()
                     mock_flow.kickoff = AsyncMock(return_value={
                         'success': True,
@@ -470,7 +470,7 @@ class TestRunDynamicFlow:
                     })
                     mock_backend.return_value = mock_flow
 
-                    with patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
                             with patch('src.services.execution_history_service.ExecutionHistoryService'):
                                 service = FlowRunnerService(mock_session)
@@ -498,12 +498,12 @@ class TestGetRequiredProviders:
     @pytest.fixture
     def service(self, mock_session):
         """Create FlowRunnerService instance."""
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService'):
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 return FlowRunnerService(mock_session)
 
     @pytest.mark.asyncio
@@ -612,20 +612,20 @@ class TestRunFlowExecution:
         """Test successful flow execution."""
         flow_id = uuid.uuid4()
 
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
 
                 # Patch both at source and usage location for module-level import
-                with patch('src.engines.crewai.flow.flow_runner_service.BackendFlow') as mock_backend:
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.BackendFlow') as mock_backend:
                     mock_flow = MagicMock()
                     mock_flow.load_flow = AsyncMock(return_value={
                         'nodes': [],
@@ -639,7 +639,7 @@ class TestRunFlowExecution:
                     })
                     mock_backend.return_value = mock_flow
 
-                    with patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
                             service = FlowRunnerService(mock_session)
 
@@ -656,14 +656,14 @@ class TestRunFlowExecution:
     @pytest.mark.asyncio
     async def test_run_flow_execution_invalid_uuid(self, mock_session):
         """Test handling of invalid UUID string."""
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
@@ -680,20 +680,20 @@ class TestRunFlowExecution:
         """Test that starting points are built when missing."""
         flow_id = uuid.uuid4()
 
-        with patch('src.engines.crewai.flow.flow_runner_service._smart_db_session') as mock_factory:
+        with patch('src.engines.crewai.paths.flow.flow_runner_service._smart_db_session') as mock_factory:
             mock_new_session = MagicMock()
             mock_context = MagicMock()
             mock_context.__aenter__ = AsyncMock(return_value=mock_new_session)
             mock_context.__aexit__ = AsyncMock(return_value=None)
             mock_factory.return_value = mock_context
 
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
                 mock_exec_svc_instance = MagicMock()
                 mock_exec_svc_instance.update_execution_status = AsyncMock()
                 mock_exec_svc.return_value = mock_exec_svc_instance
 
                 # Patch at usage location for module-level import
-                with patch('src.engines.crewai.flow.flow_runner_service.BackendFlow') as mock_backend:
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.BackendFlow') as mock_backend:
                     mock_flow = MagicMock()
                     mock_flow.load_flow = AsyncMock(return_value={
                         'nodes': [],
@@ -703,7 +703,7 @@ class TestRunFlowExecution:
                     mock_flow.kickoff = AsyncMock(return_value={'success': True, 'result': {}})
                     mock_backend.return_value = mock_flow
 
-                    with patch('src.engines.crewai.flow.flow_runner_service.ApiKeysService'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
                             service = FlowRunnerService(mock_session)
 
@@ -733,12 +733,12 @@ class TestGetFlowExecution:
     @pytest.fixture
     def service(self, mock_session):
         """Create FlowRunnerService instance."""
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 svc = FlowRunnerService(mock_session)
                                 svc.flow_execution_service = mock_exec_svc.return_value
                                 return svc
@@ -834,12 +834,12 @@ class TestGetFlowExecutionsByFlow:
     @pytest.fixture
     def service(self, mock_session):
         """Create FlowRunnerService instance."""
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService') as mock_exec_svc:
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 svc = FlowRunnerService(mock_session)
                                 svc.flow_execution_service = mock_exec_svc.return_value
                                 return svc
@@ -905,7 +905,7 @@ class TestFlowRunnerServiceConstants:
 
     def test_logger_initialization(self):
         """Test logger is properly initialized"""
-        from src.engines.crewai.flow.flow_runner_service import logger
+        from src.engines.crewai.paths.flow.flow_runner_service import logger
 
         assert logger is not None
         assert hasattr(logger, 'info')
@@ -914,7 +914,7 @@ class TestFlowRunnerServiceConstants:
 
     def test_required_imports(self):
         """Test that required imports are available"""
-        from src.engines.crewai.flow import flow_runner_service
+        from src.engines.crewai.paths.flow import flow_runner_service
 
         # Check module has the expected structure
         assert hasattr(flow_runner_service, 'FlowRunnerService')
@@ -932,8 +932,8 @@ class TestSmartDbSession:
         async def fake_get_smart():
             yield mock_session
 
-        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
-            from src.engines.crewai.flow.flow_runner_service import _smart_db_session
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            from src.engines.crewai.paths.flow.flow_runner_service import _smart_db_session
             async with _smart_db_session() as session:
                 assert session is mock_session
 
@@ -945,8 +945,8 @@ class TestSmartDbSession:
         async def fake_get_smart():
             yield mock_session
 
-        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
-            from src.engines.crewai.flow.flow_runner_service import _smart_db_session
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            from src.engines.crewai.paths.flow.flow_runner_service import _smart_db_session
             with pytest.raises(ValueError, match="test error"):
                 async with _smart_db_session() as session:
                     raise ValueError("test error")
@@ -959,13 +959,13 @@ class TestSmartDbSession:
         async def fake_get_smart():
             yield mock_session
 
-        with patch('src.engines.crewai.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
-                with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                                with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.get_smart_db_session', fake_get_smart):
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                                with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                     service = FlowRunnerService(MagicMock())
                                     async with service._safe_session() as session:
                                         assert session is mock_session
@@ -978,12 +978,12 @@ class TestFlowRunnerServiceMethodSignatures:
     def service(self):
         """Create a service with mocked dependencies"""
         mock_db = Mock()
-        with patch('src.engines.crewai.flow.flow_runner_service.FlowExecutionService'):
-            with patch('src.engines.crewai.flow.flow_runner_service.FlowRepository'):
-                with patch('src.engines.crewai.flow.flow_runner_service.TaskRepository'):
-                    with patch('src.engines.crewai.flow.flow_runner_service.AgentRepository'):
-                        with patch('src.engines.crewai.flow.flow_runner_service.ToolRepository'):
-                            with patch('src.engines.crewai.flow.flow_runner_service.CrewRepository'):
+        with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService'):
+            with patch('src.engines.crewai.paths.flow.flow_runner_service.FlowRepository'):
+                with patch('src.engines.crewai.paths.flow.flow_runner_service.TaskRepository'):
+                    with patch('src.engines.crewai.paths.flow.flow_runner_service.AgentRepository'):
+                        with patch('src.engines.crewai.paths.flow.flow_runner_service.ToolRepository'):
+                            with patch('src.engines.crewai.paths.flow.flow_runner_service.CrewRepository'):
                                 return FlowRunnerService(mock_db)
 
     def test_create_flow_execution_is_async(self, service):

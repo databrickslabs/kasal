@@ -7,7 +7,7 @@ the final_message passed to update_execution_status_with_retry.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
+from src.engines.crewai.paths.flow.flow_execution_runner import run_flow_in_process
 from src.models.execution_status import ExecutionStatus
 
 
@@ -34,8 +34,8 @@ class TestFlowExecutionWarnings:
         """When result contains warnings, they should appear in the completion message."""
         execution_id = 'flow-warn-001'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -64,8 +64,8 @@ class TestFlowExecutionWarnings:
         """Multiple warnings should be joined with semicolons in the message."""
         execution_id = 'flow-warn-002'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -95,8 +95,8 @@ class TestFlowExecutionWarnings:
         """When there are no warnings, message should be the standard success text."""
         execution_id = 'flow-warn-003'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -121,8 +121,8 @@ class TestFlowExecutionWarnings:
         """An empty warnings list should produce the standard success message."""
         execution_id = 'flow-warn-004'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -148,8 +148,8 @@ class TestFlowExecutionWarnings:
         """Warnings should NOT cause the status to be anything other than COMPLETED."""
         execution_id = 'flow-warn-005'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -175,8 +175,8 @@ class TestFlowExecutionWarnings:
         execution_id = 'flow-warn-006'
         expected_result = {'key': 'value', 'nodes': [1, 2, 3]}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -201,8 +201,8 @@ class TestFlowExecutionWarnings:
         """Verify the exact format of the warning message."""
         execution_id = 'flow-warn-007'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_update.return_value = True
             mock_executor.run_flow_isolated = AsyncMock(return_value={
@@ -228,8 +228,8 @@ class TestFlowExecutionWarnings:
         """When result status is FAILED, warnings should not be surfaced."""
         execution_id = 'flow-warn-008'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update, \
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update, \
              patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
 
             mock_update.return_value = True

@@ -6,7 +6,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.engines.crewai.crew_preparation import CrewPreparation
+from src.engines.crewai.paths.crew.crew_preparation import CrewPreparation
 
 
 def _db_agent(uuid, role, name):
@@ -59,7 +59,7 @@ async def test_failed_match_logs_bounded_summary_not_full_dump():
     p_session, p_service, _ = _patch_session_and_service(agents)
 
     with p_session, p_service, patch(
-        "src.engines.crewai.crew_preparation.logger"
+        "src.engines.crewai.paths.crew.crew_preparation.logger"
     ) as mock_logger:
         found = await prep._lookup_kasal_agent_uuid_via_service(
             {"role": "Nonexistent", "name": "nope"}, "missing-id"

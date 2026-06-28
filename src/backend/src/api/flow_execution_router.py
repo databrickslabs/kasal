@@ -10,7 +10,7 @@ from src.core.exceptions import BadRequestError, NotFoundError
 from pydantic import BaseModel
 
 from src.core.dependencies import GroupContextDep, get_db
-from src.engines.crewai.crewai_flow_service import CrewAIFlowService
+from src.engines.crewai.paths.flow.crewai_flow_service import CrewAIFlowService
 
 router = APIRouter(
     prefix="/flow-executions",

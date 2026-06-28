@@ -6,7 +6,7 @@ FlowCheckpointError, HITLGateConfigError, and FlowExecutionError classes.
 """
 import pytest
 
-from src.engines.crewai.flow.exceptions import (
+from src.engines.crewai.paths.flow.exceptions import (
     FlowExecutionError,
     FlowPausedForApprovalException,
     FlowResumeError,

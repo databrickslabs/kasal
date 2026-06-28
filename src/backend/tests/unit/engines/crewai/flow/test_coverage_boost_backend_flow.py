@@ -12,8 +12,8 @@ import pytest
 import uuid
 from unittest.mock import MagicMock, AsyncMock, patch, Mock, PropertyMock
 
-from src.engines.crewai.flow.backend_flow import BackendFlow
-from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+from src.engines.crewai.paths.flow.backend_flow import BackendFlow
+from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalException
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ class TestFlowMethod:
         }
         bf._repositories = {}
 
-        with patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -199,7 +199,7 @@ class TestFlowMethod:
         bf._config = {"group_context": group_ctx}
 
         with patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \
-             patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+             patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             await bf.flow()
         # Called at least once (may be called multiple times from flow() and _init_callbacks())
         assert mock_set_ctx.call_count >= 1
@@ -212,7 +212,7 @@ class TestFlowMethod:
         bf._config = {"group_context": MagicMock()}
 
         with patch("src.utils.user_context.UserContext.set_group_context", side_effect=Exception("no mod")), \
-             patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+             patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -234,7 +234,7 @@ class TestFlowMethod:
         flow_repo.get = AsyncMock(return_value=flow_data)
         bf._repositories = {"flow": flow_repo}
 
-        with patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -244,7 +244,7 @@ class TestFlowMethod:
         bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
         bf._config = {}
 
-        with patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(side_effect=RuntimeError("build fail"))):
+        with patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(side_effect=RuntimeError("build fail"))):
             with pytest.raises(ValueError, match="Failed to create flow"):
                 await bf.flow()
 
@@ -259,7 +259,7 @@ class TestFlowMethod:
         }
 
         mock_dynamic_flow = MagicMock()
-        with patch("src.engines.crewai.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=mock_dynamic_flow)):
+        with patch("src.engines.crewai.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=mock_dynamic_flow)):
             result = await bf.flow()
         assert result is mock_dynamic_flow
 
@@ -291,7 +291,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state.id = "state-id-1"
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -307,7 +307,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -323,7 +323,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -338,7 +338,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -355,7 +355,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -375,7 +375,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -391,7 +391,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff.return_value = "sync result"
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -406,7 +406,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         # Should have passed id=resume-uuid as input
@@ -424,7 +424,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             with pytest.raises(FlowPausedForApprovalException):
                 await bf.kickoff_async()
 
@@ -436,7 +436,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("exec fail"))
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is False
@@ -447,7 +447,7 @@ class TestKickoffAsync:
         bf = self._setup_bf()
 
         with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is False
@@ -469,7 +469,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert bf._flow_data is not None
@@ -484,8 +484,8 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
-             patch("src.engines.crewai.trace_management.TraceManager") as MockTM:
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.infra.trace_management.TraceManager") as MockTM:
             MockTM.ensure_writer_started = AsyncMock()
             result = await bf.kickoff_async()
 
@@ -502,8 +502,8 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
-             patch("src.engines.crewai.trace_management.TraceManager") as MockTM:
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.infra.trace_management.TraceManager") as MockTM:
             MockTM.ensure_writer_started = AsyncMock(side_effect=Exception("trace fail"))
             result = await bf.kickoff_async()
 
@@ -523,7 +523,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = state_mock
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -534,7 +534,7 @@ class TestKickoffAsync:
         bf = self._setup_bf()
         # Make flow() itself raise at the outer level
         with patch.object(bf, "flow", new=AsyncMock(side_effect=Exception("outer fail"))), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff_async()
         # The outer handler catches and returns failure
         assert result["success"] is False
@@ -563,7 +563,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -583,7 +583,7 @@ class TestKickoff:
         mock_crewai_flow.state = state
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -602,7 +602,7 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             with pytest.raises(FlowPausedForApprovalException):
                 await bf.kickoff()
@@ -617,7 +617,7 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("kick error"))
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -629,7 +629,7 @@ class TestKickoff:
         bf = self._setup_bf()
 
         with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -646,7 +646,7 @@ class TestKickoff:
         mock_crewai_flow = EmptyFlow()
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -664,7 +664,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -681,7 +681,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -698,7 +698,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -718,7 +718,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -730,7 +730,7 @@ class TestKickoff:
         bf._flow_data = None
         bf._config = {}  # No nodes, no repo to load
 
-        with patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+        with patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -751,7 +751,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -764,7 +764,7 @@ class TestKickoff:
         bf._config = {}
         bf._repositories = {"flow": None}
 
-        with patch("src.engines.crewai.flow.backend_flow.CallbackManager"):
+        with patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -786,7 +786,7 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.crewai.flow.backend_flow.CallbackManager"), \
+             patch("src.engines.crewai.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -838,47 +838,3 @@ class TestPlot:
             result = await bf.plot()
 
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _ensure_event_listeners_registered / _configure_agent_and_tools / _configure_task
-# ---------------------------------------------------------------------------
-
-class TestDelegatedMethods:
-
-    def test_ensure_event_listeners_registered(self):
-        bf = _make_bf()
-        listeners = [MagicMock()]
-        with patch("src.engines.crewai.flow.backend_flow.CallbackManager.ensure_event_listeners_registered") as mock_enr:
-            bf._ensure_event_listeners_registered(listeners)
-        mock_enr.assert_called_once_with(listeners)
-
-    @pytest.mark.asyncio
-    async def test_configure_agent_and_tools(self):
-        bf = _make_bf()
-        bf._flow_data = {}
-        bf._config = {}
-        bf._repositories = {}
-
-        agent_data = MagicMock()
-        mock_agent = MagicMock()
-
-        with patch("src.engines.crewai.flow.backend_flow.AgentConfig.configure_agent_and_tools", new=AsyncMock(return_value=mock_agent)):
-            result = await bf._configure_agent_and_tools(agent_data)
-
-        assert result is mock_agent
-
-    @pytest.mark.asyncio
-    async def test_configure_task(self):
-        bf = _make_bf()
-        bf._flow_data = {}
-        bf._config = {}
-        bf._repositories = {}
-
-        task_data = MagicMock()
-        mock_task = MagicMock()
-
-        with patch("src.engines.crewai.flow.backend_flow.TaskConfig.configure_task", new=AsyncMock(return_value=mock_task)):
-            result = await bf._configure_task(task_data)
-
-        assert result is mock_task

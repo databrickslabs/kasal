@@ -41,7 +41,7 @@ def _load_modules_isolated():
         "src.utils", "src.utils.user_context",
         "src.engines", "src.engines.crewai",
         "src.engines.crewai.tools", "src.engines.crewai.tools.tool_factory",
-        "src.engines.crewai.flow", "src.engines.crewai.flow.modules",
+        "src.engines.crewai.paths.flow", "src.engines.crewai.paths.flow.modules",
         "src.engines.crewai.guardrails",
         "src.engines.crewai.guardrails.guardrail_factory",
         "src.engines.crewai.guardrails.guardrail_wrapper",
@@ -55,8 +55,8 @@ def _load_modules_isolated():
         "crewai.tasks", "crewai.tasks.llm_guardrail",
     ]
     loaded_modules = [
-        "src.engines.crewai.flow.modules.task_adapter",
-        "src.engines.crewai.flow.modules.agent_adapter",
+        "src.engines.crewai.paths.flow.modules.task_adapter",
+        "src.engines.crewai.paths.flow.modules.agent_adapter",
     ]
 
     # 1. Snapshot existing entries
@@ -105,12 +105,12 @@ def _load_modules_isolated():
         return mod
 
     task_mod = _load(
-        "src.engines.crewai.flow.modules.task_adapter",
-        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "task_adapter.py"),
+        "src.engines.crewai.paths.flow.modules.task_adapter",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "paths", "flow", "modules", "task_adapter.py"),
     )
     agent_mod = _load(
-        "src.engines.crewai.flow.modules.agent_adapter",
-        os.path.join(_BACKEND_SRC, "engines", "crewai", "flow", "modules", "agent_adapter.py"),
+        "src.engines.crewai.paths.flow.modules.agent_adapter",
+        os.path.join(_BACKEND_SRC, "engines", "crewai", "paths", "flow", "modules", "agent_adapter.py"),
     )
 
     # 5. Extract the symbols we need
