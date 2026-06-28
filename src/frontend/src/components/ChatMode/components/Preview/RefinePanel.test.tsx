@@ -26,12 +26,31 @@ describe('RefinePanel', () => {
     expect(screen.getByText('Photo album')).toBeInTheDocument();
   });
 
+  it('closes the panel from the header close button', () => {
+    const p = renderPanel();
+    fireEvent.click(screen.getByLabelText('Close customize'));
+    expect(p.onClose).toHaveBeenCalled();
+  });
+
   it('applies a one-click style preset immediately (deterministic, no AI)', () => {
     const p = renderPanel();
     fireEvent.click(screen.getByTitle('Apply the Dark style'));
     expect(p.onApplyStyle).toHaveBeenCalledTimes(1);
     expect(p.onApplyStyle.mock.calls[0][0]).toMatchObject({ accent: '#38BDF8', background: '#0F172A' });
     expect(p.onRefine).not.toHaveBeenCalled();
+  });
+
+  it('marks the chosen preset as selected (aria-pressed) and only that one', () => {
+    renderPanel();
+    const dark = screen.getByTitle('Apply the Dark style');
+    const vibrant = screen.getByTitle('Apply the Vibrant style');
+    fireEvent.click(dark);
+    expect(dark).toHaveAttribute('aria-pressed', 'true');
+    expect(vibrant).toHaveAttribute('aria-pressed', 'false');
+    // A fine-tune edit diverges from the preset → selection clears.
+    fireEvent.click(screen.getByText(/fine-tune/i));
+    fireEvent.change(screen.getByLabelText('Accent'), { target: { value: '#abcdef' } });
+    expect(dark).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('debounces a fine-tune color edit before applying', () => {
@@ -69,11 +88,13 @@ describe('RefinePanel', () => {
     expect(p.onClose).toHaveBeenCalled();
   });
 
-  it('styles the AI button neutral when disabled and accent when enabled (no faded-accent smear)', () => {
+  it('styles the AI button as a borderless ghost when disabled and a solid accent CTA when enabled', () => {
     renderPanel();
     const updateBtn = screen.getByText('Update with AI');
-    // Disabled → neutral grey background, not a faded accent.
-    expect(updateBtn.style.backgroundColor).toBe('var(--bg-primary)');
+    // Disabled → no fill, no box (transparent bg + border), muted text — not a
+    // faded-accent smear and not a grey/white square.
+    expect(updateBtn.style.backgroundColor).toBe('transparent');
+    expect(updateBtn.style.borderColor).toBe('transparent');
     expect(updateBtn.style.color).toBe('var(--text-muted)');
     // Enabled → solid accent fill with white text.
     fireEvent.change(screen.getByLabelText('Target slide count'), { target: { value: '12' } });
