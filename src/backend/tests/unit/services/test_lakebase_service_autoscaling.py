@@ -5,8 +5,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 # Ensure the backend src is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Users", "nehme.tohme", "workspace", "kasal", "src", "backend"))
-sys.path.insert(0, "/Users/nehme.tohme/workspace/kasal/src/backend")
 
 
 @pytest.fixture(autouse=True)

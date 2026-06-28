@@ -731,14 +731,14 @@ class TestFromEmailUsesSmartSession:
         """When user selects a shared group, primary_group_id should be that group."""
         mock_group = Mock(id="energy_0380b619")
         groups_with_roles = [(mock_group, "operator")]
-        mock_user = Mock(id="user-1", email="nehme@databricks.com", is_system_admin=False)
+        mock_user = Mock(id="user-1", email="ada@databricks.com", is_system_admin=False)
 
         with patch.object(
             GroupContext, "_get_user_group_memberships_with_roles",
             new=AsyncMock(return_value=(mock_user, groups_with_roles))
         ):
             ctx = await GroupContext.from_email(
-                email="nehme@databricks.com",
+                email="ada@databricks.com",
                 access_token="tok",
                 group_id="energy_0380b619"
             )
@@ -747,7 +747,7 @@ class TestFromEmailUsesSmartSession:
         assert "energy_0380b619" in ctx.group_ids
         # Strict workspace isolation: only the selected group is in group_ids
         # (personal workspace excluded; reachable when the user switches back to it).
-        personal = GroupContext.generate_individual_group_id("nehme@databricks.com")
+        personal = GroupContext.generate_individual_group_id("ada@databricks.com")
         assert personal not in ctx.group_ids
 
     @pytest.mark.asyncio
@@ -755,15 +755,15 @@ class TestFromEmailUsesSmartSession:
         """When user selects personal workspace, primary_group_id should be personal."""
         mock_group = Mock(id="energy_0380b619")
         groups_with_roles = [(mock_group, "operator")]
-        mock_user = Mock(id="user-1", email="nehme@databricks.com", is_system_admin=False)
-        personal = GroupContext.generate_individual_group_id("nehme@databricks.com")
+        mock_user = Mock(id="user-1", email="ada@databricks.com", is_system_admin=False)
+        personal = GroupContext.generate_individual_group_id("ada@databricks.com")
 
         with patch.object(
             GroupContext, "_get_user_group_memberships_with_roles",
             new=AsyncMock(return_value=(mock_user, groups_with_roles))
         ):
             ctx = await GroupContext.from_email(
-                email="nehme@databricks.com",
+                email="ada@databricks.com",
                 access_token="tok",
                 group_id=personal
             )

@@ -4,7 +4,6 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, "/Users/nehme.tohme/workspace/kasal/src/backend")
 
 
 @pytest.fixture
