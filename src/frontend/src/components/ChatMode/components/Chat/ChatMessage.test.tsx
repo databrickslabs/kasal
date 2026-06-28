@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ChatMessage, { TraceGroupMessage } from './ChatMessage';
 import { CrewNameConflictError } from '../../api/crews';
+import { useExecutionStore } from '../../store/executionStore';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // --- Mock leaf children so we isolate ChatMessage's routing logic ---
@@ -712,6 +713,53 @@ describe('ChatMessage — Genie crew run button', () => {
   it('does not render the Run button when onExecute is not provided', () => {
     render(<ChatMessage message={genieMsg()} />);
     expect(screen.queryByText(/Run crew|Select a Genie space/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatMessage — a2ui preview-pane note', () => {
+  // These tests drive the real executionStore preview state; reset it after each
+  // so the inline-a2ui test elsewhere in this file keeps seeing a closed pane.
+  afterEach(() => {
+    useExecutionStore.setState({ previewPaneOpen: false, previewSourceMessageId: null });
+  });
+
+  const a2uiMsg = (id: string) =>
+    msg({
+      id,
+      content: 'Here is your deck.',
+      resultType: 'a2ui',
+      resultData: { surfaceKind: 'presentation', root: 'r', components: [], dataModel: {} },
+    });
+
+  it('shows the "Opened in the side panel" note (not the inline surface) when the pane owns this message', () => {
+    useExecutionStore.setState({ previewPaneOpen: true, previewSourceMessageId: 'm-side' });
+    render(<ChatMessage message={a2uiMsg('m-side')} />);
+    expect(screen.getByText('Opened in the side panel')).toBeInTheDocument();
+    expect(screen.getByText('Show here')).toBeInTheDocument();
+    // the inline surface is suppressed while it lives in the side pane
+    expect(screen.queryByTestId('a2ui-renderer')).toBeNull();
+  });
+
+  it('still renders inline when the pane is open for a DIFFERENT message', () => {
+    useExecutionStore.setState({ previewPaneOpen: true, previewSourceMessageId: 'other' });
+    render(<ChatMessage message={a2uiMsg('m-mine')} />);
+    expect(screen.getByTestId('a2ui-renderer')).toHaveTextContent('presentation');
+    expect(screen.queryByText('Opened in the side panel')).toBeNull();
+  });
+
+  it('"Show here" closes the preview pane (clearPreview)', () => {
+    useExecutionStore.setState({ previewPaneOpen: true, previewSourceMessageId: 'm-side' });
+    render(<ChatMessage message={a2uiMsg('m-side')} />);
+    fireEvent.click(screen.getByText('Show here'));
+    expect(useExecutionStore.getState().previewPaneOpen).toBe(false);
+  });
+
+  it('the inline expand control opens the preview pane for this message', () => {
+    const spy = vi.spyOn(useExecutionStore.getState(), 'openPreviewPane');
+    render(<ChatMessage message={a2uiMsg('m-expand')} />);
+    fireEvent.click(screen.getByLabelText('Open in side panel'));
+    expect(spy).toHaveBeenCalledWith(expect.anything(), 'm-expand');
+    spy.mockRestore();
   });
 });
 

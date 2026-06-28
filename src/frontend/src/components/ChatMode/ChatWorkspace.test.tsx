@@ -649,6 +649,24 @@ describe('extractA2uiSurface', () => {
   it('returns null for a malformed surface (missing components/surfaceKind)', () => {
     expect(extractA2uiSurface({ result: { text: 'hi', a2ui: { foo: 'bar' } } })).toBeNull();
   });
+
+  it('returns null when there is no result key', () => {
+    expect(extractA2uiSurface({})).toBeNull();
+  });
+
+  it('returns null (and never throws) for a null result', () => {
+    expect(() => extractA2uiSurface({ result: null })).not.toThrow();
+    expect(extractA2uiSurface({ result: null })).toBeNull();
+  });
+
+  it('returns null (and never throws) when a2ui is not an object', () => {
+    expect(() => extractA2uiSurface({ result: { text: 'hi', a2ui: 'nope' } })).not.toThrow();
+    expect(extractA2uiSurface({ result: { text: 'hi', a2ui: 'nope' } })).toBeNull();
+  });
+
+  it('returns null for a candidate with surfaceKind but no components', () => {
+    expect(extractA2uiSurface({ result: { a2ui: { surfaceKind: 'presentation' } } })).toBeNull();
+  });
 });
 
 describe('cleanTaskLabel', () => {
