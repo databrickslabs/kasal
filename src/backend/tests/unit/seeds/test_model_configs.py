@@ -204,6 +204,32 @@ class TestSeedAsyncFunction:
         assert mock_session.add.call_count == len(DEFAULT_MODELS)
 
     @pytest.mark.asyncio
+    async def test_seed_async_enables_only_databricks_models(self):
+        """By default only Databricks-provider models are enabled; the rest disabled."""
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        mock_context = AsyncMock()
+        mock_context.__aenter__.return_value = mock_session
+        mock_context.__aexit__.return_value = None
+
+        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+            await seed_async()
+
+        added = [c.args[0] for c in mock_session.add.call_args_list]
+        assert added, "expected new models to be added"
+        for mc in added:
+            if mc.provider == "databricks":
+                assert mc.enabled is True, f"{mc.key} (databricks) should be enabled"
+            else:
+                assert mc.enabled is False, f"{mc.key} ({mc.provider}) should be disabled"
+        # sanity: the dataset contains both databricks and non-databricks models
+        assert any(mc.provider == "databricks" for mc in added)
+        assert any(mc.provider != "databricks" for mc in added)
+
+    @pytest.mark.asyncio
     async def test_seed_async_updates_existing_models(self):
         """Test that seed_async updates existing models."""
         existing_model = MagicMock()
