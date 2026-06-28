@@ -332,4 +332,8 @@ echo -e "${BLUE}Logs will be written to ./logs/${NC}"
 echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 
 # Run using the local venv directly (works offline, no uv resolution needed)
-exec .venv/bin/uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+# --reload-dir src scopes the watcher to application code only. Without it,
+# WatchFiles also watches tests/, so editing a test bounces the live server
+# mid-execution and tears down in-flight crew/flow subprocesses, which stalls
+# the reload until everything is force-killed.
+exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000

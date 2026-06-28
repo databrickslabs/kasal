@@ -267,16 +267,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Use tab sync to keep tabs and flow manager in sync
   const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
 
-  // Restore view mode when switching tabs
-  React.useEffect(() => {
-    const tab = getActiveTab();
-    if (tab && tab.viewMode) {
-      const shouldShowFlows = tab.viewMode === 'flow';
-      if (areFlowsVisible !== shouldShowFlows) {
-        setUIStoreAreFlowsVisible(shouldShowFlows);
-      }
-    }
-  }, [activeTab?.id]); // Only trigger when tab ID changes
+  // View-mode reconciliation lives below, right after the uiLayout store hook,
+  // so that areFlowsVisible is in scope for the effect dependency arrays.
 
   // Use tab execution sync to keep execution config (process type, planning, etc.) in sync per tab
   useTabExecutionSync();
@@ -335,6 +327,53 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     areFlowsVisible,
     appMode,
   } = useUILayoutStore();
+
+  // View mode (crew vs flow) reconciliation between the global appMode/areFlowsVisible
+  // (uiLayout — restored SYNCHRONOUSLY from localStorage) and the per-tab viewMode
+  // (tabManager — rehydrated ASYNCHRONOUSLY via persist middleware, defaulting to 'crew').
+  //
+  // On a hard refresh the synchronously-restored appMode is authoritative, so the async
+  // per-tab viewMode must NOT clobber it (that was the "refresh drops me back to the crew
+  // canvas" bug). We therefore:
+  //   • the first time the active tab resolves (mount/hydration): trust the restored
+  //     appMode and heal this tab's viewMode to match it — without changing the view;
+  //   • on a genuine tab switch: restore the target tab's saved viewMode.
+  const prevActiveTabIdRef = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    const tab = getActiveTab();
+    const currentId = activeTab?.id;
+    const prevId = prevActiveTabIdRef.current;
+    if (currentId === prevId) return; // not an actual tab change
+    prevActiveTabIdRef.current = currentId;
+    if (!tab) return;
+    if (prevId === undefined) {
+      // Initial mount / hydration — appMode wins; align the tab to it.
+      const desired = areFlowsVisible ? 'flow' : 'crew';
+      if (tab.viewMode !== desired) {
+        updateTabViewMode(tab.id, desired);
+      }
+    } else if (tab.viewMode) {
+      // Genuine tab switch — restore that tab's remembered view.
+      const shouldShowFlows = tab.viewMode === 'flow';
+      if (areFlowsVisible !== shouldShowFlows) {
+        setUIStoreAreFlowsVisible(shouldShowFlows);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id]);
+
+  // Mirror the live flow visibility onto the active tab's viewMode so that switching
+  // modes (TabBar grid button, flow toggle, catalog open) persists per tab and survives
+  // a refresh. Keeps the two stores from drifting apart.
+  React.useEffect(() => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    const desired = areFlowsVisible ? 'flow' : 'crew';
+    if (tab.viewMode !== desired) {
+      updateTabViewMode(tab.id, desired);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areFlowsVisible]);
 
   // Responsive layout — computed overrides, never mutates the store
   const { isCompact, isMobile } = useResponsiveLayout();
@@ -416,7 +455,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   }, [showRunHistory, setExecutionHistoryVisible]);
 
-  // Add event listener to open flow panel when a flow is loaded from catalog
+  // Add event listener to open flow panel when a flow is loaded from catalog.
+  // Flipping areFlowsVisible is enough — the viewMode mirror effect keeps the
+  // active tab's viewMode in sync so a refresh restores the flow builder.
   React.useEffect(() => {
     const handleOpenFlowPanel = () => {
       if (!areFlowsVisible) {
@@ -1843,8 +1884,15 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }
             }}
             onSaveFlowClick={() => {
-              const event = new CustomEvent('openSaveFlowDialog');
-              window.dispatchEvent(event);
+              const activeTab = getActiveTab();
+              if (activeTab?.savedFlowId) {
+                // Overwrite the existing flow (no save-as dialog), mirroring crew save
+                window.dispatchEvent(new CustomEvent('updateExistingFlow', {
+                  detail: { flowId: activeTab.savedFlowId, tabId: activeTab.id }
+                }));
+              } else {
+                window.dispatchEvent(new CustomEvent('openSaveFlowDialog'));
+              }
             }}
             showRunHistory={showRunHistory}
             executionHistoryHeight={executionHistoryHeight}

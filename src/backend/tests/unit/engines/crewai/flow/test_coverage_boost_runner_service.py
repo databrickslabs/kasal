@@ -221,7 +221,8 @@ class TestRunFlow:
 
         with patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
             repo_instance = MagicMock()
-            repo_instance.get_execution_by_job_id = AsyncMock(return_value=None)
+            # resume_from_execution_id is the integer PK; lookup is by id, not job_id
+            repo_instance.get_execution_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
 
             fid = uuid.uuid4()
@@ -232,7 +233,7 @@ class TestRunFlow:
                     config={
                         "nodes": [{"id": "n1"}],
                         "edges": [],
-                        "resume_from_execution_id": "old-job-id",
+                        "resume_from_execution_id": 115,
                     }
                 )
             assert exc_info.value.status_code == 404

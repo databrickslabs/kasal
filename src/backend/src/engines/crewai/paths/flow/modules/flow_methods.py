@@ -668,11 +668,18 @@ class FlowMethodFactory:
                 for i, result in enumerate(results):
                     result_str = str(result)
                     logger.info(f"  Output {i}: {result_str[:200]}...")
-                    # Store each result in state
-                    self.state[f'previous_output_{i}'] = result
+                    # Store each result in state. Serialize CrewOutput first: the
+                    # @persist decorator JSON-serializes the entire flow state after
+                    # this method runs, and a raw CrewOutput is not JSON-serializable
+                    # (would raise "Object of type CrewOutput is not JSON serializable").
+                    serialized_result = (
+                        result.raw if hasattr(result, 'raw') and result.raw
+                        else (str(result) if result is not None else result)
+                    )
+                    self.state[f'previous_output_{i}'] = serialized_result
                     if i == 0:
                         # Also store first output as 'previous_output' for easy access
-                        self.state['previous_output'] = result
+                        self.state['previous_output'] = serialized_result
             else:
                 logger.info("📭 No previous outputs received")
 

@@ -23,6 +23,16 @@ interface ConditionBuilderProps {
   onChange: (conditions: Condition[]) => void;
   label?: string;
   helperText?: string;
+  /**
+   * When provided, the condition "field" becomes a dropdown of these variable names
+   * (e.g. the properties of a declared output schema) instead of a free-text input.
+   */
+  fieldOptions?: string[];
+  /**
+   * Optional map of variable name → JSON-schema type (string/number/integer/boolean).
+   * Used to tailor the value input — e.g. boolean fields get a true/false dropdown.
+   */
+  fieldTypes?: Record<string, string>;
 }
 
 const operators = [
@@ -41,8 +51,11 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
   conditions,
   onChange,
   label = 'Conditions',
-  helperText
+  helperText,
+  fieldOptions,
+  fieldTypes
 }) => {
+  const hasFieldOptions = Array.isArray(fieldOptions) && fieldOptions.length > 0;
   const handleAddCondition = () => {
     onChange([
       ...conditions,
@@ -113,14 +126,37 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
 
               {/* Condition Row */}
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                {/* Field */}
-                <TextField
-                  size="small"
-                  placeholder="Field name"
-                  value={condition.field}
-                  onChange={(e) => handleUpdateCondition(index, { field: e.target.value })}
-                  sx={{ flex: 1, '& input': { fontSize: '0.85rem' } }}
-                />
+                {/* Field — dropdown of schema variables when provided, else free text */}
+                {hasFieldOptions ? (
+                  <FormControl size="small" sx={{ flex: 1 }}>
+                    <Select
+                      // Only show the schema's routable fields. If a stored field is no
+                      // longer in the schema, fall back to the empty placeholder rather
+                      // than surfacing a stale/bogus option.
+                      value={fieldOptions!.includes(condition.field) ? condition.field : ''}
+                      displayEmpty
+                      onChange={(e) => handleUpdateCondition(index, { field: e.target.value })}
+                      sx={{ fontSize: '0.85rem' }}
+                    >
+                      <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
+                        <em>Variable</em>
+                      </MenuItem>
+                      {fieldOptions!.map((opt) => (
+                        <MenuItem key={opt} value={opt} sx={{ fontSize: '0.85rem' }}>
+                          {opt}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                ) : (
+                  <TextField
+                    size="small"
+                    placeholder="Field name"
+                    value={condition.field}
+                    onChange={(e) => handleUpdateCondition(index, { field: e.target.value })}
+                    sx={{ flex: 1, '& input': { fontSize: '0.85rem' } }}
+                  />
+                )}
 
                 {/* Operator */}
                 <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -139,14 +175,33 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
                   </Select>
                 </FormControl>
 
-                {/* Value */}
-                <TextField
-                  size="small"
-                  placeholder="Value"
-                  value={condition.value}
-                  onChange={(e) => handleUpdateCondition(index, { value: e.target.value })}
-                  sx={{ flex: 1, '& input': { fontSize: '0.85rem' } }}
-                />
+                {/* Value — boolean fields get a true/false dropdown, others free text */}
+                {fieldTypes?.[condition.field] === 'boolean' ? (
+                  <FormControl size="small" sx={{ flex: 1 }}>
+                    <Select
+                      value={['true', 'false'].includes((condition.value || '').toLowerCase())
+                        ? (condition.value || '').toLowerCase()
+                        : ''}
+                      displayEmpty
+                      onChange={(e) => handleUpdateCondition(index, { value: e.target.value })}
+                      sx={{ fontSize: '0.85rem' }}
+                    >
+                      <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
+                        <em>Value</em>
+                      </MenuItem>
+                      <MenuItem value="true" sx={{ fontSize: '0.85rem' }}>true</MenuItem>
+                      <MenuItem value="false" sx={{ fontSize: '0.85rem' }}>false</MenuItem>
+                    </Select>
+                  </FormControl>
+                ) : (
+                  <TextField
+                    size="small"
+                    placeholder="Value"
+                    value={condition.value}
+                    onChange={(e) => handleUpdateCondition(index, { value: e.target.value })}
+                    sx={{ flex: 1, '& input': { fontSize: '0.85rem' } }}
+                  />
+                )}
 
                 {/* Delete Button */}
                 <IconButton
@@ -213,7 +268,17 @@ export function conditionsToPython(conditions: Condition[]): string {
 
       // Build the condition expression
       const field = `state.get("${cond.field}", "")`;
-      const value = isNaN(Number(cond.value)) ? `"${cond.value}"` : cond.value;
+      // Emit real Python booleans for true/false so boolean fields compare correctly
+      // (state.get(...) == True), not against the string "true".
+      const lowered = cond.value.trim().toLowerCase();
+      let value: string;
+      if (lowered === 'true') {
+        value = 'True';
+      } else if (lowered === 'false') {
+        value = 'False';
+      } else {
+        value = isNaN(Number(cond.value)) ? `"${cond.value}"` : cond.value;
+      }
 
       switch (cond.operator) {
         case 'contains':

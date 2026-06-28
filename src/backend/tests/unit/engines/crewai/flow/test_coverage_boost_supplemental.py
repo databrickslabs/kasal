@@ -420,7 +420,8 @@ class TestRunFlowResumeScenario:
              patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)):
 
             repo_inst = MagicMock()
-            repo_inst.get_execution_by_job_id = AsyncMock(return_value=existing_execution)
+            # resume_from_execution_id is the integer PK; lookup is by id, not job_id
+            repo_inst.get_execution_by_id = AsyncMock(return_value=existing_execution)
             MockExecRepo.return_value = repo_inst
 
             result = await svc.run_flow(
@@ -429,7 +430,7 @@ class TestRunFlowResumeScenario:
                 config={
                     "nodes": [{"id": "n1"}],
                     "edges": [],
-                    "resume_from_execution_id": "old-job-id",
+                    "resume_from_execution_id": 115,
                 }
             )
 

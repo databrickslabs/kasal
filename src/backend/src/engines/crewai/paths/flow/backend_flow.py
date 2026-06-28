@@ -30,6 +30,46 @@ from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalExcept
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
+
+def _extract_flow_uuid(crewai_flow) -> Optional[str]:
+    """Extract CrewAI's flow state id — used as the checkpoint/resume ``flow_uuid``.
+
+    CrewAI wraps flow state in a ``StateProxy`` whose ``id`` is NOT exposed as an
+    attribute (``hasattr(state, 'id')`` is False) and which is not a ``dict``, so the
+    naive ``getattr``/``isinstance`` checks miss it and ``flow_uuid`` comes back None —
+    which means ``set_checkpoint_active`` never fires and no resumable checkpoint is
+    recorded. Try ``model_dump()['id']``, subscript, then attribute access to cover
+    StateProxy, dict, and plain pydantic states.
+    """
+    try:
+        state = getattr(crewai_flow, 'state', None)
+    except Exception:
+        return None
+    if state is None:
+        return None
+
+    sid = None
+    # 1) Direct attribute — plain pydantic states / objects exposing .id.
+    #    StateProxy raises AttributeError for 'id' (handled), so we fall through.
+    try:
+        sid = getattr(state, 'id', None)
+    except Exception:
+        sid = None
+    # 2) model_dump() — CrewAI StateProxy surfaces 'id' here, not as an attribute.
+    if sid is None and hasattr(state, 'model_dump'):
+        try:
+            sid = state.model_dump().get('id')
+        except Exception:
+            sid = None
+    # 3) Subscript — dict-like / StateProxy.__getitem__.
+    if sid is None:
+        try:
+            sid = state['id']
+        except Exception:
+            sid = None
+    return str(sid) if sid is not None else None
+
+
 class BackendFlow:
     """Base BackendFlow class for handling flow execution"""
 
@@ -452,14 +492,11 @@ class BackendFlow:
 
                 # Extract flow_uuid (state.id) for checkpoint/resume functionality
                 # This is CrewAI's internal state identifier when using @persist
-                flow_uuid = None
-                try:
-                    if hasattr(crewai_flow, 'state') and crewai_flow.state is not None:
-                        if hasattr(crewai_flow.state, 'id'):
-                            flow_uuid = str(crewai_flow.state.id)
-                            logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
-                except Exception as state_err:
-                    logger.warning(f"Could not extract flow state.id: {state_err}")
+                flow_uuid = _extract_flow_uuid(crewai_flow)
+                if flow_uuid:
+                    logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
+                else:
+                    logger.warning("Could not extract flow_uuid from flow state for checkpoint")
 
                 return {
                     "success": True,
@@ -707,25 +744,11 @@ class BackendFlow:
 
             # Extract flow_uuid (state.id) for checkpoint/resume functionality
             # This is CrewAI's internal state identifier when using @persist
-            flow_uuid = None
-            try:
-                logger.info(f"DEBUG: Checking crewai_flow.state - hasattr(state): {hasattr(crewai_flow, 'state')}")
-                if hasattr(crewai_flow, 'state'):
-                    state = crewai_flow.state
-                    logger.info(f"DEBUG: state type: {type(state)}, state value: {state}")
-                    logger.info(f"DEBUG: state attributes: {dir(state) if state else 'None'}")
-                    if state is not None:
-                        if hasattr(state, 'id'):
-                            flow_uuid = str(state.id)
-                            logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
-                        else:
-                            logger.info(f"DEBUG: state has no 'id' attribute")
-                            # Try to get id from dict-like state
-                            if isinstance(state, dict) and 'id' in state:
-                                flow_uuid = str(state['id'])
-                                logger.info(f"Extracted flow_uuid from dict state['id']: {flow_uuid}")
-            except Exception as state_err:
-                logger.warning(f"Could not extract flow state.id: {state_err}", exc_info=True)
+            flow_uuid = _extract_flow_uuid(crewai_flow)
+            if flow_uuid:
+                logger.info(f"Extracted flow_uuid (state.id) for checkpoint: {flow_uuid}")
+            else:
+                logger.warning("Could not extract flow_uuid from flow state for checkpoint")
 
             return {
                 "success": True,

@@ -307,12 +307,13 @@ class FlowRunnerService:
             resume_from_execution_id = config.get('resume_from_execution_id') if config else None
 
             if resume_from_execution_id:
-                # RESUME SCENARIO: Reuse existing execution record
-                logger.info(f"🔄 RESUME: Reusing existing execution for job_id={resume_from_execution_id}")
+                # RESUME SCENARIO: Reuse existing execution record.
+                # resume_from_execution_id is the executionhistory integer PK (id),
+                # NOT the job_id (a UUID), so look it up by id.
+                logger.info(f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}")
 
-                # Get the existing execution record by job_id
                 exec_repo = ExecutionHistoryRepository(self.db)
-                existing_execution = await exec_repo.get_execution_by_job_id(resume_from_execution_id)
+                existing_execution = await exec_repo.get_execution_by_id(int(resume_from_execution_id))
 
                 if existing_execution:
                     execution = existing_execution
@@ -321,7 +322,7 @@ class FlowRunnerService:
                     await self.db.commit()
                     logger.info(f"🔄 RESUME: Found existing execution with ID {execution.id}, status set to RUNNING")
                 else:
-                    logger.error(f"🔄 RESUME: Could not find execution for job_id={resume_from_execution_id}")
+                    logger.error(f"🔄 RESUME: Could not find execution for execution_id={resume_from_execution_id}")
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Execution not found for resume: {resume_from_execution_id}"

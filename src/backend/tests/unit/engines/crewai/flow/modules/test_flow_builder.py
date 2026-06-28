@@ -1548,7 +1548,7 @@ class TestRouterBuildEvalContext:
     def test_eval_context_crew_output_raw_json(self):
         """CrewOutput with .raw JSON object is parsed into context."""
         flow = self._build_flow_with_per_route({"check": "score > 50"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '{"score": 75}'
         method = getattr(flow, "router_ctx_0")
         result = method(crew_output)
@@ -1557,7 +1557,7 @@ class TestRouterBuildEvalContext:
     def test_eval_context_crew_output_raw_json_array(self):
         """CrewOutput with .raw JSON array parses first item."""
         flow = self._build_flow_with_per_route({"check": "score > 50"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '[{"score": 75}]'
         method = getattr(flow, "router_ctx_0")
         result = method(crew_output)
@@ -1649,7 +1649,7 @@ class TestRouterBuildEvalContext:
     def test_eval_context_auto_convert_string_int(self):
         """String numeric values auto-converted to int."""
         flow = self._build_flow_with_per_route({"check": "score > 50"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '{"score": "75"}'
         method = getattr(flow, "router_ctx_0")
         result = method(crew_output)
@@ -1658,7 +1658,7 @@ class TestRouterBuildEvalContext:
     def test_eval_context_auto_convert_string_float(self):
         """String float values auto-converted to float."""
         flow = self._build_flow_with_per_route({"check": "score > 50"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '{"score": "75.5"}'
         method = getattr(flow, "router_ctx_0")
         result = method(crew_output)
@@ -1667,7 +1667,7 @@ class TestRouterBuildEvalContext:
     def test_eval_context_code_fences_raw(self):
         """Code fences in raw output stripped before JSON parse."""
         flow = self._build_flow_with_per_route({"check": "x == 1"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '```json\n{"x": 1}\n```'
         method = getattr(flow, "router_ctx_0")
         result = method(crew_output)
@@ -2529,7 +2529,7 @@ class TestMergeHelpers:
     def test_json_array_non_dict_items(self):
         """JSON array with non-dict items → items stored but not merged."""
         flow = self._build({"check": "len(items) == 3"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '[1, 2, 3]'
         method = getattr(flow, "router_merge_0")
         result = method(crew_output)
@@ -2584,7 +2584,7 @@ class TestMergeHelpers:
     def test_auto_convert_non_numeric_string(self):
         """String that is not numeric stays as string."""
         flow = self._build({"check": "name == 'hello'"})
-        crew_output = MagicMock()
+        crew_output = MagicMock(pydantic=None, json_dict=None)
         crew_output.raw = '{"name": "hello"}'
         method = getattr(flow, "router_merge_0")
         result = method(crew_output)
@@ -2745,3 +2745,64 @@ class TestStateJsonParseException:
         method = getattr(flow, "router_sjpe_0")
         result = method("dummy")
         assert result == "check"
+
+
+class TestListenerAfterRouterBranch:
+    """A listener wired AFTER a router branch must listen to that branch's route
+    method, not fall back to the start method (which made it fire in parallel
+    with the router instead of after the branch)."""
+
+    def _build(self, listen_to_task_ids, condition_type):
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
+        p = _patches()
+        t1, t2, t3, t4 = (_make_task(i) for i in ("t1", "t2", "t3", "t4"))
+        factory = p["FlowMethodFactory"]
+        factory.create_starting_point_crew_method = MagicMock(
+            return_value=_fake_start()(lambda self: "ok")
+        )
+        factory.create_listener_method = MagicMock(
+            return_value=_fake_listen("x")(lambda self, *a: "ok")
+        )
+
+        sp = [("starting_point_0", ["t1"], [t1], "Crew1", {})]
+        router_cfg = {
+            "name": "r1",
+            "listenTo": "starting_point_0",
+            "routes": {"route_to_a": [{"id": "t2"}], "route_to_b": [{"id": "t3"}]},
+            "routeConditions": {"route_to_a": "x > 0", "route_to_b": "x <= 0"},
+            "conditionField": "success",
+        }
+        # listener tuple: (method_name, crew_id, task_ids, task_objects,
+        #                  crew_name, listen_to_task_ids, condition_type, crew_data)
+        listener = ("listener_0", "crewL", ["t4"], [t4], "Report",
+                    listen_to_task_ids, condition_type, {})
+
+        with patch.multiple(MODULE, **p):
+            flow = asyncio.run(
+                FlowBuilder._create_dynamic_flow(
+                    sp, [listener], [router_cfg], {},
+                    {"t1": t1, "t2": t2, "t3": t3, "t4": t4},
+                    flow_config={
+                        "state": {}, "persistence": {},
+                        "listeners": [{"crewId": "crewL", "name": "Report"}],
+                    },
+                )
+            )
+        return flow, factory.create_listener_method.call_args
+
+    def test_single_branch_listener_listens_to_route_method(self):
+        """Listening to one router branch task → listens to that route method,
+        NOT the start method."""
+        _, call = self._build(["t2"], "NONE")
+        cond = call.kwargs["method_condition"]
+        assert cond == "route_r1_route_to_a_0"
+        assert cond != "starting_point_0"  # regression guard
+
+    def test_or_listener_spans_both_branches(self):
+        """OR listener over both branches → or_(route_a, route_b), so it fires
+        after whichever branch the router actually took."""
+        _, call = self._build(["t2", "t3"], "OR")
+        cond = call.kwargs["method_condition"]
+        # _fake_or returns ("OR", names)
+        assert cond[0] == "OR"
+        assert set(cond[1]) == {"route_r1_route_to_a_0", "route_r1_route_to_b_0"}
