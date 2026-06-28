@@ -464,11 +464,19 @@ class TestDeleteAllExecutions:
         mock_error_delete_result = MagicMock(rowcount=2)
         mock_run_delete_result = MagicMock(rowcount=2)
 
+        # The group path issues 7 executes in order: select the rows, delete
+        # TaskStatus, delete ErrorTrace, delete ExecutionTrace (by run_id then
+        # job_id), delete LLMUsageBilling, then delete ExecutionHistory. The FK
+        # children are cleared before the run rows so the delete never violates
+        # a constraint; their results are unused (run_count = len(execution_ids)).
         mock_session.execute = AsyncMock(side_effect=[
             mock_exec_result,
             mock_task_delete_result,
             mock_error_delete_result,
-            mock_run_delete_result
+            MagicMock(),  # delete ExecutionTrace by run_id
+            MagicMock(),  # delete ExecutionTrace by job_id
+            MagicMock(),  # delete LLMUsageBilling
+            mock_run_delete_result,  # delete ExecutionHistory
         ])
 
         result = await repository.delete_all_executions(group_ids=['group-1'])
@@ -486,11 +494,18 @@ class TestDeleteAllExecutions:
         mock_count_result.scalar.return_value = 5
         mock_run_delete_result = MagicMock(rowcount=5)
 
+        # The admin (no-group) path issues 6 executes in order: delete
+        # TaskStatus, delete ErrorTrace, delete ExecutionTrace, delete
+        # LLMUsageBilling, count ExecutionHistory, then delete ExecutionHistory.
+        # FK children are cleared before the run rows; run_count comes from the
+        # count select, not the delete rowcount.
         mock_session.execute = AsyncMock(side_effect=[
             mock_task_delete_result,
             mock_error_delete_result,
+            MagicMock(),  # delete ExecutionTrace
+            MagicMock(),  # delete LLMUsageBilling
             mock_count_result,
-            mock_run_delete_result
+            mock_run_delete_result,  # delete ExecutionHistory
         ])
 
         result = await repository.delete_all_executions()
