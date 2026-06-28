@@ -1,6 +1,4 @@
 import React, { useRef, useEffect, useState } from 'react';
-import Box from '@mui/material/Box';
-import { buttonResetSx, pulseSx, fadeInSx, pingSx } from '../../chatSx';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
@@ -9,7 +7,6 @@ import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
 import ThinkingStream from '../Preview/ThinkingStream';
 import type { RunStep } from '../Preview/RunTimeline';
-import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 
 /**
  * Group trace messages for a readable timeline (shown inside the RunProgress
@@ -136,142 +133,93 @@ const RunProgress: React.FC<{
         ? 'Working…'
         : 'Run activity';
 
-  // 12px ring spinner (shared by the leading "stopping" dot + the Stop button).
-  // The original `border-t-transparent` Tailwind class is `!important`, so it
-  // beat the inline accent borderTopColor — i.e. the top has always rendered
-  // transparent; reproduced faithfully here.
-  const spinnerSx = {
-    width: 12,
-    height: 12,
-    borderRadius: '50%',
-    border: '2px solid',
-    borderColor: 'divider',
-    borderTopColor: 'transparent',
-    flexShrink: 0,
-    animation: 'kasalSpin 1s linear infinite',
-    '@keyframes kasalSpin': { to: { transform: 'rotate(360deg)' } },
-  } as const;
-
   return (
-    <Box sx={{ px: 2, my: 1, maxWidth: '48rem', ...fadeInSx }}>
+    <div className="px-4 my-2 max-w-3xl animate-fade-in">
       {/* No `overflow-hidden`: the crew card's Genie-space dropdown is an
           absolutely-positioned popover that must escape the container's bounds.
           The rounded border + bg already round the corners without clipping. */}
-      <Box
-        sx={{
-          borderRadius: '12px',
-          backgroundColor: 'background.default',
-          border: 1,
-          borderColor: 'divider',
-        }}
+      <div
+        className="rounded-xl"
+        style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1 }}>
+        <div className="flex items-center gap-2 px-3 py-2">
           {stopping ? (
-            <Box sx={spinnerSx} aria-hidden="true" />
+            <div
+              className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
+              style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+              aria-hidden="true"
+            />
           ) : running ? (
-            <Box component="span" sx={{ position: 'relative', display: 'flex', height: 8, width: 8, flexShrink: 0 }} aria-hidden="true">
-              <Box
-                component="span"
-                sx={{ position: 'absolute', display: 'inline-flex', height: '100%', width: '100%', borderRadius: '9999px', opacity: 0.6, backgroundColor: 'primary.main', ...pingSx }}
+            <span className="relative flex h-2 w-2 flex-shrink-0" aria-hidden="true">
+              <span
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+                style={{ backgroundColor: 'var(--accent)' }}
               />
-              <Box component="span" sx={{ position: 'relative', display: 'inline-flex', borderRadius: '9999px', height: 8, width: 8, backgroundColor: 'primary.main' }} />
-            </Box>
+              <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: 'var(--accent)' }} />
+            </span>
           ) : (
-            <Box component="svg" sx={{ width: 14, height: 14, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </Box>
+            </svg>
           )}
-          <Box
-            component="button"
+          <button
             type="button"
             onClick={() => setOpen((v) => !v)}
             disabled={!hasTimeline}
-            sx={{
-              ...buttonResetSx,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.75,
-              flex: 1,
-              textAlign: 'left',
-              minWidth: 0,
-              cursor: hasTimeline ? 'pointer' : 'default',
-            }}
+            className="flex items-center gap-1.5 flex-1 text-left min-w-0"
+            style={{ cursor: hasTimeline ? 'pointer' : 'default' }}
             aria-label={hasTimeline ? (open ? 'Collapse run activity' : 'Expand run activity') : undefined}
           >
             {liveStep ? (
-              <Box
-                component="span"
-                sx={{ fontSize: 12, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left', color: 'text.secondary', ...pulseSx }}
+              <span
+                className="text-xs animate-pulse min-w-0 overflow-hidden whitespace-nowrap text-ellipsis text-left"
+                style={{ color: 'var(--text-secondary)' }}
                 title={liveStep.line ? `${liveStep.name} — ${liveStep.line}` : liveStep.name}
               >
-                <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>{liveStep.name}</Box>
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{liveStep.name}</span>
                 {liveStep.line && <span> — {liveStep.line}</span>}
-              </Box>
+              </span>
             ) : (
-              <Box
-                component="span"
-                sx={{ fontSize: 12, fontWeight: 500, color: 'text.secondary', ...(running ? pulseSx : {}) }}
+              <span
+                className={`text-xs font-medium ${running ? 'animate-pulse' : ''}`}
+                style={{ color: 'var(--text-secondary)' }}
               >
                 {label}
                 {generating && !stopping && (
-                  <Box
-                    component="span"
-                    aria-hidden="true"
-                    data-testid="thinking-dots"
-                    sx={{
-                      '& span': { opacity: 0, animation: 'kasalThinkingDot 1.2s infinite' },
-                      '& span:nth-of-type(2)': { animationDelay: '0.2s' },
-                      '& span:nth-of-type(3)': { animationDelay: '0.4s' },
-                      '@keyframes kasalThinkingDot': { '0%, 60%, 100%': { opacity: 0 }, '20%, 40%': { opacity: 1 } },
-                    }}
-                  >
+                  <span className="kasal-thinking-dots" aria-hidden="true">
                     <span>.</span>
                     <span>.</span>
                     <span>.</span>
-                  </Box>
+                  </span>
                 )}
-              </Box>
+              </span>
             )}
             {hasTimeline && (
-              <Box
-                component="svg"
-                sx={{ width: 14, height: 14, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              <svg
+                className="w-3.5 h-3.5 flex-shrink-0 transition-transform"
+                style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
                 strokeWidth={2}
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </Box>
+              </svg>
             )}
-          </Box>
+          </button>
           {onTogglePlacement && (
-            <Box
-              component="button"
+            <button
               type="button"
               onClick={onTogglePlacement}
-              sx={{
-                ...buttonResetSx,
-                flexShrink: 0,
-                width: 24,
-                height: 24,
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'color 0.15s, background-color 0.15s',
-                color: 'text.disabled',
-                '&:hover': { opacity: 0.8 },
-              }}
-              title="Open the activity in the side panel"
-              aria-label="Open the activity in the side panel"
+              className="text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+              style={{ color: 'var(--text-muted)' }}
+              title="Show the activity in the preview panel instead"
             >
-              <OpenInFullIcon sx={{ fontSize: 15 }} />
-            </Box>
+              Show in panel
+            </button>
           )}
           {onStop && (
-            <Box
-              component="button"
+            <button
               type="button"
               onClick={() => {
                 setStopping(true);
@@ -280,41 +228,30 @@ const RunProgress: React.FC<{
               disabled={stopping}
               aria-label={stopping ? 'Stopping…' : 'Stop execution'}
               title={stopping ? 'Stopping…' : 'Stop execution'}
-              sx={{
-                ...buttonResetSx,
-                ml: 'auto',
-                width: 24,
-                height: 24,
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'color 0.15s, background-color 0.15s',
-                flexShrink: 0,
-                color: 'text.secondary',
-                backgroundColor: (t) => t.chat.bgSecondary,
-                border: 1,
-                borderColor: 'divider',
-                '&:hover': { opacity: 0.8 },
-              }}
+              className="ml-auto w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:opacity-80 flex-shrink-0 disabled:cursor-default"
+              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
             >
               {stopping ? (
-                <Box sx={spinnerSx} aria-hidden="true" />
+                <div
+                  className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: 'var(--border-color)', borderTopColor: 'var(--accent)' }}
+                  aria-hidden="true"
+                />
               ) : (
-                <Box component="svg" sx={{ width: 12, height: 12 }} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <rect x="6" y="6" width="12" height="12" rx="2" />
-                </Box>
+                </svg>
               )}
-            </Box>
+            </button>
           )}
-        </Box>
+        </div>
         {open && hasTimeline && (
-          <Box sx={{ px: 2, py: 1.5, maxHeight: '60vh', overflowY: 'auto', borderTop: 1, borderColor: 'divider' }}>
+          <div className="px-4 py-3 max-h-[60vh] overflow-y-auto" style={{ borderTop: '1px solid var(--border-color)' }}>
             <ThinkingStream steps={displaySteps} live={running} />
-          </Box>
+          </div>
         )}
-      </Box>
-    </Box>
+      </div>
+    </div>
   );
 };
 
@@ -371,6 +308,11 @@ interface ChatContainerProps {
   /** A crew/flow loaded from the catalog that the submit button will run. */
   pendingRunLabel?: string;
   onRunPending?: () => void;
+  /** A closed-but-persisted preview exists and can be reopened. Renders a
+   *  "Show preview" pill ABOVE the composer (anchored to it, so it never
+   *  overlaps the input the way a fixed-offset floating button did). */
+  showReopenPreview?: boolean;
+  onReopenPreview?: () => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -401,6 +343,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onMemoryEnabledChange,
   pendingRunLabel,
   onRunPending,
+  showReopenPreview,
+  onReopenPreview,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -425,24 +369,55 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   // flashes for a frame before the restored conversation arrives.
   const isEmpty = messages.length === 0 && !hydrating;
 
+  // Reopen-preview pill: a closed-but-persisted deliverable can be brought back.
+  // Anchored to the TOP of the composer (bottom-full) so it floats just above the
+  // input and never overlaps it — a fixed bottom offset in the parent collided
+  // with the variable-height composer box. Rendered inside whichever composer
+  // wrapper is active (both made `relative`).
+  const reopenPreviewPill = showReopenPreview && onReopenPreview ? (
+    <div className="absolute bottom-full right-2 mb-2 z-10">
+      <button
+        onClick={onReopenPreview}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+        style={{
+          backgroundColor: 'var(--bg-secondary)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border-color)',
+        }}
+        title="Reopen preview panel"
+      >
+        <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+        </svg>
+        Show preview
+      </button>
+    </div>
+  ) : null;
 
   // Empty state: everything centered vertically — greeting + input
   if (isEmpty && !isExecuting) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', px: 3 }}>
-        <Box sx={{ width: '100%', maxWidth: '48rem' }}>
+      <div className="flex flex-col items-center justify-center h-full px-6">
+        <div className="w-full max-w-3xl">
           {/* Greeting */}
-          <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Box component="h1" sx={{ fontSize: '1.5rem', lineHeight: '2rem', fontWeight: 600, mb: 1, color: 'text.primary' }}>
+          <div className="text-center mb-8">
+            <h1
+              className="text-2xl font-semibold mb-2"
+              style={{ color: 'var(--text-primary)' }}
+            >
               What can I help you with?
-            </Box>
-            <Box component="p" sx={{ fontSize: 14, lineHeight: 1.625, color: 'text.secondary' }}>
+            </h1>
+            <p
+              className="text-sm leading-relaxed"
+              style={{ color: 'var(--text-secondary)' }}
+            >
               Create agents, build crews, and execute workflows through natural conversation.
-            </Box>
-          </Box>
+            </p>
+          </div>
 
           {/* Input — centered */}
-          <Box sx={{ position: 'relative' }}>
+          <div className="relative">
+            {reopenPreviewPill}
             <ChatInput
               onSend={onSend}
               disabled={isLoading}
@@ -454,23 +429,22 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               onWorkspaceMemoryChange={onWorkspaceMemoryChange}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={onMemoryEnabledChange}
-              menuPlacement="down"
             />
-          </Box>
-        </Box>
-      </Box>
+          </div>
+        </div>
+      </div>
     );
   }
 
   // Conversation / executing state
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       {/* Run/generation status is shown inline in the chat input (with a Stop
           control) rather than a top-of-screen banner — see ChatInput. */}
 
       {/* Messages */}
-      <Box sx={{ flex: 1, overflowY: 'auto' }}>
-        <Box sx={{ py: 3, maxWidth: '48rem', mx: 'auto', width: '100%' }}>
+      <div className="flex-1 overflow-y-auto">
+        <div className="py-6 max-w-3xl mx-auto w-full">
           {(() => {
             // Generation/tool steps arrive as trace entries and fold into a
             // run-activity container — ONE PER PROMPT: each user message
@@ -553,24 +527,16 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 {/* Working with no trace for the current prompt yet → a fresh
                     container (Thinking…) sits at the end of the response. */}
                 {running && !placedSegs.has(lastSeg) && renderRunProgress(lastSeg)}
-                {/* After the run ends the live trace messages may be gone, but the
-                    activity is still available via runSteps (persistent / restored
-                    from the job's traces). Keep the "Run activity" bar — expandable
-                    inline AND openable in the side panel — so it doesn't vanish. */}
-                {!running &&
-                  Array.isArray(runSteps) &&
-                  runSteps.length > 0 &&
-                  !placedSegs.has(lastSeg) &&
-                  renderRunProgress(lastSeg)}
                 <div ref={messagesEndRef} />
               </>
             );
           })()}
-        </Box>
-      </Box>
+        </div>
+      </div>
 
       {/* Input pinned to bottom — also surfaces run/generation status + Stop */}
-      <Box sx={{ maxWidth: '48rem', mx: 'auto', width: '100%', position: 'relative' }}>
+      <div className="max-w-3xl mx-auto w-full relative">
+        {reopenPreviewPill}
         <ChatInput
           onSend={onSend}
           disabled={isLoading}
@@ -588,8 +554,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           pendingRunLabel={pendingRunLabel}
           onRunPending={onRunPending}
         />
-      </Box>
-    </Box>
+      </div>
+    </div>
   );
 };
 

@@ -1,8 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ThinkingStream, { narrate, extractSources } from './ThinkingStream';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 import type { RunStep } from './RunTimeline';
 
 // useWorkspaceThemes (used by nested LogSurface) hits UIConfigService — but a

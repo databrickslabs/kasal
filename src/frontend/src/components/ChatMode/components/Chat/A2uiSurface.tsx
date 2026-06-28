@@ -1,6 +1,5 @@
 import React from 'react';
-import { IconButton, Tooltip } from '@mui/material';
-import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import { Maximize2 } from 'lucide-react';
 import {
   A2UIRenderer,
   DeckThemeContext,
@@ -92,33 +91,23 @@ export const A2uiSurface: React.FC<{
       }}
     >
       {onExpand && (
-        <Tooltip title="Open in side panel">
-          <IconButton
-            size="small"
-            aria-label="Open in side panel"
-            onClick={(e) => {
-              e.stopPropagation();
-              onExpand();
-            }}
-            sx={{
-              // Top-RIGHT to match the Run activity bar's expand control (same
-              // icon, same side). Each surface's own controls (deck "PowerPoint" /
-              // table "CSV" download, mindmap zoom) live on the LEFT so they never
-              // collide with this. No circle/container behind it — just the bare
-              // icon (matches the Run activity bar's expand affordance).
-              position: 'absolute',
-              top: 6,
-              right: 6,
-              zIndex: 2,
-              padding: '2px',
-              color: 'text.secondary',
-              opacity: 0.7,
-              '&:hover': { opacity: 1, bgcolor: 'transparent' },
-            }}
-          >
-            <OpenInFullIcon sx={{ fontSize: 16 }} />
-          </IconButton>
-        </Tooltip>
+        // Top-RIGHT to match the Run activity bar's expand control (same icon,
+        // same side). Each surface's own controls (deck "PowerPoint" / table
+        // "CSV" download, mindmap zoom) live on the LEFT so they never collide
+        // with this. No circle/container behind it — just the bare icon
+        // (matches the Run activity bar's expand affordance).
+        <button
+          type="button"
+          aria-label="Open in side panel"
+          title="Open in side panel"
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
+          className="absolute top-1.5 right-1.5 z-[2] cursor-pointer border-0 bg-transparent p-0.5 text-gray-500 opacity-70 hover:opacity-100"
+        >
+          <Maximize2 size={16} />
+        </button>
       )}
       <DeckThemeContext.Provider value={deckTheme}>
         <SurfaceChromeContext.Provider value={{ downloads: !hideDownloads, onDownloadPdf, fit }}>

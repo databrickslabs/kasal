@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ChatContainer, { liveStepLine } from './ChatContainer';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // Stub the heavy children so we can isolate ChatContainer logic. The run/
@@ -126,6 +125,25 @@ describe('ChatContainer', () => {
     expect(onSend).toHaveBeenCalledWith('cmd');
   });
 
+  it('renders the reopen-preview pill above the composer (conversation + empty state) and wires the click', () => {
+    const onReopenPreview = vi.fn();
+    // Conversation state.
+    const { unmount } = render(
+      <ChatContainer {...baseProps} messages={[msg('a')]} showReopenPreview onReopenPreview={onReopenPreview} />,
+    );
+    fireEvent.click(screen.getByText('Show preview'));
+    expect(onReopenPreview).toHaveBeenCalledTimes(1);
+    unmount();
+    // Empty state shows it too (e.g. a restored session whose deliverable persisted).
+    render(<ChatContainer {...baseProps} messages={[]} showReopenPreview onReopenPreview={onReopenPreview} />);
+    expect(screen.getByText('Show preview')).toBeInTheDocument();
+  });
+
+  it('hides the reopen-preview pill when not armed', () => {
+    render(<ChatContainer {...baseProps} messages={[msg('a')]} />);
+    expect(screen.queryByText('Show preview')).not.toBeInTheDocument();
+  });
+
   it('disables the input while loading', () => {
     render(<ChatContainer {...baseProps} messages={[]} isLoading />);
     expect(screen.getByTestId('chat-input')).toBeDisabled();
@@ -178,7 +196,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q')]} isGenerating />);
     const label = screen.getByText(/Thinking/);
     expect(label).toBeInTheDocument();
-    expect(label.querySelector('[data-testid="thinking-dots"]')).not.toBeNull();
+    expect(label.querySelector('.kasal-thinking-dots')).not.toBeNull();
     expect(screen.queryByLabelText('Stop execution')).toBeNull();
     expect(screen.queryByTestId('trace-group')).toBeNull();
   });
@@ -478,7 +496,7 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
     { id: '1', label: 'PerplexityTool', sublabel: 'Switzerland news today', detail: 'Title: SwissInfo\nUrl: https://www.swissinfo.ch/eng/x' },
   ];
 
-  it('shows the Working bar with an "open in panel" toggle, expandable to the thinking stream', () => {
+  it('shows the Working bar with a "Show in panel" toggle, expandable to the thinking stream', () => {
     const onToggle = vi.fn();
     render(
       <ChatContainer
@@ -491,7 +509,7 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
       />,
     );
     expect(screen.getByText('Working…')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Open the activity in the side panel'));
+    fireEvent.click(screen.getByText('Show in panel'));
     expect(onToggle).toHaveBeenCalled();
     // Expanding the bar reveals the thinking stream (friendly phase heading).
     fireEvent.click(screen.getByLabelText('Expand run activity'));

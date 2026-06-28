@@ -4,10 +4,9 @@
  */
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 import InputVariablesPrompt, { isSensitive } from './InputVariablesPrompt';
-import { renderWithChatTheme as render } from '../../chatTestRender';
 
 const VARS = [
   { name: 'topic', required: true },

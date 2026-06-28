@@ -1,8 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import Box from '@mui/material/Box';
 import { friendlyStep, type RunStep } from './RunTimeline';
 import { contextSummary, humanizeToolJson } from './runActivitySurface';
-import { buttonResetSx, pulseSx } from '../../chatSx';
 
 /** Kasal brand mark — the hexagon-K logo (transparent), shown in the live "getting started" state. */
 const kasalMark = `${import.meta.env.BASE_URL}logo192.png`;
@@ -87,65 +85,34 @@ function excerptOf(detail?: string): string {
 
 /** A four-point sparkle marker, à la a "thinking" stream. */
 const Sparkle: React.FC = () => (
-  <Box component="svg" viewBox="0 0 24 24" fill="currentColor" sx={{ width: 14, height: 14 }} aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
     <path d="M12 2l1.7 6.1c.2.7.5 1 1.2 1.2L21 11l-6.1 1.7c-.7.2-1 .5-1.2 1.2L12 20l-1.7-6.1c-.2-.7-.5-1-1.2-1.2L3 11l6.1-1.7c.7-.2 1-.5 1.2-1.2z" />
-  </Box>
+  </svg>
 );
 
 const SourceGrid: React.FC<{ sources: Source[] }> = ({ sources }) => (
-  <Box
-    data-testid="thinking-sources"
-    sx={{
-      display: 'grid',
-      gridTemplateColumns: '1fr',
-      gap: 1,
-      mt: 1.5,
-      '@media (min-width:640px)': { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
-    }}
-  >
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3" data-testid="thinking-sources">
     {sources.map((s, i) => (
-      <Box
+      <div
         key={`${s.domain}-${i}`}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          px: 1.25,
-          py: 0.75,
-          borderRadius: '8px',
-          overflow: 'hidden',
-          border: 1,
-          borderColor: 'divider',
-          backgroundColor: (t) => t.chat.bgSecondary,
-        }}
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg overflow-hidden"
+        style={{ border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}
         title={s.title ? `${s.title} — ${s.domain}` : s.domain}
       >
-        <Box
-          component="span"
+        <span
           aria-hidden="true"
-          sx={{
-            flexShrink: 0,
-            width: 16,
-            height: 16,
-            borderRadius: '9999px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 9,
-            fontWeight: 700,
-            backgroundColor: 'primary.main',
-            color: '#fff',
-          }}
+          className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
+          style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
         >
           {s.domain.charAt(0).toUpperCase()}
-        </Box>
-        <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'text.secondary' }}>
+        </span>
+        <span className="truncate text-[12px]" style={{ color: 'var(--text-secondary)' }}>
           {s.title ? <span>{s.title} </span> : null}
-          <Box component="span" sx={{ color: 'text.disabled' }}>{s.domain}</Box>
-        </Box>
-      </Box>
+          <span style={{ color: 'var(--text-muted)' }}>{s.domain}</span>
+        </span>
+      </div>
     ))}
-  </Box>
+  </div>
 );
 
 const StepItem: React.FC<{ step: RunStep; isLast: boolean; onSelect?: (step: RunStep) => void }> = ({ step, isLast, onSelect }) => {
@@ -155,71 +122,60 @@ const StepItem: React.FC<{ step: RunStep; isLast: boolean; onSelect?: (step: Run
   const clickable = Boolean(step.detail && step.detail !== step.sublabel && onSelect);
   const inner = (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Box sx={{ fontSize: 15, fontWeight: 600, fontStyle: 'italic', flex: 1, minWidth: 0, color: 'text.primary' }}>
+      <div className="flex items-center gap-2">
+        <div className="text-[15px] font-semibold italic flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>
           {friendlyStep(step.label)}
-        </Box>
+        </div>
         {clickable && (
-          <Box
-            component="svg"
-            className="ts-chevron"
-            sx={{ width: 16, height: 16, flexShrink: 0, transition: 'transform 0.15s', color: 'text.disabled' }}
+          <svg
+            className="w-4 h-4 flex-shrink-0 transition-transform group-hover:translate-x-0.5"
+            style={{ color: 'var(--text-muted)' }}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             aria-hidden="true"
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </Box>
+          </svg>
         )}
-      </Box>
+      </div>
       {/* The actual tool behind this step, so it's traceable (the heading is a
           friendly phase name; this is the raw tool that ran). */}
       {step.label && friendlyStep(step.label) !== step.label && (
-        <Box sx={{ fontSize: 11, mt: 0.25, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.disabled', opacity: 0.75 }} title={step.label} data-testid="thinking-tool">
+        <div className="text-[11px] mt-0.5 font-mono truncate" style={{ color: 'var(--text-muted)', opacity: 0.75 }} title={step.label} data-testid="thinking-tool">
           {step.label}
-        </Box>
+        </div>
       )}
-      <Box sx={{ fontSize: 14, fontStyle: 'italic', mt: 0.5, lineHeight: 1.625, color: 'text.secondary' }} data-testid="thinking-narrative">
+      <div className="text-[14px] italic mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }} data-testid="thinking-narrative">
         {narrate(step)}
-      </Box>
+      </div>
       {sources.length > 0 && <SourceGrid sources={sources} />}
       {sources.length === 0 && excerpt && (
-        <Box component="p" sx={{ fontSize: 13, mt: 1, lineHeight: 1.625, color: 'text.disabled' }}>
+        <p className="text-[13px] mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
           {excerpt}
-        </Box>
+        </p>
       )}
     </>
   );
   return (
-    <Box component="li" sx={{ position: 'relative', pl: 4, pb: 3, '&:last-child': { pb: 1 } }}>
+    <li className="relative pl-8 pb-6 last:pb-2">
       {/* Left rail connecting the phases. */}
-      {!isLast && <Box component="span" aria-hidden="true" sx={{ position: 'absolute', left: '6px', top: 20, bottom: 0, width: '1px', backgroundColor: 'divider' }} />}
-      <Box component="span" sx={{ position: 'absolute', left: 0, top: '2px', color: 'primary.main' }}>
+      {!isLast && <span aria-hidden="true" className="absolute left-[6px] top-5 bottom-0 w-px" style={{ backgroundColor: 'var(--border-color)' }} />}
+      <span className="absolute left-0 top-0.5" style={{ color: 'var(--accent)' }}>
         <Sparkle />
-      </Box>
+      </span>
       {clickable ? (
-        <Box
-          component="button"
+        <button
           type="button"
           onClick={() => onSelect?.(step)}
+          className="group w-full text-left rounded-lg px-2 py-1.5 -mx-2 transition-opacity hover:opacity-80"
+          style={{ cursor: 'pointer' }}
           aria-label={`Open the full context for ${friendlyStep(step.label)}`}
-          sx={{
-            ...buttonResetSx,
-            width: '100%',
-            textAlign: 'left',
-            borderRadius: '8px',
-            px: 1,
-            py: 0.75,
-            mx: -1,
-            transition: 'opacity 0.15s',
-            '&:hover': { opacity: 0.8, '& .ts-chevron': { transform: 'translateX(2px)' } },
-          }}
         >
           {inner}
-        </Box>
+        </button>
       ) : (
-        <Box>{inner}</Box>
+        <div>{inner}</div>
       )}
-    </Box>
+    </li>
   );
 };
 
@@ -256,33 +212,33 @@ const ThinkingStream: React.FC<ThinkingStreamProps> = ({ steps, live = false, on
   if (steps.length === 0) {
     if (!live) return null;
     return (
-      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', px: 4 }} data-testid="thinking-empty">
-        <Box component="img" src={kasalMark} alt="Kasal" sx={{ width: 48, height: 48, mb: 2, opacity: 0.95, ...pulseSx }} />
-        <Box sx={{ fontSize: 16, fontWeight: 600, fontStyle: 'italic', mb: 0.5, color: 'text.primary' }}>
+      <div className="h-full flex flex-col items-center justify-center text-center px-8" data-testid="thinking-empty">
+        <img src={kasalMark} alt="Kasal" className="w-12 h-12 mb-4 animate-pulse" style={{ opacity: 0.95 }} />
+        <div className="text-base font-semibold italic mb-1" style={{ color: 'var(--text-primary)' }}>
           Getting started…
-        </Box>
-        <Box sx={{ fontSize: 13, fontStyle: 'italic', color: 'text.disabled' }}>
+        </div>
+        <div className="text-[13px] italic" style={{ color: 'var(--text-muted)' }}>
           I’m setting up and gathering what I need to answer you.
-        </Box>
-      </Box>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Box ref={scrollRef} sx={{ height: '100%', overflowY: 'auto', pr: 0.5 }} data-testid="thinking-stream">
-      <Box component="ol" sx={{ listStyle: 'none' }}>
+    <div ref={scrollRef} className="h-full overflow-y-auto pr-1" data-testid="thinking-stream">
+      <ol className="list-none">
         {steps.map((step, i) => (
           <StepItem key={step.id} step={step} isLast={i === steps.length - 1 && !live} onSelect={onSelect} />
         ))}
-      </Box>
+      </ol>
       {/* The live "still thinking" pulse at the tail of the stream (run in flight). */}
       {live && (
-        <Box sx={{ position: 'relative', pl: 4, pb: 1 }}>
-          <Box component="span" sx={{ position: 'absolute', left: 0, top: '4px', width: 12, height: 12, borderRadius: '9999px', backgroundColor: 'primary.main', ...pulseSx }} />
-          <Box sx={{ fontSize: 14, fontStyle: 'italic', color: 'text.disabled' }}>Thinking…</Box>
-        </Box>
+        <div className="relative pl-8 pb-2">
+          <span className="absolute left-0 top-1 w-3 h-3 rounded-full animate-pulse" style={{ backgroundColor: 'var(--accent)' }} />
+          <div className="text-[14px] italic" style={{ color: 'var(--text-muted)' }}>Thinking…</div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 
