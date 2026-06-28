@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
+import Box from '@mui/material/Box';
+import { useTheme, type Theme } from '@mui/material/styles';
+import type { SystemStyleObject } from '@mui/system';
 import MessageContent from '../MessageContent';
-import { ChartView, ChartPoint } from '../../Preview/UiRenderer';
+import { ChartView, ChartPoint } from '../../Preview/ChartView';
+import { buttonResetSx } from '../../../chatSx';
 
 /**
  * Genie-specific trace-detail renderer. Turns the GenieTool's labeled text
@@ -71,26 +75,50 @@ function cellToNumber(s: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Shared styling for an authored code block. Rendered as a <Box> (div), not a
+ *  <pre>, so the chat's global `pre` rule (a dark code-block style) doesn't
+ *  override the lighter token background used here. */
+const codeBlockSx: SystemStyleObject<Theme> = {
+  fontSize: 11,
+  fontFamily: 'monospace',
+  whiteSpace: 'pre',
+  overflowX: 'auto',
+  borderRadius: '4px',
+  p: 1,
+  my: 1.5,
+  lineHeight: 1.6,
+  color: 'text.primary',
+  backgroundColor: (t) => t.chat.bgSecondary,
+  border: 1,
+  borderColor: 'divider',
+};
+
 /** A styled HTML table for the query result rows. */
 const ResultTable: React.FC<{ columns: string[]; rows: string[][] }> = ({ columns, rows }) => (
-  <div className="overflow-auto rounded max-h-64" style={{ border: '1px solid var(--border-color)' }}>
-    <table className="text-[11px]" style={{ borderCollapse: 'collapse', width: '100%' }}>
+  <Box sx={{ overflow: 'auto', borderRadius: '4px', maxHeight: 256, border: 1, borderColor: 'divider' }}>
+    <Box component="table" sx={{ fontSize: 11, borderCollapse: 'collapse', width: '100%' }}>
       <thead>
         <tr>
           {columns.map((c, i) => (
-            <th
+            <Box
+              component="th"
               key={i}
-              className="text-left px-2 py-1 font-semibold whitespace-nowrap"
-              style={{
-                color: 'var(--text-muted)',
-                backgroundColor: 'var(--bg-secondary)',
-                borderBottom: '1px solid var(--border-color)',
+              sx={{
+                textAlign: 'left',
+                px: 1,
+                py: 0.5,
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                color: 'text.disabled',
+                backgroundColor: (t) => t.chat.bgSecondary,
+                borderBottom: 1,
+                borderColor: 'divider',
                 position: 'sticky',
                 top: 0,
               }}
             >
               {c}
-            </th>
+            </Box>
           ))}
         </tr>
       </thead>
@@ -98,19 +126,26 @@ const ResultTable: React.FC<{ columns: string[]; rows: string[][] }> = ({ column
         {rows.map((r, ri) => (
           <tr key={ri}>
             {columns.map((_, ci) => (
-              <td
+              <Box
+                component="td"
                 key={ci}
-                className="px-2 py-1 whitespace-nowrap"
-                style={{ color: 'var(--text-primary)', borderTop: ri ? '1px solid var(--border-color)' : 'none' }}
+                sx={{
+                  px: 1,
+                  py: 0.5,
+                  whiteSpace: 'nowrap',
+                  color: 'text.primary',
+                  borderTop: ri ? 1 : 0,
+                  borderColor: 'divider',
+                }}
               >
                 {r[ci] ?? ''}
-              </td>
+              </Box>
             ))}
           </tr>
         ))}
       </tbody>
-    </table>
-  </div>
+    </Box>
+  </Box>
 );
 
 /** Labels that read as a time axis → render a line chart instead of bars. */
@@ -131,6 +166,7 @@ function isTemporalLabel(s: string): boolean {
  * Renders nothing if the data isn't chartable.
  */
 const ResultChart: React.FC<{ columns: string[]; rows: string[][] }> = ({ columns, rows }) => {
+  const theme = useTheme();
   if (rows.length < 2 || columns.length < 2) return null;
   const numericThreshold = Math.max(1, Math.ceil(rows.length * 0.6));
   const colNumeric = columns.map(
@@ -161,7 +197,7 @@ const ResultChart: React.FC<{ columns: string[]; rows: string[][] }> = ({ column
       title={`${columns[metricIdx]} by ${columns[labelIdx]}`}
       // Genie renders on the (light) chat background, not the dark preview
       // stage — use theme tokens so the title + labels stay readable.
-      colors={{ text: 'var(--text-primary)', muted: 'var(--text-muted)' }}
+      colors={{ text: theme.palette.text.primary, muted: theme.palette.text.disabled }}
     />
   );
 };
@@ -172,36 +208,24 @@ const ResultChart: React.FC<{ columns: string[]; rows: string[][] }> = ({ column
 const GenieSectionView: React.FC<{ section: GenieSection }> = ({ section }) => {
   const { label, body } = section;
   const labelEl = (
-    <div
-      className="text-[10px] font-semibold uppercase tracking-wider"
-      style={{ color: 'var(--text-muted)' }}
-    >
+    <Box sx={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.disabled' }}>
       {label}
-    </div>
+    </Box>
   );
 
   if (label === 'SQL Query') {
     return (
-      <div className="flex flex-col gap-1">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         {labelEl}
-        <pre
-          className="text-[11px] font-mono whitespace-pre rounded p-2 overflow-x-auto"
-          style={{
-            color: 'var(--text-primary)',
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-          }}
-        >
-          {body}
-        </pre>
-      </div>
+        <Box sx={codeBlockSx}>{body}</Box>
+      </Box>
     );
   }
 
   if (label === 'Query Results') {
     const table = parseMarkdownTable(body);
     return (
-      <div className="flex flex-col gap-1.5">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
         {labelEl}
         {table ? (
           <>
@@ -210,36 +234,27 @@ const GenieSectionView: React.FC<{ section: GenieSection }> = ({ section }) => {
           </>
         ) : (
           // Fallback: render whatever text we got (e.g. a non-tabular result).
-          <pre
-            className="text-[11px] font-mono whitespace-pre rounded p-2 overflow-x-auto"
-            style={{
-              color: 'var(--text-primary)',
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-            }}
-          >
-            {body}
-          </pre>
+          <Box sx={codeBlockSx}>{body}</Box>
         )}
-      </div>
+      </Box>
     );
   }
 
   if (label === 'Open in Genie') {
     const url = body.trim();
     return (
-      <div className="flex flex-col gap-1">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         {labelEl}
-        <a
+        <Box
+          component="a"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[11px] underline break-all"
-          style={{ color: 'var(--accent)' }}
+          sx={{ fontSize: 11, textDecoration: 'underline', wordBreak: 'break-all', color: 'primary.main' }}
         >
           {url}
-        </a>
-      </div>
+        </Box>
+      </Box>
     );
   }
 
@@ -249,28 +264,25 @@ const GenieSectionView: React.FC<{ section: GenieSection }> = ({ section }) => {
       .map((l) => l.replace(/^-\s*/, '').trim())
       .filter(Boolean);
     return (
-      <div className="flex flex-col gap-1">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
         {labelEl}
-        <ul className="text-[11px] list-disc ml-4" style={{ color: 'var(--text-primary)' }}>
+        <Box component="ul" sx={{ fontSize: 11, listStyleType: 'disc', ml: 2, color: 'text.primary' }}>
           {items.map((it, i) => (
             <li key={i}>{it}</li>
           ))}
-        </ul>
-      </div>
+        </Box>
+      </Box>
     );
   }
 
   // Question / What the query does / Answer
   return (
-    <div className="flex flex-col gap-1">
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
       {labelEl}
-      <div
-        className="text-[11px] whitespace-pre-wrap break-words"
-        style={{ color: 'var(--text-primary)' }}
-      >
+      <Box sx={{ fontSize: 11, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', color: 'text.primary' }}>
         {body}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 };
 
@@ -280,22 +292,36 @@ export function matchesGenieDetail(detail: string): boolean {
 }
 
 /** Expanded Genie trace detail: the labeled sections (Question / SQL / Results
- *  table + chart / follow-ups / link). */
-export const GenieTraceDetail: React.FC<{ detail: string; indentClass?: string }> = ({
+ *  table + chart / follow-ups / link). `indent` = left indent in MUI spacing
+ *  units (8px each): 1.5 = 12px. */
+export const GenieTraceDetail: React.FC<{ detail: string; indent?: number }> = ({
   detail,
-  indentClass = 'ml-3',
+  indent = 1.5,
 }) => {
   const sections = parseGenieDetail(detail);
   if (!sections) return null;
   return (
-    <div
-      className={`mt-1 ${indentClass} max-w-[85%] rounded p-2 max-h-96 overflow-y-auto flex flex-col gap-2.5`}
-      style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
+    <Box
+      sx={{
+        mt: 0.5,
+        ml: indent,
+        maxWidth: '85%',
+        borderRadius: '4px',
+        p: 1,
+        maxHeight: 384,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1.25,
+        backgroundColor: 'background.default',
+        border: 1,
+        borderColor: 'divider',
+      }}
     >
       {sections.map((s, i) => (
         <GenieSectionView key={i} section={s} />
       ))}
-    </div>
+    </Box>
   );
 };
 
@@ -316,10 +342,9 @@ function formatGenieDuration(durationMs?: number): string | null {
  * collapse behind a "Show query & SQL" toggle so the plumbing is one click away
  * but never in the way. Returns null for non-Genie output (caller falls back).
  */
-export const GenieAnswerCard: React.FC<{ detail: string; durationMs?: number; indentClass?: string }> = ({
+export const GenieAnswerCard: React.FC<{ detail: string; durationMs?: number }> = ({
   detail,
   durationMs,
-  indentClass = 'ml-3',
 }) => {
   const [showQuery, setShowQuery] = useState(false);
   const sections = parseGenieDetail(detail);
@@ -336,34 +361,34 @@ export const GenieAnswerCard: React.FC<{ detail: string; durationMs?: number; in
     // No card wrapper, no indent — the answer + diagrams flow directly in the
     // chat like a normal message (the table keeps its own border, the chart its
     // own bars). Only the question + SQL hide behind a toggle.
-    <div className="max-w-[85%] flex flex-col gap-3">
+    <Box sx={{ maxWidth: '85%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       {/* Header: a small Genie label + (optional) latency. */}
-      <div className="flex items-center gap-2">
-        <svg
-          className="w-3.5 h-3.5 flex-shrink-0"
-          style={{ color: 'var(--accent)' }}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box
+          component="svg"
+          sx={{ width: 14, height: 14, flexShrink: 0, color: 'primary.main' }}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
           strokeWidth={2}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-        </svg>
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        </Box>
+        <Box component="span" sx={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.disabled' }}>
           Genie
-        </span>
+        </Box>
         {durationLabel && (
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+          <Box component="span" sx={{ fontSize: 10, fontFamily: 'monospace', color: 'text.disabled' }}>
             · {durationLabel}
-          </span>
+          </Box>
         )}
-      </div>
+      </Box>
 
       {/* The answer — rendered as Markdown, front and center. */}
       {answer && (
-        <div className="text-sm leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+        <Box sx={{ fontSize: 14, lineHeight: 1.625, color: 'text.primary' }}>
           <MessageContent content={answer.body} />
-        </div>
+        </Box>
       )}
 
       {/* The data behind the answer: table + chart. */}
@@ -374,37 +399,49 @@ export const GenieAnswerCard: React.FC<{ detail: string; durationMs?: number; in
 
       {/* Question + SQL — collapsed by default. */}
       {querySections.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <button
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box
+            component="button"
             type="button"
             onClick={() => setShowQuery((v) => !v)}
-            className="flex items-center gap-1.5 text-left self-start text-[11px] font-medium transition-colors hover:opacity-80"
-            style={{ color: 'var(--text-muted)' }}
+            sx={{
+              ...buttonResetSx,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              textAlign: 'left',
+              alignSelf: 'flex-start',
+              fontSize: 11,
+              fontWeight: 500,
+              transition: 'color 0.15s',
+              color: 'text.disabled',
+              '&:hover': { opacity: 0.8 },
+            }}
           >
-            <svg
-              className="w-3 h-3 flex-shrink-0 transition-transform"
-              style={{ transform: showQuery ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            <Box
+              component="svg"
+              sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', transform: showQuery ? 'rotate(90deg)' : 'rotate(0deg)' }}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
+            </Box>
             {showQuery ? 'Hide question & SQL' : 'Show question & SQL'}
-          </button>
+          </Box>
           {showQuery && (
-            <div className="flex flex-col gap-2.5">
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
               {querySections.map((s, i) => (
                 <GenieSectionView key={i} section={s} />
               ))}
-            </div>
+            </Box>
           )}
-        </div>
+        </Box>
       )}
 
       {/* Open in Genie link. */}
       {link && <GenieSectionView section={link} />}
-    </div>
+    </Box>
   );
 };

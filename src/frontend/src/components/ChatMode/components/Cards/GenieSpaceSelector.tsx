@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Box from '@mui/material/Box';
 import { searchGenieSpaces, getGenieSpace, GenieSpace } from '../../api/genie';
+import { buttonResetSx, inputResetSx } from '../../chatSx';
 
 interface GenieSpaceSelectorProps {
   value: string;
   onChange: (spaceId: string) => void;
 }
+
+const SHADOW_LG = '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)';
 
 const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({ value, onChange }) => {
   const [spaces, setSpaces] = useState<GenieSpace[]>([]);
@@ -88,15 +92,16 @@ const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({ value, onChange
   }, [value, spaces]);
 
   return (
-    <div ref={wrapperRef} className="relative">
-      <label
-        className="block text-[10px] font-semibold uppercase tracking-wider mb-1"
-        style={{ color: 'var(--text-muted)' }}
+    <Box ref={wrapperRef} sx={{ position: 'relative' }}>
+      <Box
+        component="label"
+        sx={{ display: 'block', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', mb: 0.5, color: 'text.disabled' }}
       >
         Genie Space
-      </label>
-      <div className="flex items-center gap-1">
-        <button
+      </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box
+          component="button"
           type="button"
           onClick={() => {
             setOpen(!open);
@@ -104,141 +109,197 @@ const GenieSpaceSelector: React.FC<GenieSpaceSelectorProps> = ({ value, onChange
               setTimeout(() => inputRef.current?.focus(), 50);
             }
           }}
-          className="flex-1 min-w-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition-colors"
-          style={{
-            backgroundColor: 'var(--bg-primary)',
-            color: value ? 'var(--text-primary)' : 'var(--text-muted)',
-            border: `1px solid ${open ? 'var(--accent)' : 'var(--border-color)'}`,
+          sx={{
+            ...buttonResetSx,
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            borderRadius: '8px',
+            px: 1.5,
+            py: 1,
+            fontSize: 14,
+            textAlign: 'left',
+            transition: 'border-color 0.15s, background-color 0.15s',
+            backgroundColor: 'background.default',
+            color: value ? 'text.primary' : 'text.disabled',
+            border: 1,
+            borderColor: open ? 'primary.main' : 'divider',
           }}
         >
-          <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <Box component="svg" sx={{ width: 16, height: 16, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-          </svg>
-          <span className="flex-1 truncate">
+          </Box>
+          <Box component="span" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {displayText || 'Select a space...'}
-          </span>
-          <svg
-            className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          </Box>
+          <Box
+            component="svg"
+            sx={{ width: 14, height: 14, flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none', color: 'text.disabled' }}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-            style={{ color: 'var(--text-muted)' }}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-          </svg>
-        </button>
+          </Box>
+        </Box>
         {value && selectedUrl && (
-          <a
+          <Box
+            component="a"
             href={selectedUrl}
             target="_blank"
             rel="noopener noreferrer"
             title="Open the selected space in Databricks"
             aria-label="Open the selected space in Databricks"
-            className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-color)' }}
+            sx={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              height: 36,
+              borderRadius: '8px',
+              transition: 'opacity 0.15s',
+              color: 'text.disabled',
+              border: 1,
+              borderColor: 'divider',
+              '&:hover': { opacity: 0.7 },
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-          </a>
+            </Box>
+          </Box>
         )}
-      </div>
+      </Box>
 
       {open && (
-        <div
-          className="absolute z-50 mt-1 w-full rounded-lg shadow-lg overflow-hidden"
-          style={{
-            backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-color)',
+        <Box
+          sx={{
+            position: 'absolute',
+            zIndex: 50,
+            mt: 0.5,
+            width: '100%',
+            borderRadius: '8px',
+            boxShadow: SHADOW_LG,
+            overflow: 'hidden',
+            backgroundColor: 'background.paper',
+            border: 1,
+            borderColor: 'divider',
           }}
         >
           {/* Search input */}
-          <div className="p-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
-            <input
+          <Box sx={{ p: 1, borderBottom: 1, borderColor: 'divider' }}>
+            <Box
+              component="input"
               ref={inputRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
               placeholder="Search spaces..."
-              className="w-full px-2.5 py-1.5 rounded text-sm outline-none"
-              style={{
-                backgroundColor: 'var(--bg-primary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
+              sx={{
+                ...inputResetSx,
+                width: '100%',
+                px: 1.25,
+                py: 0.75,
+                borderRadius: '4px',
+                fontSize: 14,
+                backgroundColor: 'background.default',
+                color: 'text.primary',
+                border: 1,
+                borderColor: 'divider',
               }}
             />
-          </div>
+          </Box>
 
           {/* Space list */}
-          <div className="max-h-48 overflow-y-auto">
+          <Box sx={{ maxHeight: 192, overflowY: 'auto' }}>
             {loading && (
-              <div className="px-3 py-4 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+              <Box sx={{ px: 1.5, py: 2, textAlign: 'center', fontSize: 12, color: 'text.disabled' }}>
                 Loading spaces...
-              </div>
+              </Box>
             )}
             {error && (
-              <div className="px-3 py-4 text-center text-xs" style={{ color: '#ef4444' }}>
+              <Box sx={{ px: 1.5, py: 2, textAlign: 'center', fontSize: 12, color: '#ef4444' }}>
                 {error}
-              </div>
+              </Box>
             )}
             {!loading && !error && spaces.length === 0 && (
-              <div className="px-3 py-4 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+              <Box sx={{ px: 1.5, py: 2, textAlign: 'center', fontSize: 12, color: 'text.disabled' }}>
                 No spaces found
-              </div>
+              </Box>
             )}
             {!loading && spaces.map((space) => (
               // Row = the select button + a separate external link. They're
               // siblings (not nested) so the link doesn't sit inside the button
               // (invalid HTML) and clicking it opens Databricks without selecting.
-              <div
+              <Box
                 key={space.id}
-                className="flex items-stretch transition-colors hover:opacity-80"
-                style={{ backgroundColor: space.id === value ? 'var(--bg-secondary)' : 'transparent' }}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  transition: 'background-color 0.15s',
+                  '&:hover': { opacity: 0.8 },
+                  backgroundColor: space.id === value ? (t) => t.chat.bgSecondary : 'transparent',
+                }}
               >
-                <button
+                <Box
+                  component="button"
                   onClick={() => {
                     onChange(space.id);
                     setOpen(false);
                   }}
-                  className="flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-center gap-2"
-                  style={{ color: 'var(--text-primary)' }}
+                  sx={{
+                    ...buttonResetSx,
+                    flex: 1,
+                    minWidth: 0,
+                    textAlign: 'left',
+                    px: 1.5,
+                    py: 1,
+                    fontSize: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    color: 'text.primary',
+                  }}
                 >
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <Box component="svg" sx={{ width: 14, height: 14, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" />
-                  </svg>
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate">{space.name}</div>
+                  </Box>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Box sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{space.name}</Box>
                     {space.description && (
-                      <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                      <Box sx={{ fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.disabled' }}>
                         {space.description}
-                      </div>
+                      </Box>
                     )}
-                  </div>
+                  </Box>
                   {space.id === value && (
-                    <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <Box component="svg" sx={{ width: 16, height: 16, flexShrink: 0, color: 'primary.main' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
+                    </Box>
                   )}
-                </button>
+                </Box>
                 {space.url && (
-                  <a
+                  <Box
+                    component="a"
                     href={space.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     title="Open this space in Databricks"
                     aria-label={`Open ${space.name} in Databricks`}
-                    className="flex items-center px-2.5 flex-shrink-0 transition-colors hover:opacity-70"
-                    style={{ color: 'var(--text-muted)' }}
+                    sx={{ display: 'flex', alignItems: 'center', px: 1.25, flexShrink: 0, transition: 'opacity 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.7 } }}
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                    </svg>
-                  </a>
+                    </Box>
+                  </Box>
                 )}
-              </div>
+              </Box>
             ))}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 };
 

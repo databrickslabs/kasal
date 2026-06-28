@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import ExecutionCard from './ExecutionCard';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 import type { ExecutionStatus } from '../../types/execution';
 
 describe('ExecutionCard', () => {
@@ -39,16 +40,16 @@ describe('ExecutionCard', () => {
     });
   });
 
-  it('applies animate-pulse class only when running', () => {
-    const { container, rerender } = render(
+  it('marks the status dot as running only when running (drives the pulse animation)', () => {
+    const { rerender } = render(
       <ExecutionCard jobId="abc" status="running" traces={[]} />,
     );
-    const dotRunning = container.querySelector('span.w-2\\.5');
-    expect(dotRunning?.className).toContain('animate-pulse');
+    // The dot pulses (sx animation) iff running; assert the stable state hook
+    // that drives it rather than the emotion-generated animation class.
+    expect(screen.getByTestId('execution-status-dot')).toHaveAttribute('data-running', 'true');
 
     rerender(<ExecutionCard jobId="abc" status="completed" traces={[]} />);
-    const dotCompleted = container.querySelector('span.w-2\\.5');
-    expect(dotCompleted?.className).not.toContain('animate-pulse');
+    expect(screen.getByTestId('execution-status-dot')).toHaveAttribute('data-running', 'false');
   });
 
   it('falls back to queued config when status is empty/falsy', () => {

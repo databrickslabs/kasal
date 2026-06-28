@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
 import { UIConfigService } from '../../../../api/UIConfigService';
 import type { RunStep } from './RunTimeline';
@@ -18,11 +19,22 @@ vi.mock('../../utils/surfacePdf', () => ({
   downloadSurfacePdf: (...args: unknown[]) => downloadSurfacePdfMock(...args),
 }));
 
+// The PPTX export (pptxgenjs) is exercised in the shared lib's own tests — here we
+// only verify the panel's PowerPoint menu option wires the surface + filename in.
+// Partial mock so the renderer's other imports (downloadCsv) stay real.
+const downloadPptxMock = vi.fn();
+vi.mock('../../../../shared/a2ui/lib/download', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../../../../shared/a2ui/lib/download')>();
+  return { ...orig, downloadPptx: (...args: unknown[]) => downloadPptxMock(...args) };
+});
+
 beforeEach(() => {
   getConfigMock.mockReset();
   getConfigMock.mockResolvedValue({ enabled: false, catalog_type: 'basic' } as never);
   downloadSurfacePdfMock.mockReset();
   downloadSurfacePdfMock.mockResolvedValue(undefined);
+  downloadPptxMock.mockReset();
+  downloadPptxMock.mockResolvedValue(undefined);
 });
 
 // A minimal A2UI document — the ONLY previewable content kind.
@@ -136,9 +148,9 @@ describe('PreviewPanel component', () => {
   });
 
   it('renders an empty body when the stored data is not a parseable A2UI document', () => {
-    const { container } = renderPanel({ type: 'ui', data: 'not a ui document at all' });
+    renderPanel({ type: 'ui', data: 'not a ui document at all' });
     expect(screen.getByText('App')).toBeInTheDocument(); // header still renders
-    expect(container.querySelector('.flex-1.overflow-auto')?.childElementCount).toBe(0);
+    expect(screen.getByTestId('preview-body').childElementCount).toBe(0);
   });
 
   it('close and toggle-chat buttons fire their callbacks', () => {
@@ -486,44 +498,60 @@ describe('PreviewPanel — full screen', () => {
   });
 });
 
-describe('PreviewPanel — Download as PDF', () => {
+describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
+  // The single top-toolbar control is a MENU: clicking it opens PDF / PowerPoint
+  // options (replacing the old icon-only PDF button AND the deck's own PowerPoint
+  // button, which is suppressed in the pane).
+  const openMenuAndPick = async (label: 'PDF' | 'PowerPoint') => {
+    fireEvent.click(screen.getByLabelText('Download'));
+    fireEvent.click(await screen.findByText(label));
+  };
+
   it('downloads the THEMED surface as a PDF using the preview title', async () => {
     renderPanel({ ...uiContent, title: 'Oil Report' });
 
-    const btn = screen.getByLabelText('Download as PDF');
-    // Icon-only control — no "PDF" text next to the arrow.
-    expect(btn.textContent).toBe('');
+    // The trigger is icon-only — no "PDF"/"Download" text next to the arrow.
+    expect(screen.getByLabelText('Download').textContent).toBe('');
 
-    fireEvent.click(btn);
+    await openMenuAndPick('PDF');
     await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1));
     const [surface, title] = downloadSurfacePdfMock.mock.calls[0];
     expect(title).toBe('Oil Report');
     expect((surface as { components: Record<string, unknown> }).components.root).toBeDefined();
   });
 
+  it('downloads as PowerPoint via the menu, themed, using the preview title', async () => {
+    renderPanel({ ...uiContent, title: 'Oil Report' });
+    await openMenuAndPick('PowerPoint');
+    await waitFor(() => expect(downloadPptxMock).toHaveBeenCalledTimes(1));
+    const [surface, , filename] = downloadPptxMock.mock.calls[0];
+    expect((surface as { components: unknown[] }).components).toBeDefined();
+    expect(filename).toBe('Oil Report.pptx');
+  });
+
   it('falls back to a default filename when the preview has no title', async () => {
     renderPanel(uiContent);
-    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    await openMenuAndPick('PDF');
     await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalled());
     expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('kasal-app');
   });
 
-  it('does nothing when the stored data is not a parseable A2UI document', () => {
+  it('does nothing when the stored data is not a parseable A2UI document', async () => {
     renderPanel({ type: 'ui', data: 'not a ui document at all' });
-    fireEvent.click(screen.getByLabelText('Download as PDF'));
+    await openMenuAndPick('PDF');
     expect(downloadSurfacePdfMock).not.toHaveBeenCalled();
   });
 
-  it('disables the button while the export is in flight and re-enables after', async () => {
+  it('disables the trigger while the export is in flight and re-enables after', async () => {
     let release: () => void = () => undefined;
     downloadSurfacePdfMock.mockImplementationOnce(
       () => new Promise<void>((resolve) => { release = resolve; }),
     );
     renderPanel(uiContent);
-    const btn = screen.getByLabelText('Download as PDF');
-    fireEvent.click(btn);
+    const btn = screen.getByLabelText('Download');
+    await openMenuAndPick('PDF');
     await waitFor(() => expect(btn).toBeDisabled());
-    // a second click while exporting is ignored
+    // a second open+download while exporting is ignored (trigger disabled)
     fireEvent.click(btn);
     expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1);
     act(() => release());

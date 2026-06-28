@@ -1,6 +1,8 @@
 import React from 'react';
+import Box from '@mui/material/Box';
 import { FlowLoadResult } from '../../types/dispatcher';
 import { useExecutionStore } from '../../store/executionStore';
+import { buttonResetSx, spinnerSx } from '../../chatSx';
 
 interface FlowDetailCardProps {
   data: FlowLoadResult;
@@ -15,66 +17,89 @@ const FlowDetailCard: React.FC<FlowDetailCardProps> = ({
   const { flow } = data;
   if (!flow) {
     return (
-      <div className="text-sm my-2" style={{ color: 'var(--text-muted)' }}>
+      <Box sx={{ fontSize: 14, my: 1, color: 'text.disabled' }}>
         No flow data available.
-      </div>
+      </Box>
     );
   }
 
   const nodeCount = flow.nodes?.length ?? 0;
+  const labelSx = { fontWeight: 500, color: 'text.primary' } as const;
 
   return (
-    <div
-      className="rounded-xl p-4 my-3"
-      style={{
-        backgroundColor: 'var(--bg-input)',
-        border: '1px solid var(--border-color)',
+    <Box
+      sx={{
+        borderRadius: '12px',
+        p: 2,
+        my: 1.5,
+        backgroundColor: 'background.paper',
+        border: 1,
+        borderColor: 'divider',
       }}
     >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs"
-            style={{ backgroundColor: 'var(--accent)' }}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            sx={{
+              width: 28,
+              height: 28,
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 12,
+              backgroundColor: 'primary.main',
+            }}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-            </svg>
-          </div>
-          <h4
-            className="font-semibold text-sm"
-            style={{ color: 'var(--text-primary)' }}
-          >
+            </Box>
+          </Box>
+          <Box component="h4" sx={{ fontWeight: 600, fontSize: 14, color: 'text.primary' }}>
             {flow.name}
-          </h4>
-        </div>
+          </Box>
+        </Box>
         {onExecute && (
-          <button
+          <Box
+            component="button"
             onClick={onExecute}
             disabled={busy}
-            className="text-white text-xs px-3.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-            style={{ backgroundColor: 'var(--accent)' }}
+            sx={{
+              ...buttonResetSx,
+              color: '#fff',
+              fontSize: 12,
+              px: 1.75,
+              py: 0.75,
+              borderRadius: '8px',
+              fontWeight: 500,
+              transition: 'all 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              backgroundColor: 'primary.main',
+              '&:hover': { opacity: 0.9 },
+              '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
+            }}
           >
-            {busy && (
-              <div className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin" />
-            )}
+            {busy && <Box sx={spinnerSx} />}
             {busy ? 'Starting...' : 'Execute'}
-          </button>
+          </Box>
         )}
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Nodes:</span>{' '}
+      </Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, fontSize: 14, color: 'text.secondary' }}>
+        <Box>
+          <Box component="span" sx={labelSx}>Nodes:</Box>{' '}
           {nodeCount}
-        </div>
+        </Box>
         {flow.flow_config && (
-          <div>
-            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Config:</span>{' '}
+          <Box>
+            <Box component="span" sx={labelSx}>Config:</Box>{' '}
             {Object.keys(flow.flow_config).length} settings
-          </div>
+          </Box>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 };
 

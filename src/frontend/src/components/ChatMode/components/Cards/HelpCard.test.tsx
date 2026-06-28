@@ -25,15 +25,12 @@ describe('HelpCard', () => {
     expect(screen.getByTestId('md')).toBeInTheDocument();
   });
 
-  it('applies the card container styling', () => {
-    const { container } = render(<HelpCard content="hello" />);
-    const card = container.querySelector('.rounded-xl');
+  it('renders the markdown inside the card container', () => {
+    render(<HelpCard content="hello" />);
+    // The card wrapper contains the rendered markdown. Styling is applied via the
+    // chat MUI theme (sx), so assert structure/behaviour, not Tailwind classes.
+    const card = screen.getByTestId('help-card');
     expect(card).toBeInTheDocument();
-    // jsdom does not resolve CSS custom properties via toHaveStyle, so assert on
-    // the inline style attribute directly.
-    const style = card?.getAttribute('style') || '';
-    expect(style).toContain('var(--bg-input)');
-    expect(style).toContain('var(--border-color)');
-    expect(card?.querySelector('.prose')).toBeInTheDocument();
+    expect(card).toContainElement(screen.getByTestId('md'));
   });
 });

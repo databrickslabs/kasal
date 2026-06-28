@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import CatalogLibrary from './CatalogLibrary';
 import { CatalogItem } from '../api/crews';
+import { renderWithChatTheme as render } from '../chatTestRender';
 
 const crews = (n: number): CatalogItem[] =>
   Array.from({ length: n }, (_, i) => ({ id: `c${i}`, name: `Crew ${i}` }));

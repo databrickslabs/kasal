@@ -4,7 +4,8 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 
 const updateMessage = vi.fn();
 vi.mock('../../store/sessionStore', () => ({

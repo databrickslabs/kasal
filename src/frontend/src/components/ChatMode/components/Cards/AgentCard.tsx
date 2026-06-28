@@ -1,4 +1,5 @@
 import React from 'react';
+import Box from '@mui/material/Box';
 import { GeneratedAgent } from '../../types/dispatcher';
 import { useExecutionStore } from '../../store/executionStore';
 import { useSessionStore } from '../../store/sessionStore';
@@ -16,16 +17,24 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   const active = running && owner === currentSession;
 
   // Agent-builder style: one flowing line — **Name** — Role <goal>. No field
-  // labels, no backstory/tools.
+  // labels, no backstory/tools. (Styled via the chat MUI theme.)
   return (
-    <div
-      className={`my-2 text-[15px] leading-[1.7]${active ? ' animate-pulse' : ''}`}
-      style={{ color: 'var(--text-primary)' }}
+    <Box
+      sx={{
+        my: 1,
+        fontSize: 15,
+        lineHeight: 1.7,
+        color: 'text.primary',
+        ...(active && {
+          animation: 'agentCardPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          '@keyframes agentCardPulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } },
+        }),
+      }}
     >
-      <span className="font-semibold">{agent.name}</span>
+      <Box component="span" sx={{ fontWeight: 600 }}>{agent.name}</Box>
       {agent.role ? ` — ${agent.role}` : ''}
       {agent.goal ? ` ${agent.goal}` : ''}
-    </div>
+    </Box>
   );
 };
 

@@ -1,20 +1,34 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import {
-  parseUiDocument,
-  findUiDocument,
-  applyConfiguredTheme,
-  inferSurfaceDeliverable,
-  setSurfaceTheme,
-  DELIVERABLE_LABELS,
-} from '../../utils/uiDocument';
+import { Menu, MenuItem } from '@mui/material';
+import Box from '@mui/material/Box';
+import { buttonResetSx, pulseSx } from '../../chatSx';
+import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
+import { toSurface } from '../../utils/surfaceAdapter';
+import { themeToDeck, getDeckTheme, DEFAULT_DECK_THEME_ID } from '../../../../shared/a2ui';
+import type { Surface } from '../../../../shared/a2ui';
+import { downloadPptx } from '../../../../shared/a2ui/lib/download';
 import type { Theme } from '../../../Configuration/uiConfigShared';
-import { useWorkspaceThemes } from '../../hooks/useWorkspaceThemes';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
-import UiRenderer from './UiRenderer';
+import { useA2uiThemes } from '../../hooks/useA2uiThemes';
+import A2uiSurface from '../Chat/A2uiSurface';
 import { friendlyStep, type RunStep } from './RunTimeline';
 import ThinkingStream from './ThinkingStream';
 import LogSurface from './LogSurface';
 import RefinePanel from './RefinePanel';
+
+/** A surface carrying a per-surface "Look" restyle (see A2uiSurface). */
+type ThemedSurface = Surface & { theme?: Theme };
+
+// A2UI surfaceKind → UIConfigurator deliverable key (drives the "Customize" panel
+// title + per-type controls). 'document' maps to the closest configurable type.
+const SURFACE_TO_DELIVERABLE: Record<string, string> = {
+  presentation: 'presentation',
+  dashboard: 'dashboard',
+  mindmap: 'mindmap',
+  quiz: 'quiz',
+  document: 'report',
+  conversation: 'default',
+};
 
 // The preview pane renders structured A2UI documents ONLY — the UI document is
 // the single source of truth for generated deliverables. Raw HTML, JSON,
@@ -32,7 +46,9 @@ interface PreviewPanelProps {
   content: PreviewContent;
   onClose: () => void;
   chatCollapsed: boolean;
-  onToggleChat: () => void;
+  /** Toggle the adjacent chat column. Omitted when there's no chat beside the pane
+   *  (e.g. the Jobs "Show result" dialog) — then no toggle button shows. */
+  onToggleChat?: () => void;
   /** Refine the current artifact with a natural-language instruction (AI). */
   onRefine?: (instruction: string) => void;
   /** Replace the current artifact's document in place (deterministic restyle, no AI). */
@@ -48,6 +64,10 @@ interface PreviewPanelProps {
   runSteps?: RunStep[];
   /** Dock the activity into the chat's "Working…" bar instead of this pane. */
   onMoveActivityToChat?: () => void;
+  /** Embedded in a host shell that already provides fullscreen + close (e.g. the
+   *  Jobs "Show result" dialog). Hides this pane's own fullscreen/close so they're
+   *  not duplicated; the title + download menu + Customize stay. */
+  embedded?: boolean;
 }
 
 /**
@@ -89,34 +109,54 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   // Drop the chat layer's bold-title prefix so the preview shows only the body.
   const body = stripTaskTitlePrefix(raw);
 
-  // Strip markdown code fences that often wrap the JSON document.
+  // Strip markdown code fences that often wrap the JSON.
   const cleaned = stripCodeFences(body);
 
-  // Search the text directly first (handles prose/fenced/bare/double-encoded and
-  // keeps the original string for a clean top-level doc). If that misses, parse
-  // to an object and search RECURSIVELY so a doc WRAPPED in a result envelope
-  // ({result:{…}}, {output:"<json>"}, nested) is still found — a top-level-only
-  // parse leaks it into the chat as raw JSON instead of rendering in the preview.
-  let doc = findUiDocument(cleaned);
-  if (!doc) {
-    try {
-      doc = findUiDocument(JSON.parse(cleaned));
-    } catch {
-      /* not a JSON wrapper */
-    }
-  }
-  if (doc) {
-    return { type: 'ui', data: typeof doc === 'string' ? doc : JSON.stringify(doc) };
-  }
-
-  return null;
+  // toSurface accepts the new {text,a2ui} envelope, a bare Surface, a JSON string
+  // of either, or an older legacy document found anywhere in the tree (adapted).
+  // PreviewContent.data always holds the canonical NEW Surface JSON afterwards.
+  const surface = toSurface(cleaned);
+  return surface ? { type: 'ui', data: JSON.stringify(surface) } : null;
 }
 
-const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat }) => {
+// Shared toolbar button styles — ALWAYS spread into a fresh `sx` literal at the
+// call site (`sx={{ ...iconBtnSx }}`), never passed directly, so inferred string
+// props don't widen out of SxProps. `iconBtnSx`: the 28×28 icon buttons;
+// `pillBtnSx`: the labelled Activity/Customize pills (caller adds bg + active color).
+const iconBtnSx = {
+  ...buttonResetSx,
+  width: 28,
+  height: 28,
+  borderRadius: '8px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'color 0.15s, background-color 0.15s',
+  color: 'text.disabled',
+  '&:hover': { opacity: 0.7 },
+};
+const pillBtnSx = {
+  ...buttonResetSx,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 0.75,
+  height: 28,
+  px: 1.25,
+  borderRadius: '8px',
+  fontSize: 12,
+  fontWeight: 500,
+  transition: 'color 0.15s, background-color 0.15s',
+  '&:hover': { opacity: 0.8 },
+};
+
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat, embedded }) => {
   const [refineOpen, setRefineOpen] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // The single top-toolbar download is a menu: PDF or PowerPoint.
+  const [downloadAnchor, setDownloadAnchor] = useState<HTMLElement | null>(null);
+  const a2uiThemes = useA2uiThemes();
   // The run's step timeline lives ON THE RIGHT the whole time: while building
   // (PreviewSkeleton) and — collapsed above the result — once it's done, so it's
   // never lost. `runSteps` comes from the persistent chat trace, so it survives
@@ -150,80 +190,130 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
 
-  // Parse the A2UI document for the brand-consistent renderer, then re-resolve
-  // its theme from the workspace UI-Configurator palettes (source of truth —
-  // the agent-embedded theme is frequently the wrong palette).
-  const workspaceThemes = useWorkspaceThemes();
-  const uiSurface = useMemo(() => {
-    const parsed = parseUiDocument(displayData);
-    return parsed ? applyConfiguredTheme(parsed, workspaceThemes) : null;
-  }, [displayData, workspaceThemes]);
+  // Coerce the stored content into the shared Surface (handles the new envelope,
+  // a bare surface, or an older legacy doc — adapted). A2uiSurface re-resolves the
+  // workspace branding (and any per-surface "Look" restyle) at render time.
+  const uiSurface = useMemo(() => toSurface(displayData), [displayData]) as ThemedSurface | null;
+  // A deck is fit to the available HEIGHT (letterboxed, no scroll) so the whole
+  // slide shows. Other surfaces (documents, dashboards) are tall content — they
+  // keep the natural width + vertical scroll. Detect a deck by an actual SlideDeck
+  // component, not just surfaceKind: messages-format / legacy results can carry a
+  // SlideDeck while their surfaceKind was inferred to 'document'.
+  const isDeck =
+    uiSurface?.surfaceKind === 'presentation' ||
+    !!uiSurface?.components?.some((c) => c.component === 'SlideDeck');
+  // Fit-to-height (letterbox) only makes sense when the host gives the pane a
+  // FIXED height to fill — i.e. the chat side pane. When `embedded` (the Jobs
+  // "Show result" dialog) the host shrink-wraps its content, so a fitted deck
+  // would just leave a tall empty band below it; there we render the deck
+  // WIDTH-driven (natural 16:9 height) and let the dialog size to it.
+  const fitDeck = isDeck && !embedded;
 
   // What this deliverable is (presentation, dashboard, …) drives the "Customize"
   // panel: a friendly title + the matching per-type content controls.
-  // inferSurfaceDeliverable only ever returns keys present in DELIVERABLE_LABELS.
-  const deliverable = useMemo(() => (uiSurface ? inferSurfaceDeliverable(uiSurface) : 'default'), [uiSurface]);
+  const deliverable = uiSurface
+    ? SURFACE_TO_DELIVERABLE[uiSurface.surfaceKind] || 'default'
+    : 'default';
   const deliverableLabel = DELIVERABLE_LABELS[deliverable];
   const currentTheme = uiSurface?.theme;
 
-  // Apply a deterministic Look change: rewrite the doc's theme and hand it back
-  // to the owner to swap in place + persist. No AI, no crew run.
+  // Apply a deterministic Look change: stamp the picked palette onto the surface
+  // and hand it back to the owner to swap in place + persist. The renderer reads
+  // surface.theme as the override, so the preview restyles INSTANTLY — no AI run.
   const applyStyle = (theme: Theme) => {
-    if (!onStyleChange) return;
-    onStyleChange(setSurfaceTheme(displayData, theme));
+    if (!onStyleChange || !uiSurface) return;
+    const restyled: ThemedSurface = {
+      ...uiSurface,
+      theme: { ...uiSurface.theme, ...theme },
+    };
+    onStyleChange(JSON.stringify(restyled));
   };
 
-  // Download the rendered surface as a PDF file (no print dialog): decks land
-  // one slide per landscape page; other deliverables as one content-sized page.
-  const downloadPdf = async () => {
+  // The deck theme resolved exactly as A2uiSurface does (per-surface "Look"
+  // override → workspace palette → built-in default), so a PowerPoint export
+  // matches the on-screen palette.
+  const deckTheme = useMemo(() => {
+    if (!uiSurface) return undefined;
+    const key = SURFACE_TO_DELIVERABLE[uiSurface.surfaceKind] || 'default';
+    const palette = uiSurface.theme ?? a2uiThemes?.[key];
+    return palette ? themeToDeck(palette) : getDeckTheme(DEFAULT_DECK_THEME_ID);
+  }, [uiSurface, a2uiThemes]);
+
+  // The single top-toolbar download offers PDF or PowerPoint (replacing both the
+  // old icon-only PDF button AND the surface's own "PowerPoint" button, which is
+  // suppressed in the pane via `hideDownloads`). Decks land one slide per page;
+  // other deliverables as one content-sized page (PDF) or slides (PPTX).
+  const baseName = content.title || 'kasal-app';
+  const runDownload = async (kind: 'pdf' | 'pptx') => {
+    setDownloadAnchor(null);
     if (!uiSurface || downloading) return;
     setDownloading(true);
     try {
-      await downloadSurfacePdf(uiSurface, content.title || 'kasal-app');
+      if (kind === 'pdf') {
+        await downloadSurfacePdf(uiSurface, baseName);
+      } else {
+        await downloadPptx(uiSurface, deckTheme, `${baseName}.pptx`);
+      }
     } finally {
       setDownloading(false);
     }
   };
 
   return (
-    <aside
+    <Box
+      component="aside"
       ref={asideRef}
-      className="flex flex-col h-full"
-      style={{
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
         minWidth: '300px',
-        backgroundColor: 'var(--bg-primary)',
-        borderLeft: chatCollapsed ? 'none' : '1px solid var(--border-color)',
+        backgroundColor: 'background.default',
+        ...(chatCollapsed ? {} : { borderLeft: 1, borderColor: 'divider' }),
       }}
     >
-      {/* Header — hidden entirely in full screen for a chrome-free view (exit with Esc) */}
-      {!fullscreen && (
-      <div
-        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-color)' }}
+      {/* Header — hidden entirely in full screen for a chrome-free view (exit with
+          Esc), and when embedded: the host dialog (Jobs "Show result") already
+          provides its own title bar + controls, so a second header would just
+          stack and steal vertical height (forcing a scroll). */}
+      {!fullscreen && !embedded && (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 2,
+          py: 1.5,
+          flexShrink: 0,
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}
       >
-        <div className="flex items-center gap-2">
-          {/* Toggle chat button */}
-          <button
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Toggle chat button — only when there's a chat column beside the pane */}
+          {onToggleChat && (
+          <Box
+            component="button"
             onClick={onToggleChat}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-muted)' }}
+            sx={{ ...iconBtnSx }}
             title={chatCollapsed ? 'Show chat' : 'Hide chat'}
           >
             {/* The preview sits to the RIGHT of the chat, so expanding it to
                 full width grows LEFTWARD: "hide chat" points left (◀◀), and
                 restoring the chat points right (▶▶). */}
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               {chatCollapsed ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" />
               ) : (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
               )}
-            </svg>
-          </button>
-          <svg
-            className="w-4 h-4"
-            style={{ color: 'var(--accent)' }}
+            </Box>
+          </Box>
+          )}
+          <Box
+            component="svg"
+            sx={{ width: 16, height: 16, color: 'primary.main' }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -234,135 +324,149 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               strokeLinejoin="round"
               d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125"
             />
-          </svg>
-          <span
-            className="text-sm font-medium"
-            style={{ color: 'var(--text-primary)' }}
+          </Box>
+          <Box
+            component="span"
+            sx={{ fontSize: 14, fontWeight: 500, color: 'text.primary' }}
           >
             {content.title || 'App'}
-          </span>
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded font-mono"
-            style={{
-              color: 'var(--text-muted)',
-              backgroundColor: 'var(--bg-secondary)',
+          </Box>
+          <Box
+            component="span"
+            sx={{
+              fontSize: 10,
+              px: 0.75,
+              py: 0.25,
+              borderRadius: '4px',
+              fontFamily: 'monospace',
+              color: 'text.disabled',
+              backgroundColor: (t) => t.chat.bgSecondary,
             }}
           >
             {content.type.toUpperCase()}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
+          </Box>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           {history && history.length > 1 && onNavigate && (() => {
             const current = index ?? history.length - 1;
             return (
-              <div
-                className="flex items-center gap-0.5 mr-1 rounded-lg"
-                style={{ backgroundColor: 'var(--bg-secondary)' }}
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', gap: 0.25, mr: 0.5, borderRadius: '8px', backgroundColor: (t) => t.chat.bgSecondary }}
               >
-                <button
+                <Box
+                  component="button"
                   onClick={() => onNavigate(current - 1)}
                   disabled={current <= 0}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: 'var(--text-muted)' }}
+                  sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.3, cursor: 'not-allowed' } }}
                   title="Previous output"
                   aria-label="Previous output"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                  </svg>
-                </button>
-                <span
-                  className="text-[11px] font-mono tabular-nums px-1 select-none"
-                  style={{ color: 'var(--text-muted)' }}
+                  </Box>
+                </Box>
+                <Box
+                  component="span"
+                  sx={{ fontSize: 11, fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums', px: 0.5, userSelect: 'none', color: 'text.disabled' }}
                   title="Task output (latest shown first)"
                 >
                   {current + 1}/{history.length}
-                </span>
-                <button
+                </Box>
+                <Box
+                  component="button"
                   onClick={() => onNavigate(current + 1)}
                   disabled={current >= history.length - 1}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: 'var(--text-muted)' }}
+                  sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.3, cursor: 'not-allowed' } }}
                   title="Next output"
                   aria-label="Next output"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
-                </button>
-              </div>
+                  </Box>
+                </Box>
+              </Box>
             );
           })()}
           {runSteps.length > 0 && (
-            <button
+            <Box
+              component="button"
               onClick={toggleActivity}
-              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-              style={{
-                color: activityOpen ? 'var(--accent)' : 'var(--text-secondary)',
-                backgroundColor: 'var(--bg-secondary)',
-              }}
+              sx={{ ...pillBtnSx, color: activityOpen ? 'primary.main' : 'text.secondary', backgroundColor: (t) => t.chat.bgSecondary }}
               title="Show the run activity timeline (steps + context)"
               aria-pressed={activityOpen}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008zM8.25 6.75h12M8.25 12h12m-12 5.25h12" />
-              </svg>
+              </Box>
               Activity
-            </button>
+            </Box>
           )}
           {onRefine && (
-            <button
+            <Box
+              component="button"
               onClick={() => setRefineOpen((v) => !v)}
-              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-              style={{
-                color: refineOpen ? 'var(--accent)' : 'var(--text-secondary)',
-                backgroundColor: 'var(--bg-secondary)',
-              }}
+              sx={{ ...pillBtnSx, color: refineOpen ? 'primary.main' : 'text.secondary', backgroundColor: (t) => t.chat.bgSecondary }}
               title="Customize the look and content of this result"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
+              </Box>
               Customize
-            </button>
+            </Box>
           )}
-          <button
-            onClick={downloadPdf}
+          <Box
+            component="button"
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => setDownloadAnchor(e.currentTarget)}
             disabled={downloading}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-40 disabled:cursor-wait"
-            style={{ color: 'var(--text-muted)' }}
-            title="Download as PDF"
-            aria-label="Download as PDF"
+            sx={{ ...iconBtnSx, '&:disabled': { opacity: 0.4, cursor: 'wait' } }}
+            title="Download"
+            aria-label="Download"
+            aria-haspopup="menu"
           >
-            <svg
-              className={`w-4 h-4 ${downloading ? 'animate-pulse' : ''}`}
+            <Box
+              component="svg"
+              sx={{ width: 16, height: 16, ...(downloading ? pulseSx : {}) }}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
-          </button>
-          <button
+            </Box>
+          </Box>
+          <Menu
+            anchorEl={downloadAnchor}
+            open={Boolean(downloadAnchor)}
+            onClose={() => setDownloadAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <MenuItem onClick={() => runDownload('pdf')}>PDF</MenuItem>
+            <MenuItem onClick={() => runDownload('pptx')}>PowerPoint</MenuItem>
+          </Menu>
+          {!embedded && (
+          <Box
+            component="button"
             onClick={enterFullscreen}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-muted)' }}
+            sx={{ ...iconBtnSx }}
             title="Full screen"
             aria-label="Full screen"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25h-4.5m4.5 0v4.5m0-4.5L15 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-            </svg>
-          </button>
-          <button
+            </Box>
+          </Box>
+          )}
+          {!embedded && (
+          <Box
+            component="button"
             onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-muted)' }}
+            sx={{ ...iconBtnSx }}
             title="Close preview"
           >
-            <svg
-              className="w-4 h-4"
+            <Box
+              component="svg"
+              sx={{ width: 16, height: 16 }}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -373,10 +477,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
                 strokeLinejoin="round"
                 d="M6 18L18 6M6 6l12 12"
               />
-            </svg>
-          </button>
-        </div>
-      </div>
+            </Box>
+          </Box>
+          )}
+        </Box>
+      </Box>
       )}
 
       {/* Customize panel — instant "Look" (deterministic) + AI "Content" refine */}
@@ -391,70 +496,84 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
         />
       )}
 
-      {/* Content — A2UI only; non-UI documents are never previewable. */}
-      <div className="flex-1 overflow-auto">
+      {/* Content — A2UI only; non-UI documents are never previewable. The deck-fit
+          layout (overflow-hidden flex column, so the deck letterboxes to height)
+          applies ONLY when the deck DELIVERABLE is actually shown. While the run
+          activity list or a step's context (LogSurface, minHeight:100%) is open it
+          REPLACES the deliverable, and those need the natural scrolling box —
+          otherwise the fit container collapses/clips them to an empty pane. */}
+      <Box
+        data-testid="preview-body"
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          ...(fitDeck && !activityOpen && !activeStep
+            ? { overflow: 'hidden', display: 'flex', flexDirection: 'column' }
+            : { overflow: 'auto' }),
+        }}
+      >
         {/* Run activity — collapsed above the result so it's never lost. The list
             shows plain-English steps; clicking one opens its context full-page. */}
         {runSteps.length > 0 && !fullscreen && (
-          <div style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
             {activeStep ? (
               // Detail header: a Back affordance to return to the step list.
-              <button
+              <Box
+                component="button"
                 type="button"
                 onClick={() => setActiveStep(null)}
-                className="flex items-center gap-1.5 w-full px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
-                style={{ color: 'var(--text-muted)' }}
+                sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 0.75, width: '100%', px: 2, py: 1, textAlign: 'left', fontSize: 11, fontWeight: 500, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
                 aria-label="Back to the run activity"
               >
-                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <Box component="svg" sx={{ width: 12, height: 12, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                </svg>
+                </Box>
                 Back · {friendlyStep(activeStep.label)}
-              </button>
+              </Box>
             ) : (
-              <div className="flex items-center">
-                <button
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box
+                  component="button"
                   type="button"
                   onClick={toggleActivity}
-                  className="flex items-center gap-1.5 flex-1 px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
-                  style={{ color: 'var(--text-muted)' }}
+                  sx={{ ...buttonResetSx, display: 'flex', alignItems: 'center', gap: 0.75, flex: 1, px: 2, py: 1, textAlign: 'left', fontSize: 11, fontWeight: 500, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
                   aria-expanded={activityOpen}
                 >
-                  <svg
-                    className="w-3 h-3 flex-shrink-0 transition-transform"
-                    style={{ transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  <Box
+                    component="svg"
+                    sx={{ width: 12, height: 12, flexShrink: 0, transition: 'transform 0.15s', transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
+                  </Box>
                   Run activity · {runSteps.length} step{runSteps.length === 1 ? '' : 's'}
-                </button>
+                </Box>
                 {onMoveActivityToChat && (
-                  <button
+                  <Box
+                    component="button"
                     type="button"
                     onClick={onMoveActivityToChat}
-                    className="px-3 py-2 text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
-                    style={{ color: 'var(--text-muted)' }}
+                    sx={{ ...buttonResetSx, px: 1.5, py: 1, fontSize: 11, flexShrink: 0, transition: 'color 0.15s, background-color 0.15s', color: 'text.disabled', '&:hover': { opacity: 0.8 } }}
                     title="Show the activity in the chat instead"
                   >
                     Show in chat
-                  </button>
+                  </Box>
                 )}
-              </div>
+              </Box>
             )}
             {activityOpen && !activeStep && (
-              <div className="px-4 pb-3">
+              <Box sx={{ px: 2, pb: 1.5 }}>
                 <ThinkingStream steps={runSteps} onSelect={setActiveStep} />
-              </div>
+              </Box>
             )}
-          </div>
+          </Box>
         )}
         {/* A chosen step's context, on its own full page (replaces the deliverable
             and fills the pane). */}
         {activeStep && (
-          <div data-testid="run-step-context" style={{ minHeight: '100%' }}>
+          <Box data-testid="run-step-context" sx={{ minHeight: '100%' }}>
             <LogSurface body={activeStep.detail || ''} />
-          </div>
+          </Box>
         )}
         {/* When the activity is open (list or detail) it REPLACES the deliverable
             — the pane shows one or the other, never stacked. */}
@@ -463,12 +582,20 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           // REMOUNTS the renderer instead of reusing the instance. The refined
           // deck reuses the same component ids (root/slide1…), so without a key
           // React keeps the old instance — and its internal useState (slide
-          // index, surface.data model) — leaving the preview on the stale
-          // version. Index + content length changes whenever the artifact does.
-          <UiRenderer key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} />
+          // index) — leaving the preview on the stale version. Index + content
+          // length changes whenever the artifact does.
+          // A deck gets a flex-fill wrapper + `fit` so it letterboxes to the height;
+          // other surfaces render naturally inside the scrolling content area.
+          fitDeck ? (
+            <Box sx={{ flex: 1, minHeight: 0, display: 'flex', p: 1.5 }}>
+              <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads fit />
+            </Box>
+          ) : (
+            <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
+          )
         )}
-      </div>
-    </aside>
+      </Box>
+    </Box>
   );
 };
 

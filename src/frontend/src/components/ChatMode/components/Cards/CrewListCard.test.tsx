@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import CrewListCard from './CrewListCard';
 import { CatalogListResult } from '../../types/dispatcher';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 
 describe('CrewListCard', () => {
   it('renders "No crews found." when plans is undefined', () => {

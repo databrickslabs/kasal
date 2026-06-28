@@ -1,5 +1,7 @@
 import React, { useState, useCallback } from 'react';
+import Box from '@mui/material/Box';
 import { DetectedVariable } from '../../utils/variableDetector';
+import { buttonResetSx, inputResetSx } from '../../chatSx';
 
 /**
  * Inline input-variables prompt, rendered IN the chat flow (same style as the
@@ -68,93 +70,153 @@ const InputVariablesPrompt: React.FC<InputVariablesPromptProps> = ({
   };
 
   return (
-    <div className="pt-1 space-y-2">
-      <p className="text-xs px-1" style={{ color: 'var(--text-muted)' }}>
+    <Box sx={{ pt: 0.5, '& > * + *': { mt: 1 } }}>
+      <Box component="p" sx={{ fontSize: 12, px: 0.5, color: 'text.disabled' }}>
         This crew uses{' '}
-        <code
-          className="px-1 py-0.5 rounded text-[11px]"
-          style={{ backgroundColor: 'var(--bg-secondary)' }}
+        {/* Styled as a <span> (not <code>) so the chat's global inline-code rule
+            doesn't override the token background; the code-red text + monospace
+            are reproduced here. */}
+        <Box
+          component="span"
+          sx={{
+            px: 0.5,
+            py: 0.25,
+            borderRadius: '4px',
+            fontSize: 11,
+            fontFamily: 'monospace',
+            fontWeight: 500,
+            backgroundColor: (t) => t.chat.bgSecondary,
+            color: (t) => (t.palette.mode === 'dark' ? '#FF7A6B' : '#D42E1B'),
+          }}
         >
           &#123;variable&#125;
-        </code>{' '}
+        </Box>{' '}
         placeholders. Provide values below to run.
-      </p>
+      </Box>
 
       {variables.map((v) => {
         const sensitive = isSensitive(v.name);
         const showValue = visibleFields[v.name] || false;
         return (
-          <div key={v.name}>
-            <label
-              className="block text-[10px] font-semibold uppercase tracking-wider mb-1 px-1"
-              style={{ color: 'var(--text-muted)' }}
+          <Box key={v.name}>
+            <Box
+              component="label"
+              sx={{
+                display: 'block',
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                mb: 0.5,
+                px: 0.5,
+                color: 'text.disabled',
+              }}
             >
               {v.name.replace(/[_-]/g, ' ')}
-              {v.required && <span style={{ color: '#ef4444' }}> *</span>}
-            </label>
-            <div className="relative">
-              <input
+              {v.required && <Box component="span" sx={{ color: '#ef4444' }}> *</Box>}
+            </Box>
+            <Box sx={{ position: 'relative' }}>
+              <Box
+                component="input"
                 type={sensitive && !showValue ? 'password' : 'text'}
                 value={values[v.name] || ''}
-                onChange={(e) => handleChange(v.name, e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange(v.name, e.target.value)}
                 placeholder={`Enter ${v.name.replace(/[_-]/g, ' ')}`}
                 disabled={submitted}
-                className="w-full rounded-lg px-3 py-2 text-sm outline-none transition-colors disabled:opacity-50"
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-color)',
-                  paddingRight: sensitive ? '2.5rem' : undefined,
+                sx={{
+                  ...inputResetSx,
+                  width: '100%',
+                  borderRadius: '8px',
+                  px: 1.5,
+                  py: 1,
+                  fontSize: 14,
+                  transition: 'border-color 0.15s, background-color 0.15s',
+                  backgroundColor: 'background.paper',
+                  color: 'text.primary',
+                  border: 1,
+                  borderColor: 'divider',
+                  pr: sensitive ? '2.5rem' : undefined,
+                  '&:disabled': { opacity: 0.5 },
                 }}
               />
               {sensitive && (
-                <button
+                <Box
+                  component="button"
                   type="button"
                   onClick={() => toggleVisibility(v.name)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded transition-colors hover:opacity-70"
-                  style={{ color: 'var(--text-muted)' }}
                   title={showValue ? 'Hide' : 'Show'}
+                  sx={{
+                    ...buttonResetSx,
+                    position: 'absolute',
+                    right: 8,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 24,
+                    height: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '4px',
+                    transition: 'opacity 0.15s',
+                    color: 'text.disabled',
+                    '&:hover': { opacity: 0.7 },
+                  }}
                 >
                   {showValue ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                    </svg>
+                    </Box>
                   ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <Box component="svg" sx={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
+                    </Box>
                   )}
-                </button>
+                </Box>
               )}
-            </div>
-          </div>
+            </Box>
+          </Box>
         );
       })}
 
       {/* Same affordance as the Genie space run button: full-width, subtle,
           disabled until ready and after it fires. */}
-      <button
+      <Box
+        component="button"
         type="button"
         onClick={handleRun}
         disabled={!requiredFilled || submitted}
-        className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-        style={{
-          backgroundColor: 'var(--bg-secondary)',
-          color: 'var(--text-secondary)',
-          border: '1px solid var(--border-color)',
+        sx={{
+          ...buttonResetSx,
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1,
+          borderRadius: '8px',
+          px: 1.5,
+          py: 1,
+          fontSize: 14,
+          fontWeight: 500,
+          transition: 'all 0.15s',
+          backgroundColor: (t) => t.chat.bgSecondary,
+          color: 'text.secondary',
+          border: 1,
+          borderColor: 'divider',
+          '&:hover': { opacity: 0.8 },
+          '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
         }}
       >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+        <Box component="svg" sx={{ width: 16, height: 16 }} fill="currentColor" viewBox="0 0 24 24">
           <path d="M8 5v14l11-7z" />
-        </svg>
+        </Box>
         {submitted
           ? 'Running…'
           : requiredFilled
             ? 'Run crew'
             : 'Fill in the variables to run'}
-      </button>
-    </div>
+      </Box>
+    </Box>
   );
 };
 

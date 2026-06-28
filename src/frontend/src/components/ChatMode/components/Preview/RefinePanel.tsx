@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Box from '@mui/material/Box';
+import type { Theme as MuiTheme } from '@mui/material/styles';
+import type { SystemStyleObject } from '@mui/system';
 import {
   Theme,
   THEME_PRESETS,
@@ -10,7 +13,8 @@ import {
   optionVal,
   buildPartialDirective,
 } from '../../../Configuration/uiConfigShared';
-import type { UiTheme } from '../../utils/uiDocument';
+import type { UiTheme } from '../../../Configuration/uiConfigShared';
+import { buttonResetSx, inputResetSx } from '../../chatSx';
 
 interface RefinePanelProps {
   /** Detected deliverable key (presentation, dashboard, album, …). */
@@ -50,6 +54,39 @@ const COLOR_FIELDS: { key: keyof Theme; label: string }[] = [
   { key: 'text', label: 'Text' },
   { key: 'muted', label: 'Subtle' },
 ];
+
+// Shared field styling for the panel's number inputs and selects.
+const fieldSx: SystemStyleObject<MuiTheme> = {
+  ...inputResetSx,
+  borderRadius: '6px',
+  px: 1,
+  py: 0.5,
+  fontSize: 14,
+  backgroundColor: 'background.paper',
+  color: 'text.primary',
+  border: 1,
+  borderColor: 'divider',
+};
+const sectionLabelSx = {
+  fontSize: 12,
+  textTransform: 'uppercase',
+  letterSpacing: '0.025em',
+  color: 'text.primary',
+  fontWeight: 600,
+} as const;
+// The accent-coloured "Send"/"Update with AI" pill buttons.
+const accentBtnSx: SystemStyleObject<MuiTheme> = {
+  ...buttonResetSx,
+  px: 1.5,
+  py: 0.75,
+  borderRadius: '8px',
+  fontSize: 14,
+  fontWeight: 500,
+  color: '#fff',
+  transition: 'all 0.15s',
+  backgroundColor: 'primary.main',
+  '&:disabled': { opacity: 0.4, cursor: 'not-allowed' },
+};
 
 /**
  * In-preview "Customize" panel. Two ways to refine a rendered deliverable, kept
@@ -131,199 +168,222 @@ const RefinePanel: React.FC<RefinePanelProps> = ({
     const value = optionVal(changed, s);
     if (s.kind === 'switch') {
       return (
-        <label key={s.key} className="flex items-center gap-2 cursor-pointer text-xs" style={{ color: 'var(--text-secondary)' }}>
-          <input
+        <Box component="label" key={s.key} sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', fontSize: 12, color: 'text.secondary' }}>
+          <Box
+            component="input"
             type="checkbox"
             checked={value as boolean}
-            onChange={(e) => setChangedOpt(s.key, e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setChangedOpt(s.key, e.target.checked)}
+            sx={{ accentColor: (t) => t.palette.primary.main }}
           />
           {s.label}
-        </label>
+        </Box>
       );
     }
     if (s.kind === 'number') {
       return (
-        <label key={s.key} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <Box component="label" key={s.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 12, color: 'text.secondary' }}>
           {s.label}
-          <input
+          <Box
+            component="input"
             type="number"
             value={value as number}
             min={s.min}
             max={s.max}
             step={s.step ?? 1}
-            onChange={(e) => setChangedOpt(s.key, Number(e.target.value))}
-            className="w-20 rounded-md px-2 py-1 text-sm outline-none"
-            style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setChangedOpt(s.key, Number(e.target.value))}
+            sx={{ ...fieldSx, width: 80 }}
           />
-        </label>
+        </Box>
       );
     }
     return (
-      <label key={s.key} className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+      <Box component="label" key={s.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 12, color: 'text.secondary' }}>
         {s.label}
-        <select
+        <Box
+          component="select"
           value={value as string}
-          onChange={(e) => setChangedOpt(s.key, e.target.value)}
-          className="rounded-md px-2 py-1 text-sm outline-none"
-          style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setChangedOpt(s.key, e.target.value)}
+          sx={fieldSx}
         >
           {s.choices.map((c) => (
             <option key={c.value} value={c.value}>{c.label}</option>
           ))}
-        </select>
-      </label>
+        </Box>
+      </Box>
     );
   };
 
-  const sectionLabel: React.CSSProperties = {
-    color: 'var(--text-primary)',
-    fontWeight: 600,
-  };
-
   return (
-    <div
-      className="flex flex-col gap-4 px-4 py-3.5 flex-shrink-0 overflow-auto"
-      style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', maxHeight: '60vh' }}
+    <Box
       data-testid="refine-panel"
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        px: 2,
+        py: 1.75,
+        flexShrink: 0,
+        overflow: 'auto',
+        borderBottom: 1,
+        borderColor: 'divider',
+        backgroundColor: (t) => t.chat.bgSecondary,
+        maxHeight: '60vh',
+      }}
     >
-      <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-        Customize this <span style={{ fontWeight: 700 }}>{deliverableLabel}</span>
-      </div>
+      <Box sx={{ fontSize: 14, color: 'text.primary' }}>
+        Customize this <Box component="span" sx={{ fontWeight: 700 }}>{deliverableLabel}</Box>
+      </Box>
 
       {/* ---- Look: instant, deterministic ---- */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide" style={sectionLabel}>Look</span>
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Applies instantly</span>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box component="span" sx={sectionLabelSx}>Look</Box>
+          <Box component="span" sx={{ fontSize: 10, color: 'text.disabled' }}>Applies instantly</Box>
+        </Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
           {THEME_PRESETS.map((p) => (
-            <button
+            <Box
+              component="button"
               key={p.key}
               onClick={() => applyPreset({ ...p.theme })}
-              className="flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium transition-colors hover:opacity-80"
-              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
               title={`Apply the ${p.label} style`}
+              sx={{
+                ...buttonResetSx,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.75,
+                height: 28,
+                px: 1.25,
+                borderRadius: '9999px',
+                fontSize: 12,
+                fontWeight: 500,
+                transition: 'opacity 0.15s',
+                color: 'text.secondary',
+                backgroundColor: 'background.default',
+                border: 1,
+                borderColor: 'divider',
+                '&:hover': { opacity: 0.8 },
+              }}
             >
-              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: p.theme.accent, border: '1px solid rgba(128,128,128,0.4)' }} />
+              <Box component="span" sx={{ width: 12, height: 12, borderRadius: '9999px', backgroundColor: p.theme.accent, border: '1px solid rgba(128,128,128,0.4)' }} />
               {p.label}
-            </button>
+            </Box>
           ))}
-        </div>
+        </Box>
 
-        <button
+        <Box
+          component="button"
           onClick={() => setFineOpen((v) => !v)}
-          className="self-start text-xs font-medium flex items-center gap-1 hover:opacity-80"
-          style={{ color: 'var(--accent)' }}
+          sx={{ ...buttonResetSx, alignSelf: 'flex-start', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 0.5, color: 'primary.main', '&:hover': { opacity: 0.8 } }}
         >
-          <svg className={`w-3 h-3 transition-transform ${fineOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <Box component="svg" sx={{ width: 12, height: 12, transition: 'transform 0.15s', transform: fineOpen ? 'rotate(90deg)' : 'none' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-          Fine-tune colors & font
-        </button>
+          </Box>
+          Fine-tune colors &amp; font
+        </Box>
 
         {fineOpen && (
-          <div className="flex flex-col gap-3 pt-1">
-            <div className="flex flex-wrap gap-3">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 0.5 }}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
               {COLOR_FIELDS.map((f) => (
-                <label key={f.key} className="flex flex-col items-center gap-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-                  <input
+                <Box component="label" key={f.key} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, fontSize: 11, color: 'text.secondary' }}>
+                  <Box
+                    component="input"
                     type="color"
                     aria-label={f.label}
                     value={draft[f.key] as string}
-                    onChange={(e) => patchDraft({ [f.key]: e.target.value } as Partial<Theme>)}
-                    className="w-9 h-9 rounded cursor-pointer p-0"
-                    style={{ border: '1px solid var(--border-color)', background: 'none' }}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => patchDraft({ [f.key]: e.target.value } as Partial<Theme>)}
+                    sx={{ ...inputResetSx, width: 36, height: 36, borderRadius: '4px', cursor: 'pointer', p: 0, border: 1, borderColor: 'divider', background: 'none' }}
                   />
                   {f.label}
-                </label>
+                </Box>
               ))}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+              <Box component="label" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 12, color: 'text.secondary' }}>
                 Font
-                <select
+                <Box
+                  component="select"
                   value={draft.font}
-                  onChange={(e) => patchDraft({ font: e.target.value as Theme['font'] })}
-                  className="rounded-md px-2 py-1 text-sm outline-none"
-                  style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => patchDraft({ font: e.target.value as Theme['font'] })}
+                  sx={fieldSx}
                 >
                   {FONT_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                </Box>
+              </Box>
+              <Box component="label" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 12, color: 'text.secondary' }}>
                 Spacing
-                <select
+                <Box
+                  component="select"
                   value={draft.density}
-                  onChange={(e) => patchDraft({ density: e.target.value as Theme['density'] })}
-                  className="rounded-md px-2 py-1 text-sm outline-none"
-                  style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => patchDraft({ density: e.target.value as Theme['density'] })}
+                  sx={fieldSx}
                 >
                   <option value="comfortable">Comfortable</option>
                   <option value="compact">Compact</option>
-                </select>
-              </label>
-            </div>
-          </div>
+                </Box>
+              </Box>
+            </Box>
+          </Box>
         )}
-      </div>
+      </Box>
 
       {/* ---- Content: needs AI ---- */}
       {specs.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide" style={sectionLabel}>Content</span>
-            <span
-              className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide"
-              style={{ color: 'var(--accent)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box component="span" sx={sectionLabelSx}>Content</Box>
+            <Box
+              component="span"
+              sx={{ fontSize: 9, px: 0.75, py: 0.25, borderRadius: '9999px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.025em', color: 'primary.main', backgroundColor: 'background.default', border: 1, borderColor: 'divider' }}
             >
               Uses AI
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-2.5 items-end">
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 2, rowGap: 1.25, alignItems: 'flex-end' }}>
             {specs.map(renderOptionControl)}
-          </div>
-          <button
+          </Box>
+          <Box
+            component="button"
             onClick={submitContent}
             disabled={!directive}
-            className="self-start mt-0.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
             title={directive ? 'Regenerate with these changes' : 'Change a setting above to enable'}
+            sx={{ ...accentBtnSx, alignSelf: 'flex-start', mt: 0.25 }}
           >
             Update with AI
-          </button>
-        </div>
+          </Box>
+        </Box>
       )}
 
       {/* ---- Free-text refine (always available) ---- */}
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Or describe a change</span>
-        <div className="flex items-center gap-2">
-          <input
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        <Box component="span" sx={{ fontSize: 11, color: 'text.disabled' }}>Or describe a change</Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            component="input"
             value={freeText}
-            onChange={(e) => setFreeText(e.target.value)}
-            onKeyDown={(e) => {
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFreeText(e.target.value)}
+            onKeyDown={(e: React.KeyboardEvent) => {
               if (e.key === 'Enter') submitFreeText();
               if (e.key === 'Escape') onClose();
             }}
             placeholder="e.g. add a chart comparing Q3 vs Q4…"
-            className="flex-1 rounded-lg px-3 py-1.5 text-sm outline-none"
-            style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+            sx={{ ...inputResetSx, flex: 1, borderRadius: '8px', px: 1.5, py: 0.75, fontSize: 14, backgroundColor: 'background.paper', color: 'text.primary', border: 1, borderColor: 'divider' }}
           />
-          <button
+          <Box
+            component="button"
             onClick={submitFreeText}
             disabled={!freeText.trim()}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--accent)' }}
+            sx={accentBtnSx}
           >
             Send
-          </button>
-        </div>
-      </div>
-    </div>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
   );
 };
 
