@@ -61,11 +61,17 @@ class KnowledgeSearchService:
             from src.core.llm_manager import LLMManager
             from src.services.documentation_embedding_service import DocumentationEmbeddingService
 
-            # Generate the query embedding with the same model used at ingest
-            # time (databricks-gte-large-en, 1024 dims) so it matches the stored
-            # vectors in the documentation_embeddings pgvector table.
+            # Generate the query embedding with the SAME embedder used at ingest
+            # time (resolved through the shared resolver: Databricks in prod, local
+            # Ollama in dev — both 1024 dims) so it matches the stored vectors in
+            # the documentation_embeddings pgvector table.
+            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+
+            embedder_config = await resolve_knowledge_embedder_config(
+                user_token=user_token, group_id=self.group_id
+            )
             try:
-                query_embedding = await LLMManager.get_embedding(query, model="databricks-gte-large-en")
+                query_embedding = await LLMManager.get_embedding(query, embedder_config=embedder_config)
                 if not query_embedding:
                     logger.error("Failed to generate query embedding")
                     return []
@@ -88,29 +94,70 @@ class KnowledgeSearchService:
                     self.session, self.group_id, user_token
                 ) as (search_session, _is_lakebase):
                     repo = DocumentationEmbeddingRepository(search_session, model=KnowledgeEmbedding)
-                    # Search GROUP-WIDE (no SQL file_path filter): the tool often
-                    # passes a bare filename ("test.txt") while the stored path is
-                    # the full "/Volumes/.../test.txt", so an exact-path filter
-                    # would wrongly match nothing. We soft-filter by basename below
-                    # and fall back to all group rows if nothing matches.
-                    rows = await repo.search_similar(
-                        query_embedding,
-                        limit=limit,
-                        group_id=self.group_id,
-                        file_paths=None,
-                    ) or []
-                    total_group_rows = len(rows)
+                    # Compare basenames under NFC normalization: an uploaded path
+                    # from a macOS filesystem is NFD (decomposed — "ä" = a + ¨),
+                    # while the same name arriving via JSON/HTTP may be NFC, so a
+                    # raw string compare silently fails for accented filenames
+                    # (e.g. "Kindeswohlgefährdung").
+                    import unicodedata
 
-                    if file_paths:
-                        wanted = {fp.rsplit('/', 1)[-1] for fp in file_paths if fp}
-                        narrowed = [
-                            r for r in rows
-                            if ((getattr(r, 'file_path', None) or '').rsplit('/', 1)[-1] in wanted)
+                    def _basename_nfc(path: Optional[str]) -> str:
+                        return unicodedata.normalize('NFC', (path or '').rsplit('/', 1)[-1])
+
+                    wanted = (
+                        {_basename_nfc(fp) for fp in file_paths if fp}
+                        if file_paths else set()
+                    )
+
+                    if wanted:
+                        # A specific file was requested: rank ONLY within THAT
+                        # file's chunks. We resolve the requested name(s) to the
+                        # actual stored full path(s) in this group (matched by
+                        # basename — robust to bare-name vs full-path differences),
+                        # then run the similarity search scoped to those paths.
+                        #
+                        # Why not rank group-wide and filter after: top-k is applied
+                        # by the DB BEFORE any post-filter, so a DIFFERENT, more
+                        # query-similar document (e.g. an English "presentation" deck
+                        # vs a German PDF) can fill the entire top-k and crowd the
+                        # requested file out — leaving nothing after the filter, so
+                        # the agent answers from NO source and hallucinates. Scoping
+                        # the ranking guarantees the requested file's best chunks are
+                        # what we return.
+                        #
+                        # If the requested file isn't in the store (e.g. its
+                        # embedding failed), return EMPTY — never substitute the
+                        # group's other files (serving a different document is worse
+                        # than returning nothing).
+                        group_paths = await repo.list_group_file_paths(self.group_id)
+                        scoped_paths = [
+                            p for p in group_paths
+                            if _basename_nfc(p) in wanted
                         ]
-                        # Only narrow when at least one file matched; otherwise keep
-                        # the group-wide results (filename mismatch shouldn't blank it).
-                        if narrowed:
-                            rows = narrowed
+                        if not scoped_paths:
+                            logger.warning(
+                                f"[KNOWLEDGE-SEARCH] Requested file(s) {sorted(wanted)} "
+                                f"not in store for group={self.group_id}; returning no "
+                                f"results (not substituting other files)."
+                            )
+                            rows = []
+                        else:
+                            rows = await repo.search_similar(
+                                query_embedding,
+                                limit=limit,
+                                group_id=self.group_id,
+                                file_paths=scoped_paths,
+                            ) or []
+                    else:
+                        # No specific file requested: rank across all of the group's
+                        # uploaded chunks.
+                        rows = await repo.search_similar(
+                            query_embedding,
+                            limit=limit,
+                            group_id=self.group_id,
+                            file_paths=None,
+                        ) or []
+                    total_group_rows = len(rows)
 
                     # Per-user isolation: only chunks uploaded by the requesting
                     # user are returned (rows without an uploader — legacy or

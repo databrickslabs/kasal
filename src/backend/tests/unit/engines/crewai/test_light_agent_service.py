@@ -144,6 +144,8 @@ def _history_patches(messages):
         yield MagicMock(name="db_session")
 
     repo = MagicMock()
+    # The preamble fetches the most-recent window via get_recent_by_session_and_group.
+    repo.get_recent_by_session_and_group = AsyncMock(return_value=messages)
     repo.get_by_session_and_group = AsyncMock(return_value=messages)
     return patch("src.db.session.request_scoped_session", _fake_session), patch(
         "src.repositories.chat_history_repository.ChatHistoryRepository",
@@ -179,6 +181,35 @@ async def test_preamble_builds_transcript_excluding_current_turn():
     assert "Assistant: Hello Nehme Tohme! Nice to meet you." in out
     assert "who am i" not in out          # current turn excluded
     assert "Thinking..." not in out and "[ui-card]" not in out
+
+
+@pytest.mark.asyncio
+async def test_preamble_keeps_user_facts_when_bloated_by_assistant_output():
+    """A user fact stated early must survive even when many large assistant turns
+    follow — user turns are never dropped, old assistant turns are."""
+    big = "X" * 5000  # bloated assistant output
+    messages = [_msg("user", "my name is nehme tohme")]
+    for i in range(12):
+        messages.append(_msg("assistant", f"{big} deck {i}"))
+        messages.append(_msg("user", f"make slide {i}"))
+    messages.append(_msg("user", "what is my name"))   # current turn
+    messages.append(_msg("assistant", "Thinking..."))
+
+    p_sess, p_repo = _history_patches(messages)
+    config, ctx = _cfg_ctx()
+    with p_sess, p_repo:
+        out = await LightAgentService()._conversation_preamble(
+            config, ctx, "g1", lambda *_: None
+        )
+    # The early name fact is retained despite the bloat...
+    assert "User: my name is nehme tohme" in out
+    # ...all the intermediate user instructions are retained too...
+    assert "User: make slide 0" in out
+    assert "User: make slide 11" in out
+    # ...the current turn is excluded...
+    assert "what is my name" not in out
+    # ...and the output stays within the character budget (assistant bloat trimmed).
+    assert len(out) <= 6000 + 400  # budget + header allowance
 
 
 @pytest.mark.asyncio

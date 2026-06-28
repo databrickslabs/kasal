@@ -883,6 +883,10 @@ class CrewGenerationService:
         crew canvas never calls this — it renders the plan as nodes instead.
         """
         mcp_servers = list(request.mcp_servers or [])
+        # Files attached in this chat turn. When present, the knowledge search tool
+        # is scoped to ONLY these files (by basename), so the run grounds on the
+        # just-uploaded document instead of any other file in the group.
+        knowledge_file_paths = list(getattr(request, "knowledge_file_paths", None) or [])
         user_request = request.original_prompt or request.prompt
 
         # Agent Bricks endpoints picked in the chat "+" menu. This backend builder is
@@ -936,6 +940,8 @@ class CrewGenerationService:
                     cfg[field] = agent[field]
             if mcp_servers:
                 cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            if knowledge_file_paths:
+                cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {"file_paths": knowledge_file_paths}
             if has_agentbricks:
                 cfg.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             # "No memory" mode: force every agent to be created without memory so
@@ -986,6 +992,8 @@ class CrewGenerationService:
             }
             if mcp_servers:
                 entry.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+            if knowledge_file_paths:
+                entry.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {"file_paths": knowledge_file_paths}
             if has_agentbricks:
                 entry.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             tasks_yaml[key] = entry

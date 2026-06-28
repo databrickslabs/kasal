@@ -732,11 +732,16 @@ class DatabricksKnowledgeService:
             endpoint_name = vector_storage.endpoint_name
             index_repo = vector_storage.repository
 
-            # Generate a dummy query embedding for fetching sources
+            # Generate a dummy query embedding for fetching sources, using the
+            # shared knowledge embedder so it matches the ingest/search model.
             from src.core.llm_manager import LLMManager
+            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
 
+            embedder_config = await resolve_knowledge_embedder_config(
+                user_token=user_token, group_id=self.group_id
+            )
             dummy_embedding = await LLMManager.get_embedding(
-                "dummy", model="databricks-gte-large-en"
+                "dummy", embedder_config=embedder_config
             )
             if not dummy_embedding:
                 logger.warning(

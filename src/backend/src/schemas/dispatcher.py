@@ -88,6 +88,12 @@ class DispatcherRequest(BaseModel):
         default_factory=list,
         description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the generated crew's run",
     )
+    knowledge_file_paths: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Paths of knowledge files attached in this chat turn (e.g. "
+        "'uploads/<group>/<exec>/<file>.pdf'). Scopes DatabricksKnowledgeSearchTool "
+        "to ONLY these files so the run grounds on the just-uploaded document.",
+    )
     chat_mode_type: Optional[Literal["chat", "research", "deep"]] = Field(
         "chat",
         description="ChatMode answer mode: 'chat' = single light agent (Agent.kickoff_async, "

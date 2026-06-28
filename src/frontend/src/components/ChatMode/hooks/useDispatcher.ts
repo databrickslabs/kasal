@@ -240,6 +240,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       dispatchSuffix?: string,
       attachments?: string[],
       displayAs?: string,
+      knowledgeFilePaths?: string[],
     ) => {
       if (isDispatchingRef.current) return;
       isDispatchingRef.current = true;
@@ -314,6 +315,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Agent Bricks endpoints picked in the chat "+" — the backend equips +
           // configures the AgentBricksTool on the auto-executed crew with these.
           agentbricks_endpoints: execState.selectedAgentBricksEndpoints,
+          // Files attached in THIS turn — scopes the knowledge search tool to the
+          // just-uploaded document (otherwise group-wide search picks a wrong file).
+          knowledge_file_paths: knowledgeFilePaths,
           // Answer mode → backend sets reasoning/planning/execution_type:
           // chat = single light agent, research = crew+reasoning, deep = +planning.
           chat_mode_type: execState.chatModeType,

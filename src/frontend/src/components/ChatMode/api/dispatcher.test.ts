@@ -198,6 +198,45 @@ describe('dispatcher api', () => {
         disable_memory: false,
       });
     });
+
+    it('includes knowledge_file_paths when run settings carry a non-empty list', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      await dispatch('summarize this', undefined, undefined, {
+        disable_memory: false,
+        knowledge_file_paths: ['uploads/g/e/doc.pdf'],
+      });
+
+      expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
+        message: 'summarize this',
+        chat_mode: true,
+        disable_memory: false,
+        knowledge_file_paths: ['uploads/g/e/doc.pdf'],
+      });
+    });
+
+    it('omits knowledge_file_paths when the list is empty or undefined', async () => {
+      post.mockResolvedValue({ data: dispatchResult });
+
+      // empty array → field omitted
+      await dispatch('hi', undefined, undefined, {
+        disable_memory: false,
+        knowledge_file_paths: [],
+      });
+      expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        chat_mode: true,
+        disable_memory: false,
+      });
+
+      // undefined → field omitted
+      await dispatch('hi', undefined, undefined, { disable_memory: false });
+      expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
+        message: 'hi',
+        chat_mode: true,
+        disable_memory: false,
+      });
+    });
   });
 
   describe('detectIntent', () => {
