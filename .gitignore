@@ -121,6 +121,11 @@ var/
 wheels/
 *.egg-info/
 .installed.cfg
+
+# The Python "lib/" rule above also matches frontend source dirs named "lib".
+# These are real source (A2UI shared library), not build artifacts — keep tracked.
+!src/frontend/src/shared/a2ui/lib/
+!src/frontend/src/shared/a2ui/lib/**
 *.egg
 
 # Frontend build artifacts
