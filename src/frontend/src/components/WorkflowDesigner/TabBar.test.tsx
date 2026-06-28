@@ -243,6 +243,33 @@ describe('TabBar', () => {
     });
   });
 
+  // ---------- New tab button placement ----------
+
+  describe('new tab button placement', () => {
+    const getAddButton = () =>
+      document.querySelector('[data-testid="AddIcon"]')!.closest('button')!;
+
+    it('renders the + button to the right of the tabs (after them in DOM order)', () => {
+      renderTabBar();
+      const tablist = screen.getByRole('tablist');
+      const addBtn = getAddButton();
+      // tablist must precede the add button -> add button "follows" the tablist
+      const relation = tablist.compareDocumentPosition(addBtn);
+      expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('still renders the tabs and the + button together', () => {
+      renderTabBar();
+      expect(screen.getByText('Tab One')).toBeInTheDocument();
+      expect(getAddButton()).toBeInTheDocument();
+    });
+
+    it('hides the + button when tabs/buttons are hidden', () => {
+      renderTabBar({ hideTabsAndButtons: true });
+      expect(document.querySelector('[data-testid="AddIcon"]')).toBeNull();
+    });
+  });
+
   // ---------- Close tab ----------
 
   describe('close tab', () => {
