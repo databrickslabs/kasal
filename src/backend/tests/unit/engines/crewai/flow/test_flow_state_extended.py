@@ -4,7 +4,7 @@ Extended unit tests for FlowStateManager to improve coverage.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.crewai.flow.modules.flow_state import FlowStateManager
+from src.engines.crewai.paths.flow.modules.flow_state import FlowStateManager
 
 
 class TestFlowStateManagerInitializeState:

@@ -505,7 +505,7 @@ async def configure_mlflow_in_subprocess(
         # we enable the same autologs — the difference is only the destination
         # (UC tables vs managed experiment).
         try:
-            from src.engines.crewai.mlflow_integration import (
+            from src.engines.crewai.infra.mlflow_integration import (
                 enable_autologs as _enable_autologs,
             )
 
@@ -820,7 +820,7 @@ async def capture_trace_and_update_execution(
     """
     alog = async_logger or logger
     try:
-        from src.engines.crewai.mlflow_integration import (
+        from src.engines.crewai.infra.mlflow_integration import (
             update_execution_trace_id as _update_trace,
         )
         from src.services.mlflow_tracing_service import (
@@ -1182,7 +1182,7 @@ async def post_execution_mlflow_cleanup(
 
     # 4. Flush and stop TraceManager writer (CrewAI-specific)
     try:
-        from src.engines.crewai.mlflow_integration import (
+        from src.engines.crewai.infra.mlflow_integration import (
             flush_and_stop_writers as _flush_stop,
         )
         await _flush_stop(async_logger=alog)

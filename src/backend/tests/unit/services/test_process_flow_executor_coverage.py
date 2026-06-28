@@ -107,18 +107,18 @@ def _deep_run_extended(
     else:
         configure_mlflow_fn = mock_configure_mlflow
     all_patches = []
-    all_patches.append(patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]))
-    all_patches.append(patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]))
-    all_patches.append(patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]))
+    all_patches.append(patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]))
+    all_patches.append(patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]))
+    all_patches.append(patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]))
     all_patches.append(patch("signal.signal"))
     all_patches.append(patch.dict("sys.modules", sys_modules_patches))
-    all_patches.append(patch("src.engines.crewai.trace_management.TraceManager", mock_tm))
+    all_patches.append(patch("src.engines.crewai.infra.trace_management.TraceManager", mock_tm))
     all_patches.append(patch("src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener", return_value=MagicMock()))
     all_patches.append(patch("src.engines.crewai.callbacks.logging_callbacks.TaskCompletionEventListener", return_value=MagicMock()))
     all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
     all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
     all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-    all_patches.append(patch("src.engines.crewai.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+    all_patches.append(patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
     all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -191,15 +191,15 @@ class TestSignalHandlerChildNSPCov:
             handlers[sig] = handler
         ml = MagicMock()
         ml.run_until_complete.return_value = {"status": "COMPLETED", "result": "ok"}
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal", side_effect=capture):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"crewai.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
-                with patch("src.engines.crewai.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
+                with patch("src.engines.crewai.infra.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_nsp", {"k": "v"})
@@ -305,15 +305,15 @@ class TestCleanupEventBusFlushCov:
                 raise RuntimeError("cleanup_flush_err")
             return True
         mock_bus.flush = MagicMock(side_effect=flush_side_effect)
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"crewai.events": MagicMock(crewai_event_bus=mock_bus)}):
-                with patch("src.engines.crewai.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
+                with patch("src.engines.crewai.infra.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("cleanup_flush_exc", {"k": "v"})
@@ -332,9 +332,9 @@ class TestOuterCleanupExceptionCov:
                 return {"status": "COMPLETED", "result": "ok"}
             raise RuntimeError("cleanup_loop_fail")
         ml.run_until_complete = MagicMock(side_effect=side_effect_run)
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
@@ -359,9 +359,9 @@ class TestOuterCleanupExceptionCov:
                 return {"status": "COMPLETED", "result": "ok"}
             raise RuntimeError("cleanup_fail")
         ml.run_until_complete = MagicMock(side_effect=side_effect_run)
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
@@ -388,15 +388,15 @@ class TestStdoutCaptureBarExceptCov:
         p["configure"].return_value = mock_logger
         ml = MagicMock()
         ml.run_until_complete.return_value = {"status": "COMPLETED", "result": "ok"}
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"crewai.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
-                with patch("src.engines.crewai.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
+                with patch("src.engines.crewai.infra.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("stdout_bare", {"k": "v"})
@@ -419,15 +419,15 @@ class TestFinalPsutilCleanupCov:
         p = _std()
         ml = MagicMock()
         ml.run_until_complete.return_value = {"status": "COMPLETED", "result": "ok"}
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"crewai.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": None}):
-                with patch("src.engines.crewai.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
+                with patch("src.engines.crewai.infra.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("psutil_imp_err", {"k": "v"})
@@ -440,15 +440,15 @@ class TestFinalPsutilCleanupCov:
         mock_psutil = MagicMock()
         mock_psutil.Process.side_effect = RuntimeError("psutil_fail")
         mock_psutil.NoSuchProcess = type("NSP", (Exception,), {})
-        with patch("src.engines.crewai.logging_config.suppress_stdout_stderr", p["suppress"]):
-         with patch("src.engines.crewai.logging_config.restore_stdout_stderr", p["restore"]):
-          with patch("src.engines.crewai.logging_config.configure_subprocess_logging", p["configure"]):
+        with patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr", p["suppress"]):
+         with patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr", p["restore"]):
+          with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"crewai.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
-                with patch("src.engines.crewai.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
+                with patch("src.engines.crewai.infra.trace_management.TraceManager.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("psutil_gen_exc", {"k": "v"})

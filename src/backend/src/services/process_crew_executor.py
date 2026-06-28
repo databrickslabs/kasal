@@ -213,7 +213,7 @@ def run_crew_in_process(
         }
 
     # This must be done early before any other imports that might configure logging
-    from src.engines.crewai.logging_config import (
+    from src.engines.crewai.infra.logging_config import (
         configure_subprocess_logging,
         restore_stdout_stderr,
         suppress_stdout_stderr,
@@ -499,7 +499,7 @@ def run_crew_in_process(
             # Suppress any stdout/stderr from CrewAI
             import warnings
 
-            from src.engines.crewai.crew_preparation import CrewPreparation
+            from src.engines.crewai.paths.crew.crew_preparation import CrewPreparation
             from src.engines.crewai.tools.mcp_integration import MCPIntegration
             from src.engines.crewai.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
@@ -1000,7 +1000,7 @@ def run_crew_in_process(
                     AgentTraceEventListener,
                     TaskCompletionEventListener,
                 )
-                from src.engines.crewai.trace_management import TraceManager
+                from src.engines.crewai.infra.trace_management import TraceManager
 
                 async_logger.info(
                     f"Process {os.getpid()} initializing event listeners for {execution_id}"
@@ -1101,7 +1101,7 @@ def run_crew_in_process(
                     crew_log_path = os.path.join(log_dir, "crew.log")
 
                     # Create file handler for crew.log
-                    from src.engines.crewai.logging_config import (
+                    from src.engines.crewai.infra.logging_config import (
                         ExecutionContextFormatter,
                         set_execution_context,
                     )

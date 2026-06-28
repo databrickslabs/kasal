@@ -16,6 +16,7 @@ https://mlflow.org/docs/latest/genai/flavors/responses-agent-intro/
 import asyncio
 import json
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -31,8 +32,17 @@ from mlflow.types.responses import (
 )
 
 import agent_server.conversation as conversation
-from agent_server import cancel, crew_progress, progress
+from agent_server import a2ui_store, cancel, crew_progress, progress
 from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
+
+# The ONE shared, stdlib-only A2UI composer (vendored verbatim from Kasal's
+# src.shared.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
+# so generative UI never forks into a second implementation.
+from agent_server.a2ui.compose import (
+    compose_a2ui as _compose_surface,
+    guidance_for as _a2ui_guidance_for,
+    load_catalog as _load_a2ui_catalog,
+)
 
 # --- Runaway / hang guards (so a stuck turn can't burn tokens forever) ---------
 # All env-tunable; generous defaults that only act as safety nets.
@@ -696,196 +706,87 @@ def _conversation_model() -> str:
 
 
 # --- A2UI generative-UI composer ---------------------------------------------
-# Turns the crew/conversation's text answer into a single declarative A2UI surface
-# (shipped in custom_outputs.a2ui) that the frontend renders as rich UI. Generic
-# across crews: it knows only the component catalog + the crew purpose. Never
-# raises — always returns a valid surface (falls back to a markdown surface).
+# Generative UI is produced by the ONE shared, stdlib-only composer vendored under
+# agent_server/a2ui/ (copied verbatim from Kasal's src.shared.a2ui — the SAME code
+# live Kasal chat runs, so there is no second implementation to drift). It turns
+# the answer into a single declarative A2UI surface (custom_outputs.a2ui) the
+# frontend renders as rich UI. The catalog + per-deliverable directives are baked
+# from this workspace's UIConfig at export time (a2ui/catalog.json + config.json).
 
-_A2UI_CATALOG_PATH = Path(__file__).parent / "a2ui_catalog.json"
+_A2UI_DIR = Path(__file__).parent / "a2ui"
 
 
-def _load_a2ui_catalog() -> Dict[str, Any]:
+def _load_a2ui_config() -> Dict[str, Any]:
+    """The baked {enabled, directives} for this workspace (export-time UIConfig)."""
     try:
-        return json.loads(_A2UI_CATALOG_PATH.read_text(encoding="utf-8"))
+        return json.loads((_A2UI_DIR / "config.json").read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        print(f"A2UI catalog unavailable ({exc}); markdown surfaces only.")
-        return {}
+        print(f"A2UI config unavailable ({exc}); defaults (enabled, no directives).")
+        return {"enabled": True, "directives": {}}
 
 
-def _markdown_surface(text: str) -> Dict[str, Any]:
-    """The always-valid fallback / cheap conversational surface."""
-    return {
-        "surfaceKind": "conversation",
-        "root": "r",
-        "components": [{"id": "r", "component": "Markdown", "content": {"path": "/md"}}],
-        "dataModel": {"md": text or ""},
-    }
-
-
-def _extract_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Tolerant parse: strip ``` fences, scan for the first balanced {...} block."""
-    if not raw:
-        return None
-    s = raw.strip()
-    if s.startswith("```"):
-        # ```json\n{...}\n```  ->  {...}
-        s = s.split("```", 2)[1] if s.count("```") >= 2 else s.strip("`")
-        if s.lower().startswith("json"):
-            s = s[4:]
-    start = s.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(s)):
-        ch = s[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(s[start : i + 1])
-                except Exception:  # noqa: BLE001
-                    return None
-    return None
-
-
-def _validate_surface(payload: Any, catalog: Dict[str, Any]) -> bool:
-    """A surface is valid if every component is in the catalog and root resolves."""
-    if not isinstance(payload, dict):
-        return False
-    comps = payload.get("components")
-    if not isinstance(comps, list) or not comps:
-        return False
-    allowed = set((catalog.get("components") or {}).keys())
-    ids = set()
-    for c in comps:
-        if not isinstance(c, dict) or "id" not in c or c.get("component") not in allowed:
-            return False
-        ids.add(c["id"])
-    return payload.get("root") in ids
-
-
-def _a2ui_system_prompt(
-    catalog: Dict[str, Any], purpose: str, hint: str, query: str = ""
-) -> str:
-    comp_lines = []
-    for name, spec in (catalog.get("components") or {}).items():
-        props = list((spec.get("props") or {}).keys())
-        comp_lines.append(f"- {name}: {spec.get('summary', '')} props={props}")
-    kinds = catalog.get("surfaceKinds", [])
-    example = json.dumps(
-        {
-            "surfaceKind": "dashboard",
-            "root": "root",
-            "components": [
-                {"id": "root", "component": "Grid", "columns": 2, "children": ["k1", "c1"]},
-                {"id": "k1", "component": "KeyValue", "label": "Revenue", "value": "$1.2M"},
-                {"id": "c1", "component": "Chart", "chartType": "bar",
-                 "xKey": "month", "yKeys": ["sales"], "data": {"path": "/series"}},
-            ],
-            "dataModel": {"series": [{"month": "Jan", "sales": 10}, {"month": "Feb", "sales": 14}]},
-        }
-    )
-    return (
-        "You convert an AI agent's final answer into ONE A2UI surface, returned as JSON.\n"
-        f"Allowed surfaceKind values: {kinds}.\n"
-        "Allowed components (use ONLY these names):\n" + "\n".join(comp_lines) + "\n\n"
-        "Rules:\n"
-        "1. Output ONE JSON object only — no prose, no markdown code fences.\n"
-        '2. Shape: {"surfaceKind","root","components":[{"id","component",...props,"children"?}],"dataModel"}.\n'
-        "3. components is a FLAT list; nest by listing child ids in a parent's children. root is a component id.\n"
-        '4. Put long text / arrays in dataModel and reference them with {"path":"/key"} (JSON pointer).\n'
-        "5. Choose surfaceKind from the USER'S REQUEST first: if they ask for a "
-        "presentation/slides/deck use 'presentation' with a SlideDeck of Slides; for a "
-        "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
-        "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
-        "component; otherwise use 'document' with Markdown.\n"
-        "6. For presentations build a REAL deck of Slides, each with a 'variant': start "
-        "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'); "
-        "then near the front a variant='stats' slide whose children are 3-4 KeyValue big "
-        "numbers IF the topic has notable figures; then several variant='content' slides "
-        "(each with a short UPPERCASE 'kicker' naming the topic + a concise title + a few "
-        "bullets or short markdown); use variant='quote' for a punchy takeaway (put it in "
-        "'title'); end with a closing slide. Use AS MANY slides as the content needs, give "
-        "each slide a DISTINCT focus, and NEVER cram everything onto one slide or repeat the "
-        "same structure. Keep ONE consistent theme — the app styles it, so do not specify colors.\n"
-        "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
-        "REAL, answerable questions — each {question, options:[4 distinct strings], "
-        "answer:<0-based index of the correct option>, explanation:<one sentence why>}. "
-        "Produce the ACTUAL questions and options (as many as the request asks for, else "
-        "about 10), NOT a description of a quiz or a grading rubric. VARY which option is "
-        "correct across questions — the answer index must be spread across 0/1/2/3, never "
-        "always the same slot. Put the questions array in dataModel and bind it with "
-        "{\"path\":\"/questions\"}. The app handles selection, scoring and navigation.\n"
-        f"Crew purpose: {purpose}\n"
-        + (f"The user's request this turn: {query}\n" if query else "")
-        + (
-            f"Default surfaceKind (use only if the request doesn't imply another): {hint}\n"
-            if hint
-            else ""
-        )
-        + "Example of a valid surface:\n"
-        + example
-    )
-
-
-# Words in the user's request (or the crew hint) that signal a rich, non-prose
-# surface is wanted — used to decide whether to spend a composer LLM call.
-_A2UI_RICH_INTENT = (
-    "presentation", "slide", "slides", "deck", "slideshow", "powerpoint", "pptx",
-    "ppt", "pitch", "dashboard", "kpi", "metric", "metrics", "chart", "charts",
-    "graph", "plot", "visualize", "visualise", "visualization", "visualisation",
-    "analytics", "mindmap", "mind map", "concept map",
-    "quiz", "quizzes", "assessment", "trivia", "exam", "test my", "test your",
-)
+_A2UI_CONFIG = _load_a2ui_config()
+_A2UI_CATALOG = _load_a2ui_catalog(str(_A2UI_DIR / "catalog.json"))
+# Effective switch: the env flag AND the workspace's baked enabled flag.
+_A2UI_ON = A2UI_ENABLED and bool(_A2UI_CONFIG.get("enabled", True))
 
 
 @mlflow.trace(name="compose_a2ui")
 def _compose_a2ui(
     output_text: str, purpose: str = "", hints: str = "", query: str = ""
 ) -> Dict[str, Any]:
-    """Compose an A2UI surface from the agent's text answer (generic, never raises)."""
-    if not A2UI_ENABLED:
-        return _markdown_surface(output_text)
-    catalog = _load_a2ui_catalog()
-    if not catalog:
-        return _markdown_surface(output_text)
-    # Cheap path: only spend a composer LLM call when a genuinely rich surface is
-    # likely. Plain prose (greetings, clarifying turns, narrative answers) renders
-    # well as markdown already, so we skip the extra round-trip to stay fast. We
-    # compose when EITHER the user asked for a rich surface this turn (e.g. "make a
-    # presentation"), the crew is biased toward one (hint), or the output carries
-    # tabular data worth turning into a real Table/Chart.
-    text = output_text or ""
-    # Decide PER TURN from what the user actually asked — NOT the static crew hint.
-    # Folding the hint in here made a presentation-biased crew turn EVERY answer
-    # (including clarifying questions) into a deck. The hint still selects WHICH
-    # surface kind in the system prompt when we do compose.
-    intent = (query or "").lower()
-    rich_intent = any(k in intent for k in _A2UI_RICH_INTENT)
-    has_table = "\n|" in text or "|---" in text or "| -" in text
-    if not rich_intent and not has_table:
-        return _markdown_surface(text)
+    """Compose an A2UI surface from the agent's text answer (generic, never raises).
+
+    Thin adapter over the shared composer: injects this app's LLM (via _make_llm,
+    temperature=0 for well-formed JSON) plus the baked catalog and the directive
+    for THIS turn's inferred deliverable.
+    """
+
+    def _llm_call(messages: List[Dict[str, str]]) -> str:
+        out = _make_llm(_conversation_model(), temperature=0).call(messages)
+        return out if isinstance(out, str) else str(out)
+
     try:
-        llm = _make_llm(_conversation_model(), temperature=0)
-        messages = [
-            {"role": "system", "content": _a2ui_system_prompt(catalog, purpose, hints, query)},
-            {"role": "user", "content": text},
-        ]
-        for _ in range(2):
-            raw = llm.call(messages)
-            payload = _extract_json(raw if isinstance(raw, str) else str(raw))
-            if payload and _validate_surface(payload, catalog):
-                return payload
-            messages += [
-                {"role": "assistant", "content": raw if isinstance(raw, str) else str(raw)},
-                {"role": "user", "content": "That was not a valid A2UI surface. "
-                 "Reply with ONLY the corrected JSON object, using only allowed components."},
-            ]
-    except Exception as exc:  # noqa: BLE001
-        print(f"A2UI compose failed ({exc}); markdown fallback.")
-    return _markdown_surface(text)
+        retries = max(1, int(os.environ.get("A2UI_COMPOSE_RETRIES", "2")))
+    except (TypeError, ValueError):
+        retries = 2
+
+    return _compose_surface(
+        output_text,
+        purpose,
+        hints,
+        query,
+        llm_call=_llm_call,
+        catalog=_A2UI_CATALOG,
+        enabled=_A2UI_ON,
+        retries=retries,
+        guidance=_a2ui_guidance_for(_A2UI_CONFIG.get("directives", {}), query),
+    )
+
+
+def _schedule_a2ui(message: str, output_text: str, session_id: Optional[str]) -> None:
+    """Compose the A2UI surface OFF the answer's critical path.
+
+    Databricks Apps time out a long-held request; composing inline (an extra LLM
+    call after the crew) would hold the connection open and risk dropping the
+    answer. So the turn returns its text immediately and we compose in a daemon
+    thread, stashing the surface for ``GET /a2ui/{id}`` to serve (a2ui_store).
+    A markdown 'conversation' surface counts as "no rich surface" → stored as none
+    so the UI stops polling and just shows the text.
+    """
+    a2ui_store.begin(session_id)
+
+    def _work() -> None:
+        try:
+            surface = _compose_a2ui(output_text, CREW_PURPOSE, A2UI_HINT, message)
+        except Exception as exc:  # noqa: BLE001 — UI compose must never break a turn
+            print(f"A2UI background compose failed ({exc}); no surface.")
+            surface = None
+        if surface and surface.get("surfaceKind") in (None, "conversation"):
+            surface = None
+        a2ui_store.put(session_id, surface)
+
+    threading.Thread(target=_work, name="a2ui-compose", daemon=True).start()
 
 
 # Wire the generic conversation layer to this crew. The "act" step runs the
@@ -1054,15 +955,12 @@ async def invoke_agent(request: ResponsesAgentRequest) -> ResponsesAgentResponse
     _CURRENT_MODE.set(mode)
     try:
         output_text = await _run_turn(message, session_id, user_id, mode)
-        a2ui = await asyncio.to_thread(
-            _compose_a2ui, output_text, CREW_PURPOSE, A2UI_HINT, message
-        )
+        # Compose the A2UI surface OFF this request's critical path (Databricks
+        # Apps time out long-held connections); the UI polls GET /a2ui/{id} for it.
+        _schedule_a2ui(message, output_text, session_id)
     finally:
         progress.clear(session_id)  # the turn is done — drop the live status
-    return ResponsesAgentResponse(
-        output=[_message_item(output_text)],
-        custom_outputs={"a2ui": a2ui},
-    )
+    return ResponsesAgentResponse(output=[_message_item(output_text)])
 
 
 @stream()
@@ -1078,13 +976,11 @@ async def stream_agent(
     _CURRENT_MODE.set(mode)
     try:
         output_text = await _run_turn(message, session_id, user_id, mode)
-        a2ui = await asyncio.to_thread(
-            _compose_a2ui, output_text, CREW_PURPOSE, A2UI_HINT, message
-        )
+        # Surface composed out-of-band (see invoke_agent); the UI polls /a2ui/{id}.
+        _schedule_a2ui(message, output_text, session_id)
     finally:
         progress.clear(session_id)  # the turn is done — drop the live status
     yield ResponsesAgentStreamEvent(
         type="response.output_item.done",
         item=_message_item(output_text),
-        custom_outputs={"a2ui": a2ui},
     )

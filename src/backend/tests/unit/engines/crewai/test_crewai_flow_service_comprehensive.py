@@ -10,7 +10,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
-from src.engines.crewai.crewai_flow_service import CrewAIFlowService
+from src.engines.crewai.paths.flow.crewai_flow_service import CrewAIFlowService
 
 
 class TestCrewAIFlowServiceInitialization:
@@ -38,16 +38,16 @@ class TestGetFlowRunner:
         mock_session = MagicMock()
         service = CrewAIFlowService(session=mock_session)
 
-        with patch('src.engines.crewai.crewai_flow_service.FlowRunnerService') as mock_flow_runner:
+        with patch('src.engines.crewai.paths.flow.crewai_flow_service.FlowRunnerService') as mock_flow_runner:
             flow_runner = service._get_flow_runner()
             mock_flow_runner.assert_called_once_with(mock_session)
 
-    @patch('src.engines.crewai.crewai_flow_service.logger')
+    @patch('src.engines.crewai.paths.flow.crewai_flow_service.logger')
     def test_get_flow_runner_without_session_logs_warning(self, mock_logger):
         """Test getting flow runner without session logs warning."""
         service = CrewAIFlowService()
 
-        with patch('src.engines.crewai.crewai_flow_service.FlowRunnerService') as mock_flow_runner:
+        with patch('src.engines.crewai.paths.flow.crewai_flow_service.FlowRunnerService') as mock_flow_runner:
             flow_runner = service._get_flow_runner()
             mock_flow_runner.assert_called_once_with(None)
             mock_logger.warning.assert_called()
@@ -462,7 +462,7 @@ class TestRunFlowIntegration:
         with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
-            with patch('src.engines.crewai.crewai_flow_service.logger') as mock_logger:
+            with patch('src.engines.crewai.paths.flow.crewai_flow_service.logger') as mock_logger:
                 result = await service.run_flow(
                     flow_id=flow_id,
                     config=config

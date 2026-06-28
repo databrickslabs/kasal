@@ -49,7 +49,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_no_task_repo(self):
         """Test process_starting_points returns empty when no task repo."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'startingPoints': [{'taskId': 'task-1', 'crewId': 'crew-1'}]}
         all_tasks = {}
@@ -63,7 +63,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_missing_task_id(self, mock_repositories):
         """Test process_starting_points skips entries without task_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'startingPoints': [{'crewId': 'crew-1'}]}  # Missing taskId
         all_tasks = {}
@@ -77,7 +77,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_missing_crew_id(self, mock_repositories):
         """Test process_starting_points skips entries without crew_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'startingPoints': [{'taskId': 'task-1'}]}  # Missing crewId
         all_tasks = {}
@@ -91,7 +91,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_crew_not_found(self, mock_repositories):
         """Test process_starting_points handles crew not found."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'startingPoints': [{'taskId': 'task-1', 'crewId': 'crew-1'}]}
         all_tasks = {}
@@ -107,7 +107,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_task_not_found(self, mock_repositories):
         """Test process_starting_points handles task not found."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -131,7 +131,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_success(self, mock_repositories):
         """Test process_starting_points successfully processes starting points."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -165,8 +165,8 @@ class TestProcessStartingPoints:
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
         # Mock the AgentConfig and TaskConfig at their source modules (imports happen inside functions)
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_obj.role = "Test Agent"
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -185,7 +185,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_groups_by_crew(self, mock_repositories):
         """Test process_starting_points groups tasks by crew_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -225,8 +225,8 @@ class TestProcessStartingPoints:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
              patch('crewai.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -250,7 +250,7 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_with_async_tasks(self, mock_repositories):
         """Test process_starting_points handles async tasks correctly."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -291,8 +291,8 @@ class TestProcessStartingPoints:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config, \
              patch('crewai.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
@@ -327,7 +327,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_no_task_repo(self):
         """Test process_listeners returns empty when no task repo."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'listeners': [{'crewId': 'crew-1'}]}
         all_tasks = {}
@@ -341,7 +341,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_missing_crew_id(self, mock_repositories):
         """Test process_listeners skips entries without crew_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'listeners': [{'tasks': []}]}  # Missing crewId
         all_tasks = {}
@@ -355,7 +355,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_skips_router_type(self, mock_repositories):
         """Test process_listeners skips ROUTER condition type."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {
             'listeners': [
@@ -373,7 +373,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_crew_not_found(self, mock_repositories):
         """Test process_listeners handles crew not found."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         crew_id = str(uuid.uuid4())
         flow_config = {
@@ -394,7 +394,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_no_tasks(self, mock_repositories):
         """Test process_listeners handles no tasks in listener."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         crew_id = str(uuid.uuid4())
         flow_config = {
@@ -413,7 +413,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_success(self, mock_repositories):
         """Test process_listeners successfully processes listeners."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -454,8 +454,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -473,7 +473,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_groups_by_crew(self, mock_repositories):
         """Test process_listeners groups listeners by crew_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -523,8 +523,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -544,7 +544,7 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_auto_and_condition(self, mock_repositories):
         """Test process_listeners auto-sets AND condition for multiple listen targets."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -585,8 +585,8 @@ class TestProcessListeners:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -618,7 +618,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_no_task_repo(self):
         """Test process_routers returns empty when no task repo."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'routers': [{'name': 'router-1'}]}
         all_tasks = {}
@@ -632,7 +632,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_missing_listen_to(self, mock_repositories):
         """Test process_routers skips entries without listenTo."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {'routers': [{'name': 'router-1', 'routes': {}}]}  # Missing listenTo
         all_tasks = {}
@@ -646,7 +646,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_empty_routes(self, mock_repositories):
         """Test process_routers handles empty routes."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         flow_config = {
             'routers': [
@@ -664,7 +664,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_route_no_crew_id(self, mock_repositories):
         """Test process_routers handles route without crew_id."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         flow_config = {
@@ -688,7 +688,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_crew_not_found(self, mock_repositories):
         """Test process_routers handles crew not found."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -715,7 +715,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_success(self, mock_repositories):
         """Test process_routers successfully processes routers."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -755,8 +755,8 @@ class TestProcessRouters:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -774,7 +774,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_multiple_routes(self, mock_repositories):
         """Test process_routers handles multiple routes."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -823,8 +823,8 @@ class TestProcessRouters:
         mock_repositories['task'].get = AsyncMock(return_value=mock_task)
         mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.engines.crewai.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.engines.crewai.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+        with patch('src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+             patch('src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -843,7 +843,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_exception_handling(self, mock_repositories):
         """Test process_routers handles exceptions gracefully."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
@@ -871,7 +871,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_task_not_found(self, mock_repositories):
         """Test process_routers handles task not found."""
-        from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager
+        from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())

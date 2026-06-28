@@ -60,7 +60,7 @@ def _run_with_prepare_false(crew_config):
             patch.dict(
                 "sys.modules",
                 {
-                    "src.engines.crewai.logging_config": mock_logging_config,
+                    "src.engines.crewai.infra.logging_config": mock_logging_config,
                     "crewai": MagicMock(),
                     "crewai.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
                     "crewai.events": MagicMock(),
@@ -99,7 +99,7 @@ def _run_with_prepare_false(crew_config):
         )
         stack.enter_context(
             patch(
-                "src.engines.crewai.crew_preparation.CrewPreparation",
+                "src.engines.crewai.paths.crew.crew_preparation.CrewPreparation",
                 mock_crew_preparation_cls,
             )
         )

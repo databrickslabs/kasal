@@ -6,7 +6,6 @@ Tests the core callback integration functionality with minimal mocking.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.crewai.execution_runner import run_crew
 
 
 @pytest.fixture
@@ -50,100 +49,6 @@ class TestExecutionRunnerCallbackIntegration:
     """Test cases for execution runner callback integration."""
 
     @pytest.mark.asyncio
-    async def test_callbacks_created_and_set(self, mock_crew, mock_group_context, running_jobs, sample_config):
-        """Test that execution-scoped callbacks are created and set on crew."""
-        execution_id = "test_execution_123"
-
-        mock_step_callback = MagicMock()
-        mock_task_callback = MagicMock()
-
-        with patch("src.engines.crewai.callbacks.execution_callback.create_execution_callbacks") as mock_create_callbacks, \
-             patch("src.engines.crewai.callbacks.execution_callback.create_crew_callbacks") as mock_create_crew_callbacks, \
-             patch("src.engines.crewai.callbacks.execution_callback.log_crew_initialization"), \
-             patch("src.services.execution_status_service.ExecutionStatusService.update_status"), \
-             patch("src.services.crew_executor.crew_executor.run_crew") as mock_crew_executor_run, \
-             patch("src.services.api_keys_service.ApiKeysService.setup_openai_api_key"), \
-             patch("src.services.api_keys_service.ApiKeysService.setup_anthropic_api_key"), \
-             patch("src.services.api_keys_service.ApiKeysService.setup_gemini_api_key"), \
-             patch("src.engines.crewai.tools.mcp_handler.stop_all_adapters"), \
-             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"), \
-             patch("src.engines.crewai.trace_management.TraceManager.ensure_writer_started"), \
-             patch("src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener"):
-
-            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
-            mock_create_crew_callbacks.return_value = {
-                'on_start': MagicMock(),
-                'on_complete': MagicMock(),
-                'on_error': MagicMock()
-            }
-            mock_crew_executor_run.return_value = "Test result"
-            running_jobs[execution_id] = {"config": sample_config}
-
-            await run_crew(
-                execution_id=execution_id,
-                crew=mock_crew,
-                running_jobs=running_jobs,
-                group_context=mock_group_context,
-                config=sample_config
-            )
-
-            mock_create_callbacks.assert_called_once_with(
-                job_id=execution_id,
-                config=sample_config,
-                group_context=mock_group_context,
-                crew=mock_crew
-            )
-
-            assert hasattr(mock_crew, 'step_callback')
-            assert hasattr(mock_crew, 'task_callback')
-            assert mock_crew.step_callback == mock_step_callback
-            assert mock_crew.task_callback == mock_task_callback
-
-    @pytest.mark.asyncio
-    async def test_callback_error_handling(self, mock_crew, mock_group_context, running_jobs, sample_config):
-        """Test that callback setup errors are handled gracefully."""
-        execution_id = "test_execution_123"
-
-        with patch("src.engines.crewai.callbacks.execution_callback.create_execution_callbacks") as mock_create_callbacks, \
-             patch("src.engines.crewai.callbacks.execution_callback.create_crew_callbacks") as mock_create_crew_callbacks, \
-             patch("src.engines.crewai.callbacks.execution_callback.log_crew_initialization"), \
-             patch("src.services.execution_status_service.ExecutionStatusService.update_status"), \
-             patch("src.services.crew_executor.crew_executor.run_crew") as mock_crew_executor_run, \
-             patch("src.services.api_keys_service.ApiKeysService.setup_openai_api_key"), \
-             patch("src.services.api_keys_service.ApiKeysService.setup_anthropic_api_key"), \
-             patch("src.services.api_keys_service.ApiKeysService.setup_gemini_api_key"), \
-             patch("src.engines.crewai.tools.mcp_handler.stop_all_adapters"), \
-             patch("src.engines.crewai.execution_runner.update_execution_status_with_retry"), \
-             patch("src.engines.crewai.trace_management.TraceManager.ensure_writer_started"), \
-             patch("src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener"):
-
-            mock_step_callback = MagicMock()
-            mock_task_callback = MagicMock()
-            mock_create_callbacks.return_value = (mock_step_callback, mock_task_callback)
-            mock_create_crew_callbacks.return_value = {
-                'on_start': MagicMock(),
-                'on_complete': MagicMock(),
-                'on_error': MagicMock()
-            }
-            mock_crew_executor_run.return_value = "Test result"
-
-            type(mock_crew).step_callback = property(lambda self: None,
-                                                   lambda self, value: exec('raise Exception("Callback setting failed")'))
-            type(mock_crew).task_callback = property(lambda self: None,
-                                                   lambda self, value: exec('raise Exception("Callback setting failed")'))
-
-            running_jobs[execution_id] = {"config": sample_config}
-
-            await run_crew(
-                execution_id=execution_id,
-                crew=mock_crew,
-                running_jobs=running_jobs,
-                group_context=mock_group_context,
-                config=sample_config
-            )
-
-            mock_crew_executor_run.assert_called_once()
-
     def test_callback_isolation_between_instances(self):
         """Test that different callback instances are isolated."""
         from src.engines.crewai.callbacks.execution_callback import create_execution_callbacks

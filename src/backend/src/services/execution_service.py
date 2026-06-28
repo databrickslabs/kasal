@@ -453,6 +453,19 @@ class ExecutionService:
                 )
                 exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
+
+            # Light "chat" mode: run a SINGLE agent via Agent.kickoff_async (no crew,
+            # no tasks/process). Reuses the same RUNNING row + status/SSE plumbing.
+            elif execution_type.lower() == "agent":
+                exec_logger.info(f"[run_crew_execution] This is a LIGHT AGENT execution - delegating to CrewAIExecutionService for job_id: {execution_id}")
+                result = await crew_execution_service.run_light_agent_execution(
+                    execution_id=execution_id,
+                    config=config,
+                    group_context=group_context,
+                    session=session
+                )
+                exec_logger.info(f"[run_crew_execution] Light agent execution finished for job_id: {execution_id}. Result: {result}")
+                return result
             else:
                 # For other execution types, use the standard thread pool approach
                 exec_logger.debug(f"[run_crew_execution] Using thread pool execution for {execution_type} job_id {execution_id}")

@@ -155,7 +155,9 @@ class TestDatabricksAppExporter:
         """Git-based version tracking is NOT enabled — with no git it makes a junk
         '<name>-no-git' LoggedModel and links traces to it. Traces flow to the
         experiment via autolog + @mlflow.trace instead."""
-        start_server = _files(await exporter.export(crew_data, {}))["agent_server/start_server.py"]
+        start_server = _files(await exporter.export(crew_data, {}))[
+            "agent_server/start_server.py"
+        ]
         # Not imported (only AgentServer) and explicitly documented as skipped.
         assert "from mlflow.genai.agent_server import AgentServer\n" in start_server
         assert "intentionally do NOT call" in start_server
@@ -200,7 +202,10 @@ class TestDatabricksAppExporter:
         # planner LLM (never CrewAI's OpenAI default).
         assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
         assert "planning=planning_on" in agent
-        assert 'kwargs["planning_llm"] = _make_llm(PLANNING_LLM or _conversation_model())' in agent
+        assert (
+            'kwargs["planning_llm"] = _make_llm(PLANNING_LLM or _conversation_model())'
+            in agent
+        )
 
     @pytest.mark.asyncio
     async def test_kickoff_offloaded_to_thread(self, exporter, crew_data):
@@ -251,7 +256,9 @@ class TestDatabricksAppExporter:
     async def test_clarify_and_resume_loop(self, exporter, crew_data):
         """The conversation layer can ask a clarifying question and resume with
         prior context (multi-turn info-gathering)."""
-        conv = _files(await exporter.export(crew_data, {}))["agent_server/conversation.py"]
+        conv = _files(await exporter.export(crew_data, {}))[
+            "agent_server/conversation.py"
+        ]
         # Classify -> gather asks ONE clarifying question instead of guessing.
         assert "def _classify" in conv and "def _gather" in conv
         assert "clarifying question" in conv
@@ -344,7 +351,9 @@ class TestDatabricksAppExporter:
         assert "INPUT_KEY = 'topic'" in agent
 
     @pytest.mark.asyncio
-    async def test_mcp_servers_rendered_as_relative_path_with_transport(self, exporter, crew_data):
+    async def test_mcp_servers_rendered_as_relative_path_with_transport(
+        self, exporter, crew_data
+    ):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         # Databricks-managed MCP keeps the host-relative path AND is pinned to
         # streamable-http (else the adapter defaults to SSE and times out).
@@ -414,7 +423,9 @@ class TestDatabricksAppExporter:
         assert "ai-gateway/mlflow/v1" in agent and "serving-endpoints" in agent
 
     @pytest.mark.asyncio
-    async def test_app_creates_uc_bound_experiment_for_tracing(self, exporter, crew_data):
+    async def test_app_creates_uc_bound_experiment_for_tracing(
+        self, exporter, crew_data
+    ):
         """The app OWNS its experiment and creates it bound to Unity Catalog at
         creation (the only way to get UC trace storage — it can't be added to an
         existing experiment). Needs the SQL warehouse to provision the tables."""
@@ -452,7 +463,9 @@ class TestDatabricksAppExporter:
 
     @pytest.mark.asyncio
     async def test_model_override_applied(self, exporter, crew_data):
-        files = _files(await exporter.export(crew_data, {"model_override": "databricks-gpt-5"}))
+        files = _files(
+            await exporter.export(crew_data, {"model_override": "databricks-gpt-5"})
+        )
         assert "MODEL_OVERRIDE = 'databricks-gpt-5'" in files["agent_server/agent.py"]
 
     @pytest.mark.asyncio
@@ -465,7 +478,9 @@ class TestDatabricksAppExporter:
         files = _files(await exporter.export(crew_data, {}))
         agents_cfg = yaml.safe_load(files["config/agents.yaml"])
         assert agents_cfg["researcher"]["tools"] == ["SerperDevTool"]
-        assert '"SerperDevTool": lambda: SerperDevTool()' in files["agent_server/agent.py"]
+        assert (
+            '"SerperDevTool": lambda: SerperDevTool()' in files["agent_server/agent.py"]
+        )
 
     @pytest.mark.asyncio
     async def test_tasks_yaml_maps_agent(self, exporter, crew_data):
@@ -585,7 +600,10 @@ class TestDatabricksAppExporter:
         agent_py = _files(result)["agent_server/agent.py"]
         # Flagged as a comment, never emitted as a runtime call that NameErrors.
         assert "unsupported standalone" in agent_py
-        assert "Power BI Comprehensive Analysis Tool" in result["metadata"]["unsupported_tools"]
+        assert (
+            "Power BI Comprehensive Analysis Tool"
+            in result["metadata"]["unsupported_tools"]
+        )
 
     @pytest.mark.asyncio
     async def test_llm_guardrail_from_plan(self, exporter):
@@ -599,7 +617,9 @@ class TestDatabricksAppExporter:
         }
         files = _files(await exporter.export(crew, {}))
         tasks_cfg = yaml.safe_load(files["config/tasks.yaml"])
-        assert tasks_cfg["answer"]["guardrail"] == "Output must cite at least one source"
+        assert (
+            tasks_cfg["answer"]["guardrail"] == "Output must cite at least one source"
+        )
         agent_py = files["agent_server/agent.py"]
         # Runtime reads the guardrail FROM the plan config and builds an LLMGuardrail.
         assert "def _make_task_guardrail(cfg" in agent_py
@@ -650,23 +670,129 @@ class TestDatabricksAppA2UI:
         import json
 
         files = _files(await exporter.export(crew_data, {}))
-        assert "agent_server/a2ui_catalog.json" in files
-        catalog = json.loads(files["agent_server/a2ui_catalog.json"])
+        # The catalog now lives inside the vendored composer package.
+        assert "agent_server/a2ui/catalog.json" in files
+        # The old standalone catalog file is gone (replaced by the package).
+        assert "agent_server/a2ui_catalog.json" not in files
+        catalog = json.loads(files["agent_server/a2ui/catalog.json"])
         assert isinstance(catalog.get("components"), dict) and catalog["components"]
         assert "surfaceKinds" in catalog
         # Core components the composer/renderer rely on.
-        for comp in ("Markdown", "Table", "Chart", "SlideDeck", "Slide", "Mindmap", "Quiz"):
+        for comp in (
+            "Markdown",
+            "Table",
+            "Chart",
+            "SlideDeck",
+            "Slide",
+            "Mindmap",
+            "Quiz",
+        ):
             assert comp in catalog["components"]
         # Quiz is a first-class surface kind (interactive assessment).
         assert "quiz" in catalog["surfaceKinds"]
+
+    @pytest.mark.asyncio
+    async def test_a2ui_composer_vendored_not_inlined(self, exporter, crew_data):
+        """The composer is the ONE shared module vendored under agent_server/a2ui/,
+        imported by agent.py — not a second inline copy that could drift."""
+        files = _files(await exporter.export(crew_data, {}))
+        assert "agent_server/a2ui/__init__.py" in files
+        assert "agent_server/a2ui/compose.py" in files
+        compose = files["agent_server/a2ui/compose.py"]
+        # The real composer + the shared resolvers live in the vendored module.
+        assert "def compose_a2ui(" in compose
+        assert "def a2ui_system_prompt(" in compose
+        assert "def guidance_for(" in compose
+        agent = files["agent_server/agent.py"]
+        # agent.py imports the shared composer instead of defining its own prompt.
+        assert "from agent_server.a2ui.compose import" in agent
+        assert "def _a2ui_system_prompt(" not in agent  # no inline duplicate
+
+    @pytest.mark.asyncio
+    async def test_a2ui_config_baked(self, exporter, crew_data):
+        """The workspace's resolved UIConfig (enabled + per-deliverable directives)
+        is baked next to the composer so the deployed app matches live chat."""
+        import json
+
+        files = _files(await exporter.export(crew_data, {}))
+        assert "agent_server/a2ui/config.json" in files
+        config = json.loads(files["agent_server/a2ui/config.json"])
+        assert set(config) == {"enabled", "directives"}
+        assert isinstance(config["enabled"], bool)
+        assert isinstance(config["directives"], dict)
+
+    @pytest.mark.asyncio
+    async def test_a2ui_config_reflects_workspace(self, exporter, crew_data):
+        """A minimal catalog choice + directives flow from crew_data into the bake."""
+        import json
+
+        crew = dict(
+            crew_data,
+            a2ui_enabled=False,
+            a2ui_catalog={"surfaceKinds": ["document"], "components": {"Markdown": {}}},
+            a2ui_directives={"presentation": "aim for about 8 slides"},
+        )
+        files = _files(await exporter.export(crew, {}))
+        catalog = json.loads(files["agent_server/a2ui/catalog.json"])
+        assert set(catalog["components"]) == {"Markdown"}  # restricted as configured
+        config = json.loads(files["agent_server/a2ui/config.json"])
+        assert config["enabled"] is False
+        assert config["directives"]["presentation"] == "aim for about 8 slides"
+
+    @pytest.mark.asyncio
+    async def test_a2ui_themes_baked_into_frontend(self, exporter, crew_data):
+        """The workspace's deck/quiz palettes are baked into App.tsx (frontend-only,
+        NOT config.json) so the deployed app's themes match this workspace's live
+        chat. Unconfigured → "{}" (built-in themes), token always substituted."""
+        import json
+
+        # Default: no workspace themes → empty object, no leftover token.
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        assert "{{WORKSPACE_THEMES_JSON}}" not in app
+        assert "const WORKSPACE_THEMES = {} as Record<string, ThemePalette>" in app
+        assert "themesFor('presentation')" in app and "themesFor('quiz')" in app
+        # Configured: the palette flows into the baked literal.
+        crew = dict(
+            crew_data,
+            a2ui_themes={
+                "presentation": {"accent": "#2272B4", "background": "#FFFFFF"}
+            },
+        )
+        app2 = _files(await exporter.export(crew, {}))["frontend/src/App.tsx"]
+        assert '"accent": "#2272B4"' in app2 and '"presentation"' in app2
+        # Themes are frontend-only — never written into the composer config.
+        config = json.loads(
+            _files(await exporter.export(crew, {}))["agent_server/a2ui/config.json"]
+        )
+        assert "themes" not in config
 
     @pytest.mark.asyncio
     async def test_a2ui_composer_present(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         assert "def _compose_a2ui(" in agent
         assert "A2UI_ENABLED" in agent
-        # Both endpoints attach the surface to custom_outputs.
-        assert agent.count('custom_outputs={"a2ui": a2ui}') == 2
+
+    @pytest.mark.asyncio
+    async def test_a2ui_composed_off_critical_path(self, exporter, crew_data):
+        """The surface is composed out-of-band (so the answer request returns fast
+        and can't be dropped by the Databricks Apps proxy timeout): both endpoints
+        schedule a background compose and NO LONGER return it inline in
+        custom_outputs. The UI polls GET /a2ui/{id} instead."""
+        files = _files(await exporter.export(crew_data, {}))
+        agent = files["agent_server/agent.py"]
+        # Background scheduling on both turns; no inline custom_outputs surface.
+        assert "def _schedule_a2ui(" in agent
+        assert agent.count("_schedule_a2ui(message, output_text, session_id)") == 2
+        assert 'custom_outputs={"a2ui"' not in agent
+        # The poll store is shipped and the route is exposed.
+        assert "agent_server/a2ui_store.py" in files
+        assert (
+            '@app.get("/a2ui/{conversation_id}")'
+            in files["agent_server/start_server.py"]
+        )
+        # The frontend polls for the surface and patches the message when ready.
+        assert "export async function fetchA2ui(" in files["frontend/src/api.ts"]
+        assert "pollA2ui(" in files["frontend/src/App.tsx"]
 
     @pytest.mark.asyncio
     async def test_a2ui_enabled_in_app_yaml(self, exporter, crew_data):
@@ -769,13 +895,16 @@ class TestDatabricksAppA2UI:
     @pytest.mark.asyncio
     async def test_a2ui_quiz_surface_wired_in_composer(self, exporter, crew_data):
         """The composer prompt teaches the 'quiz' surface and the rich-intent
-        heuristic treats quiz keywords as a rich (A2UI) request."""
-        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        heuristic treats quiz keywords as a rich (A2UI) request. The prompt now
+        lives in the vendored shared composer, not inline in agent.py."""
+        compose = _files(await exporter.export(crew_data, {}))[
+            "agent_server/a2ui/compose.py"
+        ]
         # System prompt instructs the model to build ONE Quiz component for quizzes.
-        assert "surfaceKind from the USER'S REQUEST" in agent
-        assert "for a quiz/assessment/test use 'quiz'" in agent
+        assert "surfaceKind from the USER'S REQUEST" in compose
+        assert "for a quiz/assessment/test use 'quiz'" in compose
         # Rich-intent vocabulary includes quiz terms so the surface is composed.
-        assert '"quiz", "quizzes", "assessment"' in agent
+        assert '"quiz",' in compose and '"assessment",' in compose
 
     @pytest.mark.asyncio
     async def test_frontend_bundled_not_cloned(self, exporter, crew_data):
@@ -787,6 +916,39 @@ class TestDatabricksAppA2UI:
         assert "databricks/app-templates" not in start_app
         assert "clone_frontend_if_needed" not in start_app
         assert 'Path("frontend")' in start_app
+
+    @pytest.mark.asyncio
+    async def test_frontend_renderer_vendored_from_shared(self, exporter, crew_data):
+        """The export ships the ONE shared frontend renderer (self-contained, with
+        its own lib/ + ui/), byte-identical to live Kasal — not a drifted copy."""
+        from src.engines.crewai.exporters.databricks_app_exporter import (
+            SHARED_A2UI_FRONTEND_DIR,
+        )
+
+        files = _files(await exporter.export(crew_data, {}))
+        for rel in (
+            "frontend/src/a2ui/components.tsx",
+            "frontend/src/a2ui/A2UIRenderer.tsx",
+            "frontend/src/a2ui/registry.tsx",
+            "frontend/src/a2ui/resolve.ts",
+            "frontend/src/a2ui/lib/deckThemes.ts",
+            "frontend/src/a2ui/lib/download.ts",
+            "frontend/src/a2ui/lib/markdown.tsx",
+            "frontend/src/a2ui/lib/surfaceContext.ts",
+            "frontend/src/a2ui/ui/button.tsx",
+        ):
+            assert rel in files, f"missing vendored {rel}"
+        # The drifted top-level lib copies are gone (only the shell's cn remains).
+        assert "frontend/src/lib/download.ts" not in files
+        assert "frontend/src/lib/deckThemes.ts" not in files
+        assert "frontend/src/lib/markdown.tsx" not in files
+        # Byte-identical to the live source → genuinely one implementation.
+        live = (SHARED_A2UI_FRONTEND_DIR / "components.tsx").read_text(encoding="utf-8")
+        assert files["frontend/src/a2ui/components.tsx"] == live
+        # Renderer unit-test files are not shipped (the export only builds).
+        assert not any(
+            p.startswith("frontend/src/a2ui/") and ".test." in p for p in files
+        )
 
     @pytest.mark.asyncio
     async def test_frontend_has_no_node_modules_or_dist(self, exporter, crew_data):
@@ -880,7 +1042,9 @@ class TestDatabricksAppA2UI:
         pkg = files["frontend/package.json"]
         assert "tailwindcss" in pkg and "@tailwindcss/vite" in pkg
         # No JavaScript anywhere in the frontend source (TypeScript-only).
-        assert not any(p.startswith("frontend/src/") and p.endswith((".js", ".jsx")) for p in files)
+        assert not any(
+            p.startswith("frontend/src/") and p.endswith((".js", ".jsx")) for p in files
+        )
 
 
 class TestDatabricksAppModes:
@@ -904,7 +1068,7 @@ class TestDatabricksAppModes:
         assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
         assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
         # Research mode caps tool-call loops for speed.
-        assert "min(cfg.get(\"max_iter\", 25), FAST_MAX_ITER)" in agent
+        assert 'min(cfg.get("max_iter", 25), FAST_MAX_ITER)' in agent
 
     @pytest.mark.asyncio
     async def test_reasoning_env_gated_and_off_for_local(self, exporter, crew_data):
@@ -913,7 +1077,10 @@ class TestDatabricksAppModes:
         files = _files(await exporter.export(crew_data, {}))
         agent = files["agent_server/agent.py"]
         assert 'REASONING_ENABLED = os.environ.get("AGENT_REASONING"' in agent
-        assert '_REASONING_DEFAULT = "false" if os.environ.get("LOCAL_LLM_BASE_URL")' in agent
+        assert (
+            '_REASONING_DEFAULT = "false" if os.environ.get("LOCAL_LLM_BASE_URL")'
+            in agent
+        )
         # Reasoning is gated by the toggle AND the mode.
         assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
         assert "AGENT_REASONING" in files[".env.example"]
@@ -936,7 +1103,9 @@ class TestDatabricksAppModes:
         assert "def _run_chat(" in agent
         assert "chat_runner=_run_chat" in agent
         assert "agent.kickoff(request_text)" in agent
-        conv = _files(await exporter.export(crew_data, {}))["agent_server/conversation.py"]
+        conv = _files(await exporter.export(crew_data, {}))[
+            "agent_server/conversation.py"
+        ]
         # The conversation layer routes chat mode straight to the chat runner.
         assert 'mode == "chat"' in conv and "chat_runner" in conv
 
@@ -970,9 +1139,18 @@ class TestDatabricksAppControls:
     async def test_turn_timeout_and_llm_caps(self, exporter, crew_data):
         files = _files(await exporter.export(crew_data, {}))
         agent = files["agent_server/agent.py"]
-        assert 'LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))' in agent
-        assert 'CREW_TIMEOUT_SECONDS = int(os.environ.get("CREW_TIMEOUT_SECONDS", "600"))' in agent
-        assert 'AGENT_MAX_EXECUTION_TIME = int(os.environ.get("AGENT_MAX_EXECUTION_TIME", "0"))' in agent
+        assert (
+            'LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))'
+            in agent
+        )
+        assert (
+            'CREW_TIMEOUT_SECONDS = int(os.environ.get("CREW_TIMEOUT_SECONDS", "600"))'
+            in agent
+        )
+        assert (
+            'AGENT_MAX_EXECUTION_TIME = int(os.environ.get("AGENT_MAX_EXECUTION_TIME", "0"))'
+            in agent
+        )
         # Whole-turn watchdog cancels the crew on expiry.
         assert "CREW_TIMEOUT_SECONDS" in agent and "asyncio.wait_for(" in agent
         # Documented for operators.
@@ -984,7 +1162,7 @@ class TestDatabricksAppControls:
     async def test_inject_date_on_agents(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         # Both the crew agents and the chat agent get today's date injected.
-        assert "inject_date=cfg.get(\"inject_date\", True)" in agent
+        assert 'inject_date=cfg.get("inject_date", True)' in agent
         assert agent.count("inject_date=") >= 2
 
     @pytest.mark.asyncio
@@ -996,7 +1174,9 @@ class TestDatabricksAppControls:
         assert "agent_server/crew_progress.py" in files
         # A CrewAI event-bus listener feeds the progress store.
         crew_progress = files["agent_server/crew_progress.py"]
-        assert "BaseEventListener" in crew_progress and "crewai_event_bus" in crew_progress
+        assert (
+            "BaseEventListener" in crew_progress and "crewai_event_bus" in crew_progress
+        )
         # The server exposes the poll endpoint the frontend reads.
         assert "/progress/{conversation_id}" in files["agent_server/start_server.py"]
         assert "export async function fetchProgress" in files["frontend/src/api.ts"]
@@ -1013,7 +1193,7 @@ class TestDatabricksAppCitations:
         assert "CITATION_DIRECTIVE = (" in agent
         assert "def _with_citations(backstory: str)" in agent
         # Applied to BOTH the crew agents and the single chat agent.
-        assert "backstory=_with_citations(cfg[\"backstory\"])" in agent
+        assert 'backstory=_with_citations(cfg["backstory"])' in agent
         assert agent.count("_with_citations(") >= 2
 
     @pytest.mark.asyncio
@@ -1025,8 +1205,9 @@ class TestDatabricksAppCitations:
     @pytest.mark.asyncio
     async def test_citation_renderer_shipped(self, exporter, crew_data):
         files = _files(await exporter.export(crew_data, {}))
-        assert "frontend/src/lib/markdown.tsx" in files
-        md = files["frontend/src/lib/markdown.tsx"]
+        # markdown.tsx lives inside the vendored shared renderer module now.
+        assert "frontend/src/a2ui/lib/markdown.tsx" in files
+        md = files["frontend/src/a2ui/lib/markdown.tsx"]
         # New-tab links + numeric-text citation chips + the linkifier.
         assert "export const mdComponents" in md
         assert 'rel="noopener noreferrer"' in md
@@ -1050,7 +1231,9 @@ class TestDatabricksAppScoping:
 
     @pytest.mark.asyncio
     async def test_intake_declines_out_of_scope(self, exporter, crew_data):
-        conv = _files(await exporter.export(crew_data, {}))["agent_server/conversation.py"]
+        conv = _files(await exporter.export(crew_data, {}))[
+            "agent_server/conversation.py"
+        ]
         # Classifier gains a DECLINE outcome; respond routes it to _decline.
         assert "def _decline(" in conv
         assert '"DECLINE"' in conv
@@ -1117,11 +1300,16 @@ class TestDatabricksAppPerAgentMCP:
 
     @pytest.mark.asyncio
     async def test_runtime_filters_mcp_per_agent(self, exporter):
-        agent = _files(await exporter.export(self._scoped_crew(), {}))["agent_server/agent.py"]
+        agent = _files(await exporter.export(self._scoped_crew(), {}))[
+            "agent_server/agent.py"
+        ]
         # Each agent gets ONLY its configured servers; absent key = legacy all.
         assert 'allowed = cfg.get("mcp_servers")' in agent
         assert "if allowed is None:" in agent
-        assert "agent_mcp = [t for s in allowed for t in mcp_by_server.get(s, [])]" in agent
+        assert (
+            "agent_mcp = [t for s in allowed for t in mcp_by_server.get(s, [])]"
+            in agent
+        )
 
 
 class TestDatabricksAppKasalUI:

@@ -11,7 +11,7 @@ import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.engines.crewai.trace_management import TraceManager
+from src.engines.crewai.infra.trace_management import TraceManager
 class TestTraceManagerEventFiltering:
     """Test cases for trace manager event filtering."""
 
@@ -619,7 +619,7 @@ class TestTraceManagerStopWriter:
         TraceManager._lock = asyncio.Lock()
 
         with patch(
-            "src.engines.crewai.trace_management.asyncio.get_running_loop",
+            "src.engines.crewai.infra.trace_management.asyncio.get_running_loop",
             side_effect=RuntimeError("no running loop"),
         ):
             # current_loop becomes None due to RuntimeError

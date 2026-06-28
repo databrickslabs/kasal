@@ -36,6 +36,52 @@ async def get_prompt_template(db: Session, name: str, default_template: str = No
     return await TemplateService.get_template_content(name, default_template)
 
 
+def _repair_json_structure(s):
+    """Single-pass, string-aware structural repair of brace/bracket nesting.
+
+    Drops spurious or mismatched closing tokens (e.g. a model emitting an extra
+    ``}`` inside an array: ``[{...}},{...}]``) and appends any closers still
+    missing at the end. Also strips trailing commas before closers. Returns a
+    best-effort repaired string; the caller still validates with json.loads.
+    """
+    out = []
+    stack = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+        elif ch in '{[':
+            stack.append(ch)
+            out.append(ch)
+        elif ch == '}':
+            if stack and stack[-1] == '{':
+                stack.pop()
+                out.append(ch)
+            # else: spurious '}', drop it
+        elif ch == ']':
+            if stack and stack[-1] == '[':
+                stack.pop()
+                out.append(ch)
+            # else: spurious ']', drop it
+        else:
+            out.append(ch)
+    while stack:
+        out.append('}' if stack.pop() == '{' else ']')
+    repaired = ''.join(out)
+    return re.sub(r',\s*([\]}])', r'\1', repaired)
+
+
 def robust_json_parser(text):
     """
     Parse JSON with advanced error recovery for LLM outputs.
@@ -60,12 +106,64 @@ def robust_json_parser(text):
     
     # Original text for logging
     original_text = text
-    
+
+    # Step 0: Strip reasoning / thinking blocks emitted by reasoning models
+    # (Qwen3, DeepSeek-R1-style, gpt-oss). These wrap or precede the JSON and
+    # break every downstream parser. Removing them is a no-op for clean output.
+    text = re.sub(r'<(think|thinking|reasoning|analysis)>[\s\S]*?</\1>', '', text, flags=re.IGNORECASE)
+    # Truncated thinking: a block opened and the JSON only begins after its close.
+    if re.search(r'</(?:think|thinking|reasoning|analysis)>', text, flags=re.IGNORECASE):
+        text = re.sub(r'^[\s\S]*?</(?:think|thinking|reasoning|analysis)>', '', text, flags=re.IGNORECASE)
+    text = text.strip()
+
     # Try direct parsing first
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         logger.info("Initial JSON parsing failed, attempting recovery")
+
+    # Step 0b: Extract the first COMPLETE top-level JSON value via balanced-brace
+    # scanning (string/escape aware). More reliable than the greedy regex below
+    # when the model appends trailing prose after a valid object.
+    _start = text.find('{')
+    _alt = text.find('[')
+    if _start == -1 or (0 <= _alt < _start):
+        _start = _alt
+    if _start != -1:
+        _depth = 0
+        _in_str = False
+        _esc = False
+        for _k in range(_start, len(text)):
+            _c = text[_k]
+            if _esc:
+                _esc = False
+                continue
+            if _c == '\\':
+                _esc = True
+                continue
+            if _c == '"':
+                _in_str = not _in_str
+                continue
+            if _in_str:
+                continue
+            if _c in '{[':
+                _depth += 1
+            elif _c in '}]':
+                _depth -= 1
+                if _depth == 0:
+                    try:
+                        return json.loads(text[_start:_k + 1])
+                    except json.JSONDecodeError:
+                        logger.info("Balanced-brace extraction didn't yield valid JSON, continuing...")
+                    break
+
+    # Step 0c: Structural repair — drop spurious/mismatched closing braces and
+    # append any missing ones (string-aware). Fixes the common reasoning-model
+    # error of an extra '}' or ']' inside a value, e.g. [{...}},{...}].
+    try:
+        return json.loads(_repair_json_structure(text))
+    except (json.JSONDecodeError, Exception):
+        logger.info("Structural brace repair didn't yield valid JSON, continuing...")
     
     # Step 1: Remove markdown code block formatting
     code_block_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
@@ -219,6 +317,12 @@ def robust_json_parser(text):
             truncated = truncated[:i] + '"'
             logger.info("Closed open string in truncated JSON")
 
+        # Drop a dangling key with no value (truncated right after the colon),
+        # e.g. ...,"role": — and any trailing separator, so the balance step
+        # below produces valid JSON instead of `"role":}`.
+        truncated = re.sub(r'[,\s]*"(?:[^"\\]|\\.)*"\s*:\s*$', '', truncated)
+        truncated = truncated.rstrip().rstrip(',:').rstrip()
+
         # Now balance braces/brackets
         stack = []
         in_str = False
@@ -249,6 +353,11 @@ def robust_json_parser(text):
     except (json.JSONDecodeError, Exception):
         logger.info("Aggressive truncation recovery didn't yield valid JSON")
 
-    # Log failure details for debugging
-    logger.error(f"Failed to parse JSON after all recovery attempts: {original_text[:100]}...")
+    # Log failure details for debugging. Log the FULL content (capped) and its
+    # length — the previous 100-char preview hid the real failure point (e.g.
+    # mid-array truncation from an exhausted max_tokens budget).
+    logger.error(
+        "Failed to parse JSON after all recovery attempts "
+        f"(len={len(original_text)}): {original_text[:4000]!r}"
+    )
     raise ValueError("Could not parse response as JSON after multiple recovery attempts") 

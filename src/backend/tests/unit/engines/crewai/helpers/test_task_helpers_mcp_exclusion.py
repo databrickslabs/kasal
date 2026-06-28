@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from crewai import Agent, Task
 
-from src.engines.crewai.helpers.task_adapter import create_task
+from src.engines.crewai.paths.crew.task_adapter import create_task
 
 
 @asynccontextmanager
@@ -225,7 +225,7 @@ class TestMCPServersExcludedFromAutoResolution:
 
         # Patch resolve_tool_ids_to_names so the tool_service path works
         with patch(
-            "src.engines.crewai.helpers.task_adapter.resolve_tool_ids_to_names",
+            "src.engines.crewai.paths.crew.task_adapter.resolve_tool_ids_to_names",
             new_callable=AsyncMock,
             return_value=["ResolvedTool"],
         ):

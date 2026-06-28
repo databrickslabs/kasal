@@ -6,7 +6,7 @@ Tests the functionality of agent configuration for CrewAI flows.
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.paths.flow.modules.agent_adapter import AgentConfig
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def mock_llm():
 class TestAgentConfig:
     """Test cases for AgentConfig class."""
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_success(self, mock_tool_factory_class, mock_agent_data, mock_tool_factory, mock_llm):
         """Test successful agent configuration with tools (delegates to the shared
@@ -93,7 +93,7 @@ class TestAgentConfig:
         mock_tool_factory_class.return_value = mock_tool_factory
         mock_agent_instance = MagicMock()
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
@@ -107,7 +107,7 @@ class TestAgentConfig:
         result = await AgentConfig.configure_agent_and_tools(None)
         assert result is None
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_tool_factory_error(self, mock_tool_factory_class, mock_agent_data):
         """Test agent configuration when tool factory initialization fails."""
@@ -115,14 +115,14 @@ class TestAgentConfig:
         mock_tool_factory.initialize.side_effect = Exception("Tool factory error")
         mock_tool_factory_class.return_value = mock_tool_factory
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
         assert result is not None
         mock_tool_factory.initialize.assert_called_once()
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_from_flow_nodes(self, mock_tool_factory_class, mock_flow_data, mock_tool_factory):
         """Test agent configuration using tools from flow nodes."""
@@ -137,13 +137,13 @@ class TestAgentConfig:
         agent_data.backstory = "An experienced data analyst"
         agent_data.tools = []  # No direct tools
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data, mock_flow_data)
 
         assert result is not None
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_exception(self, mock_tool_factory_class, mock_agent_data):
         """Test agent configuration with exception."""
@@ -191,7 +191,7 @@ class TestAgentConfig:
         result = AgentConfig._normalize_tools_list({"tool1": "value"})
         assert result == []
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_no_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent without tools attribute."""
@@ -206,13 +206,13 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         del agent_data.tools  # No tools attribute
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result is not None
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_none_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent with None tools attribute."""
@@ -227,13 +227,13 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         agent_data.tools = None  # None tools
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result is not None
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_flow_with_no_nodes_attr(self, mock_tool_factory_class):
         """Test configuring agent with flow data that has no nodes attribute."""
@@ -251,7 +251,7 @@ class TestAgentConfig:
         flow_data = MagicMock()
         del flow_data.nodes  # No nodes attribute
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data, flow_data)
 
@@ -261,8 +261,8 @@ class TestAgentConfig:
 class TestAgentConfigIntegration:
     """Integration tests for AgentConfig."""
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.LoggerManager')
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.LoggerManager')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_full_agent_configuration_flow(self, mock_tool_factory_class, mock_logger_manager):
         """Test the complete agent configuration flow (delegates to shared build_agent)."""
@@ -292,7 +292,7 @@ class TestAgentConfigIntegration:
         agent_data.max_rpm = 5
         agent_data.config = {"temperature": 0.7}
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
@@ -300,8 +300,8 @@ class TestAgentConfigIntegration:
         mock_tool_factory.initialize.assert_called_once()
         mock_build.assert_called_once()
 
-    @patch('src.engines.crewai.flow.modules.agent_adapter.LoggerManager')
-    @patch('src.engines.crewai.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.LoggerManager')
+    @patch('src.engines.crewai.paths.flow.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_full_agent_configuration_with_date_awareness(self, mock_tool_factory_class, mock_logger_manager):
         """Date awareness params flow through the spec into the shared build_agent."""
@@ -333,7 +333,7 @@ class TestAgentConfigIntegration:
         agent_data.inject_date = True
         agent_data.date_format = "%Y-%m-%d"
 
-        with patch('src.engines.crewai.common.agent_tools.build_agent_with_tools',
+        with patch('src.engines.crewai.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 

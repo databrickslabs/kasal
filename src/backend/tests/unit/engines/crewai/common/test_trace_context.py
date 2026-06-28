@@ -3,7 +3,7 @@ path (crew_preparation) and the flow path (flow_methods) use to tag a crew's
 memory + tools with job_id/group attribution."""
 from unittest.mock import MagicMock
 
-from src.engines.crewai.common.trace_context import attach_execution_trace_context
+from src.engines.crewai.kernel.trace_context import attach_execution_trace_context
 
 
 class TestAttachExecutionTraceContext:

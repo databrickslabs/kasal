@@ -479,6 +479,16 @@ class TestGetCrewWithDetails:
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
         service.agent_repository.get = AsyncMock(return_value=mock_agent)
         service.task_repository.get = AsyncMock(return_value=mock_task)
+        # UI-config resolution is covered by its own tests; stub it here so this
+        # agents/tasks-focused test doesn't hit the (mock) UIConfig repository.
+        service._get_a2ui_config = AsyncMock(
+            return_value={
+                "a2ui_enabled": True,
+                "a2ui_catalog": {},
+                "a2ui_directives": {},
+                "a2ui_themes": {},
+            }
+        )
 
         # Mock tool lookup for integer tool IDs
         mock_tool = MagicMock()
@@ -536,6 +546,14 @@ class TestGetCrewWithDetails:
         # a1 found, a2 not found
         service.agent_repository.get = AsyncMock(side_effect=[None, None])
         service.task_repository.get = AsyncMock(side_effect=[None, None])
+        service._get_a2ui_config = AsyncMock(
+            return_value={
+                "a2ui_enabled": True,
+                "a2ui_catalog": {},
+                "a2ui_directives": {},
+                "a2ui_themes": {},
+            }
+        )
 
         result = await service._get_crew_with_details(crew_id, None)
 
@@ -557,6 +575,14 @@ class TestGetCrewWithDetails:
         mock_crew.edges = None
 
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
+        service._get_a2ui_config = AsyncMock(
+            return_value={
+                "a2ui_enabled": True,
+                "a2ui_catalog": {},
+                "a2ui_directives": {},
+                "a2ui_themes": {},
+            }
+        )
 
         result = await service._get_crew_with_details(crew_id, None)
 

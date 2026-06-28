@@ -15,9 +15,9 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
-from src.engines.crewai.flow.flow_runner_service import FlowRunnerService
+from src.engines.crewai.paths.flow.flow_runner_service import FlowRunnerService
 from src.schemas.flow_execution import FlowExecutionStatus
-from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalException
 
 
 # ---------------------------------------------------------------------------
@@ -27,12 +27,12 @@ from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
 def _make_service(db=None):
     """Return a FlowRunnerService with all heavy deps patched out."""
     db = db or MagicMock(spec=AsyncSession)
-    with patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService"):
-        with patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"):
-            with patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"):
-                with patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"):
-                    with patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"):
-                        with patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"):
+    with patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService"):
+        with patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"):
+            with patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"):
+                with patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"):
+                    with patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"):
+                        with patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"):
                             return FlowRunnerService(db)
 
 
@@ -219,7 +219,7 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
+        with patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
             repo_instance = MagicMock()
             repo_instance.get_execution_by_job_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
@@ -575,17 +575,17 @@ class TestRunDynamicFlow:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.backend_flow.BackendFlow") as MockBF, \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.backend_flow.BackendFlow") as MockBF, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -623,17 +623,17 @@ class TestRunDynamicFlow:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.backend_flow.BackendFlow") as MockBF, \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.backend_flow.BackendFlow") as MockBF, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             flow_svc_instance = MagicMock()
@@ -660,17 +660,17 @@ class TestRunDynamicFlow:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.backend_flow.BackendFlow") as MockBF, \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.backend_flow.BackendFlow") as MockBF, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
 
             pause_exc = FlowPausedForApprovalException(
                 approval_id="appr-1",
@@ -712,17 +712,17 @@ class TestRunDynamicFlow:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.backend_flow.BackendFlow") as MockBF, \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.backend_flow.BackendFlow") as MockBF, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             bf_instance = MagicMock()
@@ -767,8 +767,8 @@ class TestRunFlowExecutionResultConversion:
             yield mock_session
 
         patches = {
-            "safe_session": ("src.engines.crewai.flow.flow_runner_service.FlowRunnerService._safe_session", _safe_ctx()),
-            "smart_db": ("src.engines.crewai.flow.flow_runner_service._smart_db_session", _smart_ctx()),
+            "safe_session": ("src.engines.crewai.paths.flow.flow_runner_service.FlowRunnerService._safe_session", _safe_ctx()),
+            "smart_db": ("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", _smart_ctx()),
         }
         return patches, mock_session, kickoff_result
 
@@ -778,14 +778,14 @@ class TestRunFlowExecutionResultConversion:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"):
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -808,18 +808,18 @@ class TestRunFlowExecutionResultConversion:
         mock_session = MagicMock(spec=AsyncSession)
 
         with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.engines.crewai.flow.backend_flow.BackendFlow", MockBF), \
-             patch("src.engines.crewai.flow.flow_runner_service.FlowRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.TaskRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.AgentRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ToolRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.CrewRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.engines.crewai.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.engines.crewai.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.BackendFlow") as MockBF, \
+             patch("src.engines.crewai.paths.flow.backend_flow.BackendFlow", MockBF), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.FlowRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.TaskRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.AgentRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ToolRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.CrewRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionTraceRepository"), \
+             patch("src.engines.crewai.paths.flow.flow_runner_service.ApiKeysService") as MockApiSvc, \
+             patch("src.engines.crewai.paths.flow.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
              patch.object(svc, "_emit_error_span", new=AsyncMock()), \
              patch("src.services.model_config_service.ModelConfigService") as MockModelSvc:
 

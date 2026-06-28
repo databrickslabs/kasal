@@ -106,9 +106,9 @@ class CrewGenerationService:
             raise ValueError("Required prompt template 'generate_crew' not found in database")
 
         # NOTE: the generation templates are format-neutral (content/structure only,
-        # never HTML/CSS/JS). Output formatting is owned entirely by the UI-document
-        # emission (apply_ui_emission) at execution time, so no per-call directive is
-        # prepended here.
+        # never HTML/CSS/JS). Output formatting is owned entirely by the shared A2UI
+        # composer (a2ui_runner), which composes a surface post-execution, so no
+        # per-call directive is prepended here.
 
         # Build tools context for the prompt with detailed descriptions
         tools_context = ""
@@ -990,14 +990,34 @@ class CrewGenerationService:
                 entry.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             tasks_yaml[key] = entry
 
+        # ── ChatMode answer mode → reasoning / planning / execution_type ──────
+        # chat     = single light agent (Agent.kickoff_async), no crew/planning/reasoning
+        # research = crew with per-agent reasoning
+        # deep     = crew with planning (+ explicit planning_llm) AND reasoning
+        _mode = (getattr(request, "chat_mode_type", "chat") or "chat")
+        _reasoning = _mode in ("research", "deep")
+        # CrewAI structured reasoning (StepObservation) breaks on local / OpenAI-
+        # compatible endpoints — disable it when a local model is configured.
+        if os.getenv("LOCAL_LLM_BASE_URL"):
+            _reasoning = False
+        _planning = _mode == "deep"
+        _execution_type = "agent" if _mode == "chat" else "crew"
+        # Planning ON without an explicit planning_llm makes CrewAI default to
+        # OpenAI (401 on a Databricks-only app); pin it to the request/crew model.
+        _planning_llm = (
+            request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
+        ) if _planning else None
+
         return {
             "agents_yaml": agents_yaml,
             "tasks_yaml": tasks_yaml,
-            "inputs": {},
-            "planning": False,
-            "reasoning": False,
+            # planning_llm rides in inputs — prepare_and_run_crew reads it from
+            # inputs_with_run_name.get("planning_llm"), not a top-level CrewConfig key.
+            "inputs": ({"planning_llm": _planning_llm} if _planning_llm else {}),
+            "planning": _planning,
+            "reasoning": _reasoning,
             "model": request.model or None,
-            "execution_type": "crew",
+            "execution_type": _execution_type,
             "schema_detection_enabled": True,
             "session_id": request.session_id,
             "memory_workspace_scope": request.memory_workspace_scope,
@@ -1049,6 +1069,21 @@ class CrewGenerationService:
 
         with trace_ctx as root_span:
             try:
+                # ── ChatMode 'chat' fast path ─────────────────────────────
+                # 'chat' answer mode runs a SINGLE Agent.kickoff_async. The
+                # bespoke plan + agent + task LLM generations below add ~3 LLM
+                # round-trips with no benefit for what is just a default
+                # assistant answering the user's message. Skip them entirely:
+                # synthesize a default agent + a task from the raw prompt and go
+                # straight to auto-execute. 'research'/'deep' still generate a
+                # full crew (they need the plan/agents/tasks).
+                if (getattr(request, "chat_mode_type", "chat") or "chat") == "chat" \
+                        and getattr(request, "auto_execute", False):
+                    await self._run_chat_fast_path(
+                        request, group_context, generation_id, root_span
+                    )
+                    return
+
                 model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
@@ -1134,6 +1169,14 @@ class CrewGenerationService:
                 else:
                     max_agents = 1
                     logger.info(f"PROGRESSIVE [{generation_id}]: Single task, 1 agent")
+
+                # Chat (light agent) mode runs a SINGLE Agent.kickoff_async — force
+                # exactly one agent + one task so there is one agent to kick off and
+                # one grounded task description to use as its prompt.
+                if (getattr(request, "chat_mode_type", "chat") or "chat") == "chat":
+                    max_agents = 1
+                    max_tasks = 1
+                    logger.info(f"PROGRESSIVE [{generation_id}]: chat (light agent) mode — capping to 1 agent / 1 task")
 
                 # ── Phase 1: Planning (LLM only, no DB writes) ───────────
                 # Inject the computed cap into the request so the LLM generates
@@ -1739,6 +1782,100 @@ class CrewGenerationService:
                     event="generation_failed",
                 ))
 
+    async def _run_chat_fast_path(
+        self,
+        request: "CrewStreamingRequest",
+        group_context: Optional[GroupContext],
+        generation_id: str,
+        root_span: Any,
+    ) -> None:
+        """ChatMode 'chat' fast path — no crew generation.
+
+        Builds a default single assistant + one task carrying the user's request
+        (plus any explicitly-attached tools / MCP servers / Agent Bricks
+        endpoints from the chat "+" menu — no LLM needed to pick those) and
+        auto-executes the light agent. Emits ONLY the terminal
+        ``generation_complete`` event the chat UI requires (with ``agents``,
+        ``tasks`` and the ``execution_id``); no plan/agent/task cards, since
+        nothing was generated. Cuts chat latency from ~3 generation LLM calls +
+        the answer down to just the answer.
+        """
+        from src.schemas.execution import CrewConfig
+        from src.services.execution_service import ExecutionService
+
+        user_request = request.original_prompt or request.prompt or ""
+        attached_tools = list(getattr(request, "tools", None) or [])
+
+        # A default lightweight assistant + a single task. The config builder
+        # injects the attached MCP servers / Agent Bricks endpoints and grounds the
+        # task with the user's request, sets execution_type='agent' (light) and carries
+        # session_id / memory_workspace_scope — identical to a generated chat agent,
+        # only without the LLM generation.
+        agent_results = [{
+            "id": "chat",
+            "name": "Assistant",
+            "role": "Assistant",
+            "goal": "Answer the user's request helpfully, accurately and concisely.",
+            "backstory": "You are a helpful AI assistant.",
+            "tools": attached_tools,
+        }]
+        clean_tasks = [{
+            "id": "chat",
+            "name": "Chat response",
+            "description": "Respond directly and helpfully to the user's request.",
+            "expected_output": "A helpful, complete answer to the user's request.",
+            "agent_id": "chat",
+            "tools": attached_tools,
+            "context": [],
+        }]
+
+        gen_complete_data: Dict[str, Any] = {
+            "type": "generation_complete",
+            "status": "completed",
+            "agents": agent_results,
+            "tasks": clean_tasks,
+            "user_request": user_request,
+        }
+
+        try:
+            crew_config = CrewConfig(
+                **self.build_crew_config_from_generated(
+                    request, agent_results, clean_tasks
+                )
+            )
+            exec_result = await ExecutionService(session=None).create_execution(
+                config=crew_config,
+                background_tasks=None,
+                group_context=group_context,
+            )
+            gen_complete_data["execution_id"] = exec_result.get("execution_id")
+            gen_complete_data["run_name"] = exec_result.get("run_name")
+            logger.info(
+                f"PROGRESSIVE [{generation_id}]: chat fast-path launched "
+                f"execution {exec_result.get('execution_id')} (no generation)"
+            )
+        except Exception as exec_err:
+            logger.error(
+                f"PROGRESSIVE [{generation_id}]: chat fast-path execute "
+                f"failed: {exec_err}"
+            )
+            logger.error(traceback.format_exc())
+            gen_complete_data["execution_error"] = str(exec_err)
+
+        await sse_manager.broadcast_to_job(generation_id, SSEEvent(
+            data=gen_complete_data,
+            event="generation_complete",
+        ))
+        logger.info(f"PROGRESSIVE [{generation_id}]: chat fast-path complete")
+
+        try:
+            from src.services.otel_tracing.mlflow_parent_setup import (
+                set_root_span_outputs,
+            )
+            set_root_span_outputs(root_span, gen_complete_data)
+        except Exception:
+            pass
+
     # ── Progressive helpers ───────────────────────────────────────────
 
     async def _suggest_genie_space(self, task_name: str, task_description: str) -> Optional[Dict]:
@@ -1853,11 +1990,14 @@ class CrewGenerationService:
             {"role": "user", "content": user_message},
         )
 
+        # 4000 (was 2000): reasoning models (Qwen3-thinking, gpt-oss, R1-style)
+        # spend part of the budget on hidden reasoning tokens, so 2000 could
+        # exhaust before the plan JSON closed → truncated, unparseable output.
         content = await LLMManager.completion(
             messages=messages,
             model=model,
             temperature=0.3,
-            max_tokens=2000,
+            max_tokens=4000,
         )
 
         # Log via an independent session (the request-scoped session is closed

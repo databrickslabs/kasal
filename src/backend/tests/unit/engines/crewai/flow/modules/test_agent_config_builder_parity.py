@@ -6,8 +6,8 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from src.engines.crewai.flow.modules.agent_adapter import AgentConfig
-from src.engines.crewai.common.agent_builder import build_agent_kwargs
+from src.engines.crewai.paths.flow.modules.agent_adapter import AgentConfig
+from src.engines.crewai.kernel.agent_builder import build_agent_kwargs
 
 
 def _agent(**over):

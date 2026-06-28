@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from src.engines.crewai.guardrails.minimum_number_guardrail import MinimumNumberGuardrail
+from src.engines.crewai.guardrails.core.minimum_number_guardrail import MinimumNumberGuardrail
 from crewai.tasks.task_output import TaskOutput
 
 
@@ -703,7 +703,7 @@ class TestMinimumNumberGuardrail(unittest.TestCase):
     def test_logger_initialization_line_coverage(self):
         """Test to cover the logger initialization check on line 19"""
         # Import the module to trigger the initialization check
-        from src.engines.crewai.guardrails.minimum_number_guardrail import logger_manager
+        from src.engines.crewai.guardrails.core.minimum_number_guardrail import logger_manager
         # Verify the logger manager exists and is initialized
         self.assertIsNotNone(logger_manager)
         self.assertTrue(logger_manager._initialized)

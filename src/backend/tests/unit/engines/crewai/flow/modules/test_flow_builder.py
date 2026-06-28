@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-MODULE = "src.engines.crewai.flow.modules.flow_builder"
+MODULE = "src.engines.crewai.paths.flow.modules.flow_builder"
 
 
 # ---------------------------------------------------------------------------
@@ -116,20 +116,20 @@ class TestBuildFlowValidation:
 
     @pytest.mark.asyncio
     async def test_no_flow_data_raises(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         with pytest.raises(ValueError, match="No flow data"):
             await FlowBuilder.build_flow(None)
 
     @pytest.mark.asyncio
     async def test_empty_dict_raises(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         with pytest.raises(ValueError, match="No starting points"):
             await FlowBuilder.build_flow({"flow_config": {"startingPoints": []}})
 
     @pytest.mark.asyncio
     async def test_empty_flow_config_enters_warning(self):
         """flow_config is {} (empty dict, falsy) enters warning branch."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         fd = {"flow_config": {}}
         with pytest.raises(ValueError, match="No starting points"):
             await FlowBuilder.build_flow(fd)
@@ -137,7 +137,7 @@ class TestBuildFlowValidation:
     @pytest.mark.asyncio
     async def test_empty_flow_config_string_parse_fail(self):
         """flow_config is empty string; isinstance(str)=True but json.loads fails."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         fd = {"flow_config": ""}
         with pytest.raises(ValueError, match="Failed to build flow"):
             await FlowBuilder.build_flow(fd)
@@ -145,7 +145,7 @@ class TestBuildFlowValidation:
     @pytest.mark.asyncio
     async def test_empty_flow_config_string_parse_success(self):
         """Cover json.loads success path with a tricky dict."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         class _TrickyDict(dict):
             _fc_calls = 0
@@ -167,7 +167,7 @@ class TestBuildFlowCheckpointEdges:
 
     @pytest.mark.asyncio
     async def test_checkpoint_edge_enables_persistence(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -190,7 +190,7 @@ class TestBuildFlowStartingPointExtraction:
 
     @pytest.mark.asyncio
     async def test_crew_node_format(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -210,7 +210,7 @@ class TestBuildFlowStartingPointExtraction:
 
     @pytest.mark.asyncio
     async def test_agent_node_skipped(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -234,7 +234,7 @@ class TestBuildFlowStartingPointExtraction:
     @pytest.mark.asyncio
     async def test_task_not_in_all_tasks(self):
         """Extracted task ID not in all_tasks logs error."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -256,7 +256,7 @@ class TestBuildFlowStartingPointExtraction:
     @pytest.mark.asyncio
     async def test_no_start_methods_warning(self):
         """When dynamic_flow has no starting_point_ methods, logs error."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(return_value={})
@@ -279,7 +279,7 @@ class TestBuildFlowCheckpointResume:
 
     @pytest.mark.asyncio
     async def test_resume_loads_checkpoint_outputs(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -311,7 +311,7 @@ class TestBuildFlowCheckpointResume:
 
     @pytest.mark.asyncio
     async def test_resume_execution_not_found(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -338,7 +338,7 @@ class TestBuildFlowCheckpointResume:
 
     @pytest.mark.asyncio
     async def test_resume_missing_repos(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -360,7 +360,7 @@ class TestBuildFlowCheckpointResume:
 
     @pytest.mark.asyncio
     async def test_resume_exception_during_load(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -387,7 +387,7 @@ class TestBuildFlowCheckpointResume:
     @pytest.mark.asyncio
     async def test_build_flow_exception_wraps(self):
         """Exceptions during build are wrapped in ValueError."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
@@ -407,18 +407,18 @@ class TestBuildFlowCheckpointResume:
 class TestApplyStateOperations:
 
     def test_none_operations(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         FlowBuilder._apply_state_operations(MagicMock(), None)
 
     def test_reads_dict_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         flow = MagicMock()
         flow.state = {"x": 42}
         # dict has 'get' so the dict path should be taken
         FlowBuilder._apply_state_operations(flow, {"reads": ["x"]})
 
     def test_reads_object_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         class ObjState:
             x = 99
@@ -427,7 +427,7 @@ class TestApplyStateOperations:
         FlowBuilder._apply_state_operations(flow, {"reads": ["x"]})
 
     def test_writes_expression_dict_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         flow = MagicMock()
         flow.state = {"counter": 5}
         ops = {"writes": [{"variable": "result", "expression": "state['counter'] + 1", "value": None}]}
@@ -435,7 +435,7 @@ class TestApplyStateOperations:
         assert flow.state["result"] == 6
 
     def test_writes_expression_object_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         class ObjState:
             counter = 10
@@ -446,7 +446,7 @@ class TestApplyStateOperations:
         assert flow.state.result == 11
 
     def test_writes_expression_failure(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         flow = MagicMock()
         flow.state = {}
         ops = {"writes": [{"variable": "x", "expression": "undefined_var", "value": None}]}
@@ -454,7 +454,7 @@ class TestApplyStateOperations:
         FlowBuilder._apply_state_operations(flow, ops)
 
     def test_writes_value_dict_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
         flow = MagicMock()
         flow.state = {}
         ops = {"writes": [{"variable": "k", "expression": None, "value": 99}]}
@@ -462,7 +462,7 @@ class TestApplyStateOperations:
         assert flow.state["k"] == 99
 
     def test_writes_value_object_state(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         class ObjState:
             pass
@@ -481,7 +481,7 @@ class TestCreateDynamicFlowInit:
 
     @pytest.mark.asyncio
     async def test_state_disabled(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -499,7 +499,7 @@ class TestCreateDynamicFlowInit:
 
     @pytest.mark.asyncio
     async def test_state_enabled_with_initial_values(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -525,7 +525,7 @@ class TestCreateDynamicFlowStartMethods:
 
     @pytest.mark.asyncio
     async def test_skip_crew_with_checkpoint(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -549,7 +549,7 @@ class TestCreateDynamicFlowStartMethods:
 
     @pytest.mark.asyncio
     async def test_skip_crew_no_checkpoint_output(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -569,7 +569,7 @@ class TestCreateDynamicFlowStartMethods:
 
     @pytest.mark.asyncio
     async def test_skip_crew_no_checkpoint_outputs_dict(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -589,7 +589,7 @@ class TestCreateDynamicFlowStartMethods:
 
     @pytest.mark.asyncio
     async def test_crew_with_tasks(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -609,7 +609,7 @@ class TestCreateDynamicFlowStartMethods:
 
     @pytest.mark.asyncio
     async def test_crew_no_tasks(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         sp = [("starting_point_0", ["t1"], [], "EmptyCrew", {})]
@@ -624,7 +624,7 @@ class TestCreateDynamicFlowStartMethods:
     @pytest.mark.asyncio
     async def test_frontend_crew_name_lookup(self):
         """Starting point uses crewName from frontend config."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -653,7 +653,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_no_tasks_skipped(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -675,7 +675,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_no_listen_targets_skipped(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -698,7 +698,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_matches_starting_point(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -724,7 +724,7 @@ class TestCreateDynamicFlowListeners:
     @pytest.mark.asyncio
     async def test_listener_matches_other_listener(self):
         """Listener chaining – listener B listens to listener A."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -754,7 +754,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_and_condition(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -785,7 +785,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_or_condition(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -815,7 +815,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_frontend_crew_name_lookup(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -843,7 +843,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_skip_checkpoint_resume(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -870,7 +870,7 @@ class TestCreateDynamicFlowListeners:
 
     @pytest.mark.asyncio
     async def test_listener_skip_no_checkpoint_output(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -902,7 +902,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_edge_gate(self):
         """HITL enabled on an incoming edge creates a gate method."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -939,7 +939,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_gate_node(self):
         """hitlGateNode type in nodes array creates a gate method."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -972,7 +972,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_gate_node_matches_listener_crew(self):
         """hitlGateNode source matches a listener crew's task."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1012,7 +1012,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_gate_node_matches_crew_id(self):
         """hitlGateNode source matches a listener by crew_id."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1052,7 +1052,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_gate_node_no_source(self):
         """hitlGateNode with no incoming edge uses default method."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1086,7 +1086,7 @@ class TestCreateDynamicFlowHITL:
     @pytest.mark.asyncio
     async def test_hitl_gate_node_source_matches_sp_crew_data(self):
         """hitlGateNode source matches starting_point's crew_data.id."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1122,7 +1122,7 @@ class TestCreateDynamicFlowPersistence:
 
     @pytest.mark.asyncio
     async def test_persist_decorator_applied(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1152,7 +1152,7 @@ class TestCreateDynamicFlowPersistence:
 
     @pytest.mark.asyncio
     async def test_persist_import_error(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1176,7 +1176,7 @@ class TestCreateDynamicFlowPersistence:
 
     @pytest.mark.asyncio
     async def test_persist_generic_error(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1210,7 +1210,7 @@ class TestRouterMethods:
     def _build_flow_with_router(self, router_config, all_tasks=None, flow_config_extra=None):
         """Helper to build a flow with a router and return the flow instance."""
         import asyncio
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1499,7 +1499,7 @@ class TestRouterBuildEvalContext:
     def _build_flow_with_per_route(self, route_conditions, routes=None):
         """Build flow with per-route conditions to exercise build_eval_context."""
         import asyncio
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1705,7 +1705,7 @@ class TestRouteListeners:
 
     @pytest.mark.asyncio
     async def test_route_listener_with_previous_output(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1753,7 +1753,7 @@ class TestRouteListeners:
 
     @pytest.mark.asyncio
     async def test_route_listener_no_previous_output(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1792,7 +1792,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_truncated_output(self):
         """Previous output longer than context limit is truncated."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1835,7 +1835,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_async_tasks_completion(self):
         """Multiple async tasks trigger auto-created completion task."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1879,7 +1879,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_no_job_id(self):
         """No job_id in callbacks → skips callback setup."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1918,7 +1918,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_callback_error(self):
         """Callback creation fails → logs warning but continues."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1959,7 +1959,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_no_crew_name(self):
         """Route with no crewName uses agent role."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -1997,7 +1997,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_no_callbacks(self):
         """callbacks_param is None → skips callback setup."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2036,7 +2036,7 @@ class TestRouteListeners:
     @pytest.mark.asyncio
     async def test_route_listener_empty_route_tasks(self):
         """Route with task IDs not in all_tasks → no listener created."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2070,7 +2070,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_hitl_edge_target_matches_task_id(self):
         """HITL edge target matches a task ID (not crew_id)."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2108,7 +2108,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_hitl_edge_target_contains_crew_id(self):
         """HITL edge target node ID contains crew_id as substring."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2146,7 +2146,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_hitl_edge_resolved_crew_id(self):
         """HITL edge resolved through node_to_crew_map."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2184,7 +2184,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_hitl_edge_not_enabled(self):
         """HITL config exists but enabled=False → no gate created."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2218,7 +2218,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_no_flow_config(self):
         """flow_config=None uses empty defaults."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2239,7 +2239,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_listener_default_method_no_starting_points(self):
         """No starting points at all → uses 'starting_point_0' as default."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2260,7 +2260,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_listener_frontend_crew_name_via_crewName_key(self):
         """Listener frontend config uses 'crewName' instead of 'name'."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2289,7 +2289,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_router_with_listen_to(self):
         """Router with explicit listenTo method name."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2318,7 +2318,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_router_no_starting_points(self):
         """Router with no starting points defaults to 'starting_point_0'."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         router_cfg = {
@@ -2340,7 +2340,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_route_listener_crew_name_from_task(self):
         """Route listener gets crew name from route_tasks config."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2378,7 +2378,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_per_route_conditions_overall_exception(self):
         """Exception at top level of per-route evaluation → None."""
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2428,7 +2428,7 @@ class TestRouterMethodNamePatching:
 
     @pytest.mark.asyncio
     async def test_router_method_has_correct_name(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2458,7 +2458,7 @@ class TestRouterMethodNamePatching:
 
     @pytest.mark.asyncio
     async def test_route_listener_method_has_correct_name(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2498,7 +2498,7 @@ class TestMergeHelpers:
 
     def _build(self, route_conditions):
         import asyncio
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2599,7 +2599,7 @@ class TestBuildFlowAgentCollection:
 
     @pytest.mark.asyncio
     async def test_agents_built_from_tasks(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1", agent_role="Researcher")
         p = _patches()
@@ -2625,7 +2625,7 @@ class TestBuildFlowTaskValidation:
 
     @pytest.mark.asyncio
     async def test_task_found_in_all_tasks(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -2651,7 +2651,7 @@ class TestBuildFlowMissingRepos:
 
     @pytest.mark.asyncio
     async def test_missing_execution_trace_repo(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         task1 = _make_task("t1")
         p = _patches()
@@ -2679,7 +2679,7 @@ class TestListenerSkipCheckpointMissing:
 
     @pytest.mark.asyncio
     async def test_listener_skip_checkpoint_output_not_found(self):
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")
@@ -2710,7 +2710,7 @@ class TestStateJsonParseException:
 
     def _build_flow(self, route_conditions):
         import asyncio
-        from src.engines.crewai.flow.modules.flow_builder import FlowBuilder
+        from src.engines.crewai.paths.flow.modules.flow_builder import FlowBuilder
 
         p = _patches()
         task1 = _make_task("t1")

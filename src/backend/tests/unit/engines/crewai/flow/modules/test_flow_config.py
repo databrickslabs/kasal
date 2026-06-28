@@ -61,7 +61,7 @@ class TestCollectAgentMcpRequirementsNoRepos:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_repositories_none(self):
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
 
         result = await FlowConfigManager.collect_agent_mcp_requirements(
             {"startingPoints": [], "listeners": []}, None
@@ -70,7 +70,7 @@ class TestCollectAgentMcpRequirementsNoRepos:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_task_repo_absent(self):
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
 
         result = await FlowConfigManager.collect_agent_mcp_requirements(
             {"startingPoints": [], "listeners": []}, {"crew": MagicMock()}
@@ -87,7 +87,7 @@ class TestCollectAgentMcpRequirementsEmptyFlow:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_no_tasks_in_flow(self):
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
 
         repos = _make_repos()
         result = await FlowConfigManager.collect_agent_mcp_requirements(
@@ -97,7 +97,7 @@ class TestCollectAgentMcpRequirementsEmptyFlow:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_flow_config_is_empty(self):
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
 
         repos = _make_repos()
         result = await FlowConfigManager.collect_agent_mcp_requirements({}, repos)
@@ -125,7 +125,7 @@ class TestCollectAgentMcpRequirementsDirectAgentId:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
 
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
@@ -147,7 +147,7 @@ class TestCollectAgentMcpRequirementsDirectAgentId:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert "server_X" in result["agent-list"]
@@ -179,7 +179,7 @@ class TestCollectAgentMcpRequirementsDirectAgentId:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert result["agent-dup"].count("dup_server") == 1
@@ -194,7 +194,7 @@ class TestCollectAgentMcpRequirementsDirectAgentId:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert result == {}
@@ -213,7 +213,7 @@ class TestCollectAgentMcpRequirementsDirectAgentId:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert result == {}
@@ -235,7 +235,7 @@ class TestCollectAgentMcpRequirementsTaskNotFound:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert result == {}
@@ -267,7 +267,7 @@ class TestCollectAgentMcpRequirementsFromListeners:
             ],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert "agent-listener" in result
@@ -308,7 +308,7 @@ class TestCollectAgentMcpRequirementsCrewResolution:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         # Agent resolved from crew structure
@@ -332,7 +332,7 @@ class TestCollectAgentMcpRequirementsCrewResolution:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         assert result == {}
@@ -349,7 +349,7 @@ class TestCollectAgentMcpRequirementsCrewResolution:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         # Should return empty rather than propagate
@@ -361,7 +361,7 @@ class TestCollectAgentMcpRequirementsCrewResolution:
         repos = _make_repos()
         flow_config = {"startingPoints": [], "listeners": []}
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(
             flow_config, repos, group_context=MagicMock()
         )
@@ -382,7 +382,7 @@ class TestCollectAgentMcpRequirementsCrewResolution:
             "listeners": [],
         }
 
-        from src.engines.crewai.flow.modules.flow_config import FlowConfigManager
+        from src.engines.crewai.paths.flow.modules.flow_config import FlowConfigManager
         result = await FlowConfigManager.collect_agent_mcp_requirements(flow_config, repos)
 
         # No agent resolved, so result is empty

@@ -7,7 +7,7 @@ such as validators, formatters, and other stateless operations.
 
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from src.engines.crewai.crew_preparation import CrewPreparation
+from src.engines.crewai.paths.crew.crew_preparation import CrewPreparation
 
 
 class TestMemoryOptimization:
@@ -241,10 +241,10 @@ class TestMemoryOptimization:
             }
         }
         
-        with patch('src.engines.crewai.crew_preparation.validate_crew_config', return_value=True):
-            with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_agents', new_callable=AsyncMock, return_value=True):
-                with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_tasks', new_callable=AsyncMock, return_value=True):
-                    with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_crew', new_callable=AsyncMock, return_value=True) as mock_create_crew:
+        with patch('src.engines.crewai.paths.crew.crew_preparation.validate_crew_config', return_value=True):
+            with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_agents', new_callable=AsyncMock, return_value=True):
+                with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_tasks', new_callable=AsyncMock, return_value=True):
+                    with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_crew', new_callable=AsyncMock, return_value=True) as mock_create_crew:
                         crew_prep = CrewPreparation(config)
                         result = await crew_prep.prepare()
                         
@@ -273,10 +273,10 @@ class TestMemoryOptimization:
             }
         }
         
-        with patch('src.engines.crewai.crew_preparation.validate_crew_config', return_value=True):
-            with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_agents', new_callable=AsyncMock, return_value=True):
-                with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_tasks', new_callable=AsyncMock, return_value=True):
-                    with patch('src.engines.crewai.crew_preparation.CrewPreparation._create_crew', new_callable=AsyncMock, return_value=True) as mock_create_crew:
+        with patch('src.engines.crewai.paths.crew.crew_preparation.validate_crew_config', return_value=True):
+            with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_agents', new_callable=AsyncMock, return_value=True):
+                with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_tasks', new_callable=AsyncMock, return_value=True):
+                    with patch('src.engines.crewai.paths.crew.crew_preparation.CrewPreparation._create_crew', new_callable=AsyncMock, return_value=True) as mock_create_crew:
                         crew_prep = CrewPreparation(config)
                         result = await crew_prep.prepare()
                         

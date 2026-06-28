@@ -10,7 +10,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from src.engines.crewai.flow.flow_execution_runner import (
+from src.engines.crewai.paths.flow.flow_execution_runner import (
     update_execution_status_with_retry,
     run_flow_in_process,
     run_flow
@@ -168,12 +168,12 @@ class TestRunFlowInProcess:
         """Test successful flow execution in process."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED', 'result': {'output': 'test'}}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -195,7 +195,7 @@ class TestRunFlowInProcess:
         """Test flow execution failure handling."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'FAILED', 'error': 'Task failed'}
             )
@@ -204,7 +204,7 @@ class TestRunFlowInProcess:
             with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
                 mock_service.get_status = AsyncMock(return_value=MagicMock(status='RUNNING'))
 
-                with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+                with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                     mock_update.return_value = True
 
                     await run_flow_in_process(
@@ -223,7 +223,7 @@ class TestRunFlowInProcess:
         """Test that STOPPED status is preserved and not overwritten."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'FAILED', 'error': 'Process terminated'}
             )
@@ -235,7 +235,7 @@ class TestRunFlowInProcess:
                     return_value=MagicMock(status='STOPPED')
                 )
 
-                with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+                with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=mock_config,
@@ -255,12 +255,12 @@ class TestRunFlowInProcess:
         execution_id = 'exec-123'
         user_token = 'test-token-xyz'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -281,12 +281,12 @@ class TestRunFlowInProcess:
         """Test that group_id is added from group_context."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -307,12 +307,12 @@ class TestRunFlowInProcess:
         execution_id = 'exec-123'
         running_jobs = {execution_id: {'task': MagicMock()}}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -329,13 +329,13 @@ class TestRunFlowInProcess:
         """Test handling of CancelledError (execution cancellation)."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 side_effect=asyncio.CancelledError()
             )
             mock_executor.terminate_execution = AsyncMock()
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -360,12 +360,12 @@ class TestRunFlowInProcess:
         """Test handling of general exceptions."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 side_effect=RuntimeError('Unexpected error')
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -403,7 +403,7 @@ class TestRunFlow:
         """Test that run_flow delegates to run_flow_in_process."""
         execution_id = 'exec-123'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.run_flow_in_process') as mock_run:
             mock_run.return_value = None
 
             await run_flow(
@@ -426,7 +426,7 @@ class TestRunFlow:
         execution_id = 'exec-123'
         mock_group_context = MagicMock()
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.run_flow_in_process') as mock_run:
             mock_run.return_value = None
 
             await run_flow(
@@ -445,7 +445,7 @@ class TestRunFlow:
         execution_id = 'exec-123'
         user_token = 'test-token'
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.run_flow_in_process') as mock_run:
             mock_run.return_value = None
 
             await run_flow(
@@ -469,15 +469,15 @@ class TestRunFlowInProcessLogging:
         config = {'nodes': [], 'edges': []}
         running_jobs = {}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
-                with patch('src.engines.crewai.flow.flow_execution_runner.logger') as mock_logger:
+                with patch('src.engines.crewai.paths.flow.flow_execution_runner.logger') as mock_logger:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=config,
@@ -494,15 +494,15 @@ class TestRunFlowInProcessLogging:
         config = {'nodes': [], 'edges': []}
         running_jobs = {}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
-                with patch('src.engines.crewai.flow.flow_execution_runner.logger') as mock_logger:
+                with patch('src.engines.crewai.paths.flow.flow_execution_runner.logger') as mock_logger:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=config,
@@ -529,12 +529,12 @@ class TestRunFlowInProcessInputExtraction:
         }
         running_jobs = {}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -554,12 +554,12 @@ class TestRunFlowInProcessInputExtraction:
         config = {'nodes': [], 'edges': []}  # No inputs key
         running_jobs = {}
 
-        with patch('src.engines.crewai.flow.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch('src.engines.crewai.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 return_value={'status': 'COMPLETED'}
             )
 
-            with patch('src.engines.crewai.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch('src.engines.crewai.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(

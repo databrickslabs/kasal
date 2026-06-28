@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.crewai.common.task_builder import build_task_args
+from src.engines.crewai.kernel.task_builder import build_task_args
 
 GENIE = {"MCP_SERVERS": {"servers": ["Databricks Genie: space"]}}
 GENIE_MCP_URL = (
@@ -78,7 +78,7 @@ class TestCodeGuardrail:
             patch(
                 "src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
-            patch("src.engines.crewai.common.task_builder.GuardrailWrapper") as MockGW,
+            patch("src.engines.crewai.kernel.task_builder.GuardrailWrapper") as MockGW,
         ):
             MockGF.create_guardrail.return_value = MagicMock()
             MockGW.return_value = MagicMock()
@@ -107,7 +107,7 @@ class TestCodeGuardrail:
                 "src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
             patch(
-                "src.engines.crewai.common.task_builder.GuardrailWrapper",
+                "src.engines.crewai.kernel.task_builder.GuardrailWrapper",
                 return_value=MagicMock(),
             ),
         ):
@@ -240,12 +240,12 @@ class TestOutputPydantic:
 
         with (
             patch(
-                "src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name",
+                "src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name",
                 new_callable=AsyncMock,
                 return_value=FakeModel,
             ),
             patch(
-                "src.engines.crewai.helpers.model_conversion_handler.get_compatible_converter_for_model",
+                "src.engines.crewai.kernel.model_conversion_handler.get_compatible_converter_for_model",
                 return_value=(None, FakeModel, False, False),
             ),
         ):
@@ -263,7 +263,7 @@ class TestOutputPydantic:
     @pytest.mark.asyncio
     async def test_unresolvable_output_pydantic_dropped(self):
         with patch(
-            "src.engines.crewai.helpers.task_adapter.get_pydantic_class_from_name",
+            "src.engines.crewai.paths.crew.task_adapter.get_pydantic_class_from_name",
             new_callable=AsyncMock,
             return_value=None,
         ):

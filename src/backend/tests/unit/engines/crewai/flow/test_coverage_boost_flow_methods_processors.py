@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, AsyncMock, patch, Mock, call
 # flow_methods.py
 # ---------------------------------------------------------------------------
 
-from src.engines.crewai.flow.modules.flow_methods import (
+from src.engines.crewai.paths.flow.modules.flow_methods import (
     extract_final_answer,
     get_model_context_limits,
     FlowMethodFactory,
@@ -625,7 +625,7 @@ class TestFlowMethodFactoryCreateHitlGate:
     @pytest.mark.asyncio
     async def test_hitl_gate_creates_approval_and_raises(self):
         """When no approved approval, creates one and raises FlowPausedForApprovalException."""
-        from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+        from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalException
 
         group_ctx = MagicMock()
         group_ctx.primary_group_id = "g1"
@@ -675,7 +675,7 @@ class TestFlowMethodFactoryCreateHitlGate:
     @pytest.mark.asyncio
     async def test_hitl_gate_fallback_flow_uuid_generated(self):
         """When state has no id, a flow_uuid should be generated."""
-        from src.engines.crewai.flow.exceptions import FlowPausedForApprovalException
+        from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalException
 
         group_ctx = MagicMock()
         group_ctx.primary_group_id = "g1"
@@ -727,7 +727,7 @@ class TestFlowMethodFactoryCreateHitlGate:
 # flow_processors.py
 # ---------------------------------------------------------------------------
 
-from src.engines.crewai.flow.modules.flow_processors import FlowProcessorManager, _to_uuid
+from src.engines.crewai.paths.flow.modules.flow_processors import FlowProcessorManager, _to_uuid
 
 
 class TestToUuid:
@@ -871,9 +871,9 @@ class TestProcessStartingPoints:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
+             patch("src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_starting_points(
                 flow_config=flow_config,
@@ -965,9 +965,9 @@ class TestProcessListeners:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
+             patch("src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_listeners(
                 flow_config=flow_config,
@@ -1112,9 +1112,9 @@ class TestProcessRouters:
         mock_agent_obj = MagicMock()
         mock_task_obj = MagicMock()
 
-        with patch("src.engines.crewai.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+        with patch("src.engines.crewai.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.engines.crewai.flow.modules.task_adapter.TaskConfig.configure_task",
+             patch("src.engines.crewai.paths.flow.modules.task_adapter.TaskConfig.configure_task",
                    new=AsyncMock(return_value=mock_task_obj)):
             result = await FlowProcessorManager.process_routers(
                 flow_config=flow_config,

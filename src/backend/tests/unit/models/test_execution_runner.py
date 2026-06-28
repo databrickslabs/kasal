@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from typing import Dict, Any
 import os
 
-from src.engines.crewai.execution_runner import run_crew, update_execution_status_with_retry
+from src.engines.crewai.paths.crew.execution_runner import update_execution_status_with_retry
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
 
@@ -52,189 +52,6 @@ def mock_group_context():
     context = MagicMock()
     context.primary_group_id = "test-group-123"
     return context
-
-
-@pytest.mark.asyncio
-class TestRunCrew:
-    """Test suite for run_crew function."""
-    
-    async def test_run_crew_success(self, sample_crew, sample_running_jobs, mock_group_context):
-        """Test successful crew execution."""
-        execution_id = "test-exec-id"
-        user_token = "test-token"
-        
-        with patch('src.utils.user_context.UserContext') as mock_user_context, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
-             patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
-             patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
-             patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
-             patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
-            
-            # Setup mocks
-            mock_status_service.update_status = AsyncMock()
-            mock_crew_logger.setup_for_job = MagicMock()
-            mock_crew_logger.cleanup_for_job = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__enter__ = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__exit__ = MagicMock()
-            mock_event_streaming.return_value.cleanup = MagicMock()
-            mock_llm_manager.configure_crewai_llm = AsyncMock()
-            mock_api_keys.setup_openai_api_key = AsyncMock()
-            mock_api_keys.setup_anthropic_api_key = AsyncMock()
-            mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_crew_executor_run.return_value = "crew execution result"
-            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
-            mock_create_crew_callbacks.return_value = {
-                'on_start': MagicMock(),
-                'on_complete': MagicMock(),
-                'on_error': MagicMock()
-            }
-            mock_update_status.return_value = True
-            mock_stop_adapters.return_value = None
-            
-            # Setup crew agents with LLM attributes
-            for agent in sample_crew.agents:
-                agent.llm = MagicMock()
-                agent.role = "test-role"
-            
-            await run_crew(execution_id, sample_crew, sample_running_jobs, mock_group_context, user_token)
-            
-            # Verify user context was set
-            mock_user_context.set_user_token.assert_called_once_with(user_token)
-            mock_user_context.set_group_context.assert_called_once_with(mock_group_context)
-            
-            # Verify status updates
-            assert mock_status_service.update_status.call_count >= 1
-            mock_status_service.update_status.assert_any_call(
-                job_id=execution_id,
-                status=ExecutionStatus.RUNNING.value,
-                message="CrewAI execution is running",
-                only_if_changed=True
-            )
-            
-            # Verify crew execution
-            mock_crew_executor_run.assert_called_once()
-            
-            # Verify final status update
-            mock_update_status.assert_called_once_with(
-                execution_id,
-                ExecutionStatus.COMPLETED.value,
-                "CrewAI execution completed successfully",
-                "crew execution result"
-            )
-
-    async def test_run_crew_cleanup_operations(self, sample_crew, sample_running_jobs):
-        """Test cleanup operations are performed."""
-        execution_id = "test-exec-id"
-
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
-             patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
-             patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
-             patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
-            
-            # Setup mocks
-            mock_status_service.update_status = AsyncMock()
-            mock_crew_logger.setup_for_job = MagicMock()
-            mock_crew_logger.cleanup_for_job = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__enter__ = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__exit__ = MagicMock()
-            mock_event_streaming_instance = MagicMock()
-            mock_event_streaming.return_value = mock_event_streaming_instance
-            mock_api_keys.setup_openai_api_key = AsyncMock()
-            mock_api_keys.setup_anthropic_api_key = AsyncMock()
-            mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_crew_executor_run.return_value = "success"
-            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
-            mock_create_crew_callbacks.return_value = {
-                'on_start': MagicMock(),
-                'on_complete': MagicMock(),
-                'on_error': MagicMock()
-            }
-            mock_update_status.return_value = True
-            mock_stop_adapters.return_value = None
-            
-            # Setup crew agents
-            for agent in sample_crew.agents:
-                agent.llm = MagicMock()
-                agent.role = "test-role"
-            
-            await run_crew(execution_id, sample_crew, sample_running_jobs)
-            
-            # Verify cleanup operations
-            mock_event_streaming_instance.cleanup.assert_called_once()
-            mock_crew_logger.cleanup_for_job.assert_called_once_with(execution_id)
-            mock_stop_adapters.assert_called_once()
-            
-            # Verify job was removed from running_jobs
-            assert execution_id not in sample_running_jobs
-
-    async def test_run_crew_no_user_context(self, sample_crew, sample_running_jobs):
-        """Test crew execution without user token or group context."""
-        execution_id = "test-exec-id"
-
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
-             patch('src.engines.crewai.crew_logger.crew_logger') as mock_crew_logger, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_streaming, \
-             patch('src.services.api_keys_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.crew_executor.crew_executor.run_crew', new_callable=AsyncMock) as mock_crew_executor_run, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_execution_callbacks') as mock_create_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.create_crew_callbacks') as mock_create_crew_callbacks, \
-             patch('src.engines.crewai.callbacks.execution_callback.log_crew_initialization'), \
-             patch('src.engines.crewai.trace_management.TraceManager.ensure_writer_started', new_callable=AsyncMock), \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener'), \
-             patch('src.engines.crewai.tools.mcp_handler.stop_all_adapters', new_callable=AsyncMock) as mock_stop_adapters, \
-             patch('src.engines.crewai.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update_status:
-            
-            # Setup mocks
-            mock_status_service.update_status = AsyncMock()
-            mock_crew_logger.setup_for_job = MagicMock()
-            mock_crew_logger.cleanup_for_job = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__enter__ = MagicMock()
-            mock_crew_logger.capture_stdout_stderr.return_value.__exit__ = MagicMock()
-            mock_event_streaming.return_value.cleanup = MagicMock()
-            mock_api_keys.setup_openai_api_key = AsyncMock()
-            mock_api_keys.setup_anthropic_api_key = AsyncMock()
-            mock_api_keys.setup_gemini_api_key = AsyncMock()
-            mock_crew_executor_run.return_value = "success"
-            mock_create_callbacks.return_value = (MagicMock(), MagicMock())
-            mock_create_crew_callbacks.return_value = {
-                'on_start': MagicMock(),
-                'on_complete': MagicMock(),
-                'on_error': MagicMock()
-            }
-            mock_update_status.return_value = True
-            mock_stop_adapters.return_value = None
-            
-            # Setup crew agents
-            for agent in sample_crew.agents:
-                agent.llm = MagicMock()
-                agent.role = "test-role"
-            
-            # Call without user token or group context
-            await run_crew(execution_id, sample_crew, sample_running_jobs)
-            
-            # Verify successful execution even without user context
-            mock_update_status.assert_called_once_with(
-                execution_id,
-                ExecutionStatus.COMPLETED.value,
-                "CrewAI execution completed successfully",
-                "success"
-            )
 
 
 @pytest.mark.asyncio
@@ -365,7 +182,7 @@ class TestSubprocessTracebackSurfacing:
 
     @pytest.mark.asyncio
     async def test_failed_result_traceback_is_logged(self, caplog):
-        from src.engines.crewai.execution_runner import run_crew_in_process
+        from src.engines.crewai.paths.crew.execution_runner import run_crew_in_process
 
         failed_result = {
             "status": "FAILED",
@@ -375,16 +192,16 @@ class TestSubprocessTracebackSurfacing:
         }
 
         with patch(
-            "src.engines.crewai.execution_runner.process_crew_executor.run_crew_isolated",
+            "src.engines.crewai.paths.crew.execution_runner.process_crew_executor.run_crew_isolated",
             new_callable=AsyncMock,
             return_value=failed_result,
         ), patch(
-            "src.engines.crewai.execution_runner.update_execution_status_with_retry",
+            "src.engines.crewai.paths.crew.execution_runner.update_execution_status_with_retry",
             new_callable=AsyncMock,
             return_value=True,
         ):
             import logging as _logging
-            with caplog.at_level(_logging.ERROR, logger="src.engines.crewai.execution_runner"):
+            with caplog.at_level(_logging.ERROR, logger="src.engines.crewai.paths.crew.execution_runner"):
                 await run_crew_in_process("exec-tb", {"agents": {}}, {})
 
         log_text = caplog.text

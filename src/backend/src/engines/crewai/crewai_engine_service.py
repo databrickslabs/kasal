@@ -40,18 +40,17 @@ from src.engines.base.base_engine_service import BaseEngineService
 from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
-from src.engines.crewai.trace_management import TraceManager
-from src.engines.crewai.execution_runner import run_crew, run_crew_in_process, update_execution_status_with_retry
-from src.engines.crewai.flow.flow_execution_runner import run_flow_in_process
+from src.engines.crewai.infra.trace_management import TraceManager
+from src.engines.crewai.paths.crew.execution_runner import run_crew_in_process, update_execution_status_with_retry
+from src.engines.crewai.paths.flow.flow_execution_runner import run_flow_in_process
 from src.engines.crewai.config_adapter import normalize_config, normalize_flow_config
-from src.engines.crewai.crew_preparation import CrewPreparation
+from src.engines.crewai.paths.crew.crew_preparation import CrewPreparation
 
 # Import the logging callbacks
 from src.engines.crewai.callbacks.logging_callbacks import AgentTraceEventListener, TaskCompletionEventListener
 
 # Import CrewAI components
 from crewai import Crew
-from crewai.flow import Flow
 
 # Import logger manager
 from src.core.logger import LoggerManager
@@ -141,7 +140,7 @@ class CrewAIEngineService(BaseEngineService):
         await TraceManager.ensure_writer_started()
         try:
             # Set up CrewAI library logging via our centralized logger
-            from src.engines.crewai.crew_logger import crew_logger
+            from src.engines.crewai.infra.crew_logger import crew_logger
 
             # Choose logger based on execution type if provided
             execution_type = kwargs.get("execution_type", "crew")
@@ -599,38 +598,33 @@ class CrewAIEngineService(BaseEngineService):
             )
             raise
 
-    async def _execute_flow(self, execution_id: str, flow: Flow) -> None:
-        """
-        Execute a flow and handle its completion.
-        
+    async def run_light_agent_execution(
+        self,
+        execution_id: str,
+        config: Any,
+        group_context: GroupContext = None,
+        session=None,
+    ) -> Dict[str, Any]:
+        """Run a single agent ("chat"/light) execution at the engine level.
+
+        CrewAI-specific counterpart to :meth:`run_execution` for the light path:
+        the service layer resolves the engine and delegates here so the actual
+        agent build + ``Agent.kickoff_async`` + trace emission live in the
+        engine. Unlike :meth:`run_execution` (which isolates the crew in a
+        subprocess), this runs IN-PROCESS for sub-second latency. Like
+        :meth:`run_flow`, it is a CrewAI-engine-specific extension and not part
+        of the :class:`BaseEngineService` contract.
+
         Args:
-            execution_id: Execution ID
-            flow: The flow to execute
+            execution_id: Execution/job ID (already has a RUNNING row).
+            config: ``CrewConfig`` with exactly one agent + one task.
+            group_context: Optional multi-tenant context (group + OBO token).
+            session: Unused; kept for signature parity with the crew path.
+
+        Returns:
+            ``{"execution_id", "status"[, "error"]}``.
         """
-        try:
-            # Execute the flow
-            result = await flow.kickoff()
-            
-            # Update status to COMPLETED
-            await self._update_execution_status(
-                execution_id,
-                ExecutionStatus.COMPLETED.value,
-                "Flow execution completed successfully"
-            )
-            
-            # Store the result
-            if execution_id in self._running_jobs:
-                self._running_jobs[execution_id]["result"] = result
-                
-        except Exception as e:
-            logger.error(f"[CrewAIEngineService] Error executing flow {execution_id}: {str(e)}", exc_info=True)
-            await self._update_execution_status(
-                execution_id,
-                ExecutionStatus.FAILED.value,
-                f"Flow execution failed: {str(e)}"
-            )
-            
-        finally:
-            # Clean up the running job entry
-            if execution_id in self._running_jobs:
-                self._running_jobs[execution_id]["end_time"] = datetime.now(UTC) 
+        from src.engines.crewai.paths.light_agent.light_agent_service import LightAgentService
+        return await LightAgentService().run_light_agent_execution(
+            execution_id, config, group_context, session
+        )

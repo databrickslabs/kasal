@@ -2,7 +2,7 @@
 Coverage tests for engines/crewai/helpers/conversion_helpers.py
 Covers missing lines: 41-44 (knowledge_sources branch), 63-70 (tool_configs branch)
 """
-from src.engines.crewai.helpers.conversion_helpers import extract_crew_yaml_data
+from src.engines.crewai.paths.crew.conversion_helpers import extract_crew_yaml_data
 
 
 def test_extract_agent_with_knowledge_sources():

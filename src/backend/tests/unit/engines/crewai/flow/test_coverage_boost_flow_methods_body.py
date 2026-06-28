@@ -10,7 +10,7 @@ import uuid
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch, Mock
 
-from src.engines.crewai.flow.modules.flow_methods import FlowMethodFactory, extract_final_answer
+from src.engines.crewai.paths.flow.modules.flow_methods import FlowMethodFactory, extract_final_answer
 
 
 def _make_task(role="Agent", has_context=False, has_kasal_memory_disabled=False):
@@ -68,8 +68,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             mock_result = MagicMock()
@@ -104,8 +104,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             crew_kwargs_captured = {}
 
@@ -146,8 +146,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -189,8 +189,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -234,9 +234,9 @@ class TestStartingPointMethodBody:
         )
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.common.trace_context.attach_execution_trace_context") as mock_attach:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.kernel.trace_context.attach_execution_trace_context") as mock_attach:
             MockCrew.return_value = MagicMock()
             mock_result = MagicMock()
             mock_result.raw = "res"
@@ -274,9 +274,9 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Process") as MockProcess:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Process") as MockProcess:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -317,8 +317,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
              patch("src.core.llm_manager.LLMManager") as MockLLM:
             mock_llm = MagicMock()
             MockLLM.get_llm = AsyncMock(return_value=mock_llm)
@@ -362,8 +362,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -405,8 +405,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
              patch("src.core.llm_manager.LLMManager") as MockLLM:
             MockLLM.get_llm = AsyncMock(side_effect=Exception("LLM error"))
             crew_kwargs_captured = {}
@@ -450,8 +450,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -493,8 +493,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
              patch("src.engines.crewai.config.embedder_config_builder.EmbedderConfigBuilder") as MockEmb:
             mock_builder = MagicMock()
             mock_builder.configure_embedder = AsyncMock(return_value=({"memory": True, "embedder": {"provider": "test"}}, None, None))
@@ -535,8 +535,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
              patch("src.engines.crewai.config.embedder_config_builder.EmbedderConfigBuilder", side_effect=ImportError("no embedder")):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
@@ -565,8 +565,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             mock_wait.return_value = None  # Returns None
@@ -595,8 +595,8 @@ class TestStartingPointMethodBody:
             def __str__(self):
                 return "no raw result"
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             no_raw = NoRaw()
@@ -622,8 +622,8 @@ class TestStartingPointMethodBody:
 
         mock_flow = _make_flow_instance(state={})
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             mock_result = MagicMock()
@@ -652,8 +652,8 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
         long_result = "x" * 500  # >400 chars
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             mock_result = MagicMock()
@@ -696,9 +696,9 @@ class TestListenerMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -732,9 +732,9 @@ class TestListenerMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             runtime_task = MagicMock(agent=task.agent, expected_output="out")
@@ -766,9 +766,9 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance()
         large_output = "x" * 3000  # >2000 chars
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             MockTask.return_value = MagicMock(agent=task.agent, expected_output="out")
@@ -806,10 +806,10 @@ class TestListenerMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
              patch("src.core.llm_manager.LLMManager") as MockLLM, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             mock_llm = MagicMock()
             MockLLM.get_llm = AsyncMock(return_value=mock_llm)
             crew_kwargs_captured = {}
@@ -854,9 +854,9 @@ class TestListenerMethodBody:
 
         mock_flow = _make_flow_instance()
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_kwargs_captured = {}
 
             def capture_kwargs(**kwargs):
@@ -907,9 +907,9 @@ class TestListenerMethodBody:
             "measure_resolutions": {}
         })
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             MockTask.return_value = MagicMock(agent=task.agent, expected_output="out")
@@ -943,9 +943,9 @@ class TestListenerMethodBody:
         }
         mock_flow = _make_flow_instance(state=state)
 
-        with patch("src.engines.crewai.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.crewai.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.crewai.flow.modules.flow_methods.Task") as MockTask:
+        with patch("src.engines.crewai.paths.flow.modules.flow_methods.Crew") as MockCrew, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
+             patch("src.engines.crewai.paths.flow.modules.flow_methods.Task") as MockTask:
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             MockTask.return_value = MagicMock(agent=task.agent, expected_output="out")

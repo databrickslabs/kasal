@@ -4146,10 +4146,55 @@ class TestBuildCrewConfigFromGenerated:
         assert cfg["tasks_yaml"]["task_t1"]["context"] == ["task_t0"]
         # description grounded with the user request
         assert "find swiss poets" in cfg["tasks_yaml"]["task_t1"]["description"]
-        # top-level execution config
-        assert cfg["model"] == "m1" and cfg["execution_type"] == "crew"
+        # top-level execution config. Default answer mode is 'chat' → a single
+        # light agent (execution_type='agent'), no planning/reasoning.
+        assert cfg["model"] == "m1" and cfg["execution_type"] == "agent"
         assert cfg["planning"] is False and cfg["reasoning"] is False
         assert cfg["session_id"] == "s1" and cfg["memory_workspace_scope"] is False
+
+    def test_chat_mode_type_drives_reasoning_planning_execution_type(self, monkeypatch):
+        """The ChatMode answer mode maps to reasoning / planning / execution_type:
+        chat → single light agent; research → crew + reasoning; deep → crew +
+        planning (with an explicit planning_llm) + reasoning."""
+        # Local-model reasoning guard must be off so research/deep reason here.
+        monkeypatch.delenv("LOCAL_LLM_BASE_URL", raising=False)
+        agents = [{"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": []}]
+        tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
+
+        chat = CrewGenerationService.build_crew_config_from_generated(
+            self._req(chat_mode_type="chat", model="m1"), agents, tasks
+        )
+        assert chat["execution_type"] == "agent"
+        assert chat["planning"] is False and chat["reasoning"] is False
+        assert "planning_llm" not in chat["inputs"]
+
+        research = CrewGenerationService.build_crew_config_from_generated(
+            self._req(chat_mode_type="research", model="m1"), agents, tasks
+        )
+        assert research["execution_type"] == "crew"
+        assert research["reasoning"] is True and research["planning"] is False
+        assert "planning_llm" not in research["inputs"]
+
+        deep = CrewGenerationService.build_crew_config_from_generated(
+            self._req(chat_mode_type="deep", model="m1"), agents, tasks
+        )
+        assert deep["execution_type"] == "crew"
+        assert deep["reasoning"] is True and deep["planning"] is True
+        # Deep planning must carry an explicit planning_llm (no OpenAI default 401).
+        assert deep["inputs"].get("planning_llm") == "m1"
+
+    def test_local_llm_disables_reasoning(self, monkeypatch):
+        """CrewAI structured reasoning breaks on local endpoints, so reasoning is
+        force-disabled when LOCAL_LLM_BASE_URL is set (even for research/deep)."""
+        monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://localhost:8081/v1")
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(chat_mode_type="deep", model="m1"),
+            [{"id": "a1", "role": "r"}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        assert cfg["reasoning"] is False
+        # planning still on for deep (only reasoning is gated by the local guard)
+        assert cfg["planning"] is True
 
     def test_mcp_servers_injected_into_agents_and_tasks(self):
         req = self._req(mcp_servers=["Databricks Genie: Sales"])
@@ -4254,3 +4299,93 @@ class TestBuildCrewConfigFromGenerated:
         # Other tools kept; only AgentBricksTool (71) stripped.
         assert without_ep["agents_yaml"]["agent_a1"]["tools"] == ["35", "SerperDevTool"]
         assert without_ep["tasks_yaml"]["task_t1"]["tools"] == ["35"]
+
+
+class TestChatFastPath:
+    """ChatMode 'chat' answer mode bypasses crew generation (no plan/agent/task
+    LLM calls) and runs the light agent directly on the raw prompt."""
+
+    @staticmethod
+    def _req(**kw):
+        from src.schemas.crew import CrewStreamingRequest
+        return CrewStreamingRequest(prompt="p", **kw)
+
+    @pytest.mark.asyncio
+    async def test_fast_path_executes_without_generation_and_emits_complete(self):
+        """_run_chat_fast_path synthesizes a default agent+task, auto-executes the
+        light agent, and emits a single generation_complete with execution_id."""
+        svc = CrewGenerationService(MagicMock())
+        req = self._req(
+            original_prompt="what's the weather",
+            model="m1",
+            auto_execute=True,
+            session_id="s1",
+            tools=["webtool"],
+        )
+
+        exec_instance = MagicMock()
+        exec_instance.create_execution = AsyncMock(
+            return_value={"execution_id": "exec-1", "run_name": "Run A"}
+        )
+        broadcast = AsyncMock()
+        with patch("src.services.execution_service.ExecutionService", MagicMock(return_value=exec_instance)), \
+             patch.object(_mod.sse_manager, "broadcast_to_job", broadcast):
+            await svc._run_chat_fast_path(req, None, "gen-1", None)
+
+        # Light agent execution launched from a config built WITHOUT generation.
+        exec_instance.create_execution.assert_awaited_once()
+        crew_config = exec_instance.create_execution.await_args.kwargs["config"]
+        assert crew_config.execution_type == "agent"           # light path
+        assert crew_config.planning is False and crew_config.reasoning is False
+        assert crew_config.session_id == "s1"
+        # Exactly one default assistant agent + one task, carrying the attached tool.
+        assert len(crew_config.agents_yaml) == 1
+        agent = next(iter(crew_config.agents_yaml.values()))
+        assert agent["role"] == "Assistant" and "webtool" in agent["tools"]
+
+        # Single terminal event carrying the execution_id the chat UI needs.
+        broadcast.assert_awaited_once()
+        _gen_id, event = broadcast.await_args.args
+        assert event.event == "generation_complete"
+        assert event.data["execution_id"] == "exec-1"
+        assert event.data["run_name"] == "Run A"
+        assert len(event.data["agents"]) == 1 and len(event.data["tasks"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_fast_path_execution_error_is_surfaced_not_raised(self):
+        """A failure launching the run is reported on generation_complete, never
+        raised (so the chat shows an error instead of hanging)."""
+        svc = CrewGenerationService(MagicMock())
+        req = self._req(original_prompt="hi", auto_execute=True)
+        exec_instance = MagicMock()
+        exec_instance.create_execution = AsyncMock(side_effect=RuntimeError("boom"))
+        broadcast = AsyncMock()
+        with patch("src.services.execution_service.ExecutionService", MagicMock(return_value=exec_instance)), \
+             patch.object(_mod.sse_manager, "broadcast_to_job", broadcast):
+            await svc._run_chat_fast_path(req, None, "gen-1", None)
+        event = broadcast.await_args.args[1]
+        assert event.data.get("execution_error") == "boom"
+        assert "execution_id" not in event.data
+
+    @pytest.mark.asyncio
+    async def test_chat_mode_takes_fast_path_skipping_generation(self):
+        """create_crew_progressive routes a chat+auto_execute request to the fast
+        path and NEVER runs the planning LLM call."""
+        svc = CrewGenerationService(MagicMock())
+        req = self._req(chat_mode_type="chat", auto_execute=True)
+        with patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast, \
+             patch.object(svc, "_generate_crew_plan", new=AsyncMock()) as plan:
+            await svc.create_crew_progressive(req, None, "gen-1", mlflow_enabled=False)
+        fast.assert_awaited_once()
+        plan.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_research_mode_does_not_take_fast_path(self):
+        """research/deep still generate a crew (fast path is chat-only)."""
+        svc = CrewGenerationService(MagicMock())
+        req = self._req(chat_mode_type="research", auto_execute=True)
+        with patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast, \
+             patch.object(svc, "_generate_crew_plan", new=AsyncMock(return_value={"agents": [], "tasks": []})) as plan:
+            await svc.create_crew_progressive(req, None, "gen-1", mlflow_enabled=False)
+        fast.assert_not_called()
+        plan.assert_awaited_once()

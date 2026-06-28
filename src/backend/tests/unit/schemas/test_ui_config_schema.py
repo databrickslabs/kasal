@@ -3,11 +3,13 @@ from src.schemas.ui_config import UIConfigBase, UIConfigUpdate, UIConfigResponse
 from src.models.ui_config import UIConfig
 
 
-def test_base_defaults_are_enabled_minimal():
-    # UI is enabled by default — the UI-document emission owns output formatting.
+def test_base_defaults_are_enabled_full_catalog():
+    # UI is enabled by default and defaults to the "full" catalog so that saving a
+    # config never silently strips rich surfaces (presentations/dashboards/charts/
+    # quizzes). "minimal" is an explicit opt-in restriction.
     b = UIConfigBase()
     assert b.enabled is True
-    assert b.catalog_type == "minimal"
+    assert b.catalog_type == "full"
     assert b.catalog_json is None
     assert b.style_json is None
 
@@ -19,7 +21,7 @@ def test_update_inherits_base_fields():
 
 
 def test_response_reads_from_model_attributes():
-    cfg = UIConfig(id=2, group_id="g", enabled=True, catalog_type="basic", created_by_email="a@b.com")
+    cfg = UIConfig(id=2, group_id="g", enabled=True, catalog_type="full", created_by_email="a@b.com")
     r = UIConfigResponse.model_validate(cfg)
     assert r.id == 2
     assert r.group_id == "g"

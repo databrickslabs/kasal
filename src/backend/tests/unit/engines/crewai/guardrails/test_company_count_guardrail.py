@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any
 from crewai.tasks.task_output import TaskOutput
 
-from src.engines.crewai.guardrails.company_count_guardrail import CompanyCountGuardrail
+from src.engines.crewai.guardrails.demo.company_count_guardrail import CompanyCountGuardrail
 
 
 class TestCompanyCountGuardrail:
     """Test suite for CompanyCountGuardrail class."""
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger_manager')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger_manager')
     def test_guardrail_initialization_default_config(self, mock_logger_manager):
         """Test guardrail initialization with default configuration."""
         mock_logger = MagicMock()
@@ -25,7 +25,7 @@ class TestCompanyCountGuardrail:
         assert guardrail.config == config
         assert guardrail.min_companies == 50  # Default value
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger_manager')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger_manager')
     def test_guardrail_initialization_custom_config(self, mock_logger_manager):
         """Test guardrail initialization with custom configuration."""
         mock_logger = MagicMock()
@@ -40,7 +40,7 @@ class TestCompanyCountGuardrail:
         assert guardrail.config == config
         assert guardrail.min_companies == 25
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger_manager')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger_manager')
     def test_guardrail_initialization_zero_min_companies(self, mock_logger_manager):
         """Test guardrail initialization with zero min_companies."""
         mock_logger = MagicMock()
@@ -58,7 +58,7 @@ class TestCompanyCountGuardrail:
         """Test that logger manager initialization is called at module level."""
         # This test verifies that the module-level initialization check exists
         # The actual initialization happens at import time, not during class creation
-        from src.engines.crewai.guardrails import company_count_guardrail
+        from src.engines.crewai.guardrails.demo import company_count_guardrail
         
         # Verify the logger_manager exists and has the expected structure
         assert hasattr(company_count_guardrail, 'logger_manager')
@@ -69,7 +69,7 @@ class TestCompanyCountGuardrail:
         guardrail = CompanyCountGuardrail(config)
         assert guardrail.min_companies == 10
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_method_exists(self, mock_logger):
         """Test that validate method exists and is callable."""
         guardrail = CompanyCountGuardrail({"min_companies": 5})
@@ -77,7 +77,7 @@ class TestCompanyCountGuardrail:
         assert hasattr(guardrail, 'validate')
         assert callable(guardrail.validate)
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_empty_output(self, mock_logger):
         """Test validate method with empty output."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})
@@ -87,7 +87,7 @@ class TestCompanyCountGuardrail:
         assert result["valid"] is False
         assert "No content found" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_none_text_content(self, mock_logger):
         """Test validate method when _get_output_text returns None."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})
@@ -104,7 +104,7 @@ class TestCompanyCountGuardrail:
             assert result["valid"] is False
             assert "No content found" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_sufficient_companies(self, mock_logger):
         """Test validate method with sufficient companies."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})
@@ -117,7 +117,7 @@ class TestCompanyCountGuardrail:
         assert result["valid"] is True
         assert result["feedback"] == ""
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_insufficient_companies(self, mock_logger):
         """Test validate method with insufficient companies."""
         guardrail = CompanyCountGuardrail({"min_companies": 50})
@@ -131,7 +131,7 @@ class TestCompanyCountGuardrail:
         assert "only includes" in result["feedback"]
         assert "at least 50" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_guardrail_inherits_from_base(self, mock_logger):
         """Test that CompanyCountGuardrail inherits from BaseGuardrail."""
         from src.engines.crewai.guardrails.base_guardrail import BaseGuardrail
@@ -142,7 +142,7 @@ class TestCompanyCountGuardrail:
         assert hasattr(guardrail, 'config')
         assert hasattr(guardrail, 'validate')
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_config_parameter_access(self, mock_logger):
         """Test access to various config parameters."""
         config = {
@@ -162,7 +162,7 @@ class TestCompanyCountGuardrail:
         assert guardrail.config["patterns"] == ["Company", "Corp", "Inc"]
         assert guardrail.config["validation_rules"]["case_sensitive"] is False
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_negative_min_companies(self, mock_logger):
         """Test guardrail with negative min_companies."""
         config = {"min_companies": -5}
@@ -170,7 +170,7 @@ class TestCompanyCountGuardrail:
         
         assert guardrail.min_companies == -5
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_large_min_companies(self, mock_logger):
         """Test guardrail with very large min_companies."""
         config = {"min_companies": 1000000}
@@ -178,7 +178,7 @@ class TestCompanyCountGuardrail:
         
         assert guardrail.min_companies == 1000000
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_config_with_non_integer_min_companies(self, mock_logger):
         """Test guardrail with non-integer min_companies."""
         # Test with string that can be converted
@@ -191,7 +191,7 @@ class TestCompanyCountGuardrail:
         guardrail = CompanyCountGuardrail(config)
         assert guardrail.min_companies == 25.5
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_empty_config_uses_defaults(self, mock_logger):
         """Test that empty config uses default values."""
         guardrail = CompanyCountGuardrail({})
@@ -199,7 +199,7 @@ class TestCompanyCountGuardrail:
         assert guardrail.min_companies == 50  # Default value
         assert guardrail.config == {}
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_config_parameter_types(self, mock_logger):
         """Test various config parameter types."""
         config = {
@@ -217,7 +217,7 @@ class TestCompanyCountGuardrail:
         assert all(key in guardrail.config for key in config.keys())
     
     # Test _get_output_text method comprehensively
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_string(self, mock_logger):
         """Test _get_output_text with string input."""
         guardrail = CompanyCountGuardrail({})
@@ -225,7 +225,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text("test string")
         assert result == "test string"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_task_output(self, mock_logger):
         """Test _get_output_text with TaskOutput object."""
         guardrail = CompanyCountGuardrail({})
@@ -237,7 +237,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(mock_task_output)
         assert result == "task output content"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_task_output_raw_output(self, mock_logger):
         """Test _get_output_text with TaskOutput object with raw_output."""
         guardrail = CompanyCountGuardrail({})
@@ -250,7 +250,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(mock_task_output)
         assert result == "raw output content"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_task_output_fallback_to_str(self, mock_logger):
         """Test _get_output_text with TaskOutput object falling back to str()."""
         guardrail = CompanyCountGuardrail({})
@@ -272,7 +272,7 @@ class TestCompanyCountGuardrail:
         """Test module-level initialization code path."""
         # This test ensures the module-level initialization check exists
         # by importing the module and checking that the logger exists
-        from src.engines.crewai.guardrails import company_count_guardrail
+        from src.engines.crewai.guardrails.demo import company_count_guardrail
         
         # Verify that the module has the expected attributes after initialization
         assert hasattr(company_count_guardrail, 'logger_manager')
@@ -281,7 +281,7 @@ class TestCompanyCountGuardrail:
         # The initialization code exists and has been executed during import
         # This covers the module-level initialization logic
         
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_dict(self, mock_logger):
         """Test _get_output_text with dictionary input."""
         guardrail = CompanyCountGuardrail({})
@@ -296,7 +296,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(dict_input)
         assert result == "raw dict content"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_dict_json_fallback(self, mock_logger):
         """Test _get_output_text with dict falling back to JSON string."""
         guardrail = CompanyCountGuardrail({})
@@ -307,7 +307,7 @@ class TestCompanyCountGuardrail:
         assert '"unknown_key": "value"' in result
         assert '"another_key": 123' in result
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_unsupported_type(self, mock_logger):
         """Test _get_output_text with unsupported type."""
         guardrail = CompanyCountGuardrail({})
@@ -320,7 +320,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(123)
         assert result == "123"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_none(self, mock_logger):
         """Test _get_output_text with None input."""
         guardrail = CompanyCountGuardrail({})
@@ -328,7 +328,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(None)
         assert result == "None"
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_exception(self, mock_logger):
         """Test _get_output_text when str() raises exception."""
         guardrail = CompanyCountGuardrail({})
@@ -341,7 +341,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(BadObject())
         assert result is None
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_task_output_str_exception(self, mock_logger):
         """Test _get_output_text with TaskOutput object when str() fails."""
         guardrail = CompanyCountGuardrail({})
@@ -359,7 +359,7 @@ class TestCompanyCountGuardrail:
         result = guardrail._get_output_text(mock_task_output)
         assert result is None
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_get_output_text_with_dict_json_exception(self, mock_logger):
         """Test _get_output_text with dict when JSON conversion fails."""
         guardrail = CompanyCountGuardrail({})
@@ -375,7 +375,7 @@ class TestCompanyCountGuardrail:
         assert result is None
     
     # Test _extract_companies method comprehensively
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_standard_suffixes(self, mock_logger):
         """Test _extract_companies with standard company suffixes."""
         guardrail = CompanyCountGuardrail({})
@@ -387,7 +387,7 @@ class TestCompanyCountGuardrail:
         # Check that at least some companies are extracted
         assert any("Apple" in company for company in companies)
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_swiss_companies(self, mock_logger):
         """Test _extract_companies with Swiss company identifiers."""
         guardrail = CompanyCountGuardrail({})
@@ -400,7 +400,7 @@ class TestCompanyCountGuardrail:
         assert "Roche" in companies
         assert "UBS" in companies
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_uid_pattern(self, mock_logger):
         """Test _extract_companies with UID pattern."""
         guardrail = CompanyCountGuardrail({})
@@ -411,7 +411,7 @@ class TestCompanyCountGuardrail:
         assert len(companies) > 0
         assert any("Example Swiss Company AG" in company for company in companies)
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_quoted_names(self, mock_logger):
         """Test _extract_companies with quoted company names."""
         guardrail = CompanyCountGuardrail({})
@@ -422,7 +422,7 @@ class TestCompanyCountGuardrail:
         assert len(companies) > 0
         assert any("Quoted Company Name" in company for company in companies)
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_filters_common_words(self, mock_logger):
         """Test _extract_companies filters out common words."""
         guardrail = CompanyCountGuardrail({})
@@ -436,7 +436,7 @@ class TestCompanyCountGuardrail:
         assert "Company" not in companies
         assert "Corporation" not in companies
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_filters_short_names(self, mock_logger):
         """Test _extract_companies filters out very short names."""
         guardrail = CompanyCountGuardrail({})
@@ -450,7 +450,7 @@ class TestCompanyCountGuardrail:
         # But should include longer names
         assert any("ABC" in company for company in companies)
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_empty_text(self, mock_logger):
         """Test _extract_companies with empty text."""
         guardrail = CompanyCountGuardrail({})
@@ -458,7 +458,7 @@ class TestCompanyCountGuardrail:
         companies = guardrail._extract_companies("")
         assert len(companies) == 0
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_with_tuple_matches(self, mock_logger):
         """Test _extract_companies with regex patterns that return tuples."""
         guardrail = CompanyCountGuardrail({})
@@ -481,7 +481,7 @@ class TestCompanyCountGuardrail:
             # Should handle tuple matches correctly - taking first element of tuple
             assert len(companies) > 0
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_extract_companies_filters_short_and_common_words(self, mock_logger):
         """Test _extract_companies filters short names and common words."""
         guardrail = CompanyCountGuardrail({})
@@ -496,7 +496,7 @@ class TestCompanyCountGuardrail:
         for word in filtered_words:
             assert word not in companies
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_none_output(self, mock_logger):
         """Test validate method with None output."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})
@@ -508,7 +508,7 @@ class TestCompanyCountGuardrail:
         # Instead it goes through the normal validation path
         assert "only includes 0 companies" in result["feedback"]
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_dict_output(self, mock_logger):
         """Test validate method with dictionary output."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})
@@ -519,7 +519,7 @@ class TestCompanyCountGuardrail:
         assert result["valid"] is True
         assert result["feedback"] == ""
     
-    @patch('src.engines.crewai.guardrails.company_count_guardrail.logger')
+    @patch('src.engines.crewai.guardrails.demo.company_count_guardrail.logger')
     def test_validate_with_task_output(self, mock_logger):
         """Test validate method with TaskOutput object."""
         guardrail = CompanyCountGuardrail({"min_companies": 2})

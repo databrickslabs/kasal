@@ -17,7 +17,7 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from typing import List, Any
 
-from src.engines.crewai.helpers.agent_adapter import create_agent
+from src.engines.crewai.paths.crew.agent_adapter import create_agent
 
 
 class TestCreateAgentDateAwareness:
@@ -57,7 +57,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": True}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -99,7 +99,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": False}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -141,7 +141,7 @@ class TestCreateAgentDateAwareness:
         date_format = "%Y-%m-%d"
         agent_config = {**base_agent_config, "date_format": date_format}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -182,7 +182,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": None}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -222,7 +222,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "date_format": None}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -262,7 +262,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         # base_agent_config does not include inject_date
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -302,7 +302,7 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         # base_agent_config does not include date_format
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -347,7 +347,7 @@ class TestCreateAgentDateAwareness:
             "date_format": date_format
         }
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -394,7 +394,7 @@ class TestCreateAgentDateAwareness:
             "date_format": "%Y-%m-%d %H:%M:%S"
         }
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -466,7 +466,7 @@ class TestCreateAgentDateFormatVariations:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "date_format": date_format}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -506,7 +506,7 @@ class TestCreateAgentDateFormatVariations:
         # Empty string is a non-None value, so it should be passed
         agent_config = {**base_agent_config, "date_format": ""}
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -575,7 +575,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "max_reasoning_attempts": 5,
         }
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -626,7 +626,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "max_rpm": 20,
         }
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 
@@ -682,7 +682,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "date_format": "%Y-%m-%d %H:%M",
         }
 
-        with patch('src.engines.crewai.common.agent_builder.Agent') as mock_agent_class, \
+        with patch('src.engines.crewai.kernel.agent_builder.Agent') as mock_agent_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
              patch('src.db.session.request_scoped_session') as mock_session_factory:
 

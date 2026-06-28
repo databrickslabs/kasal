@@ -705,3 +705,27 @@ class TestAdHocFlowValidation:
         assert result["valid"] is True
         assert result["edge_count"] == 3
 
+
+
+@pytest.mark.asyncio
+async def test_run_crew_execution_agent_branch_delegates_to_light_runner():
+    """execution_type='agent' (chat/light mode) routes run_crew_execution to
+    CrewAIExecutionService.run_light_agent_execution — NOT the crew path or the
+    no-op thread-pool stub."""
+    config = MockCrewConfig()
+    with patch('src.services.execution_service.CrewAIExecutionService') as mock_cls:
+        inst = mock_cls.return_value
+        inst.run_light_agent_execution = AsyncMock(
+            return_value={"execution_id": "e-agent", "status": ExecutionStatus.COMPLETED.value}
+        )
+        inst.run_crew_execution = AsyncMock()
+        result = await ExecutionService.run_crew_execution(
+            execution_id="e-agent",
+            config=config,
+            execution_type="agent",
+            group_context=None,
+            session=None,
+        )
+    inst.run_light_agent_execution.assert_awaited_once()
+    inst.run_crew_execution.assert_not_awaited()
+    assert result["status"] == ExecutionStatus.COMPLETED.value

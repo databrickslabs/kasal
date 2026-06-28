@@ -39,11 +39,11 @@ def _call_run_crew_in_process_with_mocks(config, exec_id="test-exec-1234-5678"):
     from src.services.process_crew_executor import run_crew_in_process
     mock_logger = _make_subprocess_logger()
 
-    with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+    with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                return_value=mock_logger), \
-         patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+         patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-         patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+         patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
          patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
          patch("psutil.Process") as mock_psutil:
         mock_psutil.return_value.children.return_value = []
@@ -241,7 +241,7 @@ class TestRunCrewInProcessAdvanced:
         from src.services.process_crew_executor import run_crew_in_process
 
         # Mock to cause failure at earliest possible point after validation
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    side_effect=Exception("logging failed")):
             result = run_crew_in_process("exec-logfail", {"agents": [], "tasks": []})
 
@@ -277,11 +277,11 @@ class TestRunCrewInProcessConfigLogging:
         config = {"agents": [], "tasks": []}
         inputs = {"key1": "value1", "key2": 42}
 
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=_make_subprocess_logger()), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
@@ -296,11 +296,11 @@ class TestRunCrewInProcessConfigLogging:
         config = {"agents": [], "tasks": []}
         inputs = "raw string input"
 
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=_make_subprocess_logger()), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
@@ -315,11 +315,11 @@ class TestRunCrewInProcessErrorPaths:
         """FAILED results from exceptions include traceback info."""
         from src.services.process_crew_executor import run_crew_in_process
 
-        with patch("src.engines.crewai.logging_config.configure_subprocess_logging",
+        with patch("src.engines.crewai.infra.logging_config.configure_subprocess_logging",
                    return_value=_make_subprocess_logger()), \
-             patch("src.engines.crewai.logging_config.suppress_stdout_stderr",
+             patch("src.engines.crewai.infra.logging_config.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.engines.crewai.logging_config.restore_stdout_stderr"), \
+             patch("src.engines.crewai.infra.logging_config.restore_stdout_stderr"), \
              patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []

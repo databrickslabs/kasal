@@ -7,13 +7,13 @@ and that the LRU eviction policy works correctly.
 import pytest
 from unittest.mock import MagicMock, patch
 
-_INJECTION_RC = "src.engines.crewai.guardrails.llm_injection_guardrail._run_completion"
-_REFLECTION_RC = "src.engines.crewai.guardrails.self_reflection_guardrail._run_completion"
+_INJECTION_RC = "src.engines.crewai.guardrails.core.llm_injection_guardrail._run_completion"
+_REFLECTION_RC = "src.engines.crewai.guardrails.core.self_reflection_guardrail._run_completion"
 
 
 def _make_injection_guardrail(config=None, cache_size=128):
     cfg = config or {"llm_model": "databricks-test-model", "cache_size": cache_size}
-    from src.engines.crewai.guardrails.llm_injection_guardrail import LLMInjectionGuardrail
+    from src.engines.crewai.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
     return LLMInjectionGuardrail(cfg)
 
 
@@ -23,7 +23,7 @@ def _make_self_reflection_guardrail(config=None, cache_size=128):
         "task_description": "Summarise revenue.",
         "cache_size": cache_size,
     }
-    from src.engines.crewai.guardrails.self_reflection_guardrail import SelfReflectionGuardrail
+    from src.engines.crewai.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
     return SelfReflectionGuardrail(cfg)
 
 

@@ -175,12 +175,13 @@ class TestRobustJsonParser:
     def test_parse_json_with_unbalanced_brackets(self):
         """Test parsing JSON with unbalanced brackets."""
         unbalanced_array = '[{"key": "value"}, {"number": 42'
-        
-        # The robust parser should be able to recover this
+
+        # The structural repair closes the dangling array, recovering BOTH
+        # elements rather than only the first object.
         result = robust_json_parser(unbalanced_array)
-        # Parser extracts the first valid object it finds
-        assert isinstance(result, dict)
-        assert result["key"] == "value"
+        assert isinstance(result, list)
+        assert result[0]["key"] == "value"
+        assert result[1]["number"] == 42
     
     def test_parse_json_ending_with_colon(self):
         """Test parsing JSON that ends with a colon."""
@@ -479,59 +480,34 @@ class TestPromptUtilsLoggingCoverage:
         # JSON with more opening brackets than closing ones
         json_with_unbalanced_brackets = '{"array": ["item1", ["nested"'
 
-        with patch('src.utils.prompt_utils.logger') as mock_logger:
-            try:
-                result = robust_json_parser(json_with_unbalanced_brackets)
-                # The aggressive truncation recovery (Step 9) kicks in and logs
-                # "Balanced N unclosed braces/brackets in truncated JSON"
-                info_calls = [str(c) for c in mock_logger.info.call_args_list]
-                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
-            except ValueError:
-                # May not always be recoverable
-                pass
+        # Unclosed brackets are recovered by appending the missing closers.
+        result = robust_json_parser(json_with_unbalanced_brackets)
+        assert result["array"][0] == "item1"
     
     def test_parse_json_ending_with_colon_logging(self):
-        """Test JSON ending with colon to trigger logging (lines 157-158)."""
+        """JSON truncated right after a colon recovers to the valid prefix."""
         json_ending_with_colon = '{"valid": "data", "incomplete":'
-        
-        with patch('src.utils.prompt_utils.logger') as mock_logger:
-            try:
-                result = robust_json_parser(json_ending_with_colon)
-                # Should log the null addition
-                mock_logger.info.assert_any_call("Added null value for incomplete field")
-            except ValueError:
-                # May not always be recoverable
-                pass
+
+        # The dangling ``"incomplete":`` key is dropped and the object closed,
+        # so the valid data is preserved rather than the whole parse failing.
+        result = robust_json_parser(json_ending_with_colon)
+        assert result["valid"] == "data"
     
     def test_parse_json_ending_with_open_brace_logging(self):
         """Test JSON ending with open brace to trigger logging (lines 162-163)."""
         json_ending_with_brace = '{"valid": "data", "nested": {'
 
-        with patch('src.utils.prompt_utils.logger') as mock_logger:
-            try:
-                result = robust_json_parser(json_ending_with_brace)
-                # The aggressive truncation recovery (Step 9) kicks in and logs
-                # "Balanced N unclosed braces/brackets in truncated JSON"
-                info_calls = [str(c) for c in mock_logger.info.call_args_list]
-                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
-            except ValueError:
-                # May not always be recoverable
-                pass
+        # Trailing open brace recovered by closing the dangling object.
+        result = robust_json_parser(json_ending_with_brace)
+        assert result["valid"] == "data"
     
     def test_parse_json_ending_with_open_bracket_logging(self):
         """Test JSON ending with open bracket to trigger logging (lines 165-166)."""
         json_ending_with_bracket = '{"valid": "data", "array": ['
 
-        with patch('src.utils.prompt_utils.logger') as mock_logger:
-            try:
-                result = robust_json_parser(json_ending_with_bracket)
-                # The aggressive truncation recovery (Step 9) kicks in and logs
-                # "Balanced N unclosed braces/brackets in truncated JSON"
-                info_calls = [str(c) for c in mock_logger.info.call_args_list]
-                assert any("Balanced" in c and "unclosed braces/brackets" in c for c in info_calls)
-            except ValueError:
-                # May not always be recoverable
-                pass
+        # Trailing open bracket recovered by closing the dangling array.
+        result = robust_json_parser(json_ending_with_bracket)
+        assert result["valid"] == "data"
     
     def test_json_unbalanced_brackets_specific_logging(self):
         """Test to specifically trigger the bracket logging (lines 146-147)."""
@@ -724,3 +700,58 @@ class TestPromptUtilsFunctionalCoverage:
             except ValueError:
                 # Some patterns may not be recoverable
                 pass
+
+class TestRobustJsonParserReasoningAndTruncation:
+    """Recovery for reasoning-model output and the crew-plan truncation cases."""
+
+    def test_strips_reasoning_block_wrapping_json(self):
+        """<think>…</think> preceding the JSON must be stripped."""
+        text = '<think>The user wants Swiss news. I will plan one agent.</think>\n{"complexity": "light", "agents": [{"name": "NewsResearcher"}]}'
+        result = robust_json_parser(text)
+        assert result["complexity"] == "light"
+        assert result["agents"][0]["name"] == "NewsResearcher"
+
+    def test_strips_unclosed_reasoning_prefix(self):
+        """A reasoning preamble that closes with </think> but had no opener."""
+        text = 'Let me think about this carefully.</think>{"complexity": "standard", "tasks": []}'
+        result = robust_json_parser(text)
+        assert result["complexity"] == "standard"
+
+    def test_trailing_prose_after_valid_json(self):
+        """Balanced-brace extraction must drop trailing commentary."""
+        text = '{"complexity": "light", "agents": [{"name": "A"}]}\n\nHope this helps!'
+        result = robust_json_parser(text)
+        assert result["agents"][0]["name"] == "A"
+
+    def test_truncated_mid_string_in_array(self):
+        """The reported failure shape: cut off inside a nested string value."""
+        text = '{"complexity":"light","process_type":"sequential","agents":[{"name":"NewsResearcher","role":"Expert'
+        result = robust_json_parser(text)
+        assert result["complexity"] == "light"
+        assert result["agents"][0]["name"] == "NewsResearcher"
+
+    def test_truncated_right_after_colon(self):
+        """Cut off right after a key's colon must drop the dangling key."""
+        text = '{"complexity":"complex","agents":[{"name":"A","role":'
+        result = robust_json_parser(text)
+        assert result["complexity"] == "complex"
+        assert result["agents"][0]["name"] == "A"
+
+    def test_spurious_extra_closing_brace_in_array(self):
+        """Reported case: model emits an extra '}' after the first array element."""
+        payload = (
+            '{"complexity":"light","process_type":"sequential",'
+            '"agents":[{"name":"NewsResearcher","role":"Expert in gathering and analyzing Swiss news"}},'
+            '{"name":"PresentationDesigner","role":"Specialist in creating visual presentations"}],'
+            '"tasks":[{"name":"Gather Latest Swiss News","assigned_agent":"NewsResearcher","context":[]},'
+            '{"name":"Create News Presentation","assigned_agent":"PresentationDesigner",'
+            '"context":["Gather Latest Swiss News"]}]}\n\n'
+        )
+        result = robust_json_parser(payload)
+        assert [a["name"] for a in result["agents"]] == ["NewsResearcher", "PresentationDesigner"]
+        assert [t["name"] for t in result["tasks"]] == ["Gather Latest Swiss News", "Create News Presentation"]
+
+    def test_spurious_mismatched_bracket(self):
+        """A stray ']' where a '}' was expected is dropped."""
+        result = robust_json_parser('{"a":1,"b":{"c":2]}')
+        assert result["a"] == 1 and result["b"]["c"] == 2

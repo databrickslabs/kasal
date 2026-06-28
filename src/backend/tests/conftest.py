@@ -212,7 +212,6 @@ _BROKEN_IMPORT_FILES = {
     "test_base_tool_registry.py",
     "test_crew_config_builder.py",
     "test_company_name_not_null_guardrail.py",
-    "test_chromadb_databricks_storage.py",  # Causes chromadb EmbeddingFunction conflicts in full suite
     # "test_memory_backend_factory.py",  # Fixed by crewai.rag stubs in memory/conftest.py
     "test_crew_memory_service.py",
     "test_config_adapter.py",
@@ -294,17 +293,17 @@ def mock_uow(monkeypatch):
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference SyncUnitOfWork
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.empty_data_processing_guardrail.SyncUnitOfWork",
+        "src.engines.crewai.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.data_processing_guardrail.SyncUnitOfWork",
+        "src.engines.crewai.guardrails.demo.data_processing_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.data_processing_count_guardrail.SyncUnitOfWork",
+        "src.engines.crewai.guardrails.demo.data_processing_count_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
@@ -319,17 +318,17 @@ def mock_repo_class(monkeypatch):
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference DataProcessingRepository
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.empty_data_processing_guardrail.DataProcessingRepository",
+        "src.engines.crewai.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.data_processing_guardrail.DataProcessingRepository",
+        "src.engines.crewai.guardrails.demo.data_processing_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.crewai.guardrails.data_processing_count_guardrail.DataProcessingRepository",
+        "src.engines.crewai.guardrails.demo.data_processing_count_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
@@ -373,21 +372,21 @@ def pytest_runtest_setup(item):
 
             # Patch guardrail modules to use these mocks
             try:
-                import src.engines.crewai.guardrails.data_processing_count_guardrail as m1
+                import src.engines.crewai.guardrails.demo.data_processing_count_guardrail as m1
 
                 m1.DataProcessingRepository = mock_cls
                 m1.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
-                import src.engines.crewai.guardrails.data_processing_guardrail as m2
+                import src.engines.crewai.guardrails.demo.data_processing_guardrail as m2
 
                 m2.DataProcessingRepository = mock_cls
                 m2.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
-                import src.engines.crewai.guardrails.empty_data_processing_guardrail as m3
+                import src.engines.crewai.guardrails.demo.empty_data_processing_guardrail as m3
 
                 m3.DataProcessingRepository = mock_cls
                 m3.SyncUnitOfWork = uow_mock_cls

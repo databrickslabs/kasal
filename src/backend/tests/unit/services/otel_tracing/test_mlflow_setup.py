@@ -1019,7 +1019,7 @@ class TestConfigureMlflowFullSPNPath:
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
-                patch("src.engines.crewai.mlflow_integration.enable_autologs",
+                patch("src.engines.crewai.infra.mlflow_integration.enable_autologs",
                       mock_enable_autologs),
                 # UC trace location active (real builder needs MLflow >=3.11's
                 # UnityCatalog import, which the mocked mlflow breaks here).
@@ -1090,7 +1090,7 @@ class TestConfigureMlflowFullSPNPath:
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
-                patch("src.engines.crewai.mlflow_integration.enable_autologs",
+                patch("src.engines.crewai.infra.mlflow_integration.enable_autologs",
                       MagicMock()),
                 patch("src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
                       return_value=MagicMock()),
@@ -1152,7 +1152,7 @@ class TestConfigureMlflowFullSPNPath:
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService", mock_service_cls),
-                patch("src.services.otel_tracing.mlflow_setup.enable_autologs" if False else "src.engines.crewai.mlflow_integration.enable_autologs", MagicMock()),
+                patch("src.services.otel_tracing.mlflow_setup.enable_autologs" if False else "src.engines.crewai.infra.mlflow_integration.enable_autologs", MagicMock()),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1447,7 +1447,7 @@ class TestCaptureTraceRealPaths:
 
         with (
             patch("src.services.mlflow_tracing_service.get_last_active_trace_id", mock_get_last),
-            patch("src.engines.crewai.mlflow_integration.update_execution_trace_id", mock_update),
+            patch("src.engines.crewai.infra.mlflow_integration.update_execution_trace_id", mock_update),
         ):
             result = await capture_trace_and_update_execution(
                 execution_id="exec-1",
@@ -1514,7 +1514,7 @@ class TestPostExecutionCleanupReal:
             patch("src.services.mlflow_tracing_service.flush_async_logging", mock_flush),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", mock_log_state),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", mock_capture),
-            patch("src.engines.crewai.mlflow_integration.flush_and_stop_writers", mock_flush_stop),
+            patch("src.engines.crewai.infra.mlflow_integration.flush_and_stop_writers", mock_flush_stop),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,
@@ -1537,7 +1537,7 @@ class TestPostExecutionCleanupReal:
             patch("src.services.mlflow_tracing_service.flush_async_logging", AsyncMock(side_effect=RuntimeError("flush error"))),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", AsyncMock(return_value=None)),
-            patch("src.engines.crewai.mlflow_integration.flush_and_stop_writers", AsyncMock()),
+            patch("src.engines.crewai.infra.mlflow_integration.flush_and_stop_writers", AsyncMock()),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,
@@ -1557,7 +1557,7 @@ class TestPostExecutionCleanupReal:
             patch("src.services.mlflow_tracing_service.flush_async_logging", AsyncMock()),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", AsyncMock(return_value=None)),
-            patch("src.engines.crewai.mlflow_integration.flush_and_stop_writers", AsyncMock(side_effect=RuntimeError("stop error"))),
+            patch("src.engines.crewai.infra.mlflow_integration.flush_and_stop_writers", AsyncMock(side_effect=RuntimeError("stop error"))),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,

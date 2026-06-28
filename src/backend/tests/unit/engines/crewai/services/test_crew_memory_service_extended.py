@@ -64,7 +64,7 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
 # Set up crewai.utilities.paths mock
 _crewai_mock.utilities.paths.db_storage_path = MagicMock(return_value="/tmp/test_storage")
 
-from src.engines.crewai.services.crew_memory_service import CrewMemoryService
+from src.engines.crewai.memory.crew_memory_service import CrewMemoryService
 from src.engines.crewai.memory.memory_backend_factory import DatabricksIndexValidationError
 from src.schemas.memory_backend import MemoryBackendType
 
@@ -207,8 +207,8 @@ class TestSetupStorageDirectory:
 
     def _do_setup_storage(self, service, crew_id, backend_config, mock_path):
         """Helper that patches the crewai paths import properly."""
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath, \
-             patch("src.engines.crewai.services.crew_memory_service.db_storage_path",
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath, \
+             patch("src.engines.crewai.memory.crew_memory_service.db_storage_path",
                    return_value="/tmp/test", create=True), \
              patch.dict("sys.modules", {
                  "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -222,7 +222,7 @@ class TestSetupStorageDirectory:
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -237,7 +237,7 @@ class TestSetupStorageDirectory:
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -257,7 +257,7 @@ class TestSetupStorageDirectory:
         mock_path.absolute.return_value = mock_path
 
         with patch.dict(os.environ, {"KASAL_MEMORY_DIR": mem_root}), \
-             patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+             patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -340,7 +340,7 @@ class TestSetupStorageDirectory:
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -359,7 +359,7 @@ class TestSetupStorageDirectory:
         mock_file.is_dir.return_value = False
         mock_path.iterdir.return_value = [mock_file]
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -373,7 +373,7 @@ class TestSetupStorageDirectory:
         mock_path.absolute.return_value = mock_path
         mock_path.iterdir.side_effect = PermissionError("no access")
 
-        with patch("src.engines.crewai.services.crew_memory_service.Path") as MockPath:
+        with patch("src.engines.crewai.memory.crew_memory_service.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {
                 "crewai.utilities.paths": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
@@ -402,7 +402,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
+            "src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_factory:
@@ -427,7 +427,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
+            "src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_factory:
@@ -450,7 +450,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
+            "src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=None,  # DEFAULT backend returns None
         ) as mock_factory:
@@ -483,7 +483,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.engines.crewai.services.crew_memory_service.MemoryBackendFactory.create_unified_storage",
+            "src.engines.crewai.memory.crew_memory_service.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             side_effect=DatabricksIndexValidationError("err", validation_result),
         ), patch.object(

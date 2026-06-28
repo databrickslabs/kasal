@@ -52,6 +52,16 @@ def _progress(conversation_id: str):
     return progress.get(conversation_id) or {"status": None}
 
 
+@app.get("/a2ui/{conversation_id}")
+def _a2ui(conversation_id: str):
+    """Poll for this turn's A2UI surface. It is composed out-of-band so the answer
+    request returns fast (Databricks Apps time out long-held connections). Returns
+    {status: pending|ready|none|idle, surface}. See agent_server.a2ui_store."""
+    from agent_server import a2ui_store
+
+    return a2ui_store.get(conversation_id)
+
+
 @app.post("/cancel/{conversation_id}")
 def _cancel(conversation_id: str):
     """Stop the running turn for this conversation. Cooperative — the crew aborts
