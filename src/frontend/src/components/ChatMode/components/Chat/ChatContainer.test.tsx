@@ -509,7 +509,7 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
       />,
     );
     expect(screen.getByText('Working…')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Show in panel'));
+    fireEvent.click(screen.getByLabelText('Show in panel'));
     expect(onToggle).toHaveBeenCalled();
     // Expanding the bar reveals the thinking stream (friendly phase heading).
     fireEvent.click(screen.getByLabelText('Expand run activity'));

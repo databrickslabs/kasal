@@ -404,3 +404,136 @@ async def test_run_light_agent_requires_a_prompt():
         result = await run_light_agent(exec_id, config, group_context=None)
 
     assert result["status"] == ExecutionStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
+# A2UI surface composition (the {"text", "a2ui"} envelope)
+# ---------------------------------------------------------------------------
+#
+# After the agent answers, the runner composes a renderable A2UI surface from
+# the prose via the SHARED composer (``a2ui_runner.compose_surface``) and, when
+# one is produced, persists a ``{"text", "a2ui"}`` envelope instead of the bare
+# string. The compose call is an auxiliary LLM call: it is bounded by
+# ``asyncio.wait_for(timeout=60)`` and must NEVER block or fail the terminal
+# status — on timeout / error / "nothing to render" the run completes with the
+# plain answer. compose_surface is imported lazily inside the function, so we
+# patch it at its source module.
+
+def _light_patches(mock_agent, update_mock, compose_mock):
+    """The standard happy-path patch stack + a patched A2UI composer."""
+    return (
+        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.utils.user_context.UserContext"),
+        patch("src.services.api_keys_service.ApiKeysService"),
+        patch("src.engines.crewai.tools.tool_factory.ToolFactory.create",
+              new_callable=AsyncMock, return_value=MagicMock()),
+        patch("src.engines.crewai.kernel.agent_tools.build_agent_with_tools",
+              new_callable=AsyncMock, return_value=mock_agent),
+        patch("src.engines.crewai.kernel.a2ui_runner.compose_surface", compose_mock),
+        patch("src.services.execution_status_service.ExecutionStatusService.update_status",
+              update_mock),
+    )
+
+
+def _a2ui_config_and_agent(answer="Hello there!"):
+    config = make_config(
+        agents_yaml={"agent_a1": {"id": "agent_a1", "role": "Assistant", "goal": "g",
+                                  "backstory": "b", "tools": [], "tool_configs": {"k": 1}}},
+        tasks_yaml={"task_t1": {"id": "task_t1", "description": "Make a 3-slide deck",
+                                "expected_output": "a deck"}},
+    )
+    mock_agent = AsyncMock()
+    mock_agent.kickoff_async = AsyncMock(return_value=SimpleNamespace(raw=answer))
+    return config, mock_agent
+
+
+async def _completed_result(update_mock):
+    completed = [c for c in update_mock.call_args_list
+                 if c.kwargs.get("status") == ExecutionStatus.COMPLETED.value]
+    assert completed, "expected a COMPLETED status write"
+    return completed[-1].kwargs.get("result")
+
+
+@pytest.mark.asyncio
+async def test_a2ui_surface_wraps_result_in_envelope():
+    """When the composer returns a surface, the persisted result is the
+    ``{"text", "a2ui"}`` envelope (not the bare string), carrying both the
+    prose answer and the rich surface for the chat to render."""
+    exec_id = f"light-{uuid.uuid4()}"
+    config, mock_agent = _a2ui_config_and_agent("Hello there!")
+    ctx = make_group_context(["g1"])
+
+    surface = {
+        "surfaceKind": "presentation",
+        "root": "root",
+        "components": [{"id": "root", "component": "SlideDeck", "children": []}],
+    }
+    compose_mock = AsyncMock(return_value=surface)
+    update_mock = AsyncMock(return_value=True)
+
+    p = _light_patches(mock_agent, update_mock, compose_mock)
+    with p[0], p[1], p[2], p[3], p[4], p[5], p[6]:
+        result = await run_light_agent(exec_id, config, group_context=ctx)
+
+    assert result["status"] == ExecutionStatus.COMPLETED.value
+    compose_mock.assert_awaited_once()
+    # Composed against the agent's prose answer (first positional arg).
+    assert compose_mock.await_args.args[0] == "Hello there!"
+    assert await _completed_result(update_mock) == {"text": "Hello there!", "a2ui": surface}
+
+
+@pytest.mark.asyncio
+async def test_a2ui_none_keeps_plain_answer():
+    """When the composer returns None ("nothing to render" / A2UI disabled), the
+    result stays the bare prose string — today's conversational behavior."""
+    exec_id = f"light-{uuid.uuid4()}"
+    config, mock_agent = _a2ui_config_and_agent("Just a chat reply.")
+    ctx = make_group_context(["g1"])
+
+    compose_mock = AsyncMock(return_value=None)
+    update_mock = AsyncMock(return_value=True)
+
+    p = _light_patches(mock_agent, update_mock, compose_mock)
+    with p[0], p[1], p[2], p[3], p[4], p[5], p[6]:
+        result = await run_light_agent(exec_id, config, group_context=ctx)
+
+    assert result["status"] == ExecutionStatus.COMPLETED.value
+    assert await _completed_result(update_mock) == "Just a chat reply."
+
+
+@pytest.mark.asyncio
+async def test_a2ui_timeout_keeps_plain_answer():
+    """A slow/hung composer (TimeoutError out of the bounded wait_for) must NOT
+    block the terminal status — the run completes with the plain answer."""
+    exec_id = f"light-{uuid.uuid4()}"
+    config, mock_agent = _a2ui_config_and_agent("Answer despite slow UI.")
+    ctx = make_group_context(["g1"])
+
+    compose_mock = AsyncMock(side_effect=asyncio.TimeoutError())
+    update_mock = AsyncMock(return_value=True)
+
+    p = _light_patches(mock_agent, update_mock, compose_mock)
+    with p[0], p[1], p[2], p[3], p[4], p[5], p[6]:
+        result = await run_light_agent(exec_id, config, group_context=ctx)
+
+    assert result["status"] == ExecutionStatus.COMPLETED.value
+    assert await _completed_result(update_mock) == "Answer despite slow UI."
+
+
+@pytest.mark.asyncio
+async def test_a2ui_compose_error_never_breaks_run():
+    """Any composer exception is swallowed — the run still completes with the
+    plain answer rather than failing on an auxiliary UI call."""
+    exec_id = f"light-{uuid.uuid4()}"
+    config, mock_agent = _a2ui_config_and_agent("Answer despite UI error.")
+    ctx = make_group_context(["g1"])
+
+    compose_mock = AsyncMock(side_effect=RuntimeError("compose blew up"))
+    update_mock = AsyncMock(return_value=True)
+
+    p = _light_patches(mock_agent, update_mock, compose_mock)
+    with p[0], p[1], p[2], p[3], p[4], p[5], p[6]:
+        result = await run_light_agent(exec_id, config, group_context=ctx)
+
+    assert result["status"] == ExecutionStatus.COMPLETED.value
+    assert await _completed_result(update_mock) == "Answer despite UI error."

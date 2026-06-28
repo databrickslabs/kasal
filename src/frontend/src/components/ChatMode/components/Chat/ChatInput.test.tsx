@@ -4,6 +4,7 @@ import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import { useExecutionStore } from '../../store/executionStore';
+import { useAppStore } from '../../store/appStore';
 
 vi.mock('../../api/knowledge', () => ({ uploadKnowledgeFile: vi.fn() }));
 const mockUpload = vi.mocked(uploadKnowledgeFile);
@@ -623,6 +624,14 @@ describe('ChatInput — memory mode pill (three-state dropdown, controlled)', ()
     expect(screen.getByLabelText('Memory mode: No memory')).toBeTruthy();
   });
 
+  it('the collapsed pill shows the compact short label, not the full name', () => {
+    render(<ChatInput {...baseProps} memoryEnabled workspaceMemory />);
+    const pill = screen.getByLabelText('Memory mode: Workspace memory');
+    // Compact label on the trigger; the full name stays in the aria-label.
+    expect(pill).toHaveTextContent('Workspace');
+    expect(pill).not.toHaveTextContent('Workspace memory');
+  });
+
   it('selecting each mode sets the controlled (memoryEnabled, workspaceMemory) state', () => {
     const onWorkspaceMemoryChange = vi.fn();
     const onMemoryEnabledChange = vi.fn();
@@ -687,6 +696,14 @@ describe('ChatInput — answer mode pill', () => {
     expect(useExecutionStore.getState().chatModeType).toBe('research');
   });
 
+  it('the collapsed pill shows the compact short label ("Deep" for Deep Research)', () => {
+    useExecutionStore.getState().setChatModeType('deep');
+    render(<ChatInput {...baseProps} />);
+    const trigger = screen.getByLabelText('Answer mode: Deep Research');
+    expect(trigger).toHaveTextContent('Deep');
+    expect(trigger).not.toHaveTextContent('Deep Research');
+  });
+
   it('opens the dropdown upward by default (input pinned to the bottom)', () => {
     const { container } = render(<ChatInput {...baseProps} />);
     fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
@@ -701,5 +718,47 @@ describe('ChatInput — answer mode pill', () => {
     const popover = container.querySelector('.kasal-popover');
     expect(popover?.className).toContain('top-full');
     expect(popover?.className).toContain('animate-slide-down');
+  });
+});
+
+describe('ChatInput — model picker placement (flips with the input position)', () => {
+  // Counterpart to "model picker opens upward" (the default/docked case): when
+  // the input is centered (empty state) the host passes menuPlacement="down" and
+  // the model dropdown must flip BELOW the pill so it isn't clipped at the top.
+  it('flips DOWN (top-full) when menuPlacement="down"', () => {
+    render(<ChatInput {...baseProps} menuPlacement="down" />);
+    fireEvent.click(screen.getByText('Model One'));
+    const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
+    expect(popover.className).toContain('top-full');
+    expect(popover.className).toContain('animate-slide-down');
+    expect(popover.className).not.toContain('bottom-full');
+  });
+});
+
+describe('ChatInput — forwards menuPlacement to the MCP picker', () => {
+  // The "+" MCP picker must flip in lock-step with the composer's other
+  // popovers, so ChatInput threads its menuPlacement straight through. Asserted
+  // end-to-end through the REAL McpPicker (its menu carries top-full/bottom-full)
+  // rather than a mock, which also proves the prop is actually wired.
+  beforeEach(() => {
+    // The real McpPicker reads appStore.toolNameMap on open; default it so the
+    // Object.values(...) guard never sees undefined.
+    useAppStore.setState({ toolNameMap: {} });
+  });
+
+  it('opens the MCP picker UPWARD by default (bottom-full)', async () => {
+    render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByLabelText('MCP servers'));
+    const menu = await screen.findByLabelText('MCP picker');
+    expect(menu.className).toContain('bottom-full');
+    expect(menu.className).not.toContain('top-full');
+  });
+
+  it('opens the MCP picker DOWNWARD when menuPlacement="down"', async () => {
+    render(<ChatInput {...baseProps} menuPlacement="down" />);
+    fireEvent.click(screen.getByLabelText('MCP servers'));
+    const menu = await screen.findByLabelText('MCP picker');
+    expect(menu.className).toContain('top-full');
+    expect(menu.className).not.toContain('bottom-full');
   });
 });

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
 import { UIConfigService } from '../../../../api/UIConfigService';
+import { THEME_PRESETS, type Theme } from '../../../Configuration/uiConfigShared';
+import { themeToTokens } from '../../../../shared/a2ui';
 import type { RunStep } from './RunTimeline';
 
 // The panel fetches the workspace UI-Configurator palettes on mount; stub the
@@ -27,6 +29,16 @@ vi.mock('../../../../shared/a2ui/lib/download', async (importOriginal) => {
   return { ...orig, downloadPptx: (...args: unknown[]) => downloadPptxMock(...args) };
 });
 
+// Theming flows through the useA2uiThemes hook (workspace palettes). Mock it so
+// tests control the resolved palette deterministically and without the hook's
+// module-level fetch cache leaking across tests. The hook's own fetch +
+// style_json parsing is identical to useWorkspaceThemes (covered by
+// useWorkspaceThemes.test.ts). Variable is `mock`-prefixed for vi.mock hoisting.
+let mockA2uiThemes: Record<string, Theme> | null = null;
+vi.mock('../../hooks/useA2uiThemes', () => ({
+  useA2uiThemes: () => mockA2uiThemes,
+}));
+
 beforeEach(() => {
   getConfigMock.mockReset();
   getConfigMock.mockResolvedValue({ enabled: false, catalog_type: 'basic' } as never);
@@ -34,6 +46,7 @@ beforeEach(() => {
   downloadSurfacePdfMock.mockResolvedValue(undefined);
   downloadPptxMock.mockReset();
   downloadPptxMock.mockResolvedValue(undefined);
+  mockA2uiThemes = null;
 });
 
 // A minimal A2UI document — the ONLY previewable content kind.
@@ -86,7 +99,12 @@ describe('parsePreviewContent — A2UI only', () => {
     expect(parsePreviewContent('Here is the app:\n```json\n' + uiDoc + '\n```\nthanks')?.type).toBe('ui');
     const out = parsePreviewContent('**My Task**\n\n' + uiDoc);
     expect(out?.type).toBe('ui');
-    expect(out?.data).toBe(uiDoc);
+    // parsePreviewContent now returns the CANONICAL adapted Surface JSON (a flat
+    // {surfaceKind, root, components[]}), not the raw legacy {messages} input.
+    const surf = JSON.parse(out!.data);
+    expect(surf.surfaceKind).toBeDefined();
+    expect(Array.isArray(surf.components)).toBe(true);
+    expect(out!.data).toContain('Hello App');
   });
 
   it('does NOT preview raw HTML (A2UI-only by design)', () => {
@@ -102,11 +120,17 @@ describe('parsePreviewContent — A2UI only', () => {
   });
 
   it('finds an A2UI doc WRAPPED in a result envelope (so it never leaks to chat)', () => {
-    // The backend often hands the surface inside {result:{…}} / {output:"<json>"};
-    // a top-level-only parse missed these and dumped raw JSON into the chat.
-    expect(parsePreviewContent(JSON.stringify({ result: JSON.parse(uiDoc) }))?.type).toBe('ui');
-    expect(parsePreviewContent(JSON.stringify({ output: uiDoc }))?.type).toBe('ui');
-    expect(parsePreviewContent(JSON.stringify({ data: { result: JSON.parse(uiDoc) } }))?.type).toBe('ui');
+    // The backend hands the surface inside {result:{…}} / {output:"<json>"} /
+    // {data:{result:…}}; a top-level-only parse missed these and dumped raw JSON
+    // into the chat. toSurface unwraps the canonical Surface from any of them.
+    const surface = {
+      surfaceKind: 'document',
+      root: 'root',
+      components: [{ id: 'root', component: 'Text', text: 'Wrapped Hello' }],
+    };
+    expect(parsePreviewContent(JSON.stringify({ result: surface }))?.type).toBe('ui');
+    expect(parsePreviewContent(JSON.stringify({ output: JSON.stringify(surface) }))?.type).toBe('ui');
+    expect(parsePreviewContent(JSON.stringify({ data: { result: surface } }))?.type).toBe('ui');
   });
 
   it('does NOT preview generic JSON, markdown, or plain text', () => {
@@ -223,9 +247,9 @@ describe('PreviewPanel component', () => {
     // Click a one-click Look preset — restyles instantly, no crew run.
     fireEvent.click(screen.getByTitle('Apply the Dark style'));
     expect(onStyleChange).toHaveBeenCalledTimes(1);
-    // The rewritten document carries the pinned dark accent.
+    // The rewritten document carries the picked dark palette as the surface theme.
     const updated = onStyleChange.mock.calls[0][0] as string;
-    expect(updated).toContain('"_pinned":true');
+    expect(JSON.parse(updated).theme.accent).toBe('#38BDF8');
     expect(updated).toContain('#38BDF8');
     expect(onRefine).not.toHaveBeenCalled();
   });
@@ -259,8 +283,8 @@ describe('PreviewPanel component', () => {
     expect(onStyleChange).toHaveBeenCalledTimes(1);
     const updated = onStyleChange.mock.calls[0][0] as string;
     expect(updated).not.toBe(prosey); // no longer the silent no-op
-    expect(updated).toContain('"_pinned":true');
-    expect(updated).toContain('#38BDF8'); // dark preset accent applied
+    expect(JSON.parse(updated).theme.accent).toBe('#38BDF8'); // dark preset accent applied
+    expect(updated).toContain('#38BDF8');
   });
 
   it('a preset click is a safe no-op when onStyleChange is not provided', () => {
@@ -364,72 +388,51 @@ describe('PreviewPanel component', () => {
   });
 });
 
-describe('PreviewPanel — workspace palettes are the source of truth', () => {
-  const stage = (container: HTMLElement) =>
-    container.querySelector('[style*="--ui-stage"]') as HTMLElement | null;
+describe('PreviewPanel — workspace palettes theme the surface', () => {
+  // The configured workspace palette reaches the rendered surface as the shared
+  // renderer's `--a2-*` CSS tokens (themeToTokens) on the `.kasal-a2ui` wrapper.
+  // Precedence (A2uiSurface): explicit prop → per-surface "Look" override
+  // (surface.theme) → workspace palette → built-in defaults. The legacy
+  // {messages} deck's embedded theme is dropped by the adapter, so the workspace
+  // palette applies. (style_json fetch + parsing live in useA2uiThemes, mocked
+  // here; that logic is identical to — and covered by — useWorkspaceThemes.test.)
+  const wrapper = (container: HTMLElement) =>
+    container.querySelector('.kasal-a2ui') as HTMLElement | null;
+  const DARK = THEME_PRESETS.find((p) => p.key === 'dark')!.theme;
+  const STUDIO = THEME_PRESETS.find((p) => p.key === 'studio')!.theme;
 
-  it('re-themes a deck from the configured Presentation palette (agent-stamped Default palette overridden)', async () => {
-    getConfigMock.mockResolvedValue({
-      enabled: true,
-      catalog_type: 'basic',
-      style_json: JSON.stringify({
-        themes: {
-          default: { accent: '#2272B4', background: '#FFFFFF' },
-          presentation: { accent: '#FF3621', background: '#0E1B21' },
-        },
-      }),
-    } as never);
+  it('applies the configured deliverable palette to the surface tokens', () => {
+    mockA2uiThemes = { presentation: STUDIO };
     const { container } = renderPanel({ type: 'ui', data: deckDoc });
-    await waitFor(() => {
-      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#0E1B21');
-    });
+    expect(wrapper(container)?.style.getPropertyValue('--a2-background')).toBe(
+      themeToTokens(STUDIO)['--a2-background'],
+    );
   });
 
-  it('clears an agent-stamped palette on a deck when no Presentation palette is configured (built-in deck identity wins)', async () => {
-    getConfigMock.mockResolvedValue({
-      enabled: true,
-      catalog_type: 'basic',
-      style_json: JSON.stringify({
-        themes: { default: { accent: '#2272B4', background: '#FFFFFF' } },
-      }),
-    } as never);
-    const { container } = renderPanel({ type: 'ui', data: deckDoc });
-    await waitFor(() => {
-      // The built-in deck stage (DECK_THEME_VARS) — not the agent's white.
-      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toContain('#162A34');
+  it('lets a per-surface "Look" override win over the workspace palette', () => {
+    mockA2uiThemes = { presentation: STUDIO };
+    // A new-format surface carrying its own "Look" theme (DARK).
+    const overridden = JSON.stringify({
+      surfaceKind: 'presentation',
+      root: 'root',
+      components: [{ id: 'root', component: 'SlideDeck', children: [] }],
+      theme: DARK,
     });
+    const { container } = renderPanel({ type: 'ui', data: overridden });
+    // DARK (the surface's own Look) wins — NOT STUDIO (the workspace palette).
+    expect(wrapper(container)?.style.getPropertyValue('--a2-background')).toBe(
+      themeToTokens(DARK)['--a2-background'],
+    );
+    expect(wrapper(container)?.style.getPropertyValue('--a2-background')).not.toBe(
+      themeToTokens(STUDIO)['--a2-background'],
+    );
   });
 
-  it('ignores a config whose style_json is malformed, non-object, or lacks a themes map', async () => {
-    const cases = [
-      '{bad json',                              // malformed → parse catch
-      'null',                                   // parses to null (not an object)
-      JSON.stringify({ accent: '#111' }),       // no themes key
-      JSON.stringify({ themes: null }),         // themes present but null
-    ];
-    for (const style_json of cases) {
-      getConfigMock.mockResolvedValue({ enabled: true, catalog_type: 'basic', style_json } as never);
-      const { container, unmount } = renderPanel({ type: 'ui', data: deckDoc });
-      await act(async () => {}); // flush the config fetch
-      // embedded (agent-stamped) theme stays in place
-      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
-      unmount();
-    }
-  });
-
-  it('keeps the embedded theme when the workspace config is disabled or unavailable', async () => {
-    // default beforeEach mock: { enabled: false } → no override
+  it('falls back to built-in tokens when no palette is configured and the surface has no override', () => {
+    mockA2uiThemes = null; // disabled / unavailable / malformed config → null
     const { container } = renderPanel({ type: 'ui', data: deckDoc });
-    await waitFor(() => {
-      expect(stage(container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
-    });
-
-    // a failing fetch also leaves the embedded theme in place
-    getConfigMock.mockRejectedValue(new Error('network'));
-    const second = renderPanel({ type: 'ui', data: deckDoc });
-    await waitFor(() => {
-      expect(stage(second.container)?.style.getPropertyValue('--ui-stage')).toBe('#FFFFFF');
-    });
+    // No workspace palette and no embedded override → no --a2-* override applied.
+    expect(wrapper(container)?.style.getPropertyValue('--a2-background')).toBe('');
   });
 });
 
@@ -516,7 +519,10 @@ describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
     await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalledTimes(1));
     const [surface, title] = downloadSurfacePdfMock.mock.calls[0];
     expect(title).toBe('Oil Report');
-    expect((surface as { components: Record<string, unknown> }).components.root).toBeDefined();
+    // The new Surface keeps components as a flat ARRAY (root id + nodes).
+    const comps = (surface as { components: unknown[] }).components;
+    expect(Array.isArray(comps)).toBe(true);
+    expect(comps.length).toBeGreaterThan(0);
   });
 
   it('downloads as PowerPoint via the menu, themed, using the preview title', async () => {
@@ -588,5 +594,23 @@ describe('PreviewPanel run activity', () => {
   it('shows no Run activity control when there are no steps', () => {
     render(<PreviewPanel content={uiContent} {...baseProps} runSteps={[]} />);
     expect(screen.queryByText('Activity')).not.toBeInTheDocument();
+  });
+
+  it('renders "Show in chat" as an icon button that moves the activity to the chat', () => {
+    const onMoveActivityToChat = vi.fn();
+    render(
+      <PreviewPanel
+        content={uiContent}
+        {...baseProps}
+        runSteps={steps}
+        onMoveActivityToChat={onMoveActivityToChat}
+      />,
+    );
+    // Compact icon control (no visible text), found by its accessible label.
+    const btn = screen.getByLabelText('Show in chat');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveTextContent('');
+    fireEvent.click(btn);
+    expect(onMoveActivityToChat).toHaveBeenCalled();
   });
 });

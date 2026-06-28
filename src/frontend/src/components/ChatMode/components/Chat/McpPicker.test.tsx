@@ -224,6 +224,48 @@ describe('McpPicker', () => {
     await act(async () => rejectKasal(new Error('late failure')));
   });
 
+  describe('placement & neutral styling', () => {
+    // The picker flips with the composer: it opens UPWARD by default (docked at
+    // the bottom of the screen) and DOWNWARD when the input is centered.
+    it('defaults to opening upward (bottom-full)', async () => {
+      render(<McpPicker />);
+      await openPicker();
+      const menu = screen.getByRole('menu', { name: 'MCP picker' });
+      expect(menu.className).toContain('bottom-full');
+      expect(menu.className).not.toContain('top-full');
+    });
+
+    it('opens downward when menuPlacement="down" (top-full)', async () => {
+      render(<McpPicker menuPlacement="down" />);
+      await openPicker();
+      const menu = screen.getByRole('menu', { name: 'MCP picker' });
+      expect(menu.className).toContain('top-full');
+      expect(menu.className).not.toContain('bottom-full');
+    });
+
+    it('renders inset rounded rows so the checkbox no longer touches the edge', async () => {
+      render(<McpPicker />);
+      await openPicker();
+      const row = screen.getByRole('menuitemcheckbox', { name: /My MCP/ });
+      expect(row.className).toContain('rounded-lg');
+      // !px-2.5 wins over the #kasal-chat-root button { padding:0 } reset so the
+      // checkbox keeps its inset gutter.
+      expect(row.className).toContain('!px-2.5');
+    });
+
+    it('uses a neutral "+" trigger colour, reserving the accent for the count badge', () => {
+      useExecutionStore.setState({ selectedMcpServers: ['My MCP'] });
+      render(<McpPicker />);
+      const trigger = screen.getByLabelText('MCP servers');
+      const triggerStyle = trigger.getAttribute('style') || '';
+      expect(triggerStyle).toContain('var(--text-secondary)');
+      expect(triggerStyle).not.toContain('var(--accent)');
+      // …the accent lives on the selection count badge instead.
+      const badge = screen.getByText('1');
+      expect(badge.getAttribute('style') || '').toContain('var(--accent)');
+    });
+  });
+
   describe('Agent Bricks "Agents" section', () => {
     // Opt the workspace into the Agent Bricks feature by registering the tool in
     // the catalog (the only signal the picker uses to show the "Agents" section).
