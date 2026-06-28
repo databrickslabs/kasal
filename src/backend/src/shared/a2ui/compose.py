@@ -261,6 +261,119 @@ def validate_surface(payload: Any, catalog: Dict[str, Any]) -> bool:
     return payload.get("root") in ids
 
 
+def presentation_needs_body(payload: Any) -> bool:
+    """True when a presentation surface is a hollow skeleton — half or more of its
+    variant='content' slides have only a kicker+title and no real body, so they
+    render as near-empty slides. title/section/quote/stats slides are body-less by
+    design and don't count. Used to retry (then fall back to a readable markdown
+    document) instead of returning an empty deck.
+    """
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("surfaceKind") or "").lower() != "presentation":
+        return False
+    comps = {
+        c.get("id"): c
+        for c in (payload.get("components") or [])
+        if isinstance(c, dict) and c.get("id") is not None
+    }
+
+    def has_content(cid: str) -> bool:
+        child = comps.get(cid)
+        if not isinstance(child, dict):
+            return False
+        comp = child.get("component")
+        if comp in ("Text", "Heading"):
+            return bool(str(child.get("text") or "").strip())
+        if comp == "Markdown":
+            content = child.get("content")
+            return (
+                content.strip() != ""
+                if isinstance(content, str)
+                else content is not None
+            )
+        if comp in ("Slide", "SlideDeck", "Divider"):
+            return False
+        # KeyValue / Chart / Table / Image / Card / Grid / List … = real content
+        return True
+
+    content_slides = [
+        c
+        for c in comps.values()
+        if c.get("component") == "Slide"
+        and str(c.get("variant") or "content").lower() == "content"
+    ]
+    if not content_slides:
+        return False
+    empty = sum(
+        1
+        for s in content_slides
+        if not any(has_content(cid) for cid in (s.get("children") or []))
+    )
+    return empty * 2 >= len(content_slides)
+
+
+def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
+    """Resolve a literal-or-{path} binding against dataModel (shallow JSON pointer)."""
+    if isinstance(value, dict) and isinstance(value.get("path"), str):
+        cur: Any = data_model or {}
+        for part in value["path"].split("/"):
+            if part == "":
+                continue
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            else:
+                return None
+        return cur
+    return value
+
+
+def quiz_needs_work(payload: Any) -> bool:
+    """True when a quiz surface is low quality — the model returned a *description*
+    of a quiz, too few real questions, or malformed items (bad option lists / answer
+    indices). Drives a retry, then a markdown fallback, instead of shipping a broken
+    quiz. Option ORDER is not checked: the renderer shuffles display order, so a model
+    that parks every answer at one index is already handled there.
+    """
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("surfaceKind") or "").lower() != "quiz":
+        return False
+    comps = [c for c in (payload.get("components") or []) if isinstance(c, dict)]
+    quiz = next((c for c in comps if c.get("component") == "Quiz"), None)
+    if quiz is None:
+        return False
+    questions = _deref(quiz.get("questions"), payload.get("dataModel") or {})
+    if not isinstance(questions, list) or not questions:
+        return True
+
+    def ok(q: Any) -> bool:
+        if not isinstance(q, dict):
+            return False
+        if not str(q.get("question") or "").strip():
+            return False
+        opts = q.get("options")
+        if not isinstance(opts, list):
+            return False
+        texts = [str(o).strip() for o in opts if str(o).strip()]
+        # need >= 3 non-empty, DISTINCT options (4 is the asked-for norm)
+        if len(texts) < 3 or len(set(texts)) != len(texts):
+            return False
+        ans = q.get("answer")
+        if isinstance(ans, bool):
+            return False
+        try:
+            ans_i = int(ans)
+        except (TypeError, ValueError):
+            return False
+        return 0 <= ans_i < len(opts)
+
+    valid = [q for q in questions if ok(q)]
+    if len(valid) < 3:
+        return True
+    return (len(questions) - len(valid)) * 2 >= len(questions)
+
+
 def a2ui_system_prompt(
     catalog: Dict[str, Any],
     purpose: str,
@@ -304,6 +417,119 @@ def a2ui_system_prompt(
             },
         }
     )
+    # A presentation example: every content slide has a BODY, and one slide carries
+    # a chart bound to dataModel. This is the structure weaker models most often get
+    # wrong (emitting title-only slides), so showing it concretely matters.
+    pres_example = json.dumps(
+        {
+            "surfaceKind": "presentation",
+            "root": "deck",
+            "components": [
+                {
+                    "id": "deck",
+                    "component": "SlideDeck",
+                    "children": ["s1", "s2", "s3"],
+                },
+                {
+                    "id": "s1",
+                    "component": "Slide",
+                    "variant": "title",
+                    "kicker": "INTRODUCTION",
+                    "title": "How LLMs Work",
+                    "subtitle": "Understanding large language models",
+                },
+                {
+                    "id": "s2",
+                    "component": "Slide",
+                    "variant": "content",
+                    "kicker": "ARCHITECTURE",
+                    "title": "Transformer Foundation",
+                    "children": ["s2a", "s2b", "s2c"],
+                },
+                {
+                    "id": "s2a",
+                    "component": "Text",
+                    "text": "Self-attention lets every token weigh all others in the sequence.",
+                },
+                {
+                    "id": "s2b",
+                    "component": "Text",
+                    "text": "Positional encodings inject word order into an otherwise order-agnostic model.",
+                },
+                {
+                    "id": "s2c",
+                    "component": "Text",
+                    "text": "Stacked decoder blocks refine the representation layer by layer.",
+                },
+                {
+                    "id": "s3",
+                    "component": "Slide",
+                    "variant": "content",
+                    "kicker": "SCALE",
+                    "title": "Parameters Over Time",
+                    "children": ["s3c"],
+                },
+                {
+                    "id": "s3c",
+                    "component": "Chart",
+                    "chartType": "bar",
+                    "xKey": "model",
+                    "yKeys": ["params"],
+                    "data": {"path": "/sizes"},
+                },
+            ],
+            "dataModel": {
+                "sizes": [
+                    {"model": "GPT-2", "params": 1.5},
+                    {"model": "GPT-3", "params": 175},
+                    {"model": "GPT-4", "params": 1800},
+                ]
+            },
+        }
+    )
+    # A quiz example: REAL questions with plausible distractors and teaching
+    # explanations, and the correct index spread across questions. Weaker models
+    # otherwise emit a description of a quiz or park every answer at one slot.
+    quiz_example = json.dumps(
+        {
+            "surfaceKind": "quiz",
+            "root": "q",
+            "components": [
+                {
+                    "id": "q",
+                    "component": "Quiz",
+                    "title": "LLM Basics",
+                    "questions": {"path": "/questions"},
+                }
+            ],
+            "dataModel": {
+                "questions": [
+                    {
+                        "question": "What does self-attention let each token do?",
+                        "options": [
+                            "Weigh the relevance of every other token",
+                            "Store gradients between training epochs",
+                            "Compress the vocabulary size",
+                            "Encode images into patches",
+                        ],
+                        "answer": 0,
+                        "explanation": "Self-attention scores each token against all others, so every token is represented in context.",
+                    },
+                    {
+                        "question": "Why are positional encodings added to token embeddings?",
+                        "options": [
+                            "To shrink the model",
+                            "Because attention is otherwise order-agnostic",
+                            "To tokenize punctuation",
+                            "To set the learning rate",
+                        ],
+                        "answer": 1,
+                        "explanation": "Attention treats the input as a set, so word order must be injected explicitly.",
+                    },
+                ]
+            },
+        }
+    )
     return (
         "You convert an AI agent's final answer into ONE A2UI surface, returned as JSON.\n"
         f"Allowed surfaceKind values: {kinds}.\n"
@@ -318,21 +544,36 @@ def a2ui_system_prompt(
         "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
         "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
         "component; otherwise use 'document' with Markdown.\n"
-        "6. For presentations build a REAL deck of Slides, each with a 'variant': start "
-        "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'); "
-        "then near the front a variant='stats' slide whose children are 3-4 KeyValue big "
-        "numbers IF the topic has notable figures; then several variant='content' slides "
-        "(each with a short UPPERCASE 'kicker' naming the topic + a concise title + a few "
-        "bullets or short markdown); use variant='quote' for a punchy takeaway (put it in "
-        "'title'); end with a closing slide. Use AS MANY slides as the content needs, give "
-        "each slide a DISTINCT focus, and NEVER cram everything onto one slide or repeat the "
-        "same structure. Keep ONE consistent theme — the app styles it, so do not specify colors.\n"
+        "6. For presentations build a REAL deck of Slides, each with a 'variant'. Start "
+        "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'), "
+        "then several variant='content' slides, and end with a closing slide. "
+        "EVERY variant='content' slide MUST carry a BODY in its 'children': 3-5 Text nodes "
+        "(one concise, FULL sentence each) OR a Markdown node whose content is 3-5 '- ' "
+        "bullet lines. A content slide with only a kicker+title and no body children is "
+        "INVALID — never emit one. Make each bullet substantive (a real fact/insight from "
+        "the answer), not a single word. "
+        "ADD VISUALS where the topic has numbers, trends, comparisons or breakdowns: either "
+        "a variant='stats' slide whose children are 3-4 KeyValue big numbers, OR put a Chart "
+        "(chartType 'bar' | 'line' | 'pie', with 'xKey', 'yKeys', and its 'data' array placed "
+        'in dataModel and referenced by {"path":"/key"}) or a Table as a child of a content '
+        "slide. Aim for at least one chart/visual slide whenever the subject is quantitative. "
+        "Use variant='quote' for a punchy takeaway (put it in 'title'). Use AS MANY slides as "
+        "the content needs, give each a DISTINCT focus, and NEVER cram everything onto one "
+        "slide or repeat the same structure. Keep ONE consistent theme — the app styles it, "
+        "so do not specify colors.\n"
         "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
         "REAL, answerable questions — each {question, options:[4 distinct strings], "
         "answer:<0-based index of the correct option>, explanation:<one sentence why>}. "
         "Produce the ACTUAL questions and options (as many as the request asks for, else "
-        "about 10), NOT a description of a quiz or a grading rubric. VARY which option is "
-        "correct across questions — the answer index must be spread across 0/1/2/3, never "
+        "about 10), NOT a description of a quiz or a grading rubric. QUALITY BAR: each "
+        "question tests ONE clear idea with a single unambiguous correct answer; make the "
+        "three distractors PLAUSIBLE (common misconceptions or near-misses), similar in "
+        "length and style to the answer — never joke options, 'all of the above', or "
+        "'none of the above'; cover DIFFERENT facets of the topic (definition, application, "
+        "comparison, cause/effect) and vary difficulty rather than rephrasing one fact; keep "
+        "each stem concise and self-contained; write every explanation to TEACH why the "
+        "answer is correct (ideally noting why a tempting distractor is wrong). VARY which "
+        "option is correct across questions — spread the answer index across 0/1/2/3, never "
         "always the same slot. Put the questions array in dataModel and bind it with "
         '{"path":"/questions"}. The app handles selection, scoring and navigation.\n'
         f"Crew purpose: {purpose}\n"
@@ -349,8 +590,13 @@ def a2ui_system_prompt(
             if guidance
             else ""
         )
-        + "Example of a valid surface:\n"
+        + "Example of a valid dashboard surface:\n"
         + example
+        + "\nExample of a valid PRESENTATION surface (note EVERY content slide has a "
+        "body, and one slide uses a chart):\n"
+        + pres_example
+        + "\nExample of a valid QUIZ surface (real questions, plausible distractors, "
+        "answer index varied, teaching explanations):\n" + quiz_example
     )
 
 
@@ -464,14 +710,36 @@ def compose_a2ui(
             raw_str = raw if isinstance(raw, str) else str(raw)
             payload = extract_json(raw_str)
             if payload and validate_surface(payload, catalog):
-                return payload
+                if presentation_needs_body(payload):
+                    correction = (
+                        "Most 'content' slides have NO body (only a kicker and title), "
+                        "so they render as empty slides. Give EVERY variant='content' "
+                        "slide a real body in its 'children': 3-5 Text nodes (a full "
+                        "sentence each) or a Markdown node with 3-5 '- ' bullet lines, "
+                        "and add a Chart or a stats slide where the topic has numbers. "
+                        "Reply with ONLY the corrected JSON object."
+                    )
+                elif quiz_needs_work(payload):
+                    correction = (
+                        "This quiz is weak or malformed. Return a Quiz whose 'questions' "
+                        '(in dataModel, bound by {"path":"/questions"}) is a list of at '
+                        "least several REAL questions, each {question, options:[4 "
+                        "distinct, plausible strings], answer:<0-based index>, "
+                        "explanation:<one teaching sentence>}. Every question needs a "
+                        "non-empty stem, four distinct plausible options, and a valid "
+                        "answer index — produce the ACTUAL questions, not a description. "
+                        "Reply with ONLY the corrected JSON object."
+                    )
+                else:
+                    return payload
+            else:
+                correction = (
+                    "That was not a valid A2UI surface. Reply with ONLY the corrected "
+                    "JSON object, using only allowed components."
+                )
             messages += [
                 {"role": "assistant", "content": raw_str},
-                {
-                    "role": "user",
-                    "content": "That was not a valid A2UI surface. "
-                    "Reply with ONLY the corrected JSON object, using only allowed components.",
-                },
+                {"role": "user", "content": correction},
             ]
     except Exception as exc:  # noqa: BLE001
         print(f"A2UI compose failed ({exc}); markdown fallback.")
