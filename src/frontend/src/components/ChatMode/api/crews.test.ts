@@ -103,6 +103,36 @@ describe('ChatMode crews api', () => {
       expect(payload.name).toBe('My Crew');
     });
 
+    it('persists the answer-mode crew config (reasoning/planning/planning_llm)', async () => {
+      // Deep mode → reasoning + planning + an explicit planning_llm so the saved
+      // crew round-trips (and never defaults planning to OpenAI on reload).
+      await saveGeneratedCrew(data as never, undefined, {
+        reasoning: true,
+        planning: true,
+        planningLlm: 'databricks-claude-sonnet-4-5',
+      });
+      const payload = post.mock.calls[0][1] as Record<string, unknown>;
+      expect(payload.reasoning).toBe(true);
+      expect(payload.planning).toBe(true);
+      expect(payload.planning_llm).toBe('databricks-claude-sonnet-4-5');
+    });
+
+    it('persists reasoning without planning for research mode (no planning_llm)', async () => {
+      await saveGeneratedCrew(data as never, undefined, { reasoning: true, planning: false });
+      const payload = post.mock.calls[0][1] as Record<string, unknown>;
+      expect(payload.reasoning).toBe(true);
+      expect(payload.planning).toBe(false);
+      expect(payload).not.toHaveProperty('planning_llm');
+    });
+
+    it('omits answer-mode config when not provided (chat/light agent save)', async () => {
+      await saveGeneratedCrew(data as never);
+      const payload = post.mock.calls[0][1] as Record<string, unknown>;
+      expect(payload).not.toHaveProperty('reasoning');
+      expect(payload).not.toHaveProperty('planning');
+      expect(payload).not.toHaveProperty('planning_llm');
+    });
+
     it('falls back to the derived name when the supplied name is blank', async () => {
       await saveGeneratedCrew(data as never, '   ');
       const payload = post.mock.calls[0][1] as Record<string, unknown>;

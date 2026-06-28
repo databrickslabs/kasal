@@ -181,6 +181,11 @@ export async function saveGeneratedCrew(
     spaceId?: string;
     mcpServers?: string[];
     agentBricksEndpoints?: string[];
+    // Persist the answer-mode crew config so a saved Research/Deep crew reloads
+    // WITH reasoning (and planning + planning_llm for Deep) instead of as a plain crew.
+    reasoning?: boolean;
+    planning?: boolean;
+    planningLlm?: string;
   },
 ): Promise<SavedCrew> {
   // When a Genie space was picked in chat, persist it as a GenieTool override on
@@ -295,6 +300,13 @@ export async function saveGeneratedCrew(
     edges,
     // Crew-level memory mirrors the chat's memory choice when provided.
     ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
+    // Answer-mode crew config (snake_case — CrewBase columns). Send reasoning/
+    // planning explicitly: the columns default to false, so omitting them would
+    // silently reload a Research/Deep crew as a plain crew. planning_llm only
+    // rides along when planning is on (avoids the OpenAI-default 401 on reload).
+    ...(opts?.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
+    ...(opts?.planning !== undefined ? { planning: opts.planning } : {}),
+    ...(opts?.planning && opts?.planningLlm ? { planning_llm: opts.planningLlm } : {}),
   };
 
   try {

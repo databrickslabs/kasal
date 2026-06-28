@@ -43,6 +43,8 @@ export interface DispatcherRequest {
   disable_memory?: boolean;
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
+  /** Answer mode: 'chat' = single light agent, 'research' = crew+reasoning, 'deep' = crew+planning+reasoning. */
+  chat_mode_type?: 'chat' | 'research' | 'deep';
 }
 
 /** ChatMode run settings gathered from the execution store at dispatch time. */
@@ -53,6 +55,7 @@ export interface DispatchRunSettings {
   disable_memory?: boolean;
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
+  chat_mode_type?: 'chat' | 'research' | 'deep';
 }
 
 export interface DispatcherResponse {

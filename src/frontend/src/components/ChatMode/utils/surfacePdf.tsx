@@ -2,8 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import UiRenderer from '../components/Preview/UiRenderer';
-import { UiSurface } from './uiDocument';
+import A2uiSurface from '../components/Chat/A2uiSurface';
+import type { Surface } from '../../../shared/a2ui';
 
 /** Deck slides export at 16:9 landscape; documents at a readable page width. */
 const SLIDE_W = 1280;
@@ -13,9 +13,11 @@ const DOC_W = 1100;
 const RASTER_SCALE = 2;
 
 /** Mount a surface offscreen, rasterize it, and unmount. The container is
- *  parked far off-viewport (NOT display:none — html2canvas needs layout). */
+ *  parked far off-viewport (NOT display:none — html2canvas needs layout). Renders
+ *  through the SAME A2uiSurface as the live preview, so the PDF matches on screen
+ *  (workspace branding + any per-surface "Look" restyle on surface.theme apply). */
 async function rasterizeSurface(
-  surface: UiSurface,
+  surface: Surface,
   width: number,
   height?: number,
 ): Promise<HTMLCanvasElement> {
@@ -26,7 +28,9 @@ async function rasterizeSurface(
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    root.render(<UiRenderer surface={surface} />);
+    // hideDownloads: never bake the deck "PowerPoint" / table "CSV" control
+    // buttons into the rasterized page.
+    root.render(<A2uiSurface surface={surface} hideDownloads />);
     // Two frames: one for React's commit, one for layout/paint to settle.
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return await html2canvas(container, {
@@ -41,11 +45,12 @@ async function rasterizeSurface(
 }
 
 /** Slide ids of a presentation surface, or null when it is not a deck. */
-function slideIdsOf(surface: UiSurface): string[] | null {
-  const root = surface.components[surface.rootId];
-  if (!root || root.component !== 'Slides') return null;
-  const children = Array.isArray(root.children) ? (root.children as string[]) : [];
-  const ids = children.filter((id) => surface.components[id]);
+function slideIdsOf(surface: Surface): string[] | null {
+  const byId = Object.fromEntries(surface.components.map((c) => [c.id, c]));
+  const root = byId[surface.root];
+  if (!root || root.component !== 'SlideDeck') return null;
+  const children = Array.isArray(root.children) ? root.children : [];
+  const ids = children.filter((id) => byId[id]);
   return ids.length > 0 ? ids : null;
 }
 
@@ -57,7 +62,7 @@ function slideIdsOf(surface: UiSurface): string[] | null {
  *  - any other deliverable exports as a single page sized to its content, so
  *    nothing is cut at arbitrary page breaks.
  */
-export async function downloadSurfacePdf(surface: UiSurface, title: string): Promise<void> {
+export async function downloadSurfacePdf(surface: Surface, title: string): Promise<void> {
   const filename = `${(title || 'kasal-app').replace(/[\\/:*?"<>|]/g, '').trim() || 'kasal-app'}.pdf`;
   const slideIds = slideIdsOf(surface);
 
@@ -71,7 +76,7 @@ export async function downloadSurfacePdf(surface: UiSurface, title: string): Pro
     for (let i = 0; i < slideIds.length; i += 1) {
       // Each slide becomes the surface root → the stage (theme background,
       // padding) wraps every slide exactly like the live preview.
-      const canvas = await rasterizeSurface({ ...surface, rootId: slideIds[i] }, SLIDE_W, SLIDE_H);
+      const canvas = await rasterizeSurface({ ...surface, root: slideIds[i] }, SLIDE_W, SLIDE_H);
       if (i > 0) pdf.addPage([SLIDE_W, SLIDE_H], 'landscape');
       pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, SLIDE_W, SLIDE_H);
     }

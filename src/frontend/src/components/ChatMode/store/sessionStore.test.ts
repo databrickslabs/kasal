@@ -196,6 +196,26 @@ describe('createNewSession', () => {
   });
 });
 
+describe('startNewChat', () => {
+  it('resets to a blank chat WITHOUT persisting a session (lazy creation)', () => {
+    useSessionStore.setState({
+      currentSessionId: 'prev',
+      messages: [makeMsg('m1')],
+    });
+    localStorage.setItem(ACTIVE_SESSION_KEY, 'prev');
+
+    useSessionStore.getState().startNewChat();
+
+    // No DB row created here — that happens lazily on the first message, so an
+    // empty "New Chat" never appears in the Recent rail beside the button.
+    expect(db.createSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
+    const state = useSessionStore.getState();
+    expect(state.currentSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+  });
+});
+
 describe('deleteSession', () => {
   it('deletes a non-current session and only updates sessions list', async () => {
     useSessionStore.setState({ currentSessionId: 'current' });

@@ -34,11 +34,11 @@ vi.mock('../../api/DatabricksService', () => ({
   DatabricksService: { getConfig: vi.fn().mockResolvedValue(null) },
 }));
 
-// The full A2UI renderer is exercised in UiSurfaceResult.test.tsx — here we
-// only verify that ShowResult routes an A2UI result into it.
-vi.mock('../Chat/components/UiSurfaceResult', () => ({
-  UiSurfaceView: () => <div data-testid="ui-surface-view">rendered surface</div>,
-  UiSurfaceResult: () => <div data-testid="ui-surface-result" />,
+// The full A2UI preview pane is exercised in PreviewPanel.test.tsx — here we only
+// verify that ShowResult routes an A2UI result into the SAME chat preview pane.
+vi.mock('../ChatMode/components/Preview/PreviewPanel', () => ({
+  __esModule: true,
+  default: () => <div data-testid="preview-panel">rendered surface</div>,
 }));
 
 beforeEach(() => {
@@ -95,7 +95,7 @@ describe('ShowResult A2UI rendering toggle', () => {
   it('defaults to the rendered A2UI surface for an A2UI document result', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ value: a2uiDoc }} run={baseRun} />);
 
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
     // The toggle offers both views.
     expect(screen.getByLabelText('rendered view')).toBeInTheDocument();
     expect(screen.getByLabelText('raw json view')).toBeInTheDocument();
@@ -105,19 +105,19 @@ describe('ShowResult A2UI rendering toggle', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ value: a2uiDoc }} run={baseRun} />);
 
     fireEvent.click(screen.getByLabelText('raw json view'));
-    expect(screen.queryByTestId('ui-surface-view')).toBeNull();
+    expect(screen.queryByTestId('preview-panel')).toBeNull();
     // The raw structure (unwrapped document) is shown instead.
     expect(screen.getByText('messages')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('rendered view'));
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
 
   it('handles an A2UI document passed as a plain object result', () => {
     render(
       <ShowResult open={true} onClose={vi.fn()} result={JSON.parse(a2uiDoc)} run={baseRun} />
     );
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
 
   it('shows no A2UI toggle for non-A2UI results', () => {
@@ -125,14 +125,14 @@ describe('ShowResult A2UI rendering toggle', () => {
       <ShowResult open={true} onClose={vi.fn()} result={{ status: 'ok' } as never} run={baseRun} />
     );
     expect(screen.queryByLabelText('rendered view')).toBeNull();
-    expect(screen.queryByTestId('ui-surface-view')).toBeNull();
+    expect(screen.queryByTestId('preview-panel')).toBeNull();
   });
 
   it('does not false-positive on a nested non-A2UI object', () => {
     render(
       <ShowResult open={true} onClose={vi.fn()} result={{ wrapper: { status: 'ok' } } as never} run={baseRun} />
     );
-    expect(screen.queryByTestId('ui-surface-view')).toBeNull();
+    expect(screen.queryByTestId('preview-panel')).toBeNull();
   });
 
   // The run result wraps the A2UI document in varying shapes; ALL of these must
@@ -140,23 +140,23 @@ describe('ShowResult A2UI rendering toggle', () => {
   // "sometimes"). The doc lives nested below the top level in each case.
   it('renders an A2UI doc nested under a single key as a parsed object', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ result: JSON.parse(a2uiDoc) }} run={baseRun} />);
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
     expect(screen.getByLabelText('rendered view')).toBeInTheDocument();
   });
 
   it('renders an A2UI doc in a multi-key envelope with a JSON-string value', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ output: 'ok', meta: a2uiDoc } as never} run={baseRun} />);
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
 
   it('renders an A2UI doc inside a prose-prefixed string value', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ task: `Here is your dashboard: ${a2uiDoc}` } as never} run={baseRun} />);
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
 
   it('renders a deeply nested A2UI doc', () => {
     render(<ShowResult open={true} onClose={vi.fn()} result={{ a: { b: JSON.parse(a2uiDoc) } } as never} run={baseRun} />);
-    expect(screen.getByTestId('ui-surface-view')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
   });
 
   it('keeps the Code/HTML toggle for HTML results', () => {

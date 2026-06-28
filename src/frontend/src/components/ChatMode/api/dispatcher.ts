@@ -35,6 +35,7 @@ export async function dispatch(
       request.mcp_servers = runSettings.mcp_servers;
     if (runSettings.agentbricks_endpoints && runSettings.agentbricks_endpoints.length > 0)
       request.agentbricks_endpoints = runSettings.agentbricks_endpoints;
+    if (runSettings.chat_mode_type) request.chat_mode_type = runSettings.chat_mode_type;
   }
 
   const response = await getClient().post<DispatchResult>(

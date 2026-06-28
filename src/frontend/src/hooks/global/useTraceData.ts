@@ -77,8 +77,11 @@ const getTaskId = (trace: Trace): string | null => {
 
 /**
  * Process raw traces into hierarchical structure for display.
+ *
+ * Exported for unit testing (the agent/task grouping, including the task-less
+ * light-agent path, is non-trivial enough to test in isolation).
  */
-function processTraces(rawTraces: Trace[]): ProcessedTraces {
+export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   const filteredTraces = rawTraces.filter(trace =>
     trace.event_source !== 'Task Orchestrator' &&
     trace.event_context !== 'task_management'
@@ -245,6 +248,12 @@ function processTraces(rawTraces: Trace[]): ProcessedTraces {
   // Process each agent's traces
   const agents: ProcessedTraces['agents'] = [];
 
+  // A run with NO task ids anywhere is the single light/chat agent path
+  // (Agent.kickoff_async) — there is no crew task, so its traces must not be
+  // framed as an "Unassigned" task in the timeline. Crew runs always carry task
+  // ids, so a stray unattributed trace there still shows under "Unassigned".
+  const runHasTaskIds = sorted.some(t => !!getTaskId(t));
+
   agentMap.forEach((agentTraces, agentName) => {
     if (agentTraces.length === 0) return;
 
@@ -310,6 +319,22 @@ function processTraces(rawTraces: Trace[]): ProcessedTraces {
     });
 
     const tasks = Array.from(taskMap.entries()).map(([taskName, taskTraces]) => {
+      // The light/chat agent produces only the synthetic "Unassigned" bucket (no
+      // crew task). Relabel it to the user's request (the trace's event_context)
+      // — falling back to the agent name — and flag it so the UI drops the crew
+      // "task" framing. Left as "Unassigned" for crew runs (runHasTaskIds), where
+      // a stray bucket really is an unattributed task.
+      const isUnassignedRun = taskName === 'Unassigned' && !runHasTaskIds;
+      let displayName = taskName;
+      if (isUnassignedRun) {
+        const ctx = taskTraces.find(
+          t => t.event_context && t.event_context !== t.event_type
+        )?.event_context;
+        const trimmedCtx = ctx?.trim();
+        displayName = trimmedCtx
+          ? (trimmedCtx.length > 80 ? trimmedCtx.substring(0, 77) + '...' : trimmedCtx)
+          : agentName;
+      }
       const taskStart = new Date(taskTraces[0].created_at);
       const taskEnd = new Date(taskTraces[taskTraces.length - 1].created_at);
 
@@ -334,12 +359,13 @@ function processTraces(rawTraces: Trace[]): ProcessedTraces {
       }).filter((event): event is NonNullable<typeof event> => event !== null);
 
       return {
-        taskName,
+        taskName: displayName,
         taskId: getTaskId(taskTraces[0]) || undefined,
         startTime: taskStart,
         endTime: taskEnd,
         duration: taskEnd.getTime() - taskStart.getTime(),
-        events
+        events,
+        unassigned: isUnassignedRun
       };
     });
 

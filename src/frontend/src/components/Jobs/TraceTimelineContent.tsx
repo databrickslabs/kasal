@@ -427,11 +427,15 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                         <Typography variant="subtitle1" fontWeight="bold">
                           {agent.agent}
                         </Typography>
-                        <Chip
-                          size="small"
-                          label={`${agent.tasks.length} task${agent.tasks.length !== 1 ? 's' : ''}`}
-                          variant="outlined"
-                        />
+                        {/* A task-less light/chat run has a single "unassigned"
+                            bucket — don't frame it as a crew task. */}
+                        {!(agent.tasks.length === 1 && agent.tasks[0].unassigned) && (
+                          <Chip
+                            size="small"
+                            label={`${agent.tasks.length} task${agent.tasks.length !== 1 ? 's' : ''}`}
+                            variant="outlined"
+                          />
+                        )}
                       </Box>
                       <Chip
                         size="small"
@@ -643,9 +647,13 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                       </Typography>
                     )}
                   </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    {agent.tasks.length} task{agent.tasks.length !== 1 ? 's' : ''}
-                  </Typography>
+                  {/* A task-less light/chat run has a single "unassigned"
+                      bucket — don't frame it as a crew task. */}
+                  {!(agent.tasks.length === 1 && agent.tasks[0].unassigned) && (
+                    <Typography variant="body2" color="text.secondary">
+                      {agent.tasks.length} task{agent.tasks.length !== 1 ? 's' : ''}
+                    </Typography>
+                  )}
                 </Box>
 
                 <Collapse in={expandedAgents.has(agentIdx)}>

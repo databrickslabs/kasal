@@ -15,7 +15,7 @@
 
 /** A full branding palette. The renderer (UiRenderer.tsx) maps these onto the
  *  stage background, accent, text colors and font; the agent embeds the matching
- *  palette as the surface `theme` (see ui_emission.py). */
+ *  palette as the surface `theme` (palette embedded by the A2UI composer). */
 export interface Theme {
   accent: string;
   background: string;
@@ -74,13 +74,63 @@ export const THEME_PRESETS: { key: string; label: string; theme: Theme }[] = [
   // DECK_THEME_VARS) so users can pin it as an explicit palette and tweak it.
   { key: 'studio', label: 'Studio', theme: { accent: '#FF3621', background: '#0E1B21', surface: '#16272F', text: '#E8EEF2', heading: '#FFFFFF', muted: '#8FA3AD', font: 'sans', density: 'comfortable' } },
   // Elegant light identity for the run-activity "logs"/context view — clean sans,
-  // compact, dark ink on a soft light surface. Mirrors LOGS_THEME in uiDocument.ts.
+  // compact, dark ink on a soft light surface. Mirrors LOGS_THEME below.
   { key: 'logs', label: 'Run activity (context)', theme: { accent: '#2563EB', background: '#F6F8FA', surface: '#FFFFFF', text: '#1F2937', heading: '#0F172A', muted: '#64748B', font: 'sans', density: 'compact' } },
 ];
 
 export const DEFAULT_THEME: Theme = THEME_PRESETS[0].theme;
 
 export const normalizeTheme = (t: Partial<Theme> | undefined): Theme => ({ ...DEFAULT_THEME, ...(t || {}) });
+
+/** Branding tokens carried on the surface, set by the agent from the workspace
+ *  UI-Configurator palette. The renderer derives its stage / accent / text /
+ *  surface colors and font from these; any omitted token falls back to the
+ *  built-in premium dark theme, so an un-themed doc renders exactly as before.
+ *
+ *  A partial {@link Theme} (de-dups the palette shape) plus `_pinned`:
+ *  Set when a user has deterministically restyled the surface from the in-preview
+ *  "Customize" panel. Marks the theme as an intentional, user-pinned choice so
+ *  applyConfiguredTheme never re-resolves it away from the workspace palettes.
+ *  Inert at render/PDF (the renderer only reads color/font/density tokens). */
+export type UiTheme = Partial<Theme> & { _pinned?: boolean };
+
+/** Workspace UI-Configurator palettes keyed by deliverable type
+ *  ('default', 'presentation', 'dashboard', …) — the parsed `themes` map of
+ *  the workspace ui_config's style_json. */
+export type WorkspaceThemes = Record<string, UiTheme>;
+
+/**
+ * Built-in style for the run-activity "logs" view (per-step retrieved context):
+ * a light console — monospace, compact, dark ink on a soft light surface,
+ * distinct from any deliverable palette. Used as the fallback when the workspace
+ * hasn't configured a 'logs' palette in the UI Configurator; mirrors the 'logs'
+ * preset in uiConfigShared.ts.
+ */
+export const LOGS_THEME: UiTheme = {
+  accent: '#2563EB',
+  background: '#F6F8FA',
+  surface: '#FFFFFF',
+  text: '#1F2937',
+  heading: '#0F172A',
+  muted: '#64748B',
+  font: 'sans',
+  density: 'compact',
+};
+
+/** Friendly, non-technical nouns for each deliverable — used as the "Customize
+ *  this {label}" title in the preview's refine panel so a business user reads
+ *  "Photo album" / "Data view" instead of internal keys like 'album' / 'genie'. */
+export const DELIVERABLE_LABELS: Record<string, string> = {
+  presentation: 'Presentation',
+  dashboard: 'Dashboard',
+  genie: 'Data view',
+  mindmap: 'Mind map',
+  album: 'Photo album',
+  quiz: 'Quiz',
+  flashcards: 'Flashcard deck',
+  report: 'Report',
+  default: 'Document',
+};
 
 /* ------------------------------------------------------------------ */
 /*  Per-deliverable settings (type-specific, beyond the palette)       */

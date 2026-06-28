@@ -57,11 +57,17 @@ const RUN_SETTINGS = {
   disable_memory: false,
   mcp_servers: [],
   agentbricks_endpoints: [],
+  // Default answer mode is 'chat' (single light agent) — also skips the
+  // crew-plan steering prefix (research/deep keep it).
+  chat_mode_type: 'chat',
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockedGenerateId.mockReturnValue(ASSISTANT_ID);
+  // Reset the shared store's answer mode so each test starts at the 'chat'
+  // default (tests that need crew augmentation opt into research explicitly).
+  useExecutionStore.getState().setChatModeType('chat');
   // Silence console noise from the hook.
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
 });
@@ -186,9 +192,12 @@ describe('useDispatcher', () => {
       expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew');
     });
 
-    it('augments plain messages with the crew steering prefix', async () => {
+    it('augments plain messages with the crew steering prefix (research/deep)', async () => {
       const opts = makeOptions();
       mockedDispatch.mockResolvedValue(result('conversation', null));
+      // Augmentation only happens for crew-building modes; chat (the default)
+      // sends the literal message to a single light agent.
+      useExecutionStore.getState().setChatModeType('research');
       const { result: hook } = renderHook(() => useDispatcher(opts));
 
       await act(async () => {
@@ -197,6 +206,25 @@ describe('useDispatcher', () => {
 
       expect(mockedDispatch).toHaveBeenCalledWith(
         'create a crew plan with agents and tasks: do something cool',
+        undefined,
+        undefined,
+        { ...RUN_SETTINGS, chat_mode_type: 'research' },
+        'do something cool',
+      );
+    });
+
+    it('does NOT augment in chat (light agent) mode — sends the literal message', async () => {
+      const opts = makeOptions();
+      mockedDispatch.mockResolvedValue(result('conversation', null));
+      // 'chat' is the default (reset in beforeEach); the prefix must be skipped.
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('do something cool');
+      });
+
+      expect(mockedDispatch).toHaveBeenCalledWith(
+        'do something cool',
         undefined,
         undefined,
         RUN_SETTINGS,
@@ -236,6 +264,8 @@ describe('useDispatcher', () => {
       const opts = makeOptions();
       mockedDispatch.mockResolvedValue(result('conversation', null));
       useExecutionStore.getState().setSelectedAgentBricksEndpoints(['ep-1']);
+      // Research mode so the crew prefix is applied (matches the expectation).
+      useExecutionStore.getState().setChatModeType('research');
       const { result: hook } = renderHook(() => useDispatcher(opts));
 
       try {
@@ -247,7 +277,7 @@ describe('useDispatcher', () => {
           'create a crew plan with agents and tasks: do something cool',
           undefined,
           undefined,
-          { ...RUN_SETTINGS, agentbricks_endpoints: ['ep-1'] },
+          { ...RUN_SETTINGS, agentbricks_endpoints: ['ep-1'], chat_mode_type: 'research' },
           'do something cool',
         );
       } finally {

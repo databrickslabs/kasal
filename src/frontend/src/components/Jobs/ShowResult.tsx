@@ -34,8 +34,15 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { sanitizeUrl } from '../Chat/components/MessageRenderer';
-import { UiSurfaceView } from '../Chat/components/UiSurfaceResult';
-import { findUiSurface } from '../ChatMode/utils/uiDocument';
+import PreviewPanel from '../ChatMode/components/Preview/PreviewPanel';
+// PreviewPanel + the shared A2UI renderer are styled by the chat-mode CSS, scoped
+// under the `.kasal-chat-root` class (Tailwind `important: '.kasal-chat-root'`).
+// Import the stylesheet so it's present wherever this dialog loads, and render the
+// pane inside a `.kasal-chat-root` wrapper below so its utilities + theme vars
+// resolve (a class, so it coexists with the chat workspace's own root — no id clash).
+import '../ChatMode/chat.css';
+import { toSurface } from '../ChatMode/utils/surfaceAdapter';
+import { useThemeStore } from '../../store/theme';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
 import { DatabricksService } from '../../api/DatabricksService';
@@ -47,6 +54,9 @@ import { runService } from '../../api/ExecutionHistoryService';
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   const theme = useTheme();
   const navigate = useNavigate();
+  // Drives the chat-mode scope's data-theme so the embedded pane matches Kasal's
+  // light/dark (chat.css keys its vars off #kasal-chat-root[data-theme]).
+  const isDarkMode = useThemeStore((s) => s.isDarkMode);
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'html' | 'ui'>('code');
   // Results open full screen by default; the toggle shrinks to a dialog.
@@ -309,7 +319,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
   // prose/fence robustness lives) so a wrapped/nested document renders too —
   // previously detection only fired for a top-level doc, so it rendered only
   // "sometimes" depending on how the run result happened to be wrapped.
-  const uiSurface = useMemo(() => findUiSurface(result), [result]);
+  const uiSurface = useMemo(() => toSurface(result), [result]);
 
   // Update the hasOpened ref when dialog opens and set view mode based on content
   useEffect(() => {
@@ -1303,8 +1313,27 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           flexDirection: 'column',
         }}>
           {viewMode === 'ui' && uiSurface ? (
-            <Box sx={{ borderRadius: 1.5, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
-              <UiSurfaceView surface={uiSurface} />
+            // Render through the SAME chat preview pane (PreviewPanel) — not a
+            // separate viewer — so the Jobs "Show result" matches the chat exactly.
+            // PreviewPanel + the shared renderer are styled by chat.css, scoped under
+            // the `.kasal-chat-root` class, so we recreate that scope here. It's a
+            // class (not the chat workspace's id), so it coexists cleanly even when
+            // chat mode is mounted-hidden. We set data-theme ourselves (the chat's
+            // appStore only themes the id element). `embedded` drops the pane's own
+            // fullscreen/close since this dialog already provides them.
+            <Box
+              className="kasal-chat-root"
+              data-theme={isDarkMode ? 'dark' : 'light'}
+              // Fill the space the dialog gives us (between title + actions) rather
+              // than a fixed vh, so the deck fits with no scroll. minHeight is a floor.
+              sx={{ flex: 1, minHeight: 320, display: 'flex' }}
+            >
+              <PreviewPanel
+                content={{ type: 'ui', data: JSON.stringify(uiSurface), title: run?.run_name || run?.job_id || 'Result' }}
+                chatCollapsed
+                embedded
+                onClose={onClose}
+              />
             </Box>
           ) : (
             renderContent(memoizedResult)

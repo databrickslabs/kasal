@@ -5,14 +5,14 @@
  *
  * Every run stamps its `executionId` onto its chat message (see
  * executionStore.completeExecution). Here we walk those runs' stored
- * `execution.result` for an A2UI document (findUiDocument, the same recursive
- * detection Job History's "Show Result" uses) and hand the EXTRACTED, top-level
- * document to the preview pane — so the deliverable survives navigating away
- * mid-run, and the pane's Customize / Look / refine / download behave exactly as
- * they do for a freshly-streamed result.
+ * `execution.result` for a renderable A2UI surface (toSurface — the same boundary
+ * Job History's "Show Result" uses, which accepts the new {text,a2ui} envelope, a
+ * bare surface, or an older legacy doc) and hand it to the preview pane — so the
+ * deliverable survives navigating away mid-run, and the pane's Customize / Look /
+ * refine / download behave exactly as they do for a freshly-streamed result.
  */
 import { getExecution } from '../api/executions';
-import { findUiDocument } from './uiDocument';
+import { toSurface } from './surfaceAdapter';
 import type { ChatMessage } from '../types/chat';
 import type { PreviewContent } from '../components/Preview/PreviewPanel';
 
@@ -33,13 +33,6 @@ async function fetchResult(jobId: string): Promise<unknown> {
   return result;
 }
 
-/** Convert an extracted A2UI document node into a renderable preview entry. */
-function toPreview(node: string | Record<string, unknown>): PreviewContent {
-  return {
-    type: 'ui',
-    data: typeof node === 'string' ? node : JSON.stringify(node),
-  };
-}
 
 /**
  * Build the preview history (and current = latest) for a session by deriving
@@ -59,8 +52,8 @@ export async function deriveSessionPreviews(
   for (const jobId of jobIds) {
     const result = await fetchResult(jobId);
     if (!result) continue;
-    const node = findUiDocument(result);
-    if (node) history.push(toPreview(node));
+    const surface = toSurface(result);
+    if (surface) history.push({ type: 'ui', data: JSON.stringify(surface) });
   }
 
   return { history, current: history.length ? history[history.length - 1] : null };
