@@ -6,6 +6,7 @@ import {
   optionVal,
   THEME_PRESETS,
   DEFAULT_THEME,
+  DELIVERABLE_LABELS,
 } from './uiConfigShared';
 
 describe('buildPartialDirective — only phrases changed keys', () => {
@@ -56,5 +57,13 @@ describe('shared specs sanity', () => {
 
   it('the first preset is the Default palette', () => {
     expect(THEME_PRESETS[0].theme).toBe(DEFAULT_THEME);
+  });
+});
+
+describe('DELIVERABLE_LABELS', () => {
+  it('maps internal keys to friendly business nouns', () => {
+    expect(DELIVERABLE_LABELS.album).toBe('Photo album');
+    expect(DELIVERABLE_LABELS.genie).toBe('Data view');
+    expect(DELIVERABLE_LABELS.default).toBe('Document');
   });
 });

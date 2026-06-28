@@ -24,7 +24,7 @@ import { MessageContent } from './MessageRenderer';
 import { stripAnsiEscapes, isMarkdown, isHtmlDocument } from '../utils/textProcessing';
 import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
 import { UiSurfaceResult } from './UiSurfaceResult';
-import { parseUiDocument } from '../../ChatMode/utils/uiDocument';
+import { toSurface } from '../../ChatMode/utils/surfaceAdapter';
 import type { ToolConfigNeededData } from '../../../hooks/global/useCrewGenerationSSE';
 
 interface ChatMessageItemProps {
@@ -72,11 +72,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
 
     // Special handling for result messages
     if (message.type === 'result') {
-      // A2UI documents render as their designed surface (like Chat mode's
-      // preview), not as raw JSON.
-      const uiSurface = parseUiDocument(processedContent);
-      if (uiSurface) {
-        return <UiSurfaceResult surface={uiSurface} />;
+      // A2UI surfaces render as their designed layout (like Chat mode's
+      // preview), not as raw JSON. toSurface accepts the new envelope, a bare
+      // surface, or an older legacy document (adapted) — one renderer for all.
+      const surface = toSurface(processedContent);
+      if (surface) {
+        return <UiSurfaceResult surface={surface} />;
       }
 
       // Try to parse as JSON

@@ -284,7 +284,11 @@ export function useDispatcher(options: UseDispatcherOptions) {
       const lowerMsg = message.toLowerCase();
       const isSlashCommand = lowerMsg.startsWith('/');
       const alreadyHasCrewHint = /\b(crew|plan|create crew|create plan|generate crew)\b/i.test(message);
-      if (!isSlashCommand && !alreadyHasCrewHint) {
+      // Chat (light agent) mode answers the literal question with a single agent —
+      // don't steer it into "create a crew plan with agents and tasks". Research /
+      // Deep modes still build a crew, so they keep the prefix.
+      const chatModeType = useExecutionStore.getState().chatModeType;
+      if (chatModeType !== 'chat' && !isSlashCommand && !alreadyHasCrewHint) {
         dispatchMessage = `create a crew plan with agents and tasks: ${message}`;
       }
       // Hidden steering text (e.g. attached-knowledge note): sent to the crew
@@ -310,6 +314,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Agent Bricks endpoints picked in the chat "+" — the backend equips +
           // configures the AgentBricksTool on the auto-executed crew with these.
           agentbricks_endpoints: execState.selectedAgentBricksEndpoints,
+          // Answer mode → backend sets reasoning/planning/execution_type:
+          // chat = single light agent, research = crew+reasoning, deep = +planning.
+          chat_mode_type: execState.chatModeType,
         }, message);
 
         const content = getAssistantResponse(result);

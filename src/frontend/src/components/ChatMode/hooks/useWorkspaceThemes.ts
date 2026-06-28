@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { UIConfigService } from '../../../api/UIConfigService';
-import { WorkspaceThemes } from '../utils/uiDocument';
+import { WorkspaceThemes } from '../../Configuration/uiConfigShared';
 
 /**
  * The workspace UI-Configurator palettes (style_json.themes), fetched on mount.

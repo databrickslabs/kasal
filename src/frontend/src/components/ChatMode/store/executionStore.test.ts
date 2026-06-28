@@ -97,6 +97,17 @@ describe('executionStore - basic setters & log', () => {
     expect(useExecutionStore.getState().executionLog).toHaveLength(0);
   });
 
+  it('chatModeType defaults to chat (single light agent) and setChatModeType updates it', () => {
+    // Default answer mode is the fast single-agent path.
+    expect(useExecutionStore.getState().chatModeType).toBe('chat');
+    useExecutionStore.getState().setChatModeType('research');
+    expect(useExecutionStore.getState().chatModeType).toBe('research');
+    useExecutionStore.getState().setChatModeType('deep');
+    expect(useExecutionStore.getState().chatModeType).toBe('deep');
+    // restore default so other tests start clean
+    useExecutionStore.getState().setChatModeType('chat');
+  });
+
   it('setIsLoading / setExecutionContext / setChatCollapsed / toggleChatCollapsed', () => {
     const store = useExecutionStore.getState();
     store.setIsLoading(true);
@@ -225,16 +236,19 @@ describe('executionStore - basic setters & log', () => {
     expect(s.previewOwnerSessionId).toBeNull();
   });
 
-  it('clearPreview hides preview and uncollapses chat but keeps data in db', () => {
+  it('clearPreview closes the pane and uncollapses chat but keeps the content for reopen', () => {
     useExecutionStore.setState({
       previewContent: preview as any,
       previewOwnerSessionId: 'sess-A',
+      previewPaneOpen: true,
       chatCollapsed: true,
     });
     useExecutionStore.getState().clearPreview();
     const s = useExecutionStore.getState();
-    expect(s.previewContent).toBeNull();
-    expect(s.previewOwnerSessionId).toBeNull();
+    // Pane closes, but the deliverable is kept (renders inline; instant reopen).
+    expect(s.previewPaneOpen).toBe(false);
+    expect(s.previewContent).toEqual(preview);
+    expect(s.previewOwnerSessionId).toBe('sess-A');
     expect(s.chatCollapsed).toBe(false);
   });
 });
@@ -581,6 +595,28 @@ describe('executionStore - completeExecution', () => {
     expect(s.executionContext).toBeNull();
     expect(s.isLoading).toBe(false);
     expect(s.executionOwnerSessionId).toBeNull();
+  });
+
+  it('composed surface + previewable text: renders the a2ui surface INLINE (empty body), not the opt-in pane', () => {
+    // Regression: deep/planning runs return a structured deck whose `text` trips
+    // parsePreviewContent. The composed A2UI surface must still ride inline on the
+    // message; it must NOT be diverted to the (hidden) preview pane, which dropped
+    // it entirely (no presentation showed for deep while research worked).
+    const surface = { surfaceKind: 'presentation', root: 'r', components: [], dataModel: {} } as never;
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(preview); // the raw text looks previewable
+    useExecutionStore.getState().startExecution('job-S', 'sess-O');
+    useExecutionStore.getState().completeExecution('# Deck\n## Slide 1', 'job-S', surface);
+    // The inline a2ui message is posted with an EMPTY body (the surface renders the
+    // deck; the raw markdown is suppressed to avoid printing it twice).
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'assistant',
+      '',
+      { executionId: 'job-S', resultType: 'a2ui', resultData: surface },
+    );
+    // The previewable text did NOT hijack the opt-in pane.
+    expect(useExecutionStore.getState().previewContent).toBeNull();
   });
 
   it('viewing owner with preview but no active execution -> activeExecution stays null', () => {
@@ -1133,10 +1169,12 @@ describe('executionStore - initial state', () => {
     expect(initialState.activeExecution).toBeNull();
     expect(initialState.executionLog).toEqual([]);
     expect(initialState.chatCollapsed).toBe(false);
+    // The side preview pane is opt-in — closed until the user opens it.
+    expect(initialState.previewPaneOpen).toBe(false);
     // Agent Bricks endpoints start empty until the user picks one in the "+" menu.
     expect(initialState.selectedAgentBricksEndpoints).toEqual([]);
-    // Run activity defaults to the preview pane.
-    expect(initialState.activityPlacement).toBe('preview');
+    // Run activity defaults to the chat (so the pane stays closed by default).
+    expect(initialState.activityPlacement).toBe('chat');
   });
 
   it('setActivityPlacement switches where the run activity is shown', () => {

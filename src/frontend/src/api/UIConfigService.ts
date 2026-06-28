@@ -8,7 +8,7 @@ import { apiClient } from '../config/api/ApiConfig';
  */
 export interface UIConfig {
   enabled: boolean;
-  catalog_type: 'minimal' | 'basic' | 'custom';
+  catalog_type: 'minimal' | 'full' | 'custom';
   catalog_json?: string | null;
   style_json?: string | null;
   id?: number | null;

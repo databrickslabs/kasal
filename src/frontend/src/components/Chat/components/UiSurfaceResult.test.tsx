@@ -1,11 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { UiSurfaceResult, UiSurfaceView } from './UiSurfaceResult';
-import { UiSurface } from '../../ChatMode/utils/uiDocument';
+import type { Surface } from '../../../shared/a2ui';
 
 // ---------------------------------------------------------------------------
-// Mocks
+// Mocks — A2uiSurface resolves workspace branding via useA2uiThemes →
+// UIConfigService.getConfig; stub it so the card renders with built-in defaults
+// (theming itself is covered by the shared a2ui deckThemes tests).
 // ---------------------------------------------------------------------------
 
 const mockGetConfig = vi.fn();
@@ -19,15 +21,16 @@ vi.mock('../../../api/UIConfigService', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSurface(): UiSurface {
+function makeSurface(): Surface {
   return {
-    rootId: 'root',
-    components: {
-      root: { id: 'root', component: 'Column', children: ['title', 'badge'] },
-      title: { id: 'title', component: 'Text', variant: 'h1', text: 'Hello Report' },
-      badge: { id: 'badge', component: 'Badge', text: 'All good', tone: 'good' },
-    },
-    data: {},
+    surfaceKind: 'document',
+    root: 'root',
+    components: [
+      { id: 'root', component: 'Column', children: ['title', 'body'] },
+      { id: 'title', component: 'Heading', text: 'Hello Report', level: 1 },
+      { id: 'body', component: 'Text', text: 'All good' },
+    ],
+    dataModel: {},
   };
 }
 
@@ -65,34 +68,8 @@ describe('UiSurfaceResult (A2UI result card)', () => {
 });
 
 describe('UiSurfaceView (full-size themed render)', () => {
-  it('renders the surface full size', () => {
+  it('renders the surface full size through the shared A2UI renderer', () => {
     render(<UiSurfaceView surface={makeSurface()} />);
     expect(screen.getByText('Hello Report')).toBeInTheDocument();
-  });
-
-  it('re-resolves the theme from the workspace UI-Configurator palettes', async () => {
-    mockGetConfig.mockResolvedValue({
-      enabled: true,
-      style_json: JSON.stringify({ themes: { default: { accent: '#123456' } } }),
-    });
-
-    const { container } = render(<UiSurfaceView surface={makeSurface()} />);
-
-    await waitFor(() => {
-      const stage = container.firstChild as HTMLElement;
-      expect(stage.style.getPropertyValue('--ui-accent')).toBe('#123456');
-    });
-  });
-
-  it('keeps the embedded theme when the config is unavailable', async () => {
-    mockGetConfig.mockRejectedValue(new Error('boom'));
-
-    const surface = { ...makeSurface(), theme: { accent: '#ABCDEF' } };
-    const { container } = render(<UiSurfaceView surface={surface} />);
-
-    await waitFor(() => {
-      const stage = container.firstChild as HTMLElement;
-      expect(stage.style.getPropertyValue('--ui-accent')).toBe('#ABCDEF');
-    });
   });
 });

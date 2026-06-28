@@ -6,15 +6,12 @@ import type { ChatMessage } from '../types/chat';
 vi.mock('../api/executions', () => ({ getExecution: vi.fn() }));
 const mockedGet = vi.mocked(getExecution);
 
-// Minimal valid A2UI document (one recognized component).
+// Minimal valid A2UI surface (the new shared shape).
 const doc = {
-  messages: [
-    {
-      updateComponents: {
-        components: [{ id: 'root', component: 'Text', text: 'Hi' }],
-      },
-    },
-  ],
+  surfaceKind: 'document',
+  root: 'root',
+  components: [{ id: 'root', component: 'Text', text: 'Hi' }],
+  dataModel: {},
 };
 
 const msg = (id: string, executionId?: string): ChatMessage => ({
@@ -31,14 +28,14 @@ beforeEach(() => {
 
 describe('deriveSessionPreviews', () => {
   it('derives the deliverable from a run by walking its execution result', async () => {
-    // Result WRAPS the document — derive must extract the clean top-level doc.
-    mockedGet.mockResolvedValue({ id: 'job-1', result: { result: doc } } as never);
+    // The backend stores the {text, a2ui} envelope — derive must extract the surface.
+    mockedGet.mockResolvedValue({ id: 'job-1', result: { text: 'Hi', a2ui: doc } } as never);
 
     const { history, current } = await deriveSessionPreviews([msg('m1', 'job-1')]);
 
     expect(history).toHaveLength(1);
     expect(history[0].type).toBe('ui');
-    // The stored data is the EXTRACTED document, not the wrapper.
+    // The stored data is the EXTRACTED surface, not the envelope.
     expect(JSON.parse(history[0].data)).toEqual(doc);
     expect(current).toEqual(history[0]);
   });
@@ -65,13 +62,10 @@ describe('deriveSessionPreviews', () => {
 
   it('returns the latest run as current across multiple runs (history order)', async () => {
     const doc2 = {
-      messages: [
-        {
-          updateComponents: {
-            components: [{ id: 'root', component: 'Text', text: 'Second' }],
-          },
-        },
-      ],
+      surfaceKind: 'document',
+      root: 'root',
+      components: [{ id: 'root', component: 'Text', text: 'Second' }],
+      dataModel: {},
     };
     mockedGet.mockImplementation(
       async (id: string) => ({ id, result: id === 'j2' ? doc2 : doc } as never),

@@ -51,6 +51,10 @@ interface SessionActions {
   reloadForGroup: (restoreActiveSession?: boolean) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   createNewSession: () => Promise<string>;
+  /** Reset to a blank chat WITHOUT persisting a session. Matches the lazy-
+   *  creation design: the row is created (and auto-titled) on the first
+   *  message, so an empty "New Chat" never clutters the Recent rail. */
+  startNewChat: () => void;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   addMessage: (
@@ -162,6 +166,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessions: allSessions,
     });
     return session.id;
+  },
+
+  // Land on a blank chat WITHOUT persisting a row. The actual session is
+  // created lazily (and auto-titled from the first prompt) by addMessage — the
+  // same path reloadForGroup uses for a fresh chat. This is what the "New Chat"
+  // button uses: eagerly creating here would drop an untitled "New Chat" into
+  // the Recent rail next to the button (the duplicate users reported).
+  startNewChat: () => {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+    set({ currentSessionId: null, messages: [] });
   },
 
   deleteSession: async (id: string) => {

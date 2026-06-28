@@ -14,6 +14,7 @@ import {
   clearActiveExecution,
 } from './activeExecutionMarker';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
+import type { Surface } from '../../../shared/a2ui';
 
 interface SessionExecSnapshot {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
@@ -57,6 +58,21 @@ interface ExecutionState {
    */
   previewHistory: PreviewContent[];
   previewIndex: number;
+  /**
+   * Whether the side preview pane is OPEN. Decoupled from `previewContent`: a
+   * deliverable is still captured into `previewContent`/`previewHistory` while the
+   * pane stays closed, so it renders inline in the chat by default and the user
+   * opens the pane on demand (the per-surface "expand" control → `openPreviewPane`,
+   * or the reopen pill → `reopenPreview`). Reset on session switch.
+   */
+  previewPaneOpen: boolean;
+  /**
+   * The chat message id whose surface is currently shown in the pane (set by the
+   * per-surface "expand" control). The inline chat copy of THAT message hides
+   * while the pane shows it, so a deliverable isn't visible in two places. null
+   * when the pane was opened by something other than a surface expand.
+   */
+  previewSourceMessageId: string | null;
   chatCollapsed: boolean;
   executionOwnerSessionId: string | null;
   executionLog: ExecutionLogEntry[];
@@ -75,6 +91,14 @@ interface ExecutionState {
    * store for the same persistence reason as ``workspaceMemory``.
    */
   memoryEnabled: boolean;
+  /**
+   * ChatMode answer mode chosen in the chat input's mode pill:
+   *   'chat'     – a single light agent (Agent.kickoff_async), fast, no crew;
+   *   'research' – a full crew with reasoning;
+   *   'deep'     – a full crew with planning + reasoning.
+   * Persisted (like ``memoryEnabled``) so the choice survives a reload.
+   */
+  chatModeType: 'chat' | 'research' | 'deep';
   /**
    * MCP servers (Kasal server NAMES) selected via the chat input's "+" picker.
    * At execution time these are injected into every generated agent's
@@ -106,9 +130,10 @@ interface ExecutionState {
    */
   runningJobBySession: Record<string, string>;
   /**
-   * Where the run-activity (the "thinking" stream) is shown: 'preview' (the right
-   * preview pane, the default) or 'chat' (collapsed into the chat's "Working…" bar,
-   * expandable to the same stream). A user preference — persisted like the other
+   * Where the run-activity (the "thinking" stream) is shown: 'chat' (the default —
+   * collapsed into the chat's "Working…" bar, expandable to the same stream) or
+   * 'preview' (the right preview pane). Defaults to 'chat' so the preview pane stays
+   * closed until the user opens it. A user preference — persisted like the other
    * chat toggles.
    */
   activityPlacement: 'preview' | 'chat';
@@ -124,10 +149,17 @@ interface ExecutionActions {
    *  new version. */
   updatePreviewData: (data: string) => void;
   navigatePreview: (index: number) => void;
+  /** Open the side preview pane, optionally focused on a specific surface (the
+   *  per-surface "expand" control passes the clicked content; it's focused in
+   *  history, appended if not already there). `sourceMessageId` is the chat
+   *  message the surface came from, so its inline copy can hide while the pane
+   *  shows it. With no argument, opens the pane on the current/last preview. */
+  openPreviewPane: (content?: PreviewContent, sourceMessageId?: string) => void;
   setChatCollapsed: (collapsed: boolean) => void;
   toggleChatCollapsed: () => void;
   setWorkspaceMemory: (value: boolean) => void;
   setMemoryEnabled: (value: boolean) => void;
+  setChatModeType: (mode: 'chat' | 'research' | 'deep') => void;
   toggleMcpServer: (name: string) => void;
   setSelectedMcpServers: (names: string[]) => void;
   toggleAgentBricksEndpoint: (name: string) => void;
@@ -145,7 +177,7 @@ interface ExecutionActions {
   // finishing in a backgrounded session (parallel sessions) lands in the right
   // place instead of the single global slot. Omitting it keeps the legacy
   // single-run behavior (route by the current live owner).
-  completeExecution: (resultText: string, jobId?: string) => void;
+  completeExecution: (resultText: string, jobId?: string, surface?: Surface) => void;
   failExecution: (error: string, jobId?: string) => void;
   /** The session that started a still-tracked job (parallel-session routing). */
   jobOwnerOf: (jobId: string) => string | null;
@@ -252,16 +284,21 @@ export const useExecutionStore = create<ExecutionStore>()(
   previewOwnerSessionId: null,
   previewHistory: [],
   previewIndex: 0,
+  previewPaneOpen: false,
+  previewSourceMessageId: null,
   chatCollapsed: false,
   executionOwnerSessionId: null,
   executionLog: [],
   workspaceMemory: true,
   memoryEnabled: true,
+  chatModeType: 'chat',
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
   runStartedAt: null,
   runningJobBySession: {},
-  activityPlacement: 'preview',
+  // 'chat' by default so the run-activity stream shows inline in the chat and the
+  // side preview pane stays closed until the user opens it (per-surface "expand").
+  activityPlacement: 'chat',
 
   setActivityPlacement: (placement) => set({ activityPlacement: placement }),
 
@@ -286,7 +323,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   setPreviewContent: (content) =>
     set((s) => {
       if (!content) {
-        return { previewContent: null, previewOwnerSessionId: null };
+        return { previewContent: null, previewOwnerSessionId: null, previewPaneOpen: false };
       }
       const last = s.previewHistory[s.previewHistory.length - 1];
       const isDup = last && last.type === content.type && last.data === content.data;
@@ -323,10 +360,50 @@ export const useExecutionStore = create<ExecutionStore>()(
       if (index < 0 || index >= s.previewHistory.length) return {};
       return { previewContent: s.previewHistory[index], previewIndex: index };
     }),
+  // Open the side pane, optionally focusing a specific surface. The per-surface
+  // "expand" control passes the clicked content (focused in history, appended if
+  // new); with no argument it opens on the current/last preview.
+  openPreviewPane: (content, sourceMessageId) =>
+    set((s) => {
+      const sessionId = useSessionStore.getState().currentSessionId;
+      const sourceId = sourceMessageId ?? null;
+      if (!content) {
+        if (s.previewContent) return { previewPaneOpen: true, previewSourceMessageId: sourceId };
+        if (s.previewHistory.length) {
+          const idx =
+            s.previewIndex >= 0 && s.previewIndex < s.previewHistory.length
+              ? s.previewIndex
+              : s.previewHistory.length - 1;
+          return {
+            previewPaneOpen: true,
+            previewSourceMessageId: sourceId,
+            previewContent: s.previewHistory[idx],
+            previewIndex: idx,
+            previewOwnerSessionId: sessionId,
+          };
+        }
+        return { previewPaneOpen: true, previewSourceMessageId: sourceId };
+      }
+      const existingIdx = s.previewHistory.findIndex(
+        (p) => p.type === content.type && p.data === content.data,
+      );
+      const previewHistory =
+        existingIdx >= 0 ? s.previewHistory : [...s.previewHistory, content];
+      const previewIndex = existingIdx >= 0 ? existingIdx : previewHistory.length - 1;
+      return {
+        previewPaneOpen: true,
+        previewSourceMessageId: sourceId,
+        previewContent: previewHistory[previewIndex],
+        previewOwnerSessionId: sessionId,
+        previewHistory,
+        previewIndex,
+      };
+    }),
   setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
   toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
   setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
   setMemoryEnabled: (value) => set({ memoryEnabled: value }),
+  setChatModeType: (mode) => set({ chatModeType: mode }),
   toggleMcpServer: (name) =>
     set((s) => ({
       selectedMcpServers: s.selectedMcpServers.includes(name)
@@ -342,27 +419,36 @@ export const useExecutionStore = create<ExecutionStore>()(
     })),
   setSelectedAgentBricksEndpoints: (names) => set({ selectedAgentBricksEndpoints: names }),
   clearPreview: () => {
-    // Only hide the preview panel — keep history/data so the user can reopen
-    set({ previewContent: null, previewOwnerSessionId: null, chatCollapsed: false });
+    // Close the pane only — keep previewContent/history so the user can reopen
+    // instantly (the deliverable still renders inline in the chat).
+    set({ previewPaneOpen: false, chatCollapsed: false });
   },
 
   reopenPreview: () => {
     const sessionId = useSessionStore.getState().currentSessionId;
     if (!sessionId) return;
-    // Fast path: the history is still in memory (clearPreview keeps it on close,
-    // and restoreSessionState resets it per session on switch) — reopen the entry
-    // the user was viewing, no refetch.
     const s0 = get();
+    // Fast path: content is still held (we keep it on close) or in history.
+    if (s0.previewContent) {
+      set({ previewPaneOpen: true });
+      return;
+    }
     if (s0.previewHistory.length) {
       const idx =
         s0.previewIndex >= 0 && s0.previewIndex < s0.previewHistory.length
           ? s0.previewIndex
           : s0.previewHistory.length - 1;
-      set({ previewContent: s0.previewHistory[idx], previewOwnerSessionId: sessionId });
+      set({
+        previewContent: s0.previewHistory[idx],
+        previewOwnerSessionId: sessionId,
+        previewPaneOpen: true,
+      });
       return;
     }
-    // History was dropped (e.g. after a page reload): derive from each run's
-    // stored execution.result (single source), legacy persisted preview as fallback.
+    // History was dropped (e.g. after a page reload): open the pane and derive the
+    // content from each run's stored execution.result (single source), legacy
+    // persisted preview as fallback.
+    set({ previewPaneOpen: true });
     void loadDerivedOrStoredPreview(sessionId, set);
   },
 
@@ -425,7 +511,7 @@ export const useExecutionStore = create<ExecutionStore>()(
     }));
   },
 
-  completeExecution: (resultText: string, jobId?: string) => {
+  completeExecution: (resultText: string, jobId?: string, surface?: Surface) => {
     const state = get();
     // Route to the job's OWNER (parallel sessions), falling back to the single
     // live owner for the legacy no-jobId path.
@@ -441,7 +527,16 @@ export const useExecutionStore = create<ExecutionStore>()(
     const sessionStore = useSessionStore.getState();
     // Anchor this run's message to its execution so the preview pane can derive
     // the deliverable from execution.result on demand (survives navigating away).
-    const runExtra = jobId ? { executionId: jobId } : undefined;
+    // A composed A2UI surface rides ALONG with the message as resultType:'a2ui'
+    // so it renders INLINE in the chat by default (the preview pane is opt-in),
+    // and persists for free through packExtras like any other rich-card message.
+    const runExtra =
+      jobId || surface
+        ? {
+            ...(jobId ? { executionId: jobId } : {}),
+            ...(surface ? { resultType: 'a2ui', resultData: surface } : {}),
+          }
+        : undefined;
 
     // Run is over — drop the persisted reconnect marker.
     if (ownerSession) clearActiveExecution(ownerSession);
@@ -457,7 +552,15 @@ export const useExecutionStore = create<ExecutionStore>()(
     let preview: PreviewContent | null = null;
     if (resultText) {
       preview = parsePreviewContent(resultText);
-      if (preview) {
+      // A composed A2UI surface is the canonical rich rendering and MUST render
+      // inline on the message (it carries its own "expand" control). When one
+      // exists, never divert to the opt-in (hidden) preview pane just because the
+      // raw answer text ALSO looks previewable — that path posts no message, so
+      // `runExtra` (the inline surface) would be silently dropped. This bit deep
+      // mode specifically: planning produces a structured deck `text` that trips
+      // parsePreviewContent, while research's conversational text falls through to
+      // the inline path — so the presentation showed for research but not deep.
+      if (preview && !surface) {
         // Only surface the preview pane if the user is currently viewing the
         // session that owns this execution — otherwise it would leak the
         // owner session's HTML into whatever session is on screen now.
@@ -479,16 +582,21 @@ export const useExecutionStore = create<ExecutionStore>()(
           saveSessionPreview(ownerSession, preview);
         }
       } else {
-        // Route text message to the correct session
+        // Route text message to the correct session. When a composed surface
+        // renders the SAME previewable artifact (e.g. a presentation deck whose
+        // markdown `text` IS the deck), drop the bulky raw text so only the
+        // inline surface shows — otherwise the deck would print twice (raw
+        // markdown above the rendered deck). Plain-prose answers keep their text.
+        const body = surface && preview ? '' : resultText;
         if (ownerSession) {
           sessionStore.addMessageToTargetSession(
             ownerSession,
             'assistant',
-            resultText,
+            body,
             runExtra,
           );
         } else {
-          sessionStore.addMessage('assistant', resultText, runExtra);
+          sessionStore.addMessage('assistant', body, runExtra);
         }
       }
     } else {
@@ -830,6 +938,9 @@ export const useExecutionStore = create<ExecutionStore>()(
         previewOwnerSessionId: snap.previewContent ? sessionId : null,
         previewHistory,
         previewIndex: snap.previewIndex ?? Math.max(0, previewHistory.length - 1),
+        // Switching sessions closes the pane — the user re-opens it per session.
+        previewPaneOpen: false,
+        previewSourceMessageId: null,
         // Restoring a still-running snapshot makes THIS session the live slot
         // owner again, so its banner/tracker reappear and its trace ticks match.
         // A completed-preview snapshot leaves the slot ownerless (no live run).
@@ -854,6 +965,8 @@ export const useExecutionStore = create<ExecutionStore>()(
         previewOwnerSessionId: null,
         previewHistory: [],
         previewIndex: 0,
+        previewPaneOpen: false,
+        previewSourceMessageId: null,
       });
       // Derive the deliverable from each run's stored execution.result (single
       // source of truth), falling back to the legacy persisted preview.
@@ -886,6 +999,17 @@ export const useExecutionStore = create<ExecutionStore>()(
     }),
     {
       name: 'kasal-chatmode-mcp-selection',
+      // v1: the run-activity stream moved to the chat event box by default (the
+      // preview pane is now opt-in). Reset any persisted 'preview' placement once
+      // so existing browsers pick up the new default instead of keeping the old
+      // value forever.
+      version: 1,
+      migrate: (persisted, version) => {
+        if (version < 1 && persisted && typeof persisted === 'object') {
+          (persisted as { activityPlacement?: string }).activityPlacement = 'chat';
+        }
+        return persisted as ExecutionStore;
+      },
       // Persist ONLY stable USER PREFERENCES so a page refresh (or a switch to a
       // new chat) keeps them — the chat "+" picker selections (MCP servers /
       // Agent Bricks endpoints), the activity placement, and the memory mode
@@ -900,6 +1024,7 @@ export const useExecutionStore = create<ExecutionStore>()(
         activityPlacement: s.activityPlacement,
         workspaceMemory: s.workspaceMemory,
         memoryEnabled: s.memoryEnabled,
+        chatModeType: s.chatModeType,
       }),
     },
   ),
