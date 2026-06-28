@@ -1,6 +1,8 @@
 import React from 'react';
+import Box from '@mui/material/Box';
 import { CatalogLoadResult } from '../../types/dispatcher';
 import { useExecutionStore } from '../../store/executionStore';
+import { buttonResetSx, spinnerSx } from '../../chatSx';
 
 interface CrewDetailCardProps {
   data: CatalogLoadResult;
@@ -15,9 +17,9 @@ const CrewDetailCard: React.FC<CrewDetailCardProps> = ({
   const { plan } = data;
   if (!plan) {
     return (
-      <div className="text-sm my-2" style={{ color: 'var(--text-muted)' }}>
+      <Box sx={{ fontSize: 14, my: 1, color: 'text.disabled' }}>
         No plan data available.
-      </div>
+      </Box>
     );
   }
 
@@ -32,76 +34,100 @@ const CrewDetailCard: React.FC<CrewDetailCardProps> = ({
       (n as Record<string, string>).type === 'task'
   ).length ?? 0;
 
+  const labelSx = { fontWeight: 500, color: 'text.primary' } as const;
+
   return (
-    <div
-      className="rounded-xl p-4 my-3"
-      style={{
-        backgroundColor: 'var(--bg-input)',
-        border: '1px solid var(--border-color)',
+    <Box
+      sx={{
+        borderRadius: '12px',
+        p: 2,
+        my: 1.5,
+        backgroundColor: 'background.paper',
+        border: 1,
+        borderColor: 'divider',
       }}
     >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs"
-            style={{ backgroundColor: 'var(--accent)' }}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box
+            sx={{
+              width: 28,
+              height: 28,
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 12,
+              backgroundColor: 'primary.main',
+            }}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-            </svg>
-          </div>
-          <h4
-            className="font-semibold text-sm"
-            style={{ color: 'var(--text-primary)' }}
-          >
+            </Box>
+          </Box>
+          <Box component="h4" sx={{ fontWeight: 600, fontSize: 14, color: 'text.primary' }}>
             {plan.name}
-          </h4>
-        </div>
+          </Box>
+        </Box>
         {onExecute && (
-          <button
+          <Box
+            component="button"
             onClick={onExecute}
             disabled={busy}
-            className="text-white text-xs px-3.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-            style={{ backgroundColor: 'var(--accent)' }}
+            sx={{
+              ...buttonResetSx,
+              color: '#fff',
+              fontSize: 12,
+              px: 1.75,
+              py: 0.75,
+              borderRadius: '8px',
+              fontWeight: 500,
+              transition: 'all 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              backgroundColor: 'primary.main',
+              '&:hover': { opacity: 0.9 },
+              '&:disabled': { opacity: 0.5, cursor: 'not-allowed' },
+            }}
           >
-            {busy && (
-              <div className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin" />
-            )}
+            {busy && <Box sx={spinnerSx} />}
             {busy ? 'Starting...' : 'Execute'}
-          </button>
+          </Box>
         )}
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Process:</span>{' '}
+      </Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, fontSize: 14, color: 'text.secondary' }}>
+        <Box>
+          <Box component="span" sx={labelSx}>Process:</Box>{' '}
           {plan.process || 'sequential'}
-        </div>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Agents:</span>{' '}
+        </Box>
+        <Box>
+          <Box component="span" sx={labelSx}>Agents:</Box>{' '}
           {agentCount}
-        </div>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Tasks:</span>{' '}
+        </Box>
+        <Box>
+          <Box component="span" sx={labelSx}>Tasks:</Box>{' '}
           {taskCount}
-        </div>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Planning:</span>{' '}
+        </Box>
+        <Box>
+          <Box component="span" sx={labelSx}>Planning:</Box>{' '}
           {plan.planning ? 'Yes' : 'No'}
-        </div>
+        </Box>
         {plan.memory !== undefined && (
-          <div>
-            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Memory:</span>{' '}
+          <Box>
+            <Box component="span" sx={labelSx}>Memory:</Box>{' '}
             {plan.memory ? 'Yes' : 'No'}
-          </div>
+          </Box>
         )}
         {plan.max_rpm !== undefined && (
-          <div>
-            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Max RPM:</span>{' '}
+          <Box>
+            <Box component="span" sx={labelSx}>Max RPM:</Box>{' '}
             {plan.max_rpm}
-          </div>
+          </Box>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 };
 

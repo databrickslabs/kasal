@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
 import { useGroupStore } from '../../../../store/groups';
+import { buttonResetSx, slideUpSx } from '../../chatSx';
 
 /**
  * Shared-workspace data-exposure notice for ChatMode.
@@ -16,7 +18,6 @@ import { useGroupStore } from '../../../../store/groups';
  * remembered in localStorage keyed by group id, so it informs without nagging.
  */
 const DISMISS_PREFIX = 'kasal_shared_ws_notice_dismissed:';
-const ACCENT = 'var(--accent)';
 
 const SharedWorkspaceNotice: React.FC = () => {
   const currentGroupId = useGroupStore((s) => s.currentGroupId);
@@ -54,41 +55,60 @@ const SharedWorkspaceNotice: React.FC = () => {
   };
 
   return (
-    <div
+    <Box
       role="status"
       data-testid="shared-workspace-notice"
-      className="mb-2 rounded-xl px-3 py-2 flex items-start gap-2 text-[11px] leading-snug animate-slide-up"
-      style={{
-        color: ACCENT,
-        backgroundColor: `color-mix(in srgb, ${ACCENT} 10%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${ACCENT} 35%, transparent)`,
+      sx={{
+        mb: 1,
+        borderRadius: '12px',
+        px: 1.5,
+        py: 1,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 1,
+        fontSize: 11,
+        lineHeight: 1.375,
+        color: 'primary.main',
+        backgroundColor: (t) => `color-mix(in srgb, ${t.palette.primary.main} 10%, transparent)`,
+        border: (t) => `1px solid color-mix(in srgb, ${t.palette.primary.main} 35%, transparent)`,
+        ...slideUpSx,
       }}
     >
-      <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <Box component="svg" sx={{ width: 16, height: 16, mt: 0.25, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
           d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
         />
-      </svg>
-      <div className="flex-1 min-w-0">
-        <span style={{ fontWeight: 600 }}>Shared workspace. </span>
+      </Box>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box component="span" sx={{ fontWeight: 600 }}>Shared workspace. </Box>
         Your team can build on each other's work here. Chats, runs, results, logs, and agent memory in this
         workspace are visible to {audience}, including data your agents read from Databricks that teammates may
         not otherwise have access to. Avoid queries whose results shouldn't be shared with the team.
-      </div>
-      <button
+      </Box>
+      <Box
+        component="button"
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss shared workspace notice"
-        className="flex-shrink-0 -mr-1 -mt-0.5 p-0.5 rounded hover:opacity-70 transition-opacity"
-        style={{ color: ACCENT }}
+        sx={{
+          ...buttonResetSx,
+          flexShrink: 0,
+          mr: -0.5,
+          mt: -0.25,
+          p: 0.25,
+          borderRadius: '4px',
+          transition: 'opacity 0.15s',
+          color: 'primary.main',
+          '&:hover': { opacity: 0.7 },
+        }}
       >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <Box component="svg" sx={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
+        </Box>
+      </Box>
+    </Box>
   );
 };
 

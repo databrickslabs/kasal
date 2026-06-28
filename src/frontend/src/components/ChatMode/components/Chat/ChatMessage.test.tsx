@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 import ChatMessage, { TraceGroupMessage } from './ChatMessage';
 import { CrewNameConflictError } from '../../api/crews';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
@@ -55,6 +56,22 @@ vi.mock('../Cards/InputVariablesPrompt', () => ({
     <button data-testid="input-vars-prompt" onClick={() => onSubmit?.({ topic: 'AI' })}>vars</button>
   ),
 }));
+vi.mock('../../../../shared/a2ui', async () => {
+  const React = await import('react');
+  return {
+    A2UIRenderer: ({ payload }: { payload: { surfaceKind?: string } }) => (
+      <div data-testid="a2ui-renderer">{payload?.surfaceKind}</div>
+    ),
+    DeckThemeContext: React.createContext({}),
+    SurfaceChromeContext: React.createContext({ downloads: true }),
+    getDeckTheme: () => ({ id: 'midnight' }),
+    DEFAULT_DECK_THEME_ID: 'midnight',
+    themeToDeck: (p: unknown) => p,
+    themeToTokens: () => ({}),
+  };
+});
+// Isolate ChatMessage from the workspace-themes fetch.
+vi.mock('../../hooks/useA2uiThemes', () => ({ useA2uiThemes: () => null }));
 
 let toolNameMap: Record<string, string> = {};
 vi.mock('../../store/appStore', () => ({
@@ -306,6 +323,20 @@ describe('ChatMessage — rich content routing', () => {
   it('unknown resultType -> renders nothing rich', () => {
     render(<ChatMessage message={msg({ resultType: 'something_else', resultData: { x: 1 } })} />);
     expect(screen.getByTestId('content')).toBeInTheDocument();
+  });
+  it('a2ui -> renders the shared A2UI surface inline alongside the text', () => {
+    render(
+      <ChatMessage
+        message={msg({
+          content: 'Here is your deck.',
+          resultType: 'a2ui',
+          resultData: { surfaceKind: 'presentation', root: 'r', components: [], dataModel: {} },
+        })}
+      />,
+    );
+    // Both the prose AND the rendered surface show — inline-in-chat by default.
+    expect(screen.getByTestId('content')).toHaveTextContent('Here is your deck.');
+    expect(screen.getByTestId('a2ui-renderer')).toHaveTextContent('presentation');
   });
   it('resultType present but resultData missing -> no rich content', () => {
     render(<ChatMessage message={msg({ resultType: 'agent', resultData: undefined })} />);
@@ -705,7 +736,7 @@ describe('TraceGroupMessage (collapsed run of same-tool traces)', () => {
 
   it('shows a spinner while any call is still pending (no duration yet)', () => {
     const pending = [{ label: 'X', sublabel: 'q', kind: 'tool_call' }] as never; // no durationMs
-    const { container } = render(<TraceGroupMessage label="X" traces={pending} />);
-    expect(container.querySelector('.animate-spin')).toBeTruthy();
+    render(<TraceGroupMessage label="X" traces={pending} />);
+    expect(screen.getByTestId('trace-group-spinner')).toBeInTheDocument();
   });
 });

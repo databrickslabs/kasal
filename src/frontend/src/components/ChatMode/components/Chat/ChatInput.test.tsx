@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { screen, fireEvent, within, act } from '@testing-library/react';
+import { renderWithChatTheme as render } from '../../chatTestRender';
 import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
@@ -614,34 +615,37 @@ describe('ChatInput — pending run mode (loaded catalog crew/flow)', () => {
   });
 });
 
-describe('ChatInput — memory mode toggle (three-state, controlled)', () => {
-  it('cycles Workspace memory → Session memory → No memory → Workspace memory', () => {
+describe('ChatInput — memory mode pill (three-state dropdown, controlled)', () => {
+  it('the pill opens a labelled dropdown with all three memory modes', () => {
+    render(<ChatInput {...baseProps} memoryEnabled workspaceMemory />);
+    // Pill reflects the active mode; clicking it opens the dropdown.
+    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
+    expect(screen.getByLabelText('Memory mode: Session memory')).toBeTruthy();
+    expect(screen.getByLabelText('Memory mode: No memory')).toBeTruthy();
+  });
+
+  it('selecting each mode sets the controlled (memoryEnabled, workspaceMemory) state', () => {
     const onWorkspaceMemoryChange = vi.fn();
     const onMemoryEnabledChange = vi.fn();
-    const props = {
-      ...baseProps,
-      onWorkspaceMemoryChange,
-      onMemoryEnabledChange,
-    };
+    const props = { ...baseProps, onWorkspaceMemoryChange, onMemoryEnabledChange };
 
-    // State 1: Workspace memory → clicking goes to Session memory.
-    const { rerender } = render(
-      <ChatInput {...props} memoryEnabled workspaceMemory />,
-    );
-    expect(screen.getByText('Workspace memory')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Workspace memory'));
+    // Active Workspace → open → pick Session: memory on, workspace off.
+    const { rerender } = render(<ChatInput {...props} memoryEnabled workspaceMemory />);
+    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
+    fireEvent.click(screen.getByLabelText('Memory mode: Session memory'));
+    expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
     expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(false);
 
-    // State 2: Session memory → clicking disables memory.
+    // Active Session → open → pick No memory: memory off.
     rerender(<ChatInput {...props} memoryEnabled workspaceMemory={false} />);
-    expect(screen.getByText('Session memory')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Session memory'));
+    fireEvent.click(screen.getByLabelText('Memory mode: Session memory'));
+    fireEvent.click(screen.getByLabelText('Memory mode: No memory'));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(false);
 
-    // State 3: No memory → clicking returns to Workspace memory.
+    // Active No memory → open → pick Workspace: memory on, workspace-wide.
     rerender(<ChatInput {...props} memoryEnabled={false} workspaceMemory={false} />);
-    expect(screen.getByText('No memory')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('No memory'));
+    fireEvent.click(screen.getByLabelText('Memory mode: No memory'));
+    fireEvent.click(screen.getByLabelText('Memory mode: Workspace memory'));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
     expect(onWorkspaceMemoryChange).toHaveBeenLastCalledWith(true);
   });
@@ -658,5 +662,45 @@ describe('ChatInput — model picker opens upward', () => {
     const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
     expect(popover.className).toContain('bottom-full');
     expect(popover.className).not.toContain('top-full');
+  });
+});
+
+describe('ChatInput — answer mode pill', () => {
+  beforeEach(() => {
+    useExecutionStore.getState().setChatModeType('chat');
+  });
+
+  it('shows the active (default) mode and opens a dropdown with all three modes', () => {
+    render(<ChatInput {...baseProps} />);
+    // Trigger reflects the default answer mode (chat = single light agent).
+    const trigger = screen.getByLabelText('Answer mode: Chat');
+    expect(trigger).toBeTruthy();
+    fireEvent.click(trigger);
+    // Dropdown lists Research + Deep Research too.
+    expect(screen.getByLabelText('Answer mode: Research')).toBeTruthy();
+    expect(screen.getByLabelText('Answer mode: Deep Research')).toBeTruthy();
+  });
+
+  it('selecting a mode updates the store', () => {
+    render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
+    fireEvent.click(screen.getByLabelText('Answer mode: Research'));
+    expect(useExecutionStore.getState().chatModeType).toBe('research');
+  });
+
+  it('opens the dropdown upward by default (input pinned to the bottom)', () => {
+    const { container } = render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
+    const popover = container.querySelector('.kasal-popover');
+    expect(popover?.className).toContain('bottom-full');
+    expect(popover?.className).toContain('animate-slide-up');
+  });
+
+  it('opens the dropdown downward when menuPlacement="down" (centered input)', () => {
+    const { container } = render(<ChatInput {...baseProps} menuPlacement="down" />);
+    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
+    const popover = container.querySelector('.kasal-popover');
+    expect(popover?.className).toContain('top-full');
+    expect(popover?.className).toContain('animate-slide-down');
   });
 });
