@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useMemo, useState } from 'react';
+import { PanelLeft } from 'lucide-react';
 import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
 import { toSurface } from '../../utils/surfaceAdapter';
 import { themeToDeck, getDeckTheme, DEFAULT_DECK_THEME_ID } from '../../../../shared/a2ui';
@@ -530,11 +531,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
                   <button
                     type="button"
                     onClick={onMoveActivityToChat}
-                    className="px-3 py-2 text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+                    aria-label="Show in chat"
+                    className="w-7 h-7 mr-2 rounded-md flex items-center justify-center flex-shrink-0 transition-colors hover:opacity-80"
                     style={{ color: 'var(--text-muted)' }}
                     title="Show the activity in the chat instead"
                   >
-                    Show in chat
+                    <PanelLeft size={14} aria-hidden="true" />
                   </button>
                 )}
               </div>

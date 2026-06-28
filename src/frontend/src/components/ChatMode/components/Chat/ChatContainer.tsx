@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { PanelRight } from 'lucide-react';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
@@ -211,11 +212,12 @@ const RunProgress: React.FC<{
             <button
               type="button"
               onClick={onTogglePlacement}
-              className="text-[11px] flex-shrink-0 transition-colors hover:opacity-80"
+              aria-label="Show in panel"
+              className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 transition-colors hover:opacity-80"
               style={{ color: 'var(--text-muted)' }}
               title="Show the activity in the preview panel instead"
             >
-              Show in panel
+              <PanelRight size={14} aria-hidden="true" />
             </button>
           )}
           {onStop && (
