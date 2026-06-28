@@ -24,14 +24,14 @@ class TestModelProvider:
     def test_model_provider_all_values(self):
         """Test that all expected ModelProvider values are present."""
         expected_values = {
-            "openai", "anthropic", "ollama", "deepseek", "databricks", "gemini"
+            "openai", "anthropic", "ollama", "deepseek", "databricks", "gemini", "vllm"
         }
         actual_values = {provider.value for provider in ModelProvider}
         assert actual_values == expected_values
-    
+
     def test_model_provider_count(self):
         """Test that ModelProvider has the expected number of providers."""
-        assert len(ModelProvider) == 6
+        assert len(ModelProvider) == 7
     
     def test_model_provider_string_behavior(self):
         """Test ModelProvider string behavior."""
@@ -49,13 +49,14 @@ class TestModelProvider:
     def test_model_provider_iteration(self):
         """Test iterating over ModelProvider enum."""
         providers = list(ModelProvider)
-        assert len(providers) == 6
+        assert len(providers) == 7
         assert ModelProvider.OPENAI in providers
         assert ModelProvider.ANTHROPIC in providers
         assert ModelProvider.OLLAMA in providers
         assert ModelProvider.DEEPSEEK in providers
         assert ModelProvider.DATABRICKS in providers
         assert ModelProvider.GEMINI in providers
+        assert ModelProvider.VLLM in providers
 
 
 class TestSupportedModels:
@@ -64,7 +65,7 @@ class TestSupportedModels:
     def test_supported_models_structure(self):
         """Test SUPPORTED_MODELS dictionary structure."""
         assert isinstance(SUPPORTED_MODELS, dict)
-        assert len(SUPPORTED_MODELS) == 6
+        assert len(SUPPORTED_MODELS) == 7
         
         # Check that all ModelProvider values are keys
         for provider in ModelProvider:
@@ -291,8 +292,8 @@ class TestModelProviderIntegration:
                 "model_count": len(models)
             })
         
-        assert len(provider_options) == 6
-        
+        assert len(provider_options) == 7
+
         # Verify each option has the expected structure
         for option in provider_options:
             assert "provider" in option
