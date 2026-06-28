@@ -125,8 +125,8 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
           className={ICON_BTN}
           style={{
             color: savedId ? 'var(--accent)' : 'var(--text-secondary)',
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
+            backgroundColor: 'transparent',
+            border: 'none',
           }}
         >
           <svg className="w-3.5 h-3.5" fill={savedId ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -145,8 +145,8 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
           className={ICON_BTN}
           style={{
             color: voted === 'up' ? 'var(--accent)' : 'var(--text-secondary)',
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
+            backgroundColor: 'transparent',
+            border: 'none',
           }}
         >
           <svg className="w-3.5 h-3.5" fill={voted === 'up' ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -164,8 +164,8 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
           className={ICON_BTN}
           style={{
             color: voted === 'down' ? '#ef4444' : 'var(--text-secondary)',
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
+            backgroundColor: 'transparent',
+            border: 'none',
           }}
         >
           <svg className="w-3.5 h-3.5" fill={voted === 'down' ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -183,8 +183,8 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
             className={ICON_BTN}
             style={{
               color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
+              backgroundColor: 'transparent',
+              border: 'none',
             }}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -229,8 +229,8 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
             className={ICON_BTN}
             style={{
               color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
+              backgroundColor: 'transparent',
+              border: 'none',
             }}
           >
             Submit feedback

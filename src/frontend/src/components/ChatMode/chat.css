@@ -81,11 +81,27 @@
  * the surrounding UI and the chat input looks soft rather than "edgy".
  * `button` is intentionally excluded so buttons keep their own styling.
  */
-#kasal-chat-root button,
 #kasal-chat-root input,
 #kasal-chat-root optgroup,
 #kasal-chat-root select,
 #kasal-chat-root textarea {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
+/*
+ * Buttons get the same font normalization, but scoped to the .kasal-chat-root
+ * CLASS (not the #id). Tailwind's `important: '.kasal-chat-root'` scopes every
+ * utility as `.kasal-chat-root .text-xs` (specificity 0,2,0); an `#id button`
+ * rule (1,0,1) would outrank ALL of them, pinning every button to font-size:100%
+ * and silently defeating `text-xs` / `text-[10px]` on the pill/chip buttons.
+ * The class selector (0,1,1) sits just under the utilities, so it sets the
+ * default while per-button `text-*` classes still win.
+ */
+.kasal-chat-root button {
   font-family: inherit;
   font-size: 100%;
   line-height: inherit;
@@ -115,7 +131,13 @@
   cursor: default;
 }
 
-#kasal-chat-root input,
+/*
+ * Strip native chrome from TEXT-like controls only. Checkbox/radio/color/range
+ * are deliberately EXEMPT: `appearance: none` on them erases the control
+ * entirely (e.g. the "Customize" panel's switches rendered as invisible boxes),
+ * so they keep their native rendering (tinted via `accent-color`).
+ */
+#kasal-chat-root input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 #kasal-chat-root select,
 #kasal-chat-root textarea {
   color: inherit;

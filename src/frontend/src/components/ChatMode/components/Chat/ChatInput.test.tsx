@@ -660,16 +660,17 @@ describe('ChatInput — memory mode pill (three-state dropdown, controlled)', ()
 });
 
 describe('ChatInput — model picker opens upward', () => {
-  it('anchors the dropdown ABOVE the input (bottom-full), like the other popovers', () => {
-    // Regression: the picker opened downward (top-full); once a conversation
-    // starts the input is pinned to the bottom of the screen, so the dropdown
-    // rendered off-screen — "model selector stopped working after the first
-    // prompt".
+  it('opens the dropdown ABOVE the input by default (slide-up), like the other popovers', () => {
+    // Regression: the picker opened downward; once a conversation starts the
+    // input is pinned to the bottom of the screen, so the dropdown must open UP.
+    // The menu is positioned with `position: fixed` (escapes the chat's
+    // overflow-hidden containers), so the open direction is conveyed by the
+    // slide-in animation class rather than bottom-full/top-full.
     render(<ChatInput {...baseProps} />);
     fireEvent.click(screen.getByText('Model One'));
     const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
-    expect(popover.className).toContain('bottom-full');
-    expect(popover.className).not.toContain('top-full');
+    expect(popover.className).toContain('animate-slide-up');
+    expect(popover.className).not.toContain('animate-slide-down');
   });
 });
 
@@ -696,6 +697,17 @@ describe('ChatInput — answer mode pill', () => {
     expect(useExecutionStore.getState().chatModeType).toBe('research');
   });
 
+  it('positions the dropdown with position:fixed so it escapes overflow-hidden containers', () => {
+    // Regression: an `absolute` menu was clipped by the chat's overflow-hidden
+    // <main>/scroll wrappers once the sidebar narrowed them, so the menu vanished
+    // "behind" the sidebar. Fixed positioning is not clipped by ancestor overflow.
+    const { container } = render(<ChatInput {...baseProps} />);
+    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
+    const popover = container.querySelector('.kasal-popover') as HTMLElement;
+    expect(popover.style.position).toBe('fixed');
+    expect(popover.className).not.toContain('absolute');
+  });
+
   it('the collapsed pill shows the compact short label ("Deep" for Deep Research)', () => {
     useExecutionStore.getState().setChatModeType('deep');
     render(<ChatInput {...baseProps} />);
@@ -708,16 +720,16 @@ describe('ChatInput — answer mode pill', () => {
     const { container } = render(<ChatInput {...baseProps} />);
     fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
     const popover = container.querySelector('.kasal-popover');
-    expect(popover?.className).toContain('bottom-full');
     expect(popover?.className).toContain('animate-slide-up');
+    expect(popover?.className).not.toContain('animate-slide-down');
   });
 
   it('opens the dropdown downward when menuPlacement="down" (centered input)', () => {
     const { container } = render(<ChatInput {...baseProps} menuPlacement="down" />);
     fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
     const popover = container.querySelector('.kasal-popover');
-    expect(popover?.className).toContain('top-full');
     expect(popover?.className).toContain('animate-slide-down');
+    expect(popover?.className).not.toContain('animate-slide-up');
   });
 });
 
@@ -725,13 +737,12 @@ describe('ChatInput — model picker placement (flips with the input position)',
   // Counterpart to "model picker opens upward" (the default/docked case): when
   // the input is centered (empty state) the host passes menuPlacement="down" and
   // the model dropdown must flip BELOW the pill so it isn't clipped at the top.
-  it('flips DOWN (top-full) when menuPlacement="down"', () => {
+  it('flips DOWN (slide-down) when menuPlacement="down"', () => {
     render(<ChatInput {...baseProps} menuPlacement="down" />);
     fireEvent.click(screen.getByText('Model One'));
     const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
-    expect(popover.className).toContain('top-full');
     expect(popover.className).toContain('animate-slide-down');
-    expect(popover.className).not.toContain('bottom-full');
+    expect(popover.className).not.toContain('animate-slide-up');
   });
 });
 
