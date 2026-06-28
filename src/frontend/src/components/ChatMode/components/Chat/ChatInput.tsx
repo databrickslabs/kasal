@@ -708,7 +708,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 }}
                 aria-label={`Answer mode: ${activeMode.label}`}
                 title={activeMode.hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
                 style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -778,7 +778,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 }}
                 aria-label={`Memory mode: ${activeMemory.label}`}
                 title={activeMemory.hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
                 style={{
                   color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
                   backgroundColor: 'transparent',
@@ -849,7 +849,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     setShowMemoryPicker(false);
                     setShowCommands(false);
                   }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-80"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
                   style={{
                     color: 'var(--text-secondary)',
                     backgroundColor: 'transparent',

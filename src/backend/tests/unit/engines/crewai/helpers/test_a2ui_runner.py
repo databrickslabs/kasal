@@ -5,6 +5,7 @@ for the new shared composer: which catalog the composer may use, and the
 per-deliverable directive injected for a turn — while UNCONFIGURED workspaces keep
 the full catalog so rich surfaces don't silently regress.
 """
+
 import json
 from types import SimpleNamespace
 
@@ -56,7 +57,10 @@ def test_unconfigured_workspace_keeps_full_catalog():
 
 def test_saved_minimal_restricts_to_subset():
     cfg = _cfg(id=7, catalog_type="minimal")
-    assert set(R._resolve_catalog(cfg, CATALOG)["components"]) == set(MINIMAL_COMPONENTS) & FULL
+    assert (
+        set(R._resolve_catalog(cfg, CATALOG)["components"])
+        == set(MINIMAL_COMPONENTS) & FULL
+    )
 
 
 def test_saved_basic_uses_full_catalog():
@@ -65,7 +69,11 @@ def test_saved_basic_uses_full_catalog():
 
 
 def test_custom_catalog_parsed_and_surfacekinds_backfilled():
-    cfg = _cfg(id=7, catalog_type="custom", catalog_json='{"components": {"Text": {"props": {}}}}')
+    cfg = _cfg(
+        id=7,
+        catalog_type="custom",
+        catalog_json='{"components": {"Text": {"props": {}}}}',
+    )
     out = R._resolve_catalog(cfg, CATALOG)
     assert set(out["components"]) == {"Text"}
     assert out["surfaceKinds"] == CATALOG["surfaceKinds"]  # backfilled from default
@@ -81,7 +89,12 @@ def test_guidance_picks_inferred_deliverables_directive():
     cfg = _cfg(
         id=7,
         style_json=json.dumps(
-            {"directives": {"presentation": "aim for about 8 slides", "quiz": "10 questions"}}
+            {
+                "directives": {
+                    "presentation": "aim for about 8 slides",
+                    "quiz": "10 questions",
+                }
+            }
         ),
     )
     assert R._resolve_guidance(cfg, "make a slide deck") == "aim for about 8 slides"
@@ -98,7 +111,9 @@ def test_guidance_falls_back_to_default_then_empty():
 
 # --- guidance threads into the composer prompt -----------------------------
 def test_guidance_appears_in_system_prompt():
-    sp = a2ui_system_prompt(CATALOG, "purpose", "", "make a deck", "aim for about 8 slides")
+    sp = a2ui_system_prompt(
+        CATALOG, "purpose", "", "make a deck", "aim for about 8 slides"
+    )
     assert "DELIVERABLE SETTINGS" in sp
     assert "aim for about 8 slides" in sp
 
@@ -108,10 +123,13 @@ def test_compose_a2ui_threads_guidance_to_llm():
 
     def stub(messages):
         seen["sys"] = messages[0]["content"]
+        # A content slide must carry a real body, else the hollow-deck guard
+        # rejects it and falls back to markdown.
         return (
             '{"surfaceKind":"presentation","root":"d","components":'
             '[{"id":"d","component":"SlideDeck","children":["s"]},'
-            '{"id":"s","component":"Slide","title":"Hi"}],"dataModel":{}}'
+            '{"id":"s","component":"Slide","title":"Hi","children":["t"]},'
+            '{"id":"t","component":"Text","text":"A real point."}],"dataModel":{}}'
         )
 
     surf = compose_a2ui(
