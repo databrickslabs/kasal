@@ -256,6 +256,9 @@ export function buildCrewConfigFromGenerated(
   mcpServers: string[] = [],
   userRequest?: string,
   agentBricksEndpoints: string[] = [],
+  reasoning: boolean = false,
+  planning: boolean = false,
+  planningLlm?: string,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -441,9 +444,12 @@ export function buildCrewConfigFromGenerated(
   return {
     agents_yaml,
     tasks_yaml,
-    inputs: inputs || {},
-    planning: false,
-    reasoning: false,
+    // planning_llm must ride in inputs — the backend reads it from
+    // inputs.planning_llm, not a top-level config key (and Deep planning without
+    // an explicit planning_llm defaults to OpenAI → 401 on a Databricks app).
+    inputs: { ...(inputs || {}), ...(planning && planningLlm ? { planning_llm: planningLlm } : {}) },
+    planning,
+    reasoning,
     model: model || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,

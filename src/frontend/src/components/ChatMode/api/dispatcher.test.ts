@@ -39,6 +39,7 @@ describe('dispatcher api', () => {
       expect(getClient).toHaveBeenCalledTimes(1);
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hello',
+        chat_mode: true,
       });
       expect(result).toEqual(dispatchResult);
     });
@@ -50,6 +51,7 @@ describe('dispatcher api', () => {
 
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hello',
+        chat_mode: true,
         model: 'gpt-4',
       });
     });
@@ -61,6 +63,7 @@ describe('dispatcher api', () => {
 
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hello',
+        chat_mode: true,
         tools: ['search'],
       });
     });
@@ -72,6 +75,7 @@ describe('dispatcher api', () => {
 
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hello',
+        chat_mode: true,
         model: 'gpt-4',
         tools: ['search', 'browse'],
       });
@@ -97,6 +101,7 @@ describe('dispatcher api', () => {
 
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'create a crew plan with agents and tasks: top customers',
+        chat_mode: true,
         model: 'm',
         original_prompt: 'top customers',
         auto_execute: true,
@@ -121,6 +126,7 @@ describe('dispatcher api', () => {
       // the crew canvas renders the plan and runs it via Play, not on dispatch.
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hi',
+        chat_mode: true,
         memory_workspace_scope: true,
         disable_memory: false,
       });
@@ -140,6 +146,7 @@ describe('dispatcher api', () => {
       // (booleans are meaningful), but no session_id and no empty mcp_servers.
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hi',
+        chat_mode: true,
         memory_workspace_scope: true,
         disable_memory: false,
       });
@@ -156,6 +163,7 @@ describe('dispatcher api', () => {
 
       expect(post).toHaveBeenCalledWith('/dispatcher/dispatch', {
         message: 'hi',
+        chat_mode: true,
         memory_workspace_scope: true,
         disable_memory: false,
         agentbricks_endpoints: ['ep-1', 'ep-2'],
@@ -173,6 +181,7 @@ describe('dispatcher api', () => {
       });
       expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
         message: 'hi',
+        chat_mode: true,
         memory_workspace_scope: true,
         disable_memory: false,
       });
@@ -184,6 +193,7 @@ describe('dispatcher api', () => {
       });
       expect(post).toHaveBeenLastCalledWith('/dispatcher/dispatch', {
         message: 'hi',
+        chat_mode: true,
         memory_workspace_scope: true,
         disable_memory: false,
       });

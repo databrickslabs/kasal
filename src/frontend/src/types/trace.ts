@@ -57,6 +57,10 @@ export interface GroupedTrace {
     endTime: Date;
     duration: number;
     events: TraceEvent[];
+    /** True for the synthetic "Unassigned" bucket of a task-less run (e.g. the
+     *  single light/chat agent, which has no crew task). The UI uses this to
+     *  avoid framing the activity as a crew task. */
+    unassigned?: boolean;
   }[];
 }
 

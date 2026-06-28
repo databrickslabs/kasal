@@ -687,4 +687,89 @@ describe('TraceTimelineContent RunConfig UI', () => {
       expect(screen.queryByText(/ID:/)).not.toBeInTheDocument();
     });
   });
+
+  describe('Light/chat agent (task-less run) framing', () => {
+    const t0 = new Date('2024-01-01T00:00:00Z');
+    const t1 = new Date('2024-01-01T00:00:13Z');
+
+    const lightAgentTraces: ProcessedTraces = {
+      ...baseProcessedTraces,
+      agents: [
+        {
+          agent: 'Assistant',
+          startTime: t0,
+          endTime: t1,
+          duration: 13000,
+          agentEvents: [],
+          tasks: [
+            {
+              taskName: 'Top Swiss news today',
+              startTime: t0,
+              endTime: t1,
+              duration: 13000,
+              events: [
+                { type: 'tool_result', description: 'Response Run', timestamp: t1 },
+              ],
+              unassigned: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    it('does not render the "Unassigned" task label', () => {
+      render(<TraceTimelineContent {...baseProps} processedTraces={lightAgentTraces} />);
+      expect(screen.queryByText('Unassigned')).not.toBeInTheDocument();
+    });
+
+    it('does not frame the single light-agent activity as a crew task (no task count)', () => {
+      render(
+        <TraceTimelineContent
+          {...baseProps}
+          viewMode="timeline"
+          expandedAgents={new Set<number>([0])}
+          processedTraces={lightAgentTraces}
+        />
+      );
+      // The misleading "1 task" count is suppressed for the flat light-agent run.
+      expect(screen.queryByText('1 task')).not.toBeInTheDocument();
+      // The activity is labelled with the user's request instead.
+      expect(screen.getByText('Top Swiss news today')).toBeInTheDocument();
+    });
+
+    it('still shows the task count for a normal crew task', () => {
+      const crewTraces: ProcessedTraces = {
+        ...baseProcessedTraces,
+        agents: [
+          {
+            agent: 'Researcher',
+            startTime: t0,
+            endTime: t1,
+            duration: 13000,
+            agentEvents: [],
+            tasks: [
+              {
+                taskName: 'Research the topic',
+                taskId: 'T1',
+                startTime: t0,
+                endTime: t1,
+                duration: 13000,
+                events: [],
+                unassigned: false,
+              },
+            ],
+          },
+        ],
+      };
+      render(
+        <TraceTimelineContent
+          {...baseProps}
+          viewMode="timeline"
+          expandedAgents={new Set<number>([0])}
+          processedTraces={crewTraces}
+        />
+      );
+      expect(screen.getByText('1 task')).toBeInTheDocument();
+    });
+  });
 });

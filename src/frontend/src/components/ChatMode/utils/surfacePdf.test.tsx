@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { downloadSurfacePdf } from './surfacePdf';
-import { UiSurface } from './uiDocument';
+import type { Surface } from '../../../shared/a2ui';
 
 // ---------------------------------------------------------------------------
 // Mocks — rasterization and PDF assembly are third-party; we verify the
@@ -46,25 +46,27 @@ beforeEach(() => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const deckSurface = (): UiSurface => ({
-  rootId: 'root',
-  components: {
-    root: { id: 'root', component: 'Slides', children: ['s1', 's2'] },
-    s1: { id: 's1', component: 'Slide', title: 'One', children: ['t1'] },
-    s2: { id: 's2', component: 'Slide', title: 'Two', children: ['t2'] },
-    t1: { id: 't1', component: 'Text', text: 'first slide text' },
-    t2: { id: 't2', component: 'Text', text: 'second slide text' },
-  },
-  data: {},
+const deckSurface = (): Surface => ({
+  surfaceKind: 'presentation',
+  root: 'root',
+  components: [
+    { id: 'root', component: 'SlideDeck', children: ['s1', 's2'] },
+    { id: 's1', component: 'Slide', title: 'One', children: ['t1'] },
+    { id: 's2', component: 'Slide', title: 'Two', children: ['t2'] },
+    { id: 't1', component: 'Text', text: 'first slide text' },
+    { id: 't2', component: 'Text', text: 'second slide text' },
+  ],
+  dataModel: {},
 });
 
-const docSurface = (): UiSurface => ({
-  rootId: 'root',
-  components: {
-    root: { id: 'root', component: 'Column', children: ['t'] },
-    t: { id: 't', component: 'Text', variant: 'h1', text: 'Report body' },
-  },
-  data: {},
+const docSurface = (): Surface => ({
+  surfaceKind: 'document',
+  root: 'root',
+  components: [
+    { id: 'root', component: 'Column', children: ['t'] },
+    { id: 't', component: 'Text', text: 'Report body' },
+  ],
+  dataModel: {},
 });
 
 // ---------------------------------------------------------------------------
@@ -127,11 +129,12 @@ describe('downloadSurfacePdf — other deliverables', () => {
     expect(jsPDFCtor.mock.calls[0][0]).toMatchObject({ orientation: 'landscape' });
   });
 
-  it('treats a Slides root with no resolvable slides as a plain document', async () => {
-    const surface: UiSurface = {
-      rootId: 'root',
-      components: { root: { id: 'root', component: 'Slides', children: ['missing'] } },
-      data: {},
+  it('treats a SlideDeck root with no resolvable slides as a plain document', async () => {
+    const surface: Surface = {
+      surfaceKind: 'presentation',
+      root: 'root',
+      components: [{ id: 'root', component: 'SlideDeck', children: ['missing'] }],
+      dataModel: {},
     };
     await downloadSurfacePdf(surface, 'Empty Deck');
     expect(html2canvasMock).toHaveBeenCalledTimes(1); // single-page path
@@ -152,18 +155,19 @@ describe('downloadSurfacePdf — other deliverables', () => {
     expect(save).toHaveBeenCalledWith('kasal-app.pdf');
   });
 
-  it('treats a Slides root with malformed children (or a missing root) as a plain document', async () => {
-    const malformed: UiSurface = {
-      rootId: 'root',
-      components: { root: { id: 'root', component: 'Slides', children: 'nope' as never } },
-      data: {},
+  it('treats a SlideDeck root with malformed children (or a missing root) as a plain document', async () => {
+    const malformed: Surface = {
+      surfaceKind: 'presentation',
+      root: 'root',
+      components: [{ id: 'root', component: 'SlideDeck', children: 'nope' as never }],
+      dataModel: {},
     };
     await downloadSurfacePdf(malformed, 'X');
     expect(addPage).not.toHaveBeenCalled(); // single-page document path
 
     vi.clearAllMocks();
     html2canvasMock.mockResolvedValue(fakeCanvas(2200, 1000));
-    const missingRoot: UiSurface = { rootId: 'ghost', components: {}, data: {} };
+    const missingRoot: Surface = { surfaceKind: 'document', root: 'ghost', components: [], dataModel: {} };
     await downloadSurfacePdf(missingRoot, 'Y');
     expect(addPage).not.toHaveBeenCalled();
   });

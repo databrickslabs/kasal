@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Dialog, DialogContent, IconButton, Tooltip, Typography } from '@mui/material';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
-import UiRenderer from '../../ChatMode/components/Preview/UiRenderer';
-import { applyConfiguredTheme, UiSurface } from '../../ChatMode/utils/uiDocument';
-import { useWorkspaceThemes } from '../../ChatMode/hooks/useWorkspaceThemes';
+import A2uiSurface from '../../ChatMode/components/Chat/A2uiSurface';
+import type { Surface } from '../../../shared/a2ui';
 
 /** The width an A2UI surface is laid out at before being scaled into the
  *  narrow chat column — the renderer's typography is designed for a wide
@@ -13,37 +12,25 @@ const NATURAL_WIDTH = 860;
 const MAX_PREVIEW_HEIGHT = 480;
 
 /**
- * Full-size themed A2UI render: the surface theme is re-resolved from the
- * workspace UI-Configurator palettes (source of truth — the agent-embedded
- * theme is frequently the wrong palette), exactly like Chat mode's preview.
+ * Full-size themed A2UI render: the shared A2uiSurface wrapper re-resolves the
+ * workspace UI-Configurator branding (source of truth) and draws through the
+ * shared A2UIRenderer — the same one implementation used everywhere + the export.
  */
-export const UiSurfaceView: React.FC<{ surface: UiSurface }> = ({ surface }) => {
-  const workspaceThemes = useWorkspaceThemes();
-  const themed = useMemo(
-    () => applyConfiguredTheme(surface, workspaceThemes),
-    [surface, workspaceThemes],
-  );
-  return <UiRenderer surface={themed} />;
+export const UiSurfaceView: React.FC<{ surface: Surface }> = ({ surface }) => {
+  return <A2uiSurface surface={surface} />;
 };
 
 /**
- * An A2UI final-result card for the Agent Builder chat: the document renders
- * as its designed surface (scaled to fit the chat column, clipped at a
- * readable height) instead of raw JSON, with a full-size dialog behind an
- * expand control.
+ * An A2UI final-result card for the Agent Builder chat: the surface renders as
+ * its designed layout (scaled to fit the chat column, clipped at a readable
+ * height) instead of raw JSON, with a full-size dialog behind an expand control.
  */
-export const UiSurfaceResult: React.FC<{ surface: UiSurface }> = ({ surface }) => {
+export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState<number | null>(null);
-
-  const workspaceThemes = useWorkspaceThemes();
-  const themed = useMemo(
-    () => applyConfiguredTheme(surface, workspaceThemes),
-    [surface, workspaceThemes],
-  );
 
   // Shrink-to-fit: the surface renders at NATURAL_WIDTH and is scaled down to
   // the chat column's width; the wrapper's height tracks the scaled content.
@@ -98,7 +85,7 @@ export const UiSurfaceResult: React.FC<{ surface: UiSurface }> = ({ surface }) =
           sx={{ position: 'relative', overflow: 'hidden', height: previewHeight, cursor: 'pointer' }}
         >
           <Box ref={innerRef} sx={{ width: NATURAL_WIDTH, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-            <UiRenderer surface={themed} />
+            <A2uiSurface surface={surface} />
           </Box>
           {clipped && (
             <Box
@@ -134,7 +121,7 @@ export const UiSurfaceResult: React.FC<{ surface: UiSurface }> = ({ surface }) =
           <CloseIcon fontSize="small" />
         </IconButton>
         <DialogContent sx={{ p: 0 }}>
-          <UiRenderer surface={themed} />
+          <A2uiSurface surface={surface} />
         </DialogContent>
       </Dialog>
     </Box>
