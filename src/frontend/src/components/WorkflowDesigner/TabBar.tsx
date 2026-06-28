@@ -447,7 +447,7 @@ const TabBar: React.FC<TabBarProps> = ({
               scrollButtons="auto"
               sx={{
                 minWidth: 0, // Allow tabs to shrink
-                flex: 1,
+                flex: '0 1 auto', // size to tabs so the + button can hug their right edge
                 opacity: disabled ? 0.6 : 1,
                 pointerEvents: disabled ? 'none' : 'auto',
                 '& .MuiTab-root': {
@@ -628,6 +628,9 @@ const TabBar: React.FC<TabBarProps> = ({
                 </IconButton>
               </span>
             </Tooltip>
+
+            {/* Spacer keeps the + button hugging the tabs instead of floating far-right */}
+            <Box sx={{ flex: 1 }} />
           </Box>
         )}
 
