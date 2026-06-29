@@ -202,6 +202,18 @@
   box-shadow: var(--shadow-popover);
 }
 
+/* ---- A2UI surface in native full screen (the inline "Full screen" control) ----
+ * The element stays a DOM descendant of #kasal-chat-root in fullscreen, so the
+ * scoped Tailwind utilities still apply; it just needs a page background, some
+ * breathing room, and scrolling for tall content (otherwise fullscreen paints a
+ * black backdrop and clips). */
+#kasal-chat-root .kasal-a2ui:fullscreen,
+#kasal-chat-root .kasal-a2ui:-webkit-full-screen {
+  overflow: auto;
+  background: var(--bg-primary);
+  padding: 32px;
+}
+
 /* Scrollbar */
 #kasal-chat-root ::-webkit-scrollbar {
   width: 5px;
