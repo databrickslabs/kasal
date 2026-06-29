@@ -374,9 +374,21 @@ def _configure_litellm_caching() -> None:
             # calls hit across runs. Use a controlled dir (default under logs)
             # instead of litellm's ".litellm_cache" in the current directory.
             disk_dir = settings.LITELLM_CACHE_DIR or os.path.join(log_dir, "llm_cache")
-            litellm.enable_cache(type="disk", disk_cache_dir=disk_dir, ttl=ttl)
-            logger.info(f"LiteLLM disk cache enabled (dir={disk_dir}, ttl={ttl}s)")
-            return
+            try:
+                litellm.enable_cache(type="disk", disk_cache_dir=disk_dir, ttl=ttl)
+                logger.info(f"LiteLLM disk cache enabled (dir={disk_dir}, ttl={ttl}s)")
+                return
+            except Exception as disk_err:
+                # Disk caching needs LiteLLM's optional dependency (litellm[caching],
+                # i.e. the `diskcache` package). When it's absent, fall back to the
+                # in-memory cache so callers still get caching (just without the
+                # cross-subprocess persistence) instead of NO cache at all. Install
+                # litellm[caching] to restore persistent disk caching.
+                logger.info(
+                    f"LiteLLM disk cache unavailable ({disk_err}); falling back to "
+                    "in-memory cache. Install litellm[caching] for persistent disk caching."
+                )
+                cache_type = "local"
 
         litellm.enable_cache(type=cache_type, ttl=ttl)
         logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")
