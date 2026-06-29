@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { Node, Edge } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
 import { ReasoningConfig } from '../types/crews';
+import { useUILayoutStore } from './uiLayout';
 
 // Execution configuration per tab
 export interface TabExecutionConfig {
@@ -51,7 +52,7 @@ interface TabManagerState {
   activeTabId: string | null;
 
   // Actions
-  createTab: (name?: string) => string;
+  createTab: (name?: string, viewMode?: 'crew' | 'flow') => string;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   updateTabName: (tabId: string, name: string) => void;
@@ -150,7 +151,7 @@ export const useTabManagerStore = create<TabManagerState>()(
       tabs: [],
       activeTabId: null,
 
-      createTab: (name?: string) => {
+      createTab: (name?: string, viewMode?: 'crew' | 'flow') => {
         const newTabId = uuidv4();
         // Get current group ID from localStorage
         const currentGroupId = localStorage.getItem('selectedGroupId') || '';
@@ -159,6 +160,12 @@ export const useTabManagerStore = create<TabManagerState>()(
         const groupTabs = get().tabs.filter(tab => tab.group_id === currentGroupId);
         const tabName = name || `Canvas ${groupTabs.length + 1}`;
 
+        // A new tab opens in the canvas the user is currently looking at, so adding
+        // a tab from the flow canvas stays in flow (not snapped back to crew). Callers
+        // that load specific content (e.g. a crew) pass viewMode explicitly to override.
+        const resolvedViewMode: 'crew' | 'flow' =
+          viewMode ?? (useUILayoutStore.getState().areFlowsVisible ? 'flow' : 'crew');
+
         const newTab: TabData = {
           id: newTabId,
           name: tabName,
@@ -166,7 +173,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           edges: [],
           flowNodes: [],
           flowEdges: [],
-          viewMode: 'crew', // Default to crew canvas view
+          viewMode: resolvedViewMode,
           isActive: true,
           isDirty: false,
           createdAt: new Date(),
@@ -532,7 +539,8 @@ export const useTabManagerStore = create<TabManagerState>()(
                   savedFlowId: flowId,
                   savedFlowName: flowName,
                   lastSavedAt: new Date(),
-                  isDirty: false
+                  isDirty: false,
+                  name: flowName // Update tab name to match flow name (mirrors crew save)
                 }
               : tab
           )
