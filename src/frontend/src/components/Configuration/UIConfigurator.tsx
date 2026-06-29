@@ -50,6 +50,7 @@ const CATALOG_COMPONENTS: Record<Exclude<CatalogType, 'custom'>, string[]> = {
   full: [
     'Markdown', 'Text', 'Heading', 'Image', 'Card', 'KeyValue', 'List', 'Table',
     'Divider', 'Row', 'Column', 'Grid', 'Chart', 'SlideDeck', 'Slide', 'Mindmap', 'Quiz',
+    'Flashcards', 'Map',
   ],
 };
 
@@ -61,7 +62,7 @@ const SAMPLE_CUSTOM_CATALOG = JSON.stringify(
   {
     version: '1.0',
     description: 'Components agents may use. Extend or trim to taste. Names must match the shared renderer.',
-    surfaceKinds: ['conversation', 'document', 'presentation', 'dashboard', 'mindmap', 'quiz'],
+    surfaceKinds: ['conversation', 'document', 'presentation', 'dashboard', 'mindmap', 'quiz', 'flashcards', 'map'],
     components: {
       Markdown: { summary: 'A block of GitHub-flavored markdown.', props: { content: 'string(binding)' } },
       Text: { summary: 'A short run of plain text.', props: { text: 'string(binding)', variant: ['body', 'caption', 'label'] } },
@@ -80,6 +81,8 @@ const SAMPLE_CUSTOM_CATALOG = JSON.stringify(
       Slide: { summary: 'One slide. variant: title|stats|quote|content|section.', props: { variant: 'string', kicker: 'string?', title: 'string?', subtitle: 'string?', children: 'id[]' } },
       Mindmap: { summary: 'A mindmap/tree. Root for surfaceKind "mindmap".', props: { root: '{ id, label, description?, children:[node] }(binding)' } },
       Quiz: { summary: 'Interactive multiple-choice quiz. Root for surfaceKind "quiz".', props: { title: 'string?', questions: '[{ question, options:[string], answer:int, explanation? }](binding)' } },
+      Flashcards: { summary: 'Anki-style flippable study deck. Root for surfaceKind "flashcards".', props: { title: 'string?', cards: '[{ front, back, hint? }](binding)' } },
+      Map: { summary: 'Geographic map plotting lat/lng points. Root for surfaceKind "map".', props: { title: 'string?', points: '[{ lat, lng, label?, value? }](binding)' } },
     },
   },
   null,

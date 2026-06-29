@@ -7,7 +7,9 @@
     "presentation",
     "dashboard",
     "mindmap",
-    "quiz"
+    "quiz",
+    "flashcards",
+    "map"
   ],
   "components": {
     "Markdown": {
@@ -240,6 +242,34 @@
           "type": "array",
           "binding": true,
           "shape": "[{ question, options: [string], answer: int, explanation }]"
+        }
+      }
+    },
+    "Flashcards": {
+      "summary": "An interactive Anki-style flashcard deck for studying. cards is a list of REAL study cards, each of shape {front, back, hint?}. front is the prompt/question shown first; back is the answer revealed on flip. The renderer handles flipping (click to reveal), deck navigation and shuffle — supply ONLY the card data, never a description of a deck. Use as the root for surfaceKind 'flashcards'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "cards": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ front, back, hint }]"
+        }
+      }
+    },
+    "Map": {
+      "summary": "A geographic map that plots points from coordinates. points is a list of {lat, lng, label?, value?}. Use ONLY when the data has real latitude/longitude coordinates. The renderer draws a lightweight world map with the points and a legend. Use as the root for surfaceKind 'map'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "points": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ lat: number, lng: number, label, value }]"
         }
       }
     }
