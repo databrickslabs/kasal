@@ -389,6 +389,24 @@ class DatabricksRetryLLM(LLM):
     # Databricks server-side limit is 297s, so we match it.
     REQUEST_TIMEOUT: ClassVar[float] = 297.0
 
+    def supports_native_structured_output(self) -> bool:
+        """Databricks chat models enforce output_pydantic via response_format
+        (json_schema): ``call`` already forwards ``response_model`` to the parent
+        LLM and coerces the result (see _coerce_to_response_model). So the
+        converter selection should KEEP output_pydantic rather than downgrade to
+        the soft output_json prompt, which lets the model omit fields and makes
+        routers that branch on those fields non-deterministic.
+
+        Gemini is excluded — it has known tool-calling / structured-output quirks
+        on Databricks, so it stays on the output_json fallback.
+        """
+        model = (
+            getattr(self, "model", "")
+            or getattr(self, "_original_model_name", "")
+            or ""
+        ).lower()
+        return "gemini" not in model
+
     def __init__(self, **kwargs):
         """Initialize the Databricks Retry LLM wrapper."""
         # Set default timeout if not provided to prevent hanging requests
