@@ -27,6 +27,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import InputVariablesPrompt from '../Cards/InputVariablesPrompt';
 import GenieSpacePrompt from '../Cards/GenieSpacePrompt';
 import CrewActionsBar from '../Cards/CrewActionsBar';
+import OpenOnCanvasButtons from '../Cards/OpenOnCanvasButtons';
 import { DetectedVariable } from '../../utils/variableDetector';
 import { type Surface } from '../../../../shared/a2ui';
 import { useExecutionStore } from '../../store/executionStore';
@@ -41,6 +42,8 @@ interface ChatMessageProps {
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Save this generated crew's plan to the catalog. Resolves to the saved name. */
   onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
+  /** Answer mode: distill a reusable crew from the conversation and save it. */
+  onSaveAnswerToCatalog?: (sessionId?: string) => void | Promise<void>;
   /** Run the parked execution with the user-provided {variable} inputs. */
   onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
 }
@@ -58,6 +61,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   onExecuteFlow,
   onExecuteGenerated,
   onSaveCrew,
+  onSaveAnswerToCatalog,
   onSubmitVariables,
 }) => {
   const isUser = message.role === 'user';
@@ -162,13 +166,40 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
           />
         );
       }
+      case 'saved_crew': {
+        // Read-only view of a crew just saved to the catalog from an answer-mode
+        // conversation: shows the agents/tasks that were stored, with NO save
+        // bookmark and NO Run button (onSaveCrew/onExecute omitted) — the save
+        // already happened in one click. Offer to open the saved crew on either
+        // builder canvas.
+        const savedData = message.resultData as GenerationCompleteData & {
+          savedCrewId?: string;
+          savedName?: string;
+        };
+        return (
+          <>
+            <GenerationCompleteCard data={savedData} messageId={message.id} />
+            <div className="px-4 my-1 max-w-3xl">
+              <div className="flex items-center gap-2 flex-wrap">
+                <OpenOnCanvasButtons
+                  data={savedData}
+                  savedCrewId={savedData.savedCrewId}
+                  savedName={savedData.savedName}
+                />
+              </div>
+            </div>
+          </>
+        );
+      }
       case 'crew_actions': {
         return (
           <CrewActionsBar
             data={message.resultData as GenerationCompleteData}
             messageId={message.id}
             onSaveCrew={onSaveCrew}
+            onSaveAnswerToCatalog={onSaveAnswerToCatalog}
             executionId={message.executionId}
+            usedWorkspaceMemory={message.usedWorkspaceMemory}
           />
         );
       }
@@ -243,9 +274,20 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                 )
               }
               // PDF rasterization is host-specific (Kasal's preflight restore), so
-              // the chat host supplies it; the deck's "Download" menu then offers
-              // PDF alongside the shared PowerPoint export.
-              onDownloadPdf={() => downloadSurfacePdf(a2uiSurface, 'presentation')}
+              // the chat host supplies it; every surface's "Download" menu then
+              // offers PDF (decks also offer the shared PowerPoint export). The
+              // filename tracks the surface kind (dashboard.pdf, quiz.pdf, …).
+              onDownloadPdf={() => downloadSurfacePdf(a2uiSurface, a2uiSurface.surfaceKind || 'kasal-app')}
+              // A restyle (inline Look picker) persists onto THIS message's stored
+              // surface, so it survives reload and re-renders the inline surface +
+              // any preview derived from it. Also refresh the live preview slot
+              // when this message is the one currently open in the pane.
+              onRestyle={(restyled) => {
+                useSessionStore.getState().updateMessage(message.id, { resultData: restyled });
+                if (previewPaneOpen && previewSourceMessageId === message.id) {
+                  useExecutionStore.getState().updatePreviewData(JSON.stringify(restyled));
+                }
+              }}
             />
           </div>
         );

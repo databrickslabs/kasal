@@ -278,6 +278,8 @@ interface ChatContainerProps {
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   onSaveCrew?: (data: GenerationCompleteData, opts?: { overwrite?: boolean; spaceId?: string }) => Promise<{ id: string; name: string }>;
+  /** Answer mode: distill a reusable crew from the conversation and save it. */
+  onSaveAnswerToCatalog?: (sessionId?: string) => void | Promise<void>;
   onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
   onStopExecution?: () => void;
   isLoading: boolean;
@@ -324,6 +326,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onExecuteFlow,
   onExecuteGenerated,
   onSaveCrew,
+  onSaveAnswerToCatalog,
   onSubmitVariables,
   onStopExecution,
   isLoading,
@@ -515,6 +518,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                       onExecuteFlow={onExecuteFlow}
                       onExecuteGenerated={onExecuteGenerated}
                       onSaveCrew={onSaveCrew}
+                      onSaveAnswerToCatalog={onSaveAnswerToCatalog}
                       onSubmitVariables={onSubmitVariables}
                     />
                   );

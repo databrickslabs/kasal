@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExecutionStatus } from './types/execution';
 import { createExecution, stopExecution, listExecutions, getExecutionStatus, getJobTraces } from './api/executions';
-import { saveGeneratedCrew, CrewNameConflictError } from './api/crews';
+import { saveGeneratedCrew, synthesizeCrewFromConversation, CrewNameConflictError } from './api/crews';
 import { useSessionStore } from './store/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { readActiveExecution, clearActiveExecution } from './store/activeExecutionMarker';
@@ -660,6 +660,9 @@ const ChatWorkspace: React.FC = () => {
 
   // Sync chat theme from Kasal's theme store (dark-mode toggle).
   const kasalIsDarkMode = useThemeStore((s) => s.isDarkMode);
+  // The chat-scoped theme (drives the sidebar dark-mode toggle — flips instantly,
+  // no page reload, persisted to localStorage by appStore).
+  const chatThemeIsDark = useAppStore((s) => s.theme) === 'dark';
   useEffect(() => {
     useAppStore.getState().setTheme(kasalIsDarkMode ? 'dark' : 'light');
   }, [kasalIsDarkMode]);
@@ -896,7 +899,7 @@ const ChatWorkspace: React.FC = () => {
   // The bookmark/feedback actions row for the latest generated crew, parked
   // until that crew's run finishes — feedback only makes sense once the
   // result is visible. Cleared on post; a refine run never sets it.
-  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string } | null>(null);
+  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string; usedWorkspaceMemory?: boolean } | null>(null);
   const postPendingActionsRow = useCallback((jobId?: string) => {
     const pending = pendingActionsRef.current;
     if (!pending) return;
@@ -909,8 +912,17 @@ const ChatWorkspace: React.FC = () => {
     const extra = {
       id: generateId(),
       resultType: 'crew_actions',
-      resultData: { ...pending.data, chatModeType: pending.mode },
+      // Carry the run's session so an answer-mode (chat) bar can distill a crew
+      // from THIS conversation, even after the user switches sessions.
+      resultData: {
+        ...pending.data,
+        chatModeType: pending.mode,
+        sessionId: pending.ownerSession ?? useSessionStore.getState().currentSessionId,
+      },
       executionId: jobId,
+      // Per-run snapshot (captured at generation, not the live toggle) so the
+      // "Memory graph" action only appears for runs that used workspace memory.
+      usedWorkspaceMemory: pending.usedWorkspaceMemory,
     };
     if (pending.ownerSession) sessionStore.addMessageToTargetSession(pending.ownerSession, 'assistant', '', extra);
     else sessionStore.addMessage('assistant', '', extra);
@@ -1132,7 +1144,14 @@ const ChatWorkspace: React.FC = () => {
           genDataRef.current.set(genId, data);
           // Park the actions row (bookmark + thumbs feedback) — it posts only
           // AFTER the run's result comes back, so users rate what they've seen.
-          pendingActionsRef.current = { data, ownerSession: ownerSession ?? null, mode: useExecutionStore.getState().chatModeType };
+          pendingActionsRef.current = {
+            data,
+            ownerSession: ownerSession ?? null,
+            mode: useExecutionStore.getState().chatModeType,
+            // memoryEnabled === true means the run used Workspace memory (false =
+            // session-only). Snapshot it now so a later toggle can't change it.
+            usedWorkspaceMemory: useExecutionStore.getState().memoryEnabled,
+          };
           dispatcher.setLastGenerated(data);
           lastGeneratedRef.current = data; // /save target
           useExecutionStore.getState().completeGeneration(ownerSession ?? undefined);
@@ -1621,6 +1640,60 @@ const ChatWorkspace: React.FC = () => {
     [refreshLibrary, selectedModel],
   );
 
+  // --- Answer mode: distill a reusable crew from the conversation and SAVE it ---
+  // ChatMode 'chat' turns run a generic single assistant, so bookmarking that
+  // saves nothing specific. Instead we ask the backend to read the conversation
+  // and synthesize an agent + task, then save it to the catalog in one shot and
+  // show what was saved (read-only) — no second confirmation click.
+  const handleSaveAnswerToCatalog = useCallback(
+    async (sessionId?: string) => {
+      const sid = sessionId || useSessionStore.getState().currentSessionId;
+      if (!sid) {
+        addMessage('assistant', 'There is no active chat session to build a crew from.');
+        return;
+      }
+      const thinkingId = addMessage(
+        'assistant',
+        'Distilling a reusable crew from this conversation and saving it…',
+        { isStreaming: true },
+      );
+      try {
+        const data = await synthesizeCrewFromConversation(sid, selectedModel || undefined);
+        if (data.agents.length === 0 && data.tasks.length === 0) {
+          updateMessage(thinkingId, {
+            content:
+              'I could not distill a reusable crew from this conversation yet — try again after a few more messages.',
+            isStreaming: false,
+          });
+          return;
+        }
+        // Save automatically (no second click). On a name clash, overwrite the
+        // same-named crew rather than dead-ending — this one-shot save re-derives
+        // the same distilled crew, so overwrite is the intended outcome.
+        const saved = await handleSaveCrew(data).catch((e) => {
+          if (e instanceof CrewNameConflictError) return handleSaveCrew(data, { overwrite: true });
+          throw e;
+        });
+        updateMessage(thinkingId, {
+          content: `✓ Saved **${saved.name}** to the catalog — find it in the **Crews** library on the left.`,
+          isStreaming: false,
+          // Read-only display of exactly what was saved (no save bookmark, no Run).
+          // Carry the saved crew id/name so the card can offer "Open in Agent/Flow
+          // Builder" without re-saving.
+          resultType: 'saved_crew',
+          resultData: { ...data, savedCrewId: saved.id, savedName: saved.name },
+        });
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : 'Failed to save a crew';
+        updateMessage(thinkingId, {
+          content: `I couldn't save a crew from this conversation: ${errMsg}`,
+          isStreaming: false,
+        });
+      }
+    },
+    [addMessage, updateMessage, selectedModel, handleSaveCrew],
+  );
+
   const handleExecuteFlow = useCallback(
     async (flow: FlowData) => {
       // Capture the session ID NOW, before the async createExecution call.
@@ -1968,9 +2041,9 @@ const ChatWorkspace: React.FC = () => {
 
           {/* Section label */}
           {sessions.length > 0 && (
-            <div className="px-3 pt-4 pb-1">
+            <div className="px-3 pt-4 pb-1.5">
               <span
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[11px] font-semibold uppercase tracking-[0.08em]"
                 style={{ color: 'var(--text-muted)' }}
               >
                 Recent
@@ -1978,8 +2051,9 @@ const ChatWorkspace: React.FC = () => {
             </div>
           )}
 
-          {/* Session list */}
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
+          {/* Session list — generous bottom padding so the last row keeps a bit of
+              breathing room and never sits flush against the sidebar's edge. */}
+          <div className="flex-1 overflow-y-auto px-2 pb-6">
             {sessions.map((s) => {
               const isActive = s.id === currentSessionId;
               return (
@@ -1994,7 +2068,7 @@ const ChatWorkspace: React.FC = () => {
                       if (e.key === 'Enter') handleFinishRename();
                       if (e.key === 'Escape') { setRenamingSessionId(null); setRenameValue(''); }
                     }}
-                    className="kasal-rename-input w-full px-3 py-2 my-0.5 rounded-lg text-sm"
+                    className="kasal-rename-input w-full pl-5 pr-3 py-1.5 my-0.5 rounded-lg text-[13px]"
                     style={{
                       backgroundColor: 'var(--bg-input)',
                       color: 'var(--text-primary)',
@@ -2003,7 +2077,7 @@ const ChatWorkspace: React.FC = () => {
                   />
                 ) : (
                   <div
-                    className="kasal-session flex items-center gap-1 rounded-lg my-0.5 group"
+                    className="kasal-session flex items-center rounded-lg group my-0.5"
                     style={{
                       backgroundColor: isActive ? 'var(--bg-active-chip)' : 'transparent',
                     }}
@@ -2014,16 +2088,19 @@ const ChatWorkspace: React.FC = () => {
                         e.preventDefault();
                         setContextMenu({ sessionId: s.id, x: e.clientX, y: e.clientY });
                       }}
-                      className="flex-1 text-left pl-3 pr-1 py-2 text-sm truncate min-w-0"
+                      className="flex-1 flex items-center gap-2 text-left min-w-0"
+                      // Padding is set INLINE, not via Tailwind `pl-*`/`py-*`: the
+                      // global `#kasal-chat-root button { padding: 0 }` reset uses an
+                      // ID selector that out-specifies the class-scoped utilities, so
+                      // a `pl-5` on a <button> is silently overridden. Inline wins.
                       style={{
                         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        padding: '6px 4px 6px 14px',
                       }}
                       title={s.title}
                     >
-                      <div className="flex items-center gap-1.5">
-                        <SessionSpinner sessionId={s.id} />
-                        <div className={`kasal-session-title truncate text-[13px] ${isActive ? 'font-medium' : ''}`}>{s.title}</div>
-                      </div>
+                      <SessionSpinner sessionId={s.id} />
+                      <span className={`kasal-session-title truncate text-[13px] ${isActive ? 'font-semibold' : 'font-medium'}`}>{s.title}</span>
                     </button>
                     {/* Kebab menu button */}
                     <button
@@ -2032,7 +2109,7 @@ const ChatWorkspace: React.FC = () => {
                         const rect = (e.target as HTMLElement).getBoundingClientRect();
                         setContextMenu({ sessionId: s.id, x: rect.right, y: rect.bottom });
                       }}
-                      className="flex-shrink-0 w-7 h-7 mr-1.5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--bg-rail-hover)]"
+                      className="flex-shrink-0 w-6 h-6 mr-1.5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--bg-rail-hover)]"
                       style={{ color: 'var(--text-muted)' }}
                       title="Options"
                     >
@@ -2049,15 +2126,46 @@ const ChatWorkspace: React.FC = () => {
             })}
           </div>
 
+          {/* Sidebar footer — dark-mode toggle, pinned at the bottom. A divider +
+              padding above it leaves clear space between the scrolling session
+              list and the toggle. */}
+          <div
+            className="flex-shrink-0 px-2 pt-2 pb-3 mt-1"
+            style={{ borderTop: '1px solid var(--border-color)' }}
+          >
+            <button
+              onClick={() => useAppStore.getState().toggleTheme()}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
+              style={{ color: 'var(--text-secondary)' }}
+              title={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {chatThemeIsDark ? (
+                // Sun — currently dark, click for light
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <circle cx="12" cy="12" r="4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
+                </svg>
+              ) : (
+                // Moon — currently light, click for dark
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+              )}
+              {chatThemeIsDark ? 'Light mode' : 'Dark mode'}
+            </button>
+          </div>
+
           {/* Context menu */}
           {contextMenu && (
             <>
               <div data-testid="context-menu-backdrop" className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
               <div
-                className="kasal-popover fixed z-50 rounded-xl overflow-hidden py-1"
+                className="kasal-popover fixed z-50 rounded-xl overflow-hidden p-1 shadow-lg"
                 style={{
                   left: contextMenu.x,
                   top: contextMenu.y,
+                  minWidth: 168,
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-color)',
                 }}
@@ -2067,16 +2175,23 @@ const ChatWorkspace: React.FC = () => {
                     const session = sessions.find((s) => s.id === contextMenu.sessionId);
                     if (session) handleStartRename(session.id, session.title);
                   }}
-                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
+                  className="w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm rounded-lg transition-colors hover:bg-[var(--bg-rail-hover)]"
                   style={{ color: 'var(--text-primary)' }}
                 >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.875 4.5" />
+                  </svg>
                   Rename
                 </button>
+                <div className="my-1 h-px" style={{ backgroundColor: 'var(--border-color)' }} />
                 <button
                   onClick={() => handleDeleteSession(contextMenu.sessionId)}
-                  className="w-full text-left px-4 py-2 text-sm transition-colors hover:opacity-80"
+                  className="w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm rounded-lg transition-colors hover:bg-[rgba(239,68,68,0.10)]"
                   style={{ color: '#ef4444' }}
                 >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
                   Delete
                 </button>
               </div>
@@ -2106,6 +2221,7 @@ const ChatWorkspace: React.FC = () => {
               onExecuteFlow={handleExecuteFlow}
               onExecuteGenerated={handleExecuteGenerated}
               onSaveCrew={handleSaveCrew}
+              onSaveAnswerToCatalog={handleSaveAnswerToCatalog}
               onSubmitVariables={handleVariablesSubmit}
               onStopExecution={handleStopExecution}
               isLoading={viewIsLoading}
@@ -2196,10 +2312,14 @@ const ChatWorkspace: React.FC = () => {
 const SessionSpinner: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasActive = useExecutionStore((s) => s.hasActiveExecution(sessionId));
   if (!hasActive) return null;
+  // A clearly-visible accent ring (was an 8px hairline that read as a static dot)
+  // so an in-progress session is obvious at a glance in the list.
   return (
-    <div
-      aria-hidden="true"
-      className="w-2 h-2 rounded-full border border-t-transparent animate-spin flex-shrink-0"
+    <span
+      role="status"
+      aria-label="Running"
+      title="Running…"
+      className="w-3.5 h-3.5 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0"
       style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
     />
   );

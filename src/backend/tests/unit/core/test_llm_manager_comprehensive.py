@@ -13,7 +13,7 @@ Tests cover:
 
 import time as _time
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock, call
 from typing import Dict, Any, List, Optional
 import os
 import logging
@@ -1323,6 +1323,33 @@ class TestConfigureLiteLLMCaching:
             finally:
                 for p in patches:
                     p.stop()
+
+    def test_disk_cache_falls_back_to_local_when_unavailable(self):
+        """Disk caching needs the optional `diskcache` dep (litellm[caching]).
+        When it's missing, enable_cache(type='disk') raises; we must fall back to
+        the in-memory ('local') cache so callers still get caching — NOT end up
+        with no cache (the original noisy-warning behaviour)."""
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_TTL=77, LITELLM_CACHE_DIR="/tmp/x"
+        )
+        # First call (disk) raises like the missing-dependency error; second
+        # call (local fallback) succeeds.
+        with patch(
+            "src.core.llm_manager.litellm.enable_cache",
+            side_effect=[ImportError("install litellm[caching]"), None],
+        ) as mock_enable:
+            for p in patches:
+                p.start()
+            try:
+                _configure_litellm_caching()
+            finally:
+                for p in patches:
+                    p.stop()
+            assert mock_enable.call_count == 2
+            # Disk attempted first...
+            assert mock_enable.call_args_list[0].kwargs["type"] == "disk"
+            # ...then fell back to in-memory local with the same TTL.
+            assert mock_enable.call_args_list[1] == call(type="local", ttl=77)
 
 
 class TestCompletionMaxTokensPolicy:

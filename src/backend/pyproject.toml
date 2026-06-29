@@ -46,7 +46,7 @@ dependencies = [
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
-    "litellm==1.74.9",
+    "litellm[caching]==1.74.9",
     "crewai[tools]>=1.14.5", # Unified cognitive memory system
     "langchain",
     "langchain-text-splitters", # langchain 1.x moved text splitters out of core

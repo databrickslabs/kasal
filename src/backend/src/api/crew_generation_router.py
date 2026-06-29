@@ -15,6 +15,7 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
 from src.schemas.crew import (
     CrewCreationResponse,
+    CrewFromConversationRequest,
     CrewGenerationRequest,
     CrewGenerationResponse,
     CrewStreamingRequest,
@@ -57,6 +58,39 @@ async def create_crew(
     )
 
     # Return the created objects
+    return CrewCreationResponse(agents=created_agents, tasks=created_tasks)
+
+
+@router.post("/from-conversation", response_model=CrewCreationResponse)
+async def create_crew_from_conversation(
+    request: CrewFromConversationRequest,
+    group_context: GroupContextDep,
+    session: SessionDep,
+):
+    """Synthesize a reusable crew (agent + task) from a chat session's conversation.
+
+    Reads the conversation for ``request.session_id`` and distills it into an
+    agent + task, creating the entities in the database. Used by ChatMode answer
+    mode's "Save to catalog" so the saved crew reflects what the user actually
+    asked for, not the generic chat assistant.
+    """
+    crew_service = CrewGenerationService(session)
+
+    logger.info(
+        f"Synthesizing crew from conversation for session {request.session_id}"
+    )
+    result = await crew_service.synthesize_crew_from_conversation(
+        session_id=request.session_id,
+        group_context=group_context,
+        model=request.model,
+    )
+
+    created_agents = result.get("agents", [])
+    created_tasks = result.get("tasks", [])
+    logger.info(
+        f"Synthesized crew with {len(created_agents)} agents and "
+        f"{len(created_tasks)} tasks from conversation"
+    )
     return CrewCreationResponse(agents=created_agents, tasks=created_tasks)
 
 

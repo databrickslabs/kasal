@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, postCrewFeedback, CrewNameConflictError, listSavedCrews, listSavedFlows } from './crews';
+import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, postCrewFeedback, CrewNameConflictError, listSavedCrews, listSavedFlows, synthesizeCrewFromConversation } from './crews';
 import { getClient } from './client';
 
 vi.mock('./client', () => ({
@@ -509,5 +509,40 @@ describe('postCrewFeedback', () => {
       rating: 'down',
       comment: 'images were broken',
     });
+  });
+});
+
+describe('synthesizeCrewFromConversation', () => {
+  let post: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    post = vi.fn().mockResolvedValue({
+      data: {
+        agents: [{ id: 'a1', name: 'Researcher' }],
+        tasks: [{ id: 't1', name: 'Gather' }, { id: 't2', name: 'Dashboard' }],
+      },
+    });
+    mockedGetClient.mockReturnValue({ post } as unknown as ReturnType<typeof getClient>);
+  });
+
+  it('posts the session id and returns the synthesized agents/tasks', async () => {
+    const out = await synthesizeCrewFromConversation('sess-1');
+    expect(post).toHaveBeenCalledWith('/crew/from-conversation', { session_id: 'sess-1' });
+    expect(out.agents).toHaveLength(1);
+    expect(out.tasks).toHaveLength(2);
+  });
+
+  it('includes the model override when provided', async () => {
+    await synthesizeCrewFromConversation('sess-1', 'databricks-gpt-5');
+    expect(post).toHaveBeenCalledWith('/crew/from-conversation', {
+      session_id: 'sess-1',
+      model: 'databricks-gpt-5',
+    });
+  });
+
+  it('normalizes a missing/empty payload to empty arrays', async () => {
+    post.mockResolvedValueOnce({ data: {} });
+    const out = await synthesizeCrewFromConversation('sess-1');
+    expect(out).toEqual({ agents: [], tasks: [] });
   });
 });

@@ -14,7 +14,7 @@ from src.schemas.crew import (
     Position, Style, LLMGuardrailConfig, TaskConfig, NodeData, Node, Edge, CrewBase, CrewCreate,
     CrewUpdate, CrewInDBBase, Crew, CrewResponse, CrewGenerationRequest,
     AgentConfig, Agent, Task, CrewGenerationResponse, CrewCreationResponse,
-    CrewStreamingRequest, CrewStreamingResponse
+    CrewStreamingRequest, CrewStreamingResponse, CrewFromConversationRequest
 )
 
 
@@ -1200,3 +1200,22 @@ class TestCrewStreamingResponse:
             generation_id="550e8400-e29b-41d4-a716-446655440000"
         )
         assert response.generation_id == "550e8400-e29b-41d4-a716-446655440000"
+
+
+class TestCrewFromConversationRequest:
+    """Test cases for CrewFromConversationRequest schema (answer-mode save)."""
+
+    def test_valid_minimal(self):
+        """session_id alone is valid; model defaults to None."""
+        req = CrewFromConversationRequest(session_id="sess-1")
+        assert req.session_id == "sess-1"
+        assert req.model is None
+
+    def test_with_model_override(self):
+        req = CrewFromConversationRequest(session_id="sess-1", model="databricks-gpt-5")
+        assert req.model == "databricks-gpt-5"
+
+    def test_session_id_is_required(self):
+        """Omitting session_id is a validation error."""
+        with pytest.raises(ValidationError):
+            CrewFromConversationRequest()
