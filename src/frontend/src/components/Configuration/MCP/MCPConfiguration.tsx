@@ -52,7 +52,7 @@ export interface MCPServerConfig {
   server_url: string;
   api_key: string;
   server_type: string;  // "sse" or "streamable"
-  auth_type?: string;  // "api_key" or "databricks_spn"
+  auth_type?: string;  // "api_key", "databricks_obo", or "databricks_spn"
   timeout_seconds: number;
   max_retries: number;
   rate_limit: number;
@@ -296,13 +296,14 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                   onChange={handleSelectChange('auth_type')}
                 >
                   <MenuItem value="api_key">API Key</MenuItem>
+                  <MenuItem value="databricks_obo">Apps OBO (on-behalf-of user)</MenuItem>
                   <MenuItem value="databricks_spn">Apps SPN</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
           )}
 
-          {editedServer.server_type === 'streamable' && editedServer.auth_type !== 'databricks_spn' && (
+          {editedServer.server_type === 'streamable' && !['databricks_spn', 'databricks_obo'].includes(editedServer.auth_type || '') && (
             <Grid item xs={12} md={6}>
               <TextField
                 label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
@@ -439,7 +440,7 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
             testingConnection ||
             !editedServer.server_url?.trim() ||
             (editedServer.server_type === 'streamable' &&
-             editedServer.auth_type !== 'databricks_spn' &&
+             !['databricks_spn', 'databricks_obo'].includes(editedServer.auth_type || '') &&
              !editedServer.api_key?.trim())
           }
           startIcon={testingConnection ? <CircularProgress size={16} /> : <CloudIcon />}

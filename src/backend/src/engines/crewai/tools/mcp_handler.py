@@ -3,6 +3,7 @@ import os
 import asyncio
 import json
 import sys
+import hashlib
 import subprocess
 import concurrent.futures
 import time
@@ -12,6 +13,34 @@ from typing import Optional
 from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_headers
 
 logger = logging.getLogger(__name__)
+
+
+def format_mcp_exception(exc: BaseException) -> str:
+    """Render an MCP error into its real underlying cause(s).
+
+    The MCP client runs over ``anyio`` task groups, so a failed connection OR a
+    failed tool call (403, PERMISSION_DENIED, timeout, …) surfaces as an
+    ``ExceptionGroup`` whose ``str()`` is the useless "unhandled errors in a
+    TaskGroup (1 sub-exception)". This walks the group (duck-typed on
+    ``.exceptions`` so it also works with the 3.9 backport) and joins the leaf
+    messages, so logs/traces show e.g. "PERMISSION_DENIED: Unable to get space …"
+    instead of the wrapper.
+    """
+    msgs = []
+
+    def _walk(e: BaseException) -> None:
+        subs = getattr(e, "exceptions", None)
+        if subs and isinstance(subs, (list, tuple)):
+            for sub in subs:
+                _walk(sub)
+            return
+        text = str(e).strip()
+        msgs.append(f"{type(e).__name__}: {text}" if text else type(e).__name__)
+
+    _walk(exc)
+    seen = set()
+    unique = [m for m in msgs if not (m in seen or seen.add(m))]
+    return "; ".join(unique) or f"{type(exc).__name__}: {exc}"
 
 
 def _is_image_mime(mime: Optional[str]) -> bool:
@@ -254,8 +283,25 @@ async def get_or_create_mcp_adapter(server_params, adapter_id=None):
         command_str = ' '.join(server_params['command']) if isinstance(server_params['command'], list) else server_params['command']
         pool_key = f"stdio_{command_str}"
     else:
-        # For HTTP-based servers, use URL and auth type
-        pool_key = f"{server_url}_{auth_type}"
+        # For HTTP-based servers, key by URL + auth type + a fingerprint of the
+        # ACTUAL credential being sent. A pooled connection's server-side identity
+        # is fixed when it is opened, so sharing one connection across callers is
+        # only safe when they authenticate as the SAME principal. For OBO this is
+        # per-USER — without the fingerprint, user A's pooled Genie connection is
+        # reused for user B, and B's query against a conversation A created fails
+        # with "PERMISSION_DENIED: ... does not own conversation". The fingerprint
+        # also rotates the key when an OBO token refreshes, so a stale (expired)
+        # connection is never reused. Hashing keeps the raw token out of keys/logs.
+        auth_material = (
+            (server_params.get('headers') or {}).get('Authorization')
+            or server_params.get('user_token')
+            or ''
+        )
+        identity_fp = (
+            hashlib.sha256(auth_material.encode()).hexdigest()[:12]
+            if auth_material else 'noauth'
+        )
+        pool_key = f"{server_url}_{auth_type}_{identity_fp}"
     
     # Check if we have a valid adapter in the pool
     if pool_key in _mcp_connection_pool:
@@ -625,8 +671,9 @@ def wrap_mcp_tool(tool):
                     
                     return result
                 except Exception as e:
-                    logger.error(f"All approaches failed for MCP tool {tool_name}: {e}")
-                    return f"Error executing tool: {str(e)}"
+                    cause = format_mcp_exception(e)
+                    logger.error(f"All approaches failed for MCP tool {tool_name}: {cause}")
+                    return f"Error executing tool '{tool_name}': {cause}"
         
         # Replace the original _run method with our wrapped version
         tool._run = wrapped_run
@@ -662,8 +709,9 @@ def wrap_mcp_tool(tool):
                     return f"Error executing tool: {str(e)}"
             else:
                 # For other errors, just log and return the error
-                logger.error(f"Error running MCP tool {tool_name}: {direct_error}")
-                return f"Error executing tool: {str(direct_error)}"
+                cause = format_mcp_exception(direct_error)
+                logger.error(f"Error running MCP tool {tool_name}: {cause}")
+                return f"Error executing tool '{tool_name}': {cause}"
         except Exception as e:
             # For any other exception, log and return error message
             logger.error(f"Error running MCP tool {tool_name}: {e}")
