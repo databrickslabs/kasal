@@ -19,6 +19,11 @@ export interface ChatMessage {
    * per-session preview copy is needed. Persisted in the __chatmode extras.
    */
   executionId?: string;
+  /**
+   * Per-run snapshot (captured at generation, not the live toggle) of whether the
+   * run used workspace memory. Gates the "Memory graph" action on the crew bar.
+   */
+  usedWorkspaceMemory?: boolean;
 }
 
 export interface ChatSession {

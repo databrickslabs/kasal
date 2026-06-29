@@ -308,12 +308,19 @@ class FlowRunnerService:
 
             if resume_from_execution_id:
                 # RESUME SCENARIO: Reuse existing execution record.
-                # resume_from_execution_id is the executionhistory integer PK (id),
-                # NOT the job_id (a UUID), so look it up by id.
+                # resume_from_execution_id is normally the job_id (a UUID string) — that
+                # is what the HITL resume path passes (HITLApproval.execution_id is a FK to
+                # executionhistory.job_id). Older callers may pass the integer PK, so look
+                # up by job_id first and fall back to the integer id when it parses as int.
                 logger.info(f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}")
 
                 exec_repo = ExecutionHistoryRepository(self.db)
-                existing_execution = await exec_repo.get_execution_by_id(int(resume_from_execution_id))
+                existing_execution = await exec_repo.get_execution_by_job_id(str(resume_from_execution_id))
+                if not existing_execution:
+                    try:
+                        existing_execution = await exec_repo.get_execution_by_id(int(resume_from_execution_id))
+                    except (TypeError, ValueError):
+                        existing_execution = None
 
                 if existing_execution:
                     execution = existing_execution
