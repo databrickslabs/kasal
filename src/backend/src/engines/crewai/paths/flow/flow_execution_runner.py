@@ -16,6 +16,15 @@ from src.core.logger import LoggerManager
 # Use flow-specific logger
 logger = LoggerManager.get_instance().flow
 
+# CI/CD artifact aggregation query. CAST(... AS TEXT) is portable across SQLite
+# (dev) and Postgres/Lakebase; the Postgres-only ``output::text`` cast raises
+# "unrecognized token: ':'" on SQLite. Module-level so it's unit-testable.
+CICD_ARTIFACT_QUERY = (
+    "SELECT output FROM execution_trace "
+    "WHERE job_id = :jid AND CAST(output AS TEXT) LIKE '%cicd_download_url%' "
+    "ORDER BY created_at ASC"
+)
+
 
 async def update_execution_status_with_retry(
     execution_id: str,
@@ -165,11 +174,9 @@ async def run_flow_in_process(
                 from sqlalchemy import text as _text
 
                 async with async_session_factory() as _session:
-                    _rows = await _session.execute(_text(
-                        "SELECT output FROM execution_trace "
-                        "WHERE job_id = :jid AND output::text LIKE '%cicd_download_url%' "
-                        "ORDER BY created_at ASC"
-                    ), {'jid': execution_id})
+                    _rows = await _session.execute(
+                        _text(CICD_ARTIFACT_QUERY), {'jid': execution_id}
+                    )
                     _trace_rows = _rows.fetchall()
 
                 _artifacts: list = []

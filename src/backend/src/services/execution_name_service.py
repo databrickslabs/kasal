@@ -10,7 +10,6 @@ import traceback
 
 
 from src.schemas.execution import ExecutionNameGenerationRequest, ExecutionNameGenerationResponse
-from src.services.template_service import TemplateService
 from src.services.log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 
@@ -20,16 +19,19 @@ logger = logging.getLogger(__name__)
 class ExecutionNameService:
     """Service for execution name generation operations."""
 
-    def __init__(self, log_service: LLMLogService, template_service):
+    def __init__(self, log_service, template_service, session=None):
         """
         Initialize the service.
 
         Args:
-            log_service: Service for logging LLM interactions
-            template_service: Service for template operations
+            log_service: Service for logging LLM interactions (None when no
+                session was injected — a standalone one is opened per call).
+            template_service: Service for template operations (same nullability).
+            session: The injected DB session, or None.
         """
         self.log_service = log_service
         self.template_service = template_service
+        self._session = session
 
     @classmethod
     def create(cls, session) -> 'ExecutionNameService':
@@ -40,17 +42,36 @@ class ExecutionNameService:
         proper separation of concerns.
 
         Args:
-            session: Database session for repository operations
+            session: Database session for repository operations, or None. The chat
+                auto-execute path constructs the whole execution stack with
+                ``session=None`` (it runs detached, off an asyncio task, and each
+                layer opens its OWN ``request_scoped_session()``). When None is
+                passed here we defer dependency creation and open a standalone
+                session per DB call — so the template read and LLM-interaction log
+                never run on a ``None`` session ("'NoneType' has no attribute
+                'execute'/'add'").
 
         Returns:
             An instance of ExecutionNameService with all required dependencies
         """
         from src.services.template_service import TemplateService
 
+        if session is None:
+            return cls(log_service=None, template_service=None, session=None)
         log_service = LLMLogService.create(session)
         template_service = TemplateService(session)
-        return cls(log_service=log_service, template_service=template_service)
-    
+        return cls(log_service=log_service, template_service=template_service, session=session)
+
+    async def _get_name_template(self) -> str:
+        """Fetch the ``generate_job_name`` template, opening a standalone session
+        when none was injected (so the read never hits a ``None`` session)."""
+        if self.template_service is not None:
+            return await self.template_service.get_template_content("generate_job_name")
+        from src.db.session import request_scoped_session
+        from src.services.template_service import TemplateService
+        async with request_scoped_session() as session:
+            return await TemplateService(session).get_template_content("generate_job_name")
+
     async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:
         """
         Log LLM interaction using the log service.
@@ -62,21 +83,35 @@ class ExecutionNameService:
             model: Model used for generation
         """
         try:
-            await self.log_service.create_log(
-                endpoint=endpoint,
-                prompt=prompt,
-                response=response,
-                model=model,
-                status='success'
-            )
+            if self.log_service is not None:
+                await self.log_service.create_log(
+                    endpoint=endpoint,
+                    prompt=prompt,
+                    response=response,
+                    model=model,
+                    status='success'
+                )
+            else:
+                # No injected session: open a standalone one and COMMIT (the
+                # repository only flushes — a request would normally commit at end).
+                from src.db.session import request_scoped_session
+                async with request_scoped_session() as session:
+                    await LLMLogService.create(session).create_log(
+                        endpoint=endpoint,
+                        prompt=prompt,
+                        response=response,
+                        model=model,
+                        status='success'
+                    )
+                    await session.commit()
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             # CRITICAL: Rollback the session so subsequent operations (e.g.
             # create_execution) are not blocked by PendingRollbackError.
             try:
-                session = self.log_service.repository.session
-                await session.rollback()
+                if self.log_service is not None:
+                    await self.log_service.repository.session.rollback()
             except Exception:
                 pass
     
@@ -91,9 +126,11 @@ class ExecutionNameService:
             Response containing the generated name
         """
         try:
-            # Get the template for name generation
-            # This template already includes instructions to only return the name without explanations
-            system_message = await self.template_service.get_template_content("generate_job_name")
+            # Get the template for name generation (opens its own session when none
+            # was injected — the chat auto-execute path builds this service with
+            # session=None). This template already includes instructions to only
+            # return the name without explanations.
+            system_message = await self._get_name_template()
 
             # Fallback if template is not found (shouldn't happen if seeds are run)
             if not system_message:

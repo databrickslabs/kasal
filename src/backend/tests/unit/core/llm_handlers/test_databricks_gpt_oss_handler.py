@@ -167,3 +167,52 @@ class TestPlaceholderResponseRetry:
         # Terminal behavior matches the empty-response path (empty string),
         # not a placeholder masquerading as an answer.
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Structured-output coercion (_coerce_to_response_model)
+# ---------------------------------------------------------------------------
+#
+# CrewAI's long-term-memory consolidation / save-analysis pass response_model and
+# then do `isinstance(resp, Model) or Model.model_validate(resp)`. litellm returns
+# structured output as a JSON *string*, so model_validate(<str>) raised and CrewAI
+# fell back ("Consolidation analysis failed, defaulting to insert"). The wrapper
+# now parses the string into the model so the plan is actually used.
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class _Plan(BaseModel):
+    keep: bool
+    note: str = ""
+
+
+class TestCoerceToResponseModel:
+    def test_parses_json_string_into_response_model(self):
+        out = DatabricksRetryLLM._coerce_to_response_model(
+            '{"keep": true, "note": "hi"}', {"response_model": _Plan}
+        )
+        assert isinstance(out, _Plan)
+        assert out.keep is True and out.note == "hi"
+
+    def test_strips_markdown_json_fence(self):
+        fenced = "```json\n{\"keep\": false}\n```"
+        out = DatabricksRetryLLM._coerce_to_response_model(fenced, {"response_model": _Plan})
+        assert isinstance(out, _Plan)
+        assert out.keep is False
+
+    def test_no_response_model_returns_result_unchanged(self):
+        out = DatabricksRetryLLM._coerce_to_response_model('{"keep": true}', {})
+        assert out == '{"keep": true}'
+
+    def test_non_string_result_returned_unchanged(self):
+        plan = _Plan(keep=True)
+        out = DatabricksRetryLLM._coerce_to_response_model(plan, {"response_model": _Plan})
+        assert out is plan
+
+    def test_invalid_json_falls_back_to_original_string(self):
+        # Not valid for the model → return the original string so the caller's
+        # own fallback still applies (behaviour identical to before the fix).
+        bad = "not json at all"
+        out = DatabricksRetryLLM._coerce_to_response_model(bad, {"response_model": _Plan})
+        assert out == bad
