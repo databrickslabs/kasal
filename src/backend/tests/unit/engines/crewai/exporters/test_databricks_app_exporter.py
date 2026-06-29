@@ -782,6 +782,60 @@ class TestDatabricksAppA2UI:
         assert config["directives"]["presentation"] == "aim for about 8 slides"
 
     @pytest.mark.asyncio
+    async def test_a2ui_rich_surface_kinds_cover_live_renderer(self, exporter, crew_data):
+        """App.tsx's RICH set gates which composed surfaces actually render — a kind
+        the shared composer can emit but that's absent here is silently dropped. The
+        shared renderer (live chat) supports flashcards + map (added in the a2ui
+        flashcards/map work); regression-guard that the export kept up so those
+        surfaces aren't dropped on the deployed app."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        # Extract the kinds listed in `const RICH = new Set([...])`.
+        m = re.search(r"const RICH = new Set\((\[[^\]]*\])\)", app, re.DOTALL)
+        assert m, "could not find the RICH surface-kind set in App.tsx"
+        rich = set(re.findall(r"'([a-z]+)'", m.group(1)))
+        expected = {
+            "document",
+            "presentation",
+            "dashboard",
+            "mindmap",
+            "quiz",
+            "flashcards",
+            "map",
+        }
+        missing = expected - rich
+        assert not missing, f"App.tsx RICH set is missing surface kinds: {sorted(missing)}"
+
+    @pytest.mark.asyncio
+    async def test_a2ui_surfaces_inherit_workspace_palette(self, exporter, crew_data):
+        """Exported surfaces must theme via the SAME --a2-* token contract as Kasal
+        chat: index.css maps the shadcn utilities to hsl(var(--a2-*)) and App.tsx
+        injects themeToTokens(workspace palette) onto each surface. Otherwise the
+        deployed app's cards/dashboards render with a static theme that ignores the
+        workspace branding (the gap this closes)."""
+        files = _files(await exporter.export(crew_data, {}))
+        css = files["frontend/src/index.css"]
+        app = files["frontend/src/App.tsx"]
+        # The Tailwind utilities the primitives use resolve to the --a2-* tokens.
+        assert "--a2-card:" in css and "--a2-background:" in css
+        assert "--color-card: hsl(var(--a2-card))" in css
+        assert "--color-background: hsl(var(--a2-background))" in css
+        # App injects the workspace palette as those tokens on every surface.
+        assert "themeToTokens" in app
+        assert "paletteForKind" in app
+        assert "kasal-a2ui" in app
+
+    @pytest.mark.asyncio
+    async def test_a2ui_surfaces_support_fullscreen(self, exporter, crew_data):
+        """Every rich surface gets a native full-screen control (matching chat's
+        expand), backed by the .kasal-a2ui:fullscreen page styling."""
+        files = _files(await exporter.export(crew_data, {}))
+        app = files["frontend/src/App.tsx"]
+        css = files["frontend/src/index.css"]
+        assert "Maximize2" in app
+        assert "requestFullscreen" in app and "exitFullscreen" in app
+        assert ".kasal-a2ui:fullscreen" in css
+
+    @pytest.mark.asyncio
     async def test_a2ui_themes_baked_into_frontend(self, exporter, crew_data):
         """The workspace's deck/quiz palettes are baked into App.tsx (frontend-only,
         NOT config.json) so the deployed app's themes match this workspace's live
