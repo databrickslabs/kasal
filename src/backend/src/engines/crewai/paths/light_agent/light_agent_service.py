@@ -284,6 +284,15 @@ class LightAgentService:
                     mcp_call_config={"group_id": group_id},
                 )
 
+                # ── Genie MCP fixups — parity with the crew/flow task_builder ─────
+                # The light agent has no Task, so it skips build_task_args() and the
+                # MCP/Genie fixups it performs. Apply them here against the agent's
+                # tools so a Genie MCP server picked in the chat "+" menu actually
+                # works (without this, a co-assigned GenieTool errors "Genie space ID
+                # is not configured" and the answer comes back as pure prose). The
+                # returned suffix is folded into the kickoff prompt only (below).
+                genie_format_suffix = self._apply_genie_mcp_fixups(agent, agent_spec)
+
                 # ── Cognitive memory (recall + persist) — chat parity w/ crews ──
                 # Attach a unified Memory so kickoff_async auto-recalls relevant
                 # context and persists this turn. Best-effort: never breaks the run.
@@ -300,6 +309,16 @@ class LightAgentService:
                 # not attached (disabled / no backend) → no memory traces.
                 _attached_mem = getattr(agent, "memory", None)
                 _agent_memory = _attached_mem if _attached_mem not in (None, True, False) else None
+
+                # This agent's own LLM instance. CrewAI emits tool/LLM events with
+                # ``source = <the LLM>`` (crewai/llm.py, llms/base_llm.py), and native
+                # function-calling / MCP tool events can arrive with ``from_agent``
+                # already nulled by ToolUsageEvent.__init__ (it copies agent_id/role
+                # off from_agent then clears it) — or, for a direct LLM tool call,
+                # with NO agent attribution at all. Matching ``source is _agent_llm``
+                # catches those, and is tenant-safe: build_agent builds a fresh LLM
+                # per agent, so each in-process light run has its own instance.
+                _agent_llm = getattr(agent, "llm", None)
 
                 # Register tool-activity handlers scoped to THIS agent's id. A
                 # ``tool_usage`` trace marks the call; a ``<tool>_run`` trace carries
@@ -345,30 +364,21 @@ class LightAgentService:
 
                 _role_lower = str(role or "").strip().lower()
 
-                def _matches(event) -> bool:
-                    # Tool events reach the bus from several sources — the agent
-                    # executor (from_agent set → agent_id), the LLM's inline
-                    # function caller, and MCP wrappers — so match on ANY reliable
-                    # identity signal before giving up. A single agent runs per
-                    # in-process light run and handlers are unregistered right after
-                    # kickoff, so this stays tenant-safe.
-                    eid = getattr(event, "agent_id", None)
-                    if eid is not None and _agent_id and str(eid) == _agent_id:
-                        return True
-                    if getattr(event, "agent", None) is agent:
-                        return True
-                    fa = getattr(event, "from_agent", None)
-                    if fa is not None and _agent_id and str(getattr(fa, "id", "")) == _agent_id:
-                        return True
-                    erole = getattr(event, "agent_role", None)
-                    if erole and _role_lower and str(erole).strip().lower() == _role_lower:
+                def _matches(event, source=None) -> bool:
+                    if self._event_matches_run(
+                        event, source,
+                        agent=agent, agent_id=_agent_id,
+                        role_lower=_role_lower, agent_llm=_agent_llm,
+                    ):
                         return True
                     # Nothing matched — log once so a dropped MCP/tool event is
                     # visible instead of silently vanishing from the trace.
                     logger.info(
                         "[light_agent] tool event NOT matched to this run "
-                        "(tool=%s event_agent_id=%s our_agent_id=%s) — dropped",
-                        getattr(event, "tool_name", "?"), eid, _agent_id,
+                        "(tool=%s event_agent_id=%s our_agent_id=%s source=%s) — dropped",
+                        getattr(event, "tool_name", "?"),
+                        getattr(event, "agent_id", None), _agent_id,
+                        type(source).__name__ if source is not None else None,
                     )
                     return False
 
@@ -385,7 +395,7 @@ class LightAgentService:
 
                 def _on_tool_started(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         args = _args_str(event)
@@ -401,7 +411,7 @@ class LightAgentService:
 
                 def _on_tool_finished(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         out_val = getattr(event, "output", None)
@@ -438,7 +448,7 @@ class LightAgentService:
                     # showed "using tool" then nothing. Surface the failure as a
                     # ``<tool>_error`` trace so the result is never silently missing.
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         err = str(getattr(event, "error", "") or "Tool error")
@@ -479,7 +489,7 @@ class LightAgentService:
 
                 def _on_llm_started(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         model_name = str(getattr(event, "model", "") or "llm")
                         prompt_text = _msgs_str(event)
@@ -504,7 +514,7 @@ class LightAgentService:
 
                 def _on_llm_completed(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         model_name = str(getattr(event, "model", "") or "llm")
                         resp = getattr(event, "response", None)
@@ -538,7 +548,7 @@ class LightAgentService:
 
                 def _on_llm_failed(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         err = str(getattr(event, "error", "") or "LLM error")
                         _log(f"LLM call failed: {err[:200]}")
@@ -698,6 +708,10 @@ class LightAgentService:
                         f"{conversation_preamble}\n\nCurrent message:\n{prompt}"
                         if conversation_preamble else prompt
                     )
+                    # Genie MCP output-formatting instructions (parity with the
+                    # crew/flow expected_output); kickoff-only so trace/memory stay clean.
+                    if genie_format_suffix:
+                        kickoff_prompt = f"{kickoff_prompt}\n\n{genie_format_suffix}"
                     kicked = await self._kickoff_with_mlflow_trace(
                         agent, kickoff_prompt, config, execution_id,
                         trace_context, group_context, group_id,
@@ -807,6 +821,69 @@ class LightAgentService:
             except Exception as status_err:  # noqa: BLE001
                 logger.error(f"[light_agent] Could not mark execution {execution_id} FAILED: {status_err}")
             return {"execution_id": execution_id, "status": ExecutionStatus.FAILED.value, "error": str(e)}
+
+    @staticmethod
+    def _event_matches_run(
+        event: Any,
+        source: Any,
+        *,
+        agent: Any,
+        agent_id: str,
+        role_lower: str,
+        agent_llm: Any,
+    ) -> bool:
+        """True if a bus event belongs to THIS in-process light run.
+
+        Tool events reach the shared bus from several sources — the agent executor
+        (``from_agent`` → ``agent_id``), the LLM's inline function caller, and MCP
+        wrappers — so match on ANY reliable identity signal. Concurrent chat users
+        share this in-process bus, so every clause must be run-unique (tenant-safe).
+
+        ``source is agent_llm`` is checked FIRST: CrewAI emits tool/LLM events with
+        ``source=<the LLM>``, and ``ToolUsageEvent.__init__`` copies agent_id/role off
+        ``from_agent`` then nulls it — so a native function-calling / MCP tool call
+        can arrive with NO agent attribution at all. The LLM instance is unique per
+        run (``build_agent`` builds a fresh LLM per agent), so this is safe.
+        """
+        if source is not None and agent_llm is not None and source is agent_llm:
+            return True
+        eid = getattr(event, "agent_id", None)
+        if eid is not None and agent_id and str(eid) == agent_id:
+            return True
+        if agent is not None and getattr(event, "agent", None) is agent:
+            return True
+        fa = getattr(event, "from_agent", None)
+        if fa is not None and agent_id and str(getattr(fa, "id", "")) == agent_id:
+            return True
+        erole = getattr(event, "agent_role", None)
+        if erole and role_lower and str(erole).strip().lower() == role_lower:
+            return True
+        return False
+
+    @staticmethod
+    def _apply_genie_mcp_fixups(agent: Any, agent_spec: Dict[str, Any]) -> str:
+        """Apply the Genie MCP fixups the crew/flow ``build_task_args`` performs.
+
+        The light agent has no Task, so it never runs ``build_task_args`` and would
+        otherwise miss these. Returns the Genie output-formatting suffix to fold
+        into the kickoff prompt (empty string when no Genie MCP server is attached).
+        """
+        from src.engines.crewai.kernel.genie_formatting import (
+            apply_genie_mcp_space_id,
+            append_genie_mcp_formatting,
+        )
+
+        tool_configs = (agent_spec or {}).get("tool_configs", {}) or {}
+        # Copy the picked Genie MCP server's space id into any co-assigned GenieTool
+        # (scans agent.tools) so it doesn't error "Genie space ID is not configured".
+        applied_space = apply_genie_mcp_space_id([], agent)
+        if applied_space:
+            logger.info(
+                "[light_agent] configured GenieTool spaceId '%s' from the selected "
+                "Genie MCP server",
+                applied_space,
+            )
+        return append_genie_mcp_formatting("", tool_configs)
 
     async def _kickoff_with_mlflow_trace(
         self,

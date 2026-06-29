@@ -1067,6 +1067,14 @@ class CrewGenerationService:
             for field in OPTIONAL_AGENT_FIELDS:
                 if agent.get(field) is not None:
                     cfg[field] = agent[field]
+            # Honor the model picker: when an agent carries no explicit model, use
+            # the request's selected model. Without this the chat (light-agent) fast
+            # path — whose default agent has no llm — silently falls back to the
+            # engine default (databricks-llama-4-maverick), which serializes MCP/Genie
+            # tool calls as Pythonic text instead of executing them (no tool runs, no
+            # tool trace). The picker model (e.g. claude-sonnet) tool-calls reliably.
+            if request.model and not cfg.get("llm"):
+                cfg["llm"] = request.model
             if mcp_servers:
                 cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
             if knowledge_file_paths:
