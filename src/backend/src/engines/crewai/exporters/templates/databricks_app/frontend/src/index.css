@@ -4,76 +4,82 @@
 /* Enable `dark:` utilities driven by a `dark` class on <html> (toggled in App). */
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui design tokens (light, corporate B2B; blue primary).
-   Theme lives here as CSS variables — no tailwind.config.js, no PostCSS file. */
+/* A2UI design tokens — the SAME `--a2-*` contract Kasal chat mode uses (live:
+   tailwind.config.js maps the shadcn utilities to `hsl(var(--a2-*))`; here the
+   v4 `@theme` below does the same). Tokens are HSL channel triples ("H S% L%")
+   so `themeToTokens(palette)` (shared/a2ui/lib/deckThemes) can override them per
+   surface inline — that's how a composed surface inherits the workspace palette,
+   exactly like the inline chat surface. `--a2-*` is prefixed (not bare shadcn
+   names) to mirror the live token set verbatim. Defaults are the canonical
+   shadcn slate+blue palette. */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.21 0.02 264);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 264);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.02 264);
-  --primary: oklch(0.55 0.215 264);          /* ~ blue-600 */
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0.005 264);
-  --secondary-foreground: oklch(0.3 0.02 264);
-  --muted: oklch(0.97 0.005 264);
-  --muted-foreground: oklch(0.55 0.02 264);
-  --accent: oklch(0.96 0.02 264);
-  --accent-foreground: oklch(0.42 0.16 264);
-  --destructive: oklch(0.58 0.22 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.006 264);
-  --input: oklch(0.9 0.006 264);
-  --ring: oklch(0.55 0.215 264);
+  --a2-background: 0 0% 100%;
+  --a2-foreground: 222.2 47.4% 11.2%;
+  --a2-card: 0 0% 100%;
+  --a2-card-foreground: 222.2 47.4% 11.2%;
+  --a2-popover: 0 0% 100%;
+  --a2-popover-foreground: 222.2 47.4% 11.2%;
+  --a2-primary: 221.2 83.2% 53.3%;
+  --a2-primary-foreground: 210 40% 98%;
+  --a2-secondary: 210 40% 96.1%;
+  --a2-secondary-foreground: 222.2 47.4% 11.2%;
+  --a2-muted: 210 40% 96.1%;
+  --a2-muted-foreground: 215.4 16.3% 46.9%;
+  --a2-accent: 210 40% 96.1%;
+  --a2-accent-foreground: 222.2 47.4% 11.2%;
+  --a2-destructive: 0 84.2% 60.2%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 214.3 31.8% 91.4%;
+  --a2-input: 214.3 31.8% 91.4%;
+  --a2-ring: 221.2 83.2% 53.3%;
 }
 
-/* Dark theme: overrides the same CSS variables, so every color token flips
-   automatically when <html class="dark"> is set. */
+/* Dark theme: overrides the same channels, so every token flips automatically
+   when <html class="dark"> is set. */
 .dark {
   color-scheme: dark;
-  --background: oklch(0.2 0.015 264);
-  --foreground: oklch(0.96 0.005 264);
-  --card: oklch(0.24 0.018 264);
-  --card-foreground: oklch(0.96 0.005 264);
-  --popover: oklch(0.24 0.018 264);
-  --popover-foreground: oklch(0.96 0.005 264);
-  --primary: oklch(0.62 0.19 264);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.3 0.02 264);
-  --secondary-foreground: oklch(0.96 0.005 264);
-  --muted: oklch(0.29 0.018 264);
-  --muted-foreground: oklch(0.72 0.02 264);
-  --accent: oklch(0.34 0.025 264);
-  --accent-foreground: oklch(0.96 0.005 264);
-  --destructive: oklch(0.62 0.21 27);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.34 0.02 264);
-  --input: oklch(0.38 0.02 264);
-  --ring: oklch(0.62 0.19 264);
+  --a2-background: 222.2 84% 4.9%;
+  --a2-foreground: 210 40% 98%;
+  --a2-card: 222.2 84% 4.9%;
+  --a2-card-foreground: 210 40% 98%;
+  --a2-popover: 222.2 84% 4.9%;
+  --a2-popover-foreground: 210 40% 98%;
+  --a2-primary: 217.2 91.2% 59.8%;
+  --a2-primary-foreground: 222.2 47.4% 11.2%;
+  --a2-secondary: 217.2 32.6% 17.5%;
+  --a2-secondary-foreground: 210 40% 98%;
+  --a2-muted: 217.2 32.6% 17.5%;
+  --a2-muted-foreground: 215 20.2% 65.1%;
+  --a2-accent: 217.2 32.6% 17.5%;
+  --a2-accent-foreground: 210 40% 98%;
+  --a2-destructive: 0 62.8% 30.6%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 217.2 32.6% 17.5%;
+  --a2-input: 217.2 32.6% 17.5%;
+  --a2-ring: 224.3 76.3% 48%;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: hsl(var(--a2-background));
+  --color-foreground: hsl(var(--a2-foreground));
+  --color-card: hsl(var(--a2-card));
+  --color-card-foreground: hsl(var(--a2-card-foreground));
+  --color-popover: hsl(var(--a2-popover));
+  --color-popover-foreground: hsl(var(--a2-popover-foreground));
+  --color-primary: hsl(var(--a2-primary));
+  --color-primary-foreground: hsl(var(--a2-primary-foreground));
+  --color-secondary: hsl(var(--a2-secondary));
+  --color-secondary-foreground: hsl(var(--a2-secondary-foreground));
+  --color-muted: hsl(var(--a2-muted));
+  --color-muted-foreground: hsl(var(--a2-muted-foreground));
+  --color-accent: hsl(var(--a2-accent));
+  --color-accent-foreground: hsl(var(--a2-accent-foreground));
+  --color-destructive: hsl(var(--a2-destructive));
+  --color-destructive-foreground: hsl(var(--a2-destructive-foreground));
+  --color-border: hsl(var(--a2-border));
+  --color-input: hsl(var(--a2-input));
+  --color-ring: hsl(var(--a2-ring));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -97,6 +103,17 @@
       Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+}
+
+/* A2UI surface in native full screen (the inline "Full screen" control). The
+   element stays in the DOM so the injected --a2-* tokens still apply; it just
+   needs a page background, breathing room, and scrolling for tall content
+   (otherwise fullscreen paints a black backdrop and clips). Mirrors chat.css. */
+.kasal-a2ui:fullscreen,
+.kasal-a2ui:-webkit-full-screen {
+  overflow: auto;
+  background-color: var(--color-background);
+  padding: 32px;
 }
 
 /* Slide body inherits the deck theme's text color so prose stays readable on a

@@ -90,7 +90,8 @@ import {
   useFlowSelectHandler,
   useCrewFlowDialogHandler,
   useFlowSelectionDialogHandler,
-  useEventBindings
+  useEventBindings,
+  openCatalogForCanvas
 } from './WorkflowEventHandlers';
 import { useDialogManager } from './WorkflowDialogManager';
 
@@ -1198,11 +1199,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onRunTab={handleRunTab}
           isRunning={!!runningTabId}
           runningTabId={runningTabId}
-          onLoadCrew={() => {
-            setCrewFlowDialogInitialTab(0);
-            setCrewFlowDialogShowOnlyTab(0); // Only show Plans tab
-            setIsCrewFlowDialogOpen(true);
-          }}
+          // Load from the catalog matching the active canvas (Flows on the flow
+          // canvas, Crews on the crew canvas).
+          onLoadCrew={() => openCatalogForCanvas(areFlowsVisible, {
+            setInitialTab: setCrewFlowDialogInitialTab,
+            setShowOnlyTab: setCrewFlowDialogShowOnlyTab,
+            setOpen: setIsCrewFlowDialogOpen,
+          })}
 
           disabled={isChatProcessing || !!runningTabId}
           hideTabsAndButtons={isChatMode}

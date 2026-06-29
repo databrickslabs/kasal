@@ -84,6 +84,16 @@ class DatabricksCodexCompletion(OpenAICompletion):
         """gpt-5.3-codex supports native function calling via Responses API."""
         return True
 
+    def supports_native_structured_output(self) -> bool:
+        """The Responses API validates output_pydantic directly (see
+        _handle_responses → _validate_structured_output), so a task's
+        output_pydantic is passed to the model as ``text.format`` and enforced,
+        returning a typed object. Signals the converter selection NOT to
+        downgrade this model to the soft output_json prompt, which would set
+        ``output_json = True`` (a bool CrewAI can't validate) and silently drop
+        fields the model omits — breaking routers that branch on those fields."""
+        return True
+
     def supports_stop_words(self) -> bool:
         """GPT-5 reasoning models reject the 'stop' parameter."""
         return False

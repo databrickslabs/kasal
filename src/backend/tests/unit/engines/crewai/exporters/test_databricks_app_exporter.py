@@ -327,6 +327,48 @@ class TestDatabricksAppExporter:
         assert "_is_codex_model" in agent
         assert "gpt-5-3-codex" in agent
         assert 'api="responses"' in agent
+
+    @pytest.mark.asyncio
+    async def test_temperature_dropped_for_rejecting_models(self, exporter, crew_data):
+        """Models whose Databricks endpoint 400s on `temperature` (Claude Opus 4.7+,
+        Fable 5, GPT-5) must not have it sent. Regression for the deployed export
+        failing with: "Model us.anthropic.claude-opus-4-8 does not support the
+        temperature parameter." Extract the vendored helper from the rendered
+        agent.py and assert it behaves like Kasal's model_rejects_temperature, and
+        that _make_llm is wired to drop the param via additional_drop_params."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+
+        # _make_llm only sets temperature behind the reject check, and drops it.
+        assert "_model_rejects_temperature" in agent
+        assert 'kwargs["additional_drop_params"] = ["temperature"]' in agent
+
+        # Pull the standalone helper out of the (placeholder-laden) template and
+        # exec just that function to assert real behavior across model families.
+        tree = ast.parse(agent)
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_model_rejects_temperature"
+        )
+        ns: dict = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<agent>", "exec"), ns)
+        rejects = ns["_model_rejects_temperature"]
+
+        for model in (
+            "databricks-claude-opus-4-8",
+            "us.anthropic.claude-opus-4-8",
+            "databricks-claude-opus-4-7",
+            "databricks-claude-fable-5",
+            "databricks-gpt-5",
+        ):
+            assert rejects(model) is True, model
+        for model in (
+            "databricks-llama-4-maverick",
+            "databricks-claude-sonnet-4-5",
+            "",
+            None,
+        ):
+            assert rejects(model) is False, model
         assert "OpenAICompletion" in agent
 
     @pytest.mark.asyncio
@@ -740,6 +782,60 @@ class TestDatabricksAppA2UI:
         assert config["directives"]["presentation"] == "aim for about 8 slides"
 
     @pytest.mark.asyncio
+    async def test_a2ui_rich_surface_kinds_cover_live_renderer(self, exporter, crew_data):
+        """App.tsx's RICH set gates which composed surfaces actually render — a kind
+        the shared composer can emit but that's absent here is silently dropped. The
+        shared renderer (live chat) supports flashcards + map (added in the a2ui
+        flashcards/map work); regression-guard that the export kept up so those
+        surfaces aren't dropped on the deployed app."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        # Extract the kinds listed in `const RICH = new Set([...])`.
+        m = re.search(r"const RICH = new Set\((\[[^\]]*\])\)", app, re.DOTALL)
+        assert m, "could not find the RICH surface-kind set in App.tsx"
+        rich = set(re.findall(r"'([a-z]+)'", m.group(1)))
+        expected = {
+            "document",
+            "presentation",
+            "dashboard",
+            "mindmap",
+            "quiz",
+            "flashcards",
+            "map",
+        }
+        missing = expected - rich
+        assert not missing, f"App.tsx RICH set is missing surface kinds: {sorted(missing)}"
+
+    @pytest.mark.asyncio
+    async def test_a2ui_surfaces_inherit_workspace_palette(self, exporter, crew_data):
+        """Exported surfaces must theme via the SAME --a2-* token contract as Kasal
+        chat: index.css maps the shadcn utilities to hsl(var(--a2-*)) and App.tsx
+        injects themeToTokens(workspace palette) onto each surface. Otherwise the
+        deployed app's cards/dashboards render with a static theme that ignores the
+        workspace branding (the gap this closes)."""
+        files = _files(await exporter.export(crew_data, {}))
+        css = files["frontend/src/index.css"]
+        app = files["frontend/src/App.tsx"]
+        # The Tailwind utilities the primitives use resolve to the --a2-* tokens.
+        assert "--a2-card:" in css and "--a2-background:" in css
+        assert "--color-card: hsl(var(--a2-card))" in css
+        assert "--color-background: hsl(var(--a2-background))" in css
+        # App injects the workspace palette as those tokens on every surface.
+        assert "themeToTokens" in app
+        assert "paletteForKind" in app
+        assert "kasal-a2ui" in app
+
+    @pytest.mark.asyncio
+    async def test_a2ui_surfaces_support_fullscreen(self, exporter, crew_data):
+        """Every rich surface gets a native full-screen control (matching chat's
+        expand), backed by the .kasal-a2ui:fullscreen page styling."""
+        files = _files(await exporter.export(crew_data, {}))
+        app = files["frontend/src/App.tsx"]
+        css = files["frontend/src/index.css"]
+        assert "Maximize2" in app
+        assert "requestFullscreen" in app and "exitFullscreen" in app
+        assert ".kasal-a2ui:fullscreen" in css
+
+    @pytest.mark.asyncio
     async def test_a2ui_themes_baked_into_frontend(self, exporter, crew_data):
         """The workspace's deck/quiz palettes are baked into App.tsx (frontend-only,
         NOT config.json) so the deployed app's themes match this workspace's live
@@ -765,6 +861,47 @@ class TestDatabricksAppA2UI:
             _files(await exporter.export(crew, {}))["agent_server/a2ui/config.json"]
         )
         assert "themes" not in config
+
+    @pytest.mark.asyncio
+    async def test_a2ui_frontend_imports_are_declared_deps(self, exporter, crew_data):
+        """Every npm package the vendored frontend/src/a2ui/ tree imports must be
+        declared in the exported package.json (deps or devDeps). The exporter copies
+        the shared a2ui tree verbatim — when a component pulls in a new package
+        (e.g. LeafletMap.tsx importing 'leaflet'/'react-leaflet'), forgetting to add
+        it here makes the deployed app's `vite build` fail to resolve the import.
+        Test-only packages are excluded since .test. files are not shipped."""
+        import json
+
+        files = _files(await exporter.export(crew_data, {}))
+        pkg = json.loads(files["frontend/package.json"])
+        declared = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
+        # react-leaflet bundles its own types and re-exports leaflet; @types/* is a
+        # dev concern only. Test runners/utilities never reach the build.
+        test_only = {"@testing-library/react", "vitest", "@vitejs/plugin-react"}
+
+        # Bare module specifiers (not relative/absolute) from the vendored tree.
+        import_re = re.compile(r"""(?:from|import)\s+['"]([^'".][^'"]*)['"]""")
+        imported: set[str] = set()
+        for path, content in files.items():
+            if not path.startswith("frontend/src/a2ui/"):
+                continue
+            if not path.endswith((".ts", ".tsx")):
+                continue
+            for spec in import_re.findall(content):
+                # Normalize "leaflet/dist/leaflet.css" / "@scope/pkg/sub" → package root.
+                if spec.startswith("@"):
+                    root = "/".join(spec.split("/")[:2])
+                else:
+                    root = spec.split("/")[0]
+                imported.add(root)
+
+        missing = {p for p in imported if p not in declared and p not in test_only}
+        assert "leaflet" in imported and "react-leaflet" in imported, (
+            "expected the vendored a2ui tree to include LeafletMap's imports"
+        )
+        assert not missing, (
+            f"a2ui frontend imports not declared in exported package.json: {sorted(missing)}"
+        )
 
     @pytest.mark.asyncio
     async def test_a2ui_composer_present(self, exporter, crew_data):

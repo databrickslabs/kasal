@@ -41,13 +41,25 @@ import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 
 // Node types
 import { CrewNode } from '../Flow';
+import AgentNode from '../Agents/AgentNode';
+import ManagerNode from '../Agents/ManagerNode';
+import TaskNode from '../Tasks/TaskNode';
 
 // Edge types
 import CrewEdge from '../Flow/CrewEdge';
 
-// Node and edge types configuration
-const nodeTypes = {
+// Node and edge types configuration.
+// Register ALL custom node types, not just crewNode: a saved flow/crew loaded
+// onto this canvas can contain agent/task/manager nodes, and any node whose
+// `type` isn't in this map falls back to ReactFlow's bare default box (losing the
+// rich card). Mirrors the shared registry in flow-config.ts.
+// Exported for a regression test that guards the full registration (a missing
+// type silently degrades loaded nodes to ReactFlow's bare default box).
+export const nodeTypes = {
   crewNode: CrewNode,
+  agentNode: AgentNode,
+  taskNode: TaskNode,
+  managerNode: ManagerNode,
 };
 
 // Note: Only crewEdge is customized. 'default' edges use ReactFlow's built-in component

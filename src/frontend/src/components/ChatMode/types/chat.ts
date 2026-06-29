@@ -20,8 +20,12 @@ export interface ChatMessage {
    */
   executionId?: string;
   /**
-   * Per-run snapshot (captured at generation, not the live toggle) of whether the
-   * run used workspace memory. Gates the "Memory graph" action on the crew bar.
+   * Whether THIS run actually used workspace memory (the "Workspace memory"
+   * mode was on when it ran). Captured per-run at dispatch — NOT the live
+   * toggle — so the "Memory graph" action only shows for runs that wrote
+   * workspace memory. A later toggle to workspace memory must not retroactively
+   * reveal the graph on a run that ran in session-only mode. Persisted in the
+   * __chatmode extras.
    */
   usedWorkspaceMemory?: boolean;
 }

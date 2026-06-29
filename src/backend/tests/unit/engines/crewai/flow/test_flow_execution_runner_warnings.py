@@ -250,3 +250,52 @@ class TestFlowExecutionWarnings:
             call_kwargs = mock_update.call_args.kwargs
             assert call_kwargs['status'] == ExecutionStatus.FAILED.value
             assert "warning" not in call_kwargs['message'].lower()
+
+
+# ---------------------------------------------------------------------------
+# CI/CD artifact aggregation query — SQLite/Postgres portability (regression)
+# ---------------------------------------------------------------------------
+#
+# The query previously used the Postgres-only ``output::text`` cast, which on
+# SQLite (dev) raised "(sqlite3.OperationalError) unrecognized token: ':'" and
+# silently skipped CI/CD artifact injection. It now uses CAST(... AS TEXT).
+
+import sqlite3  # noqa: E402
+
+from src.engines.crewai.paths.flow.flow_execution_runner import (  # noqa: E402
+    CICD_ARTIFACT_QUERY,
+)
+
+
+def test_cicd_query_has_no_postgres_only_cast():
+    """The query must not use the Postgres-only ``::text`` cast (SQLite chokes)."""
+    assert "::text" not in CICD_ARTIFACT_QUERY
+    assert "CAST(output AS TEXT)" in CICD_ARTIFACT_QUERY
+
+
+def test_cicd_query_runs_on_sqlite_and_filters():
+    """Regression: the query parses on SQLite and matches only rows whose output
+    contains cicd_download_url."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE execution_trace (job_id TEXT, output TEXT, created_at TEXT)")
+    conn.execute(
+        "INSERT INTO execution_trace VALUES (?, ?, ?)",
+        ("job-1", '{"cicd_download_url": "/api/x"}', "2026-01-01"),
+    )
+    conn.execute(
+        "INSERT INTO execution_trace VALUES (?, ?, ?)",
+        ("job-1", '{"something_else": true}', "2026-01-02"),
+    )
+    conn.execute(
+        "INSERT INTO execution_trace VALUES (?, ?, ?)",
+        ("job-2", '{"cicd_download_url": "/api/y"}', "2026-01-03"),
+    )
+
+    # SQLAlchemy's ``:jid`` bind param maps to SQLite's ``?`` — run the named SQL
+    # via a tiny translation so we exercise the real query text on SQLite.
+    sqlite_sql = CICD_ARTIFACT_QUERY.replace(":jid", "?")
+    rows = conn.execute(sqlite_sql, ("job-1",)).fetchall()
+
+    assert len(rows) == 1  # only job-1's cicd row, not the non-cicd row nor job-2
+    assert rows[0][0] == '{"cicd_download_url": "/api/x"}'
+    conn.close()
