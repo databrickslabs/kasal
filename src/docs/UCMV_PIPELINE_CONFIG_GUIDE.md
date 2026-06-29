@@ -8,6 +8,23 @@ This document explains what needs manual configuration, why, and how to fill it 
 
 ---
 
+## BI Specialist Quick Reference — What You Actually Edit
+
+The extractor auto-fills the joins/columns (~70%). A BI specialist mainly hand-authors the **Measure & Switch Logic**, plus one review pass on the fact joins:
+
+| You edit | Why |
+|----------|-----|
+| **Switch Decompositions** | Split each `SWITCH(...)` DAX measure into one metric-view measure per branch (the heaviest item — real projects have dozens across multiple fact tables). |
+| **Switch Join Column + Switch Join Alias** | Mandatory companions to Switch Decompositions — the dimension column each SWITCH filters on (e.g. `bic_cwc_type` / `dim_wkctr`). Switches don't work without them. |
+| **Filter Sets** | The named value-sets the switch branches reference via `num_fs` / `den_fs`. |
+| **Measure Resolutions** | Disambiguate/redirect measures to the right physical column or fact. |
+| **Manual Overrides** | Hand-written SQL for DAX too complex to auto-translate. |
+| **Fact Join Map** (review) | Seeded but usually flagged TODO — needs a human review/confirm pass for cross-fact union/join logic. |
+
+Hands-off (auto, do not touch): **Join Key Map, Enrichment Joins, Dimension Alias Map**. Optional polish only: `column_overrides`, `column_alias_map`, `comment_overrides`, `measure_metadata`, `budget_suffix`.
+
+---
+
 ## Config Keys That ARE Automated
 
 These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA):
@@ -194,6 +211,44 @@ The LLM fallback can translate some of these, but for business-critical measures
 
 ---
 
+### 7. `measure_resolutions`
+
+**What**: Disambiguation/redirection of measures whose name or source is ambiguous after extraction — e.g. mapping a measure to the correct physical column, or resolving two measures that collapse to the same name.
+
+**Example**:
+```json
+{
+  "Net Sales": { "column": "net_sales_value", "table": "fact_pe002" },
+  "Volume (UC)": { "column": "volume_in_uc", "table": "fact_co012_actuals" }
+}
+```
+
+**Why it can't be automated**: When a DAX measure references `[Measure]` or a column whose name doesn't match the physical schema (renamed, aliased, or sourced from a different fact), only the report author knows the intended target. The extractor can list the candidates but cannot pick the correct one.
+
+**What to do**: For each flagged measure, point it at the right physical `column` (and `table` when it differs from the owning fact).
+
+---
+
+## Editing in the Pipeline Config Editor (UI)
+
+The config is curated in the **Pipeline Config Editor** during the HITL review step — you do **not** hand-edit JSON in normal use.
+
+**Status colors** (left sidebar):
+- 🟢 **auto** — extractor filled it; no action.
+- 🟡 **TODO** — seeded but needs human review/completion (e.g. *Fact Join Map*).
+- 🔴 **empty** — nothing yet; fill in if your model needs it (e.g. *Switch Decompositions*).
+
+**The sidebar maps 1:1 to config keys**: Join Key Map → `join_key_map`, Fact Join Map → `fact_join_map`, Enrichment Joins → `enrichment_joins`, Dimension Alias Map → `dim_alias_map`, Switch Decompositions → `switch_decompositions`, Measure Resolutions → `measure_resolutions`, Filter Sets → `filter_sets`, Manual Overrides → `manual_overrides`, Switch Join Alias/Column → `switch_join_alias` / `switch_join_col`, Budget Suffix → `budget_suffix`.
+
+**The action buttons (how the config reaches the generator):**
+- **Save JSON** — downloads the `config_json` blob (for backup / manual hand-off).
+- **Save to Execution** — writes the config straight into the running execution's `config_json` (the production path — no manual upload).
+- **Save & Approve Flow** — approves the HITL step; the config flows forward and the UCMV Generator reads it as `config_json`.
+
+**How it wires to the generator (no code change needed):** whatever JSON the editor saves lands in the UCMV Generator tool's `config_json` field (`tool_configs.config_json`, persisted on the task node). At run time the tool parses it and passes it to `MetricViewPipeline(config=...)`, which reads `switch_decompositions`, `switch_join_col/alias`, `filter_sets`, etc. The generator does not care whether the JSON arrived via the editor's *Save to Execution* or a manual upload — the input is identical. The editor's job is simply to produce valid JSON of the shapes documented above.
+
+---
+
 ## Summary
 
 | Config Key | Auto-Filled? | Human Effort | Difficulty |
@@ -205,9 +260,10 @@ The LLM fallback can translate some of these, but for business-critical measures
 | `column_overrides` | Partial | Low | Easy |
 | `join_key_map.source_table` | No | Medium | Look up UC table names |
 | `filter_sets` | Partial | Medium | Query dimension tables for flag values |
+| `measure_resolutions` | No | Medium | Map ambiguous measures to the right column/fact |
 | `switch_decompositions` | No | High | Requires understanding DAX business logic |
 | `fact_join_map` | No | High | Requires data architecture knowledge |
 | `manual_overrides` | No | High | Requires SQL writing skill |
 | `switch_join_alias/col` | No | Low | Identify the SWITCH dimension |
 
-The HITL review step between Config Proposer and UCMV Generator is where this manual enrichment happens. The Config Proposer flags what's missing; the human fills in the gaps.
+The HITL review step between Config Proposer and UCMV Generator is where this manual enrichment happens, via the Pipeline Config Editor. The Config Proposer flags what's missing (🟡/🔴); the human fills in the gaps and approves.
