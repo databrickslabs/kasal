@@ -327,6 +327,48 @@ class TestDatabricksAppExporter:
         assert "_is_codex_model" in agent
         assert "gpt-5-3-codex" in agent
         assert 'api="responses"' in agent
+
+    @pytest.mark.asyncio
+    async def test_temperature_dropped_for_rejecting_models(self, exporter, crew_data):
+        """Models whose Databricks endpoint 400s on `temperature` (Claude Opus 4.7+,
+        Fable 5, GPT-5) must not have it sent. Regression for the deployed export
+        failing with: "Model us.anthropic.claude-opus-4-8 does not support the
+        temperature parameter." Extract the vendored helper from the rendered
+        agent.py and assert it behaves like Kasal's model_rejects_temperature, and
+        that _make_llm is wired to drop the param via additional_drop_params."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+
+        # _make_llm only sets temperature behind the reject check, and drops it.
+        assert "_model_rejects_temperature" in agent
+        assert 'kwargs["additional_drop_params"] = ["temperature"]' in agent
+
+        # Pull the standalone helper out of the (placeholder-laden) template and
+        # exec just that function to assert real behavior across model families.
+        tree = ast.parse(agent)
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_model_rejects_temperature"
+        )
+        ns: dict = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<agent>", "exec"), ns)
+        rejects = ns["_model_rejects_temperature"]
+
+        for model in (
+            "databricks-claude-opus-4-8",
+            "us.anthropic.claude-opus-4-8",
+            "databricks-claude-opus-4-7",
+            "databricks-claude-fable-5",
+            "databricks-gpt-5",
+        ):
+            assert rejects(model) is True, model
+        for model in (
+            "databricks-llama-4-maverick",
+            "databricks-claude-sonnet-4-5",
+            "",
+            None,
+        ):
+            assert rejects(model) is False, model
         assert "OpenAICompletion" in agent
 
     @pytest.mark.asyncio
