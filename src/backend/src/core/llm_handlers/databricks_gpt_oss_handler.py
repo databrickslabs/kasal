@@ -10,6 +10,7 @@ rather than a simple string, which requires special handling for CrewAI integrat
 
 import asyncio
 import concurrent.futures
+import re
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from crewai import LLM
@@ -1021,6 +1022,37 @@ class DatabricksRetryLLM(LLM):
         )
         return await fallback_llm.acall(**call_kwargs)
 
+    @staticmethod
+    def _coerce_to_response_model(result, kwargs):
+        """Return a parsed ``response_model`` instance when the model answered with
+        a JSON string.
+
+        CrewAI's structured-output callers (e.g. long-term-memory consolidation /
+        save-analysis in ``crewai/memory/analyze.py``) pass ``response_model`` and
+        then do ``isinstance(response, Model) or Model.model_validate(response)``.
+        litellm hands structured output back as a JSON *string*, and
+        ``model_validate(<str>)`` expects a dict — so it raises and CrewAI silently
+        falls back ("Consolidation analysis failed, defaulting to insert" /
+        "Memory save analysis failed, using defaults"). Parsing the string into the
+        model here makes ``isinstance`` true so the plan is actually used. On any
+        parse failure we return the original result unchanged — behaviour is then
+        identical to before (the caller's safe fallback still applies).
+        """
+        rm = kwargs.get("response_model")
+        if rm is None or not isinstance(result, str):
+            return result
+        if not hasattr(rm, "model_validate_json"):
+            return result
+        text = result.strip()
+        # Some models wrap structured output in a ```json … ``` fence.
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text).strip()
+        try:
+            return rm.model_validate_json(text)
+        except Exception:  # noqa: BLE001 — leave as-is; caller falls back safely
+            return result
+
     def call(
         self,
         messages,
@@ -1159,7 +1191,9 @@ class DatabricksRetryLLM(LLM):
                 crew_log.info(
                     f"[DatabricksRetryLLM] Success, response length: {len(str(result))}"
                 )
-                return result
+                # Structured-output callers (e.g. memory consolidation) expect a
+                # response_model instance, not a JSON string — coerce it here.
+                return self._coerce_to_response_model(result, kwargs)
 
             except Exception as e:
                 last_error = e
@@ -1279,7 +1313,7 @@ class DatabricksRetryLLM(LLM):
         fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
 
         try:
-            return await super().acall(
+            result = await super().acall(
                 fixed_messages,
                 tools=tools,
                 callbacks=callbacks,
@@ -1288,6 +1322,9 @@ class DatabricksRetryLLM(LLM):
                 from_agent=from_agent,
                 **kwargs,
             )
+            # Coerce a JSON-string structured-output result into its response_model
+            # (parity with call()), so structured-output callers get an instance.
+            return self._coerce_to_response_model(result, kwargs)
         except Exception as e:
             fb = await self._amaybe_model_fallback(
                 e,
