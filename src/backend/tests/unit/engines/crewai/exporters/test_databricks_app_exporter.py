@@ -767,6 +767,47 @@ class TestDatabricksAppA2UI:
         assert "themes" not in config
 
     @pytest.mark.asyncio
+    async def test_a2ui_frontend_imports_are_declared_deps(self, exporter, crew_data):
+        """Every npm package the vendored frontend/src/a2ui/ tree imports must be
+        declared in the exported package.json (deps or devDeps). The exporter copies
+        the shared a2ui tree verbatim — when a component pulls in a new package
+        (e.g. LeafletMap.tsx importing 'leaflet'/'react-leaflet'), forgetting to add
+        it here makes the deployed app's `vite build` fail to resolve the import.
+        Test-only packages are excluded since .test. files are not shipped."""
+        import json
+
+        files = _files(await exporter.export(crew_data, {}))
+        pkg = json.loads(files["frontend/package.json"])
+        declared = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
+        # react-leaflet bundles its own types and re-exports leaflet; @types/* is a
+        # dev concern only. Test runners/utilities never reach the build.
+        test_only = {"@testing-library/react", "vitest", "@vitejs/plugin-react"}
+
+        # Bare module specifiers (not relative/absolute) from the vendored tree.
+        import_re = re.compile(r"""(?:from|import)\s+['"]([^'".][^'"]*)['"]""")
+        imported: set[str] = set()
+        for path, content in files.items():
+            if not path.startswith("frontend/src/a2ui/"):
+                continue
+            if not path.endswith((".ts", ".tsx")):
+                continue
+            for spec in import_re.findall(content):
+                # Normalize "leaflet/dist/leaflet.css" / "@scope/pkg/sub" → package root.
+                if spec.startswith("@"):
+                    root = "/".join(spec.split("/")[:2])
+                else:
+                    root = spec.split("/")[0]
+                imported.add(root)
+
+        missing = {p for p in imported if p not in declared and p not in test_only}
+        assert "leaflet" in imported and "react-leaflet" in imported, (
+            "expected the vendored a2ui tree to include LeafletMap's imports"
+        )
+        assert not missing, (
+            f"a2ui frontend imports not declared in exported package.json: {sorted(missing)}"
+        )
+
+    @pytest.mark.asyncio
     async def test_a2ui_composer_present(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         assert "def _compose_a2ui(" in agent
