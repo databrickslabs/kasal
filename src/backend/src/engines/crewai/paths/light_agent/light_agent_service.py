@@ -268,8 +268,13 @@ class LightAgentService:
                     except Exception:  # noqa: BLE001
                         pass
 
-                mcp_config = dict(agent_spec)
-                mcp_config["group_id"] = group_id
+                # Thread the requesting user's OBO token into MCP creation (see
+                # _build_mcp_configs) so Databricks-managed MCP servers authenticate
+                # on behalf of the user, not the app service principal.
+                user_obo_token = getattr(group_context, "access_token", None)
+                mcp_config, mcp_call_config = self._build_mcp_configs(
+                    agent_spec, group_id, user_obo_token
+                )
 
                 agent = await build_agent_with_tools(
                     agent_spec,
@@ -281,7 +286,7 @@ class LightAgentService:
                     tool_configs=agent_spec.get("tool_configs", {}),
                     tool_service=None,
                     mcp_config=mcp_config,
-                    mcp_call_config={"group_id": group_id},
+                    mcp_call_config=mcp_call_config,
                 )
 
                 # ── Genie MCP fixups — parity with the crew/flow task_builder ─────
@@ -859,6 +864,28 @@ class LightAgentService:
         if erole and role_lower and str(erole).strip().lower() == role_lower:
             return True
         return False
+
+    @staticmethod
+    def _build_mcp_configs(
+        agent_spec: Dict[str, Any], group_id: str, user_token: Optional[str]
+    ) -> tuple:
+        """Build (mcp_config, mcp_call_config) for the chat agent's MCP tools.
+
+        Threads the requesting user's OBO token through so Databricks-managed MCP
+        servers (Genie, UC functions) authenticate ON BEHALF OF THE USER rather
+        than the app service principal — without it MCPIntegration falls back to
+        SPN and per-user Genie spaces fail with PERMISSION_DENIED. The crew/flow
+        paths already pass user_token; the in-process chat path previously did not.
+        ``user_token`` is omitted when absent so service-level (PAT/SPN) auth still
+        applies for non-OBO runs.
+        """
+        mcp_config = dict(agent_spec)
+        mcp_config["group_id"] = group_id
+        mcp_call_config: Dict[str, Any] = {"group_id": group_id}
+        if user_token:
+            mcp_config["user_token"] = user_token
+            mcp_call_config["user_token"] = user_token
+        return mcp_config, mcp_call_config
 
     @staticmethod
     def _apply_genie_mcp_fixups(agent: Any, agent_spec: Dict[str, Any]) -> str:

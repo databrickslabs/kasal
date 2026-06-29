@@ -312,6 +312,32 @@ def test_genie_fixups_handle_empty_spec():
     assert LightAgentService._apply_genie_mcp_fixups(agent, {}) == ""
 
 
+# ── _build_mcp_configs — OBO token threading for chat MCP ─────────────────────
+
+
+def test_build_mcp_configs_threads_obo_token():
+    """With a user OBO token, both configs carry it so managed MCP (Genie) auths
+    on behalf of the user, not the app SPN."""
+    spec = {"role": "Assistant", "tool_configs": {"MCP_SERVERS": {"servers": ["g"]}}}
+    mcp_config, call_config = LightAgentService._build_mcp_configs(
+        spec, "grp-1", "USER_OBO_TOKEN"
+    )
+    assert mcp_config["group_id"] == "grp-1"
+    assert mcp_config["user_token"] == "USER_OBO_TOKEN"
+    assert call_config == {"group_id": "grp-1", "user_token": "USER_OBO_TOKEN"}
+    # agent_spec is copied, not mutated.
+    assert "user_token" not in spec
+
+
+def test_build_mcp_configs_omits_token_when_absent():
+    """No OBO token → user_token is omitted so PAT/SPN service auth still applies."""
+    mcp_config, call_config = LightAgentService._build_mcp_configs(
+        {"role": "Assistant"}, "grp-1", None
+    )
+    assert "user_token" not in mcp_config
+    assert call_config == {"group_id": "grp-1"}
+
+
 # ── _event_matches_run — bus event → this run attribution ─────────────────────
 
 

@@ -28,7 +28,37 @@ from src.engines.crewai.tools.mcp_handler import (
     create_crewai_tool_from_mcp,
     wrap_mcp_tool,
     run_in_separate_process,
+    format_mcp_exception,
 )
+
+
+# ---------------------------------------------------------------------------
+# format_mcp_exception — unwrap anyio ExceptionGroup to the real cause
+# ---------------------------------------------------------------------------
+
+
+class TestFormatMcpException:
+    def test_unwraps_exception_group_to_leaf_cause(self):
+        """The MCP client wraps real errors in a TaskGroup ExceptionGroup whose
+        str() is opaque; the leaf cause must surface instead."""
+        eg = ExceptionGroup(
+            "unhandled errors in a TaskGroup (1 sub-exception)",
+            [PermissionError("PERMISSION_DENIED: Unable to get space 01f1")],
+        )
+        out = format_mcp_exception(eg)
+        assert "PERMISSION_DENIED: Unable to get space 01f1" in out
+        assert "TaskGroup" not in out
+
+    def test_nested_groups_and_dedup(self):
+        inner = ExceptionGroup("inner", [ValueError("boom"), ValueError("boom")])
+        outer = ExceptionGroup("outer", [inner])
+        out = format_mcp_exception(outer)
+        # Deduplicated, leaf message preserved.
+        assert out == "ValueError: boom"
+
+    def test_plain_exception_passthrough(self):
+        out = format_mcp_exception(RuntimeError("just an error"))
+        assert out == "RuntimeError: just an error"
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +123,8 @@ class TestGetOrCreateMCPAdapter:
     async def test_reuses_adapter_from_pool(self):
         existing = MagicMock()
         existing._initialized = True
-        mcp_handler._mcp_connection_pool["http://example.com_pat"] = existing
+        # No auth material in server_params → identity fingerprint is 'noauth'.
+        mcp_handler._mcp_connection_pool["http://example.com_pat_noauth"] = existing
 
         result = await get_or_create_mcp_adapter(
             {"url": "http://example.com", "auth_type": "pat"},
@@ -106,7 +137,7 @@ class TestGetOrCreateMCPAdapter:
     async def test_removes_stale_adapter_from_pool(self):
         stale = MagicMock()
         stale._initialized = False
-        mcp_handler._mcp_connection_pool["http://example.com_pat"] = stale
+        mcp_handler._mcp_connection_pool["http://example.com_pat_noauth"] = stale
 
         fresh = MagicMock()
         fresh._initialized = True
@@ -120,6 +151,49 @@ class TestGetOrCreateMCPAdapter:
                 {"url": "http://example.com", "auth_type": "pat"}
             )
             assert result is fresh
+
+    @pytest.mark.asyncio
+    async def test_obo_tokens_get_separate_pooled_adapters(self):
+        """Two different OBO users must NOT share one pooled connection — sharing
+        causes Genie 'does not own conversation' errors across identities."""
+        made = []
+
+        def _make(_params):
+            a = MagicMock(); a._initialized = True; a.initialize = AsyncMock()
+            made.append(a)
+            return a
+
+        with patch("src.engines.common.mcp_adapter.MCPAdapter", side_effect=_make):
+            a_user = await get_or_create_mcp_adapter({
+                "url": "https://w/api/2.0/mcp/genie/s1",
+                "auth_type": "databricks_obo",
+                "headers": {"Authorization": "Bearer USER_A_TOKEN"},
+            })
+            b_user = await get_or_create_mcp_adapter({
+                "url": "https://w/api/2.0/mcp/genie/s1",
+                "auth_type": "databricks_obo",
+                "headers": {"Authorization": "Bearer USER_B_TOKEN"},
+            })
+        # Distinct adapters + two distinct pool keys (one per identity).
+        assert a_user is not b_user
+        assert len(mcp_handler._mcp_connection_pool) == 2
+
+    @pytest.mark.asyncio
+    async def test_same_token_reuses_pooled_adapter(self):
+        """The same caller (identical credential) reuses one pooled connection."""
+        existing = MagicMock(); existing._initialized = True
+        params = {
+            "url": "https://w/api/2.0/mcp/genie/s1",
+            "auth_type": "databricks_obo",
+            "headers": {"Authorization": "Bearer SAME_TOKEN"},
+        }
+        # Prime the pool via a first create, then assert the second call reuses it.
+        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=existing):
+            existing.initialize = AsyncMock()
+            first = await get_or_create_mcp_adapter(params)
+        second = await get_or_create_mcp_adapter(params)
+        assert first is existing and second is existing
+        assert len(mcp_handler._mcp_connection_pool) == 1
 
     @pytest.mark.asyncio
     async def test_stdio_transport_pool_key(self):
