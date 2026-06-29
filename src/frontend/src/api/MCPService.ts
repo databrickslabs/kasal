@@ -427,7 +427,10 @@ export class MCPService {
       name,
       server_url: option.server_url,
       server_type: 'streamable',
-      auth_type: 'databricks_spn',
+      // Managed Databricks MCP (Genie, UC functions) authenticates on-behalf-of
+      // the requesting user (OBO) so per-user resources like Genie spaces resolve
+      // against the user's own permissions, not the app service principal.
+      auth_type: 'databricks_obo',
       enabled: true,
       global_enabled: false,
       api_key: '',
