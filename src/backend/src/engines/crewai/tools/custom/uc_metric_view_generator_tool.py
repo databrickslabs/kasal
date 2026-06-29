@@ -223,7 +223,9 @@ class UCMetricViewGeneratorTool(BaseTool):
             )
             if measures_raw and measures_raw != '[]':
                 mapping_for_val = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw
-                import tempfile, os
+                import tempfile  # NOTE: os is already imported at module level; importing it
+                # here too would make `os` a function-local for all of _run() and break the
+                # earlier os.environ.get(...) calls with UnboundLocalError.
                 for table_key, yml in yaml_output.items():
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as yf:
                         yf.write(yml)

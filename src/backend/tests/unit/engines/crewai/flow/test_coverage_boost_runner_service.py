@@ -221,7 +221,8 @@ class TestRunFlow:
 
         with patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
             repo_instance = MagicMock()
-            # resume_from_execution_id is the integer PK; lookup is by id, not job_id
+            # resume_from_execution_id is resolved by job_id first, then int PK fallback.
+            repo_instance.get_execution_by_job_id = AsyncMock(return_value=None)
             repo_instance.get_execution_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
 
@@ -237,6 +238,38 @@ class TestRunFlow:
                     }
                 )
             assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_run_flow_resume_by_uuid_job_id(self):
+        """resume_from_execution_id as a UUID job_id (HITL path) resolves by job_id, not int()."""
+        svc = self._service_with_mocks()
+        svc.db.commit = AsyncMock()
+
+        with patch("src.engines.crewai.paths.flow.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
+            repo_instance = MagicMock()
+            existing = MagicMock()
+            existing.id = 42
+            repo_instance.get_execution_by_job_id = AsyncMock(return_value=existing)
+            repo_instance.get_execution_by_id = AsyncMock(return_value=None)
+            MockRepo.return_value = repo_instance
+
+            job_uuid = "e089f9fd-d6ea-4565-96ee-f039d5925992"
+            svc._run_dynamic_flow = AsyncMock(return_value={"success": True, "result": "ok"})
+
+            result = await svc.run_flow(
+                flow_id=None,
+                job_id="job-8",
+                config={
+                    "nodes": [{"id": "n1"}],
+                    "edges": [],
+                    "resume_from_execution_id": job_uuid,
+                },
+            )
+
+            # Looked up by job_id (UUID), and int() fallback never attempted.
+            repo_instance.get_execution_by_job_id.assert_awaited_once_with(job_uuid)
+            repo_instance.get_execution_by_id.assert_not_awaited()
+            assert result["status"] == FlowExecutionStatus.COMPLETED
 
     @pytest.mark.asyncio
     async def test_run_flow_hitl_pause_result_returned(self):
