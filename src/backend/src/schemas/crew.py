@@ -213,6 +213,17 @@ class CrewGenerationRequest(BaseModel):
     api_key: Optional[str] = Field(None, description="API key for the LLM provider")
 
 
+class CrewFromConversationRequest(BaseModel):
+    """Request schema for distilling a reusable crew from a chat conversation.
+
+    Used by ChatMode answer mode's "Save to catalog": rather than persisting the
+    generic chat assistant, the backend reads the session's conversation and
+    synthesizes an Agent + Task that capture what the user actually asked for.
+    """
+    session_id: str = Field(..., description="Chat session whose conversation is distilled into a reusable crew")
+    model: Optional[str] = Field(None, description="LLM model to use for the synthesis")
+
+
 class AgentConfig(BaseModel):
     """Configuration for an agent in the crew."""
     llm: Optional[str] = Field("databricks-llama-4-maverick", description="LLM model for the agent")

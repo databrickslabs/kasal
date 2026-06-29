@@ -172,32 +172,34 @@ export function deriveCrewName(
  * Persist the generated crew to the catalog. Resolves to the created crew's
  * id + name. Throws if the plan has no DB-backed agents/tasks to reference.
  */
-export async function saveGeneratedCrew(
+/** Options that shape how a crew's nodes/edges are synthesized. */
+export interface CrewGraphOpts {
+  memoryEnabled?: boolean;
+  spaceId?: string;
+  mcpServers?: string[];
+  agentBricksEndpoints?: string[];
+}
+
+/**
+ * Synthesize the ReactFlow nodes/edges (and the referenced agent/task ids) for a
+ * generated crew. Shared by {@link saveGeneratedCrew} (persist to the catalog)
+ * and the chat "Open in Agent Builder" action (load straight onto the canvas),
+ * so both produce the IDENTICAL graph. Throws when the crew has no saved
+ * agents/tasks to reference yet.
+ */
+export function buildCrewGraph(
   data: GenerationCompleteData | Record<string, unknown>,
-  name?: string,
-  opts?: {
-    overwrite?: boolean;
-    memoryEnabled?: boolean;
-    spaceId?: string;
-    mcpServers?: string[];
-    agentBricksEndpoints?: string[];
-    // Persist the answer-mode crew config so a saved Research/Deep crew reloads
-    // WITH reasoning (and planning + planning_llm for Deep) instead of as a plain crew.
-    reasoning?: boolean;
-    planning?: boolean;
-    planningLlm?: string;
-  },
-): Promise<SavedCrew> {
-  // When a Genie space was picked in chat, persist it as a GenieTool override on
-  // any agent/task that uses GenieTool so the saved crew runs against that space.
+  opts?: CrewGraphOpts,
+): {
+  nodes: Record<string, unknown>[];
+  edges: Record<string, unknown>[];
+  agent_ids: string[];
+  task_ids: string[];
+} {
   const genieToolConfig = opts?.spaceId ? { GenieTool: { spaceId: opts.spaceId } } : undefined;
   const usesGenie = (tools: unknown): boolean =>
     Array.isArray(tools) && tools.some((t) => isGenieToolRef(t));
 
-  // Agent Bricks: the user picked an endpoint in the chat "+" — persist it so the
-  // saved crew reloads WITH the agent assigned (the editor's AgentBricks selector
-  // shows it populated) and runs against it. Mirrors the Genie/MCP persistence:
-  // equip AgentBricksTool (catalog id 71) and store its endpointName on each node.
   const ABT = '71';
   const agentBricksEndpoints = opts?.agentBricksEndpoints ?? [];
   const agentBricksPicked = agentBricksEndpoints.length > 0;
@@ -209,9 +211,6 @@ export async function saveGeneratedCrew(
     return arr;
   };
 
-  // Persist the MCP servers selected for the run onto EVERY agent and task
-  // (mirrors execution's buildCrewConfigFromGenerated injection), so the saved
-  // crew reloads with the same MCP tools instead of losing them.
   const mcpServers = opts?.mcpServers ?? [];
   const toolConfigsFor = (tools: unknown): Record<string, unknown> | undefined => {
     const cfg: Record<string, unknown> = {};
@@ -238,8 +237,6 @@ export async function saveGeneratedCrew(
       type: 'agentNode',
       position: { x: 80, y: 100 + i * 220 },
       data: {
-        // Carry the full agent record (llm + advanced behaviour settings) so the
-        // saved crew round-trips faithfully instead of falling back to defaults.
         ...a,
         label: a.name || a.role || `Agent ${i + 1}`,
         agentId: String(a.id),
@@ -249,9 +246,7 @@ export async function saveGeneratedCrew(
         goal: a.goal || '',
         backstory: a.backstory || '',
         tools: equipAgentBricks(a.tools),
-        // Honour the chat's memory choice when provided, else keep the agent's own.
         ...(opts?.memoryEnabled !== undefined ? { memory: opts.memoryEnabled } : {}),
-        // Persist the Genie space, selected MCP servers, and/or Agent Bricks endpoint.
         ...(toolConfigsFor(a.tools) ? { tool_configs: toolConfigsFor(a.tools) } : {}),
       },
     });
@@ -268,13 +263,10 @@ export async function saveGeneratedCrew(
         description: t.description || '',
         expected_output: t.expected_output || '',
         tools: equipAgentBricks(t.tools),
-        // Persist the Genie space, selected MCP servers, and/or Agent Bricks endpoint.
         ...(toolConfigsFor(t.tools) ? { tool_configs: toolConfigsFor(t.tools) } : {}),
       },
     });
 
-    // Connect a task to its owning agent (fall back to positional pairing),
-    // and chain tasks sequentially so dependencies render in Crew mode.
     const ownerAgentId = t.agent_id || agents[i]?.id || agents[0]?.id;
     if (ownerAgentId) {
       edges.push({
@@ -291,6 +283,25 @@ export async function saveGeneratedCrew(
       });
     }
   });
+
+  return { nodes, edges, agent_ids, task_ids };
+}
+
+export async function saveGeneratedCrew(
+  data: GenerationCompleteData | Record<string, unknown>,
+  name?: string,
+  opts?: CrewGraphOpts & {
+    overwrite?: boolean;
+    // Persist the answer-mode crew config so a saved Research/Deep crew reloads
+    // WITH reasoning (and planning + planning_llm for Deep) instead of as a plain crew.
+    reasoning?: boolean;
+    planning?: boolean;
+    planningLlm?: string;
+  },
+): Promise<SavedCrew> {
+  // Synthesize nodes/edges (and the agent/task id references) — the SAME graph
+  // the "Open in Agent Builder" chat action loads onto the canvas.
+  const { nodes, edges, agent_ids, task_ids } = buildCrewGraph(data, opts);
 
   const payload = {
     name: name?.trim() || deriveCrewName(data),
@@ -323,6 +334,33 @@ export async function saveGeneratedCrew(
     }
     throw err;
   }
+}
+
+/**
+ * Distill a reusable crew (agent + task) from a chat session's conversation.
+ *
+ * ChatMode answer ("chat") turns run a generic single assistant, so saving that
+ * to the catalog stores nothing specific. This asks the backend to read the
+ * conversation for `sessionId` and synthesize an agent + task that capture what
+ * the user actually asked for. The created entities come back with DB ids in the
+ * GenerationCompleteData shape, so the chat renders them as a proposal the user
+ * confirms (bookmarks) via the normal `saveGeneratedCrew` path.
+ */
+export async function synthesizeCrewFromConversation(
+  sessionId: string,
+  model?: string,
+): Promise<GenerationCompleteData> {
+  const res = await getClient().post<{
+    agents?: Record<string, unknown>[];
+    tasks?: Record<string, unknown>[];
+  }>('/crew/from-conversation', {
+    session_id: sessionId,
+    ...(model ? { model } : {}),
+  });
+  return {
+    agents: Array.isArray(res.data?.agents) ? res.data.agents : [],
+    tasks: Array.isArray(res.data?.tasks) ? res.data.tasks : [],
+  };
 }
 
 /** A saved catalog entry (crew or flow) for the library rail. */
