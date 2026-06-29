@@ -19,6 +19,41 @@ def _to_uuid(value) -> UUID:
         return UUID(value)
     raise ValueError(f"Cannot convert {type(value)} to UUID")
 
+
+def recover_mcp_from_current_tasks(effective_tool_configs, flow_task_id, flow_task_name, current_tasks):
+    """Recover a missing MCP_SERVERS config from the crew's CURRENT task(s).
+
+    A flow's startingPoint/listener task IDs are captured at save time, but crew
+    edits mint NEW task rows (and re-checking a tool only updates the current
+    task). So the flow can point at a stale task whose tool_configs no longer has
+    the MCP server the user added — silently yielding zero MCP tools in the flow
+    while the crew (which uses the current task) works fine.
+
+    When MCP_SERVERS is absent from effective_tool_configs, merge it from the
+    crew's current task: an exact task-name match, or — if the crew has a single
+    task — that task. Mutates and returns ``effective_tool_configs``.
+
+    Args:
+        effective_tool_configs: dict merged from crew-level + flow-task-level configs
+        flow_task_id: the (possibly stale) task ID the flow references
+        flow_task_name: name of the flow's task (for matching)
+        current_tasks: list of (task_id, task_name, tool_configs) for the crew's
+            CURRENT tasks (from crew.task_ids)
+    """
+    cfg = effective_tool_configs if isinstance(effective_tool_configs, dict) else {}
+    if 'MCP_SERVERS' in cfg:
+        return cfg
+    single = len(current_tasks) == 1
+    for tid, tname, tcfg in current_tasks:
+        if str(tid) == str(flow_task_id):
+            continue
+        if not isinstance(tcfg, dict) or 'MCP_SERVERS' not in tcfg:
+            continue
+        if single or (flow_task_name and tname == flow_task_name):
+            cfg.update(tcfg)
+            break
+    return cfg
+
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
@@ -251,6 +286,37 @@ class FlowProcessorManager:
                         if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
+
+                        # Recover MCP from the crew's CURRENT task if the flow points
+                        # at a stale task that lost it (see recover_mcp_from_current_tasks).
+                        if 'MCP_SERVERS' not in effective_tool_configs and task_repo:
+                            try:
+                                current_task_ids = getattr(crew_data, 'task_ids', None) or []
+                                current_tasks = []
+                                for cur_tid in current_task_ids:
+                                    if str(cur_tid) == str(task_id):
+                                        continue
+                                    cur_task = await task_repo.get(str(cur_tid))
+                                    if cur_task is not None:
+                                        current_tasks.append((
+                                            cur_tid,
+                                            getattr(cur_task, 'name', None),
+                                            getattr(cur_task, 'tool_configs', None),
+                                        ))
+                                before = 'MCP_SERVERS' in effective_tool_configs
+                                effective_tool_configs = recover_mcp_from_current_tasks(
+                                    effective_tool_configs,
+                                    task_id,
+                                    getattr(task_data, 'name', None),
+                                    current_tasks,
+                                )
+                                if not before and 'MCP_SERVERS' in effective_tool_configs:
+                                    logger.info(
+                                        f"Recovered MCP_SERVERS for stale flow task {task_id} "
+                                        f"from crew {crew_id}'s current task(s)"
+                                    )
+                            except Exception as _mcp_rec_err:
+                                logger.warning(f"MCP recovery from current crew task failed: {_mcp_rec_err}")
 
                         logger.info(f"Task {task_id} effective tool_configs: {effective_tool_configs}")
 
