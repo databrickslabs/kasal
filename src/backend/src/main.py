@@ -298,6 +298,18 @@ async def lifespan(app: FastAPI):
                 system_logger.info(
                     f"Activated Lakebase session factory (instance: {instance_name})"
                 )
+                # Self-heal column drift on the Lakebase backend. init_db()'s
+                # self-heal only targets settings.DATABASE_URI (the SQLite
+                # bootstrap DB on a Databricks App), so Lakebase tables created
+                # from an older schema (e.g. crews without reasoning_config)
+                # would otherwise stay behind the model and 500 every read.
+                try:
+                    from src.db.session import ensure_lakebase_runtime_schema
+                    await ensure_lakebase_runtime_schema(lb_factory._engine)
+                except Exception as heal_err:
+                    system_logger.warning(
+                        f"Lakebase schema self-heal skipped: {heal_err}"
+                    )
         except Exception as e:
             system_logger.warning(f"Lakebase activation skipped: {e}")
 

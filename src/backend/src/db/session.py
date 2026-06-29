@@ -880,6 +880,46 @@ async def _ensure_databricks_config_columns(conn) -> None:
         )
 
 
+async def ensure_lakebase_runtime_schema(engine) -> None:
+    """Self-heal column drift on the active Lakebase engine.
+
+    The ``_ensure_*`` helpers above derive ``is_sqlite`` from
+    ``settings.DATABASE_URI`` and only run inside ``init_db()`` against that
+    URI. On a Databricks App the bootstrap DB is SQLite while Lakebase is the
+    real backend (swapped in at runtime via ``activate_lakebase``), so the
+    Lakebase database itself never receives the ALTERs — leaving tables created
+    by an older ``Base.metadata`` (e.g. ``crews`` without ``reasoning_config``)
+    permanently behind the model. ``create_all``/``checkfirst`` never ALTERs an
+    existing table and the migration dialog only creates missing tables, so a
+    reconnect can't fix it either. This runs the Postgres-branch DDL directly
+    against the Lakebase engine after activation. Each statement runs in its own
+    transaction so a missing table can't abort the rest; all columns are
+    nullable (or defaulted) and ``IF NOT EXISTS``, making this idempotent and
+    safe on every startup. The Lakebase engine already pins
+    ``search_path = 'kasal, public'`` so unqualified names resolve to ``kasal``.
+    """
+    statements = [
+        "ALTER TABLE crews ADD COLUMN IF NOT EXISTS reasoning_config JSONB",
+        "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)",
+        "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS file_path VARCHAR",
+        "ALTER TABLE knowledge_embeddings ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS running_job_id VARCHAR",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS preview_type VARCHAR(50)",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS preview_data TEXT",
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS preview_title VARCHAR(512)",
+        "ALTER TABLE databricksconfig ADD COLUMN IF NOT EXISTS ai_gateway_enabled BOOLEAN DEFAULT false",
+    ]
+    healed = 0
+    for stmt in statements:
+        try:
+            async with engine.begin() as conn:
+                await conn.exec_driver_sql(stmt)
+            healed += 1
+        except Exception as e:
+            logger.warning(f"Lakebase self-heal statement skipped ({stmt[:48]}...): {e}")
+    logger.info(f"Lakebase runtime schema self-heal complete ({healed}/{len(statements)} statements applied)")
+
+
 async def init_db() -> None:
     """Initialize database tables if they don't exist."""
     try:
