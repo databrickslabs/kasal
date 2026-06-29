@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -7,7 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import type { ComponentNode, NodeProps } from './types'
-import { Check, Download, RotateCcw, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Lightbulb, Presentation, RotateCcw, RotateCw, Shuffle, Trophy, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Separator } from './ui/separator'
 import { Button } from './ui/button'
@@ -111,20 +111,25 @@ export function KeyValue({ node, resolve }: NodeProps) {
   const { inDeck } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
   if (inDeck) {
-    // Big-number stat tile, themed to the active deck.
+    // Big-number stat tile, themed to the active deck. `h-full` + flex column so a
+    // row of tiles is always equal height (a longer label wrapping to two lines no
+    // longer makes its tile taller than its neighbours).
     return (
-      <div className="rounded-xl border p-5" style={{ background: theme.panel, borderColor: theme.panelBorder }}>
+      <div className="flex h-full flex-col rounded-xl border p-5" style={{ background: theme.panel, borderColor: theme.panelBorder }}>
         <div className="text-[2.2rem] font-extrabold leading-none" style={{ color: theme.accent }}>
           {asStr(resolve(node.value))}
         </div>
-        <div className="mt-2 text-sm" style={{ color: theme.muted }}>{asStr(resolve(node.label))}</div>
+        {/* Label uses the body foreground (not `muted`) so it stays legible — a
+            workspace palette whose muted color sits near the surface color would
+            otherwise wash the label out against the tile. */}
+        <div className="mt-2 text-sm font-medium" style={{ color: theme.fg, opacity: 0.85 }}>{asStr(resolve(node.label))}</div>
       </div>
     )
   }
   return (
-    <div className="rounded-xl border bg-secondary/40 p-4">
+    <div className="flex h-full flex-col rounded-xl border bg-secondary/40 p-4">
       <div className="text-2xl font-bold">{asStr(resolve(node.value))}</div>
-      <div className="mt-1 text-sm text-muted-foreground">{asStr(resolve(node.label))}</div>
+      <div className="mt-1 text-sm font-medium text-foreground/80">{asStr(resolve(node.label))}</div>
     </div>
   )
 }
@@ -176,22 +181,26 @@ export function Table({ node, resolve }: NodeProps) {
           </Button>
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-lg border">
       <table className="w-full border-collapse text-sm">
         {columns.length > 0 && (
           <thead>
             <tr>
+              {/* Inverted header (foreground bg / background text) — a guaranteed
+                  contrasting pair from the palette. `bg-muted` (= surface) could
+                  collide with the foreground text on palettes whose surface is
+                  dark, leaving the header unreadable. */}
               {columns.map((c, i) => (
-                <th key={i} className="border bg-muted px-3 py-2 text-left font-semibold">{asStr(c)}</th>
+                <th key={i} className="bg-foreground px-3 py-2 text-left font-semibold text-background">{asStr(c)}</th>
               ))}
             </tr>
           </thead>
         )}
         <tbody>
           {rows.map((row, ri) => (
-            <tr key={ri}>
+            <tr key={ri} className={cn('border-t', ri % 2 === 1 && 'bg-muted/30')}>
               {asArr(row).map((cell, ci) => (
-                <td key={ci} className="border px-3 py-2">{asStr(cell)}</td>
+                <td key={ci} className="px-3 py-2">{asStr(cell)}</td>
               ))}
             </tr>
           ))}
@@ -224,12 +233,71 @@ export function Column({ node, render }: NodeProps) {
 
 export function Grid({ node, render }: NodeProps) {
   const columns = Number(node.columns) || 2
+  // A table reads terribly squeezed into one narrow grid cell (truncated columns,
+  // tons of wrapping). Let any cell whose subtree contains a Table span the full
+  // row instead — with grid auto-flow that drops it onto its own full-width row,
+  // typically the bottom of the dashboard, which is where wide tables belong.
+  const surface = useContext(SurfaceContext)
+  const byId = useMemo(
+    () => Object.fromEntries((surface?.components || []).map((c) => [c.id, c])),
+    [surface],
+  )
+  const hasTable = (id: string, depth = 0): boolean => {
+    if (depth > 6) return false
+    const n = byId[id]
+    if (!n) return false
+    if (n.component === 'Table') return true
+    return (Array.isArray(n.children) ? n.children : []).some((cid) => hasTable(cid, depth + 1))
+  }
+  // Lay out row-by-row instead of one fixed N-column grid. Normal cells pack
+  // `columns` per row; an UNDERFULL last row uses its own item count as the
+  // column count so its cells STRETCH to fill the width (symmetric, no empty
+  // gap — e.g. 2 charts in a 3-col dashboard become two equal halves instead of
+  // leaving a blank third cell). A Table-bearing cell always takes its OWN
+  // full-width row (the wide footer).
+  const children = node.children || []
+  const rows: { wide: boolean; ids: string[] }[] = []
+  let buf: string[] = []
+  const flush = () => {
+    if (buf.length) {
+      rows.push({ wide: false, ids: buf })
+      buf = []
+    }
+  }
+  for (const id of children) {
+    if (hasTable(id)) {
+      flush()
+      rows.push({ wide: true, ids: [id] })
+    } else {
+      buf.push(id)
+      if (buf.length === columns) flush()
+    }
+  }
+  flush()
   return (
-    <div className="grid gap-3.5" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-      {(node.children || []).map((id) => render(id))}
+    <div className="flex flex-col gap-3.5">
+      {/* `h-full` on the cell wrapper gives stat tiles a defined stretched height
+          so a row of tiles stays symmetric regardless of label length. */}
+      {rows.map((row, ri) => (
+        <div
+          key={ri}
+          className="grid items-stretch gap-3.5"
+          style={{ gridTemplateColumns: row.wide ? '1fr' : `repeat(${row.ids.length}, minmax(0, 1fr))` }}
+        >
+          {row.ids.map((id) => (
+            <div key={id} className="h-full">{render(id)}</div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
+
+// One height for EVERY chart type so charts sitting in the same dashboard row
+// line up (symmetry). Pie gets a relative radius + a margin band so its labels /
+// leader lines and the bottom legend always fit inside the box — never overflowing
+// upward into the title above it.
+const CHART_HEIGHT = 300
 
 export function Chart({ node, resolve }: NodeProps) {
   const type = asStr(node.chartType) || 'bar'
@@ -238,30 +306,35 @@ export function Chart({ node, resolve }: NodeProps) {
   const yKeys = asArr(node.yKeys).map(asStr)
   const keys = yKeys.length ? yKeys : ['value']
   return (
-    <div>
+    <div className="flex h-full w-full min-w-0 flex-col">
       {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
-      <ResponsiveContainer width="100%" height={260}>
+      {/* Fixed-height box keeps the SVG bounded so it can't bleed into the title. */}
+      <div style={{ width: '100%', height: CHART_HEIGHT }}>
+      <ResponsiveContainer width="100%" height="100%">
         {type === 'pie' ? (
-          <PieChart>
-            <Pie data={data} dataKey={keys[0]} nameKey={xKey} outerRadius={90} label>
+          <PieChart margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
+            {/* Radius RELATIVE to the box and cy lifted to 46% so the bottom legend
+                has room — a fixed 90px radius overflowed small cells. */}
+            <Pie data={data} dataKey={keys[0]} nameKey={xKey} cx="50%" cy="46%" outerRadius="70%" label>
               {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
             </Pie>
             <Tooltip /><Legend />
           </PieChart>
         ) : type === 'line' ? (
-          <LineChart data={data}>
+          <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
             {keys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={CHART_COLORS[i % CHART_COLORS.length]} />)}
           </LineChart>
         ) : (
-          <BarChart data={data}>
+          <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
             {keys.map((k, i) => <Bar key={k} dataKey={k} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
           </BarChart>
         )}
       </ResponsiveContainer>
+      </div>
     </div>
   )
 }
@@ -340,13 +413,13 @@ export function Slide({ node, render }: NodeProps) {
         {num}
         {eyebrow}
         {node.title != null && (
-          <h2 className="mt-3 text-[2.6rem] font-extrabold leading-[1.05] tracking-tight" style={{ color: theme.title }}>
+          <h2 className="mt-3 text-balance text-[2.7rem] font-extrabold leading-[1.05] tracking-tight" style={{ color: theme.title }}>
             {asStr(node.title)}
           </h2>
         )}
-        <div className="mt-5 h-1 w-20 rounded-full" style={{ background: theme.accent }} />
-        {subtitle && <p className="mt-5 max-w-2xl text-lg" style={{ color: theme.muted }}>{subtitle}</p>}
-        {children.length > 0 && <div className="mt-6 max-w-3xl space-y-2 text-left">{body}</div>}
+        <div className="mt-6 h-1 w-20 rounded-full" style={{ background: theme.accent }} />
+        {subtitle && <p className="mt-6 max-w-2xl text-pretty text-xl leading-relaxed" style={{ color: theme.muted }}>{subtitle}</p>}
+        {children.length > 0 && <div className="mt-6 max-w-3xl space-y-2 text-left text-pretty">{body}</div>}
       </div>
     )
   }
@@ -358,12 +431,12 @@ export function Slide({ node, render }: NodeProps) {
         {num}
         {eyebrow}
         {node.title != null && (
-          <h2 className="mt-1 text-3xl font-bold tracking-tight" style={{ color: theme.title }}>{asStr(node.title)}</h2>
+          <h2 className="mt-1 text-balance text-3xl font-bold tracking-tight" style={{ color: theme.title }}>{asStr(node.title)}</h2>
         )}
-        <div className="mt-7 grid flex-1 content-center gap-4" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        <div className="mt-7 grid flex-1 content-center gap-5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {body}
         </div>
-        {subtitle && <p className="mt-4 text-sm" style={{ color: theme.muted }}>{subtitle}</p>}
+        {subtitle && <p className="mt-4 max-w-3xl text-pretty text-base" style={{ color: theme.muted }}>{subtitle}</p>}
       </div>
     )
   }
@@ -375,11 +448,12 @@ export function Slide({ node, render }: NodeProps) {
         {eyebrow}
         <div className="mb-5 mt-3 h-1 w-16 rounded-full" style={{ background: theme.accent }} />
         {node.title != null && (
-          <blockquote className="text-[2rem] font-semibold leading-snug" style={{ color: theme.title }}>
+          <blockquote className="max-w-4xl text-balance text-[2.2rem] font-semibold leading-snug" style={{ color: theme.title }}>
             “{asStr(node.title)}”
           </blockquote>
         )}
-        {children.length > 0 && <div className="mt-6 text-base" style={{ color: theme.muted }}>{body}</div>}
+        {subtitle && <p className="mt-6 text-pretty text-lg font-medium" style={{ color: theme.kicker }}>— {subtitle}</p>}
+        {children.length > 0 && <div className="mt-6 max-w-3xl text-pretty text-base" style={{ color: theme.muted }}>{body}</div>}
       </div>
     )
   }
@@ -394,11 +468,19 @@ export function Slide({ node, render }: NodeProps) {
       {eyebrow}
       <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
       {node.title != null && (
-        <h2 className="text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+        <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
           {asStr(node.title)}
         </h2>
       )}
-      <div className="mt-8 flex-1 flex flex-col justify-center space-y-5 overflow-auto pr-1 text-[1.5rem] leading-relaxed">{body}</div>
+      {/* Subtitle as a lead-in (was previously dropped on content slides) — a short
+          framing sentence under the title gives the slide context before the body. */}
+      {subtitle && (
+        <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+      )}
+      {/* Body: vertically centred, uses the full slide width (a measure cap made
+          short lines wrap early and leave the right half empty), pretty wrapping to
+          avoid orphan words, and roomier inter-item rhythm. */}
+      <div className="mt-6 flex-1 flex flex-col justify-center overflow-auto pr-1 text-pretty text-[1.55rem] leading-relaxed space-y-5 [&_ul]:space-y-3 [&_ol]:space-y-3 [&_li]:pl-1">{body}</div>
     </div>
   )
 }
@@ -447,28 +529,22 @@ function SlideStage({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function SlideDeck({ node, render }: NodeProps) {
-  const slides = Array.isArray(node.children) ? node.children : []
-  const total = slides.length
-  const [idx, setIdx] = useState(0)
-  const [exporting, setExporting] = useState(false)
+// ---- SurfaceDownloadMenu (shared download chrome) --------------------------
+// One elegant "Download" dropdown reused by every surface. Self-detects what the
+// surface can export: PDF (any surface, when the host wires `onDownloadPdf`) and
+// PowerPoint (decks only, via the shared DOM-free pptxgenjs export). Renders
+// nothing when downloads are suppressed or there's nothing to offer — so it's
+// safe to drop into the renderer for ALL surfaces.
+export function SurfaceDownloadMenu({ className }: { className?: string }) {
   const surface = useContext(SurfaceContext)
   const theme = useContext(DeckThemeContext)
-  const { downloads: showDownloads, onDownloadPdf, fit } = useContext(SurfaceChromeContext)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const clamp = (n: number) => Math.max(0, Math.min(total - 1, n))
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') setIdx((i) => clamp(i + 1))
-      if (e.key === 'ArrowLeft') setIdx((i) => clamp(i - 1))
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-  // Export the WHOLE deck (from the surface in context, not just the visible
-  // slide) to PowerPoint. pptxgenjs is loaded lazily inside downloadPptx, themed
-  // to match the on-screen deck.
-  const onDownload = useCallback(async () => {
+  const { downloads: showDownloads, onDownloadPdf } = useContext(SurfaceChromeContext)
+  const [open, setOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const isDeck = !!surface?.components?.some((c) => c.id === surface.root && c.component === 'SlideDeck')
+  // Export the WHOLE deck (from the surface in context) to PowerPoint. pptxgenjs
+  // is loaded lazily inside downloadPptx, themed to match the on-screen deck.
+  const onPptx = useCallback(async () => {
     if (!surface || exporting) return
     setExporting(true)
     try {
@@ -479,60 +555,78 @@ export function SlideDeck({ node, render }: NodeProps) {
       setExporting(false)
     }
   }, [surface, theme, exporting])
+
+  if (!showDownloads) return null
+  const options: { key: string; label: string; sub: string; icon: JSX.Element; onClick: () => void }[] = []
+  if (onDownloadPdf) options.push({ key: 'pdf', label: 'PDF', sub: 'Portable document', icon: <FileText className="size-4" />, onClick: onDownloadPdf })
+  if (isDeck) options.push({ key: 'pptx', label: 'PowerPoint', sub: 'Editable slides', icon: <Presentation className="size-4" />, onClick: () => void onPptx() })
+  if (!options.length) return null
+
+  return (
+    <div className={cn('relative flex shrink-0 justify-start', className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={!surface || exporting}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Download className="size-3.5" /> {exporting ? 'Preparing…' : 'Download'}
+        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <>
+          {/* click-away catcher */}
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div
+            role="menu"
+            className="absolute left-0 top-9 z-20 min-w-[12rem] overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          >
+            {options.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  setOpen(false)
+                  opt.onClick()
+                }}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">{opt.icon}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs font-semibold">{opt.label}</span>
+                  <span className="text-[11px] text-muted-foreground">{opt.sub}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function SlideDeck({ node, render }: NodeProps) {
+  const slides = Array.isArray(node.children) ? node.children : []
+  const total = slides.length
+  const [idx, setIdx] = useState(0)
+  const { fit } = useContext(SurfaceChromeContext)
+  const clamp = (n: number) => Math.max(0, Math.min(total - 1, n))
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') setIdx((i) => clamp(i + 1))
+      if (e.key === 'ArrowLeft') setIdx((i) => clamp(i - 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
   if (!total) return null
   const cur = clamp(idx)
   return (
     <div className={cn('flex flex-col gap-3', fit && 'h-full min-h-0')}>
-      {showDownloads && (
-        <div className="relative flex shrink-0 justify-start">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-            onClick={() => setMenuOpen((o) => !o)}
-            disabled={!surface || exporting}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <Download className="size-3.5" /> {exporting ? 'Preparing…' : 'Download'}
-          </Button>
-          {menuOpen && (
-            <>
-              {/* click-away catcher */}
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-              <div
-                role="menu"
-                className="absolute left-0 top-8 z-20 min-w-[9rem] overflow-hidden rounded-md border bg-card py-1 shadow-md"
-              >
-                {onDownloadPdf && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="block w-full px-3 py-1.5 text-left text-xs text-card-foreground transition-opacity hover:opacity-70"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onDownloadPdf()
-                    }}
-                  >
-                    PDF
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left text-xs text-card-foreground transition-opacity hover:opacity-70"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    void onDownload()
-                  }}
-                >
-                  PowerPoint
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      <SurfaceDownloadMenu />
       {/* 16:9 stage. aspectRatio is set INLINE (not via Tailwind's `aspect-video`
           utility) so the height is guaranteed regardless of JIT content scanning
           or preflight being disabled in the host app.
@@ -638,66 +732,116 @@ export function Quiz({ node, resolve }: NodeProps) {
   if (!total) return null
 
   const clamp = (n: number) => Math.max(0, Math.min(total, n))
+  const correctOf = (i: number) => Number(questions[i]?.answer)
   const score = questions.reduce(
     (acc, q, i) => acc + (picked[i] === Number(q.answer) ? 1 : 0),
     0,
   )
   const onResults = idx >= total
 
+  const OK = '#10b981'
+  const BAD = '#ef4444'
+
+  // A slim progress meter that tracks how far through the quiz the user is — a
+  // staple of the quiz "feel" (1-indexed so question 1 already reads as progress).
+  const progressPct = onResults ? 100 : Math.round(((idx + 1) / total) * 100)
+  const progress = (
+    <div className="h-2 w-full overflow-hidden rounded-full" style={{ background: theme.panel }}>
+      <div
+        className="h-full rounded-full transition-all duration-500 ease-out"
+        style={{ width: `${progressPct}%`, background: theme.accent }}
+      />
+    </div>
+  )
+
+  // Navigation dots double as an answer key: green = answered correctly, red =
+  // answered wrong, muted = unseen. The current question gets an accent pill.
   const dots = (
     <div className="flex flex-wrap items-center justify-center gap-1.5">
-      {Array.from({ length: total + 1 }).map((_, i) => (
-        <button
-          key={i}
-          aria-label={i === total ? 'Results' : `Go to question ${i + 1}`}
-          onClick={() => setIdx(i)}
-          className="h-2 rounded-full transition-all"
-          style={
-            i === idx
-              ? { width: 20, background: theme.accent }
-              : { width: 8, background: theme.muted, opacity: 0.5 }
-          }
-        />
-      ))}
+      {Array.from({ length: total + 1 }).map((_, i) => {
+        const isCur = i === idx
+        let bg = theme.muted
+        let op = 0.4
+        if (i === total) {
+          bg = theme.accent
+          op = 0.9
+        } else if (picked[i] != null) {
+          bg = picked[i] === correctOf(i) ? OK : BAD
+          op = 0.95
+        }
+        return (
+          <button
+            key={i}
+            aria-label={i === total ? 'Results' : `Go to question ${i + 1}`}
+            onClick={() => setIdx(i)}
+            className="h-2 rounded-full transition-all"
+            style={isCur ? { width: 22, background: theme.accent } : { width: 8, background: bg, opacity: op }}
+          />
+        )
+      })}
     </div>
   )
 
   const nav = (
     <div className="flex items-center justify-between gap-3">
-      <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i - 1))} disabled={idx === 0}>
-        ‹ Prev
+      <Button variant="outline" size="sm" className="gap-1" onClick={() => setIdx((i) => clamp(i - 1))} disabled={idx === 0}>
+        <ChevronLeft className="size-4" /> Prev
       </Button>
       {dots}
-      <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i + 1))} disabled={idx >= total}>
-        Next ›
+      <Button variant="outline" size="sm" className="gap-1" onClick={() => setIdx((i) => clamp(i + 1))} disabled={idx >= total}>
+        Next <ChevronRight className="size-4" />
       </Button>
     </div>
   )
 
   if (onResults) {
     const pct = Math.round((score / total) * 100)
+    const grade =
+      pct >= 90 ? 'Outstanding!' : pct >= 75 ? 'Great job!' : pct >= 50 ? 'Good effort!' : 'Keep practicing!'
+    // Circular score ring: an SVG donut whose accent arc sweeps to `pct`.
+    const radius = 54
+    const circ = 2 * Math.PI * radius
     return (
       <div className="flex flex-col gap-4">
         {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+        {progress}
         <div
-          className="flex flex-col items-center gap-2 rounded-2xl border p-8 text-center"
+          className="flex flex-col items-center gap-3 rounded-2xl border p-8 text-center"
           style={{ background: theme.stage, borderColor: theme.panelBorder, color: theme.fg }}
         >
-          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.muted }}>Your score</div>
-          <div className="text-[2.4rem] font-extrabold leading-none" style={{ color: theme.accent }}>
-            {score} / {total}
+          <Trophy className="size-7" style={{ color: theme.accent }} />
+          <div className="text-xl font-bold tracking-tight" style={{ color: theme.title }}>{grade}</div>
+          <div className="relative" style={{ width: 128, height: 128 }}>
+            <svg width="128" height="128" className="-rotate-90">
+              <circle cx="64" cy="64" r={radius} fill="none" stroke={theme.panel} strokeWidth="10" />
+              <circle
+                cx="64"
+                cy="64"
+                r={radius}
+                fill="none"
+                stroke={theme.accent}
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeDasharray={circ}
+                strokeDashoffset={circ - circ * (pct / 100)}
+                style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-3xl font-extrabold leading-none" style={{ color: theme.accent }}>{pct}%</div>
+              <div className="mt-1 text-xs font-medium" style={{ color: theme.muted }}>{score} / {total} correct</div>
+            </div>
           </div>
-          <div className="text-sm" style={{ color: theme.muted }}>{pct}% correct</div>
           <Button
             variant="outline"
             size="sm"
-            className="mt-3 gap-1"
+            className="mt-1 gap-1"
             onClick={() => {
               setPicked({})
               setIdx(0)
             }}
           >
-            <RotateCcw className="size-3.5" /> Retake
+            <RotateCcw className="size-3.5" /> Retake quiz
           </Button>
         </div>
         {nav}
@@ -710,6 +854,7 @@ export function Quiz({ node, resolve }: NodeProps) {
   const correct = Number(q.answer)
   const chosen = picked[idx]
   const answered = chosen != null
+  const isRight = answered && chosen === correct
   const explanation = asStr(q.explanation)
   // Display options in a deterministic, per-question shuffled order so the correct
   // answer isn't always in the same slot (composer models tend to park it at a
@@ -722,51 +867,289 @@ export function Quiz({ node, resolve }: NodeProps) {
   return (
     <div className="flex flex-col gap-4">
       {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+      {progress}
       <div className="rounded-2xl border p-6" style={{ background: theme.stage, borderColor: theme.panelBorder, color: theme.fg }}>
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.muted }}>
-          Question {idx + 1} of {total}
+        <div className="flex items-center justify-between gap-3">
+          <span
+            className="inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide"
+            style={{ background: theme.panel, color: theme.accent }}
+          >
+            Question {idx + 1} of {total}
+          </span>
+          {answered && (
+            <span className="inline-flex items-center gap-1 text-xs font-bold" style={{ color: isRight ? OK : BAD }}>
+              {isRight ? <Check className="size-3.5" /> : <X className="size-3.5" />}
+              {isRight ? 'Correct' : 'Incorrect'}
+            </span>
+          )}
         </div>
-        <p className="mt-2 text-base font-medium leading-snug" style={{ color: theme.fg }}>{asStr(q.question)}</p>
-        <div className="mt-4 flex flex-col gap-2">
-          {order.map((oi) => {
+        <p className="mt-3 text-base font-semibold leading-snug" style={{ color: theme.fg }}>{asStr(q.question)}</p>
+        <div className="mt-4 flex flex-col gap-2.5">
+          {order.map((oi, pos) => {
             const opt = options[oi]
             const isCorrect = oi === correct
             const isChosen = oi === chosen
-            const reveal = answered && (isCorrect || isChosen)
+            const showCorrect = answered && isCorrect
+            const showWrong = answered && isChosen && !isCorrect
+            const dim = answered && !isCorrect && !isChosen
+            const letter = String.fromCharCode(65 + pos)
             // Themed until answered; on reveal, semantic green/red overrides the
             // theme so right/wrong reads clearly on any palette.
-            const base = { borderColor: theme.panelBorder, color: theme.fg }
-            const style =
-              reveal && isCorrect
-                ? { ...base, borderColor: '#10b981', background: 'rgba(16,185,129,0.12)' }
-                : answered && isChosen && !isCorrect
-                  ? { ...base, borderColor: '#ef4444', background: 'rgba(239,68,68,0.12)' }
-                  : answered
-                    ? { ...base, opacity: 0.6 }
-                    : base
+            const cardStyle = showCorrect
+              ? { borderColor: OK, background: 'rgba(16,185,129,0.12)', color: theme.fg }
+              : showWrong
+                ? { borderColor: BAD, background: 'rgba(239,68,68,0.12)', color: theme.fg }
+                : { borderColor: theme.panelBorder, color: theme.fg, opacity: dim ? 0.55 : 1 }
+            // The A/B/C/D badge turns into a green check / red cross on reveal.
+            const badgeStyle = showCorrect
+              ? { background: OK, color: '#fff', borderColor: OK }
+              : showWrong
+                ? { background: BAD, color: '#fff', borderColor: BAD }
+                : { background: theme.panel, color: theme.fg, borderColor: theme.panelBorder }
             return (
               <button
                 key={oi}
                 disabled={answered}
                 onClick={() => setPicked((p) => ({ ...p, [idx]: oi }))}
                 className={cn(
-                  'flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
-                  !answered && 'hover:opacity-90',
+                  'flex items-center gap-3 rounded-xl border px-4 py-3.5 text-left text-sm font-medium transition-all',
+                  !answered && 'hover:-translate-y-0.5 hover:shadow-md',
                 )}
-                style={style}
+                style={cardStyle}
               >
-                <span>{asStr(opt)}</span>
-                {reveal && isCorrect && <Check className="size-4 shrink-0" style={{ color: '#10b981' }} />}
-                {answered && isChosen && !isCorrect && <X className="size-4 shrink-0" style={{ color: '#ef4444' }} />}
+                <span
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold"
+                  style={badgeStyle}
+                >
+                  {showCorrect ? <Check className="size-4" /> : showWrong ? <X className="size-4" /> : letter}
+                </span>
+                <span className="flex-1">{asStr(opt)}</span>
               </button>
             )
           })}
         </div>
         {answered && explanation && (
-          <p className="mt-4 rounded-lg px-3 py-2 text-sm" style={{ background: theme.panel, color: theme.muted }}>{explanation}</p>
+          <div
+            className="mt-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm"
+            style={{ background: theme.panel, color: theme.muted }}
+          >
+            <Lightbulb className="mt-0.5 size-4 shrink-0" style={{ color: theme.accent }} />
+            <span>{explanation}</span>
+          </div>
         )}
       </div>
       {nav}
+    </div>
+  )
+}
+
+// ---- Flashcards (Anki-style study deck) ------------------------------------
+// Flippable cards (click to reveal the back), Prev/Next deck navigation, a
+// deterministic shuffle, and a "known" tally — themed like the Quiz/SlideDeck.
+type FlashCard = {
+  front?: unknown
+  back?: unknown
+  hint?: unknown
+}
+
+export function Flashcards({ node, resolve }: NodeProps) {
+  const title = asStr(resolve(node.title))
+  const cards = asArr(resolve(node.cards)) as FlashCard[]
+  const total = cards.length
+  // Hooks run before the empty-guard so hook order is stable.
+  const [idx, setIdx] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [known, setKnown] = useState<Record<number, boolean>>({})
+  // null = natural order; a number seeds a deterministic shuffle (no Math.random,
+  // so the order is stable across re-renders until the user reshuffles).
+  const [shuffleSeed, setShuffleSeed] = useState<number | null>(null)
+  const theme = useContext(DeckThemeContext)
+  if (!total) return null
+
+  const OK = '#10b981'
+  const order = shuffleSeed == null ? cards.map((_, i) => i) : shuffleIndices(total, shuffleSeed)
+  const clamp = (n: number) => Math.max(0, Math.min(total - 1, n))
+  const cur = clamp(idx)
+  const realIdx = order[cur]
+  const card = cards[realIdx] || {}
+  const hint = asStr(card.hint)
+  const knownCount = Object.values(known).filter(Boolean).length
+  const go = (n: number) => {
+    setIdx(clamp(n))
+    setFlipped(false)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className="inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide"
+          style={{ background: theme.panel, color: theme.accent }}
+        >
+          Card {cur + 1} of {total}
+        </span>
+        <div className="flex items-center gap-4 text-xs" style={{ color: theme.muted }}>
+          <span className="inline-flex items-center gap-1"><Check className="size-3.5" style={{ color: OK }} /> {knownCount} known</span>
+          <button
+            type="button"
+            onClick={() => {
+              setShuffleSeed((s) => (s == null ? 1 : s + 1))
+              setIdx(0)
+              setFlipped(false)
+            }}
+            className="inline-flex items-center gap-1 font-semibold transition-opacity hover:opacity-80"
+            style={{ color: theme.accent }}
+          >
+            <Shuffle className="size-3.5" /> Shuffle
+          </button>
+        </div>
+      </div>
+
+      {/* Flip card — click to toggle front/back. 3D transforms are INLINE so they
+          work regardless of the host's Tailwind build (the exported app too). */}
+      <div style={{ perspective: '1400px' }}>
+        <button
+          type="button"
+          onClick={() => setFlipped((f) => !f)}
+          className="relative w-full"
+          style={{ height: 280 }}
+          aria-label="Flip card"
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              transformStyle: 'preserve-3d',
+              transition: 'transform 0.5s',
+              transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+            }}
+          >
+            {/* Front */}
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border p-8 text-center"
+              style={{ background: theme.stage, borderColor: theme.panelBorder, color: theme.fg, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.muted }}>Question</span>
+              <p className="text-xl font-semibold leading-snug" style={{ color: theme.fg }}>{asStr(card.front)}</p>
+              {hint && <p className="text-sm" style={{ color: theme.muted }}>Hint: {hint}</p>}
+              <span className="mt-2 inline-flex items-center gap-1 text-xs" style={{ color: theme.muted }}><RotateCw className="size-3.5" /> Click to flip</span>
+            </div>
+            {/* Back */}
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border p-8 text-center"
+              style={{ background: theme.panel, borderColor: theme.accent, color: theme.fg, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.accent }}>Answer</span>
+              <p className="text-lg leading-snug" style={{ color: theme.fg }}>{asStr(card.back)}</p>
+            </div>
+          </div>
+        </button>
+      </div>
+
+      {/* Self-grade — marks the card and advances. */}
+      <div className="flex items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => { setKnown((k) => ({ ...k, [realIdx]: false })); go(cur + 1) }}
+          className="rounded-xl border px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-80"
+          style={{ borderColor: theme.panelBorder, color: theme.fg }}
+        >
+          Still learning
+        </button>
+        <button
+          type="button"
+          onClick={() => { setKnown((k) => ({ ...k, [realIdx]: true })); go(cur + 1) }}
+          className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02]"
+          style={{ background: OK }}
+        >
+          <Check className="size-4" /> Got it
+        </button>
+      </div>
+
+      {/* Nav: Prev / status dots (green = marked known) / Next */}
+      <div className="flex items-center justify-between gap-3">
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => go(cur - 1)} disabled={cur === 0}>
+          <ChevronLeft className="size-4" /> Prev
+        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {order.map((ri, i) => (
+            <button
+              key={i}
+              aria-label={`Go to card ${i + 1}`}
+              onClick={() => go(i)}
+              className="h-2 rounded-full transition-all"
+              style={
+                i === cur
+                  ? { width: 22, background: theme.accent }
+                  : { width: 8, background: known[ri] ? OK : theme.muted, opacity: known[ri] ? 0.95 : 0.45 }
+              }
+            />
+          ))}
+        </div>
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => go(cur + 1)} disabled={cur >= total - 1}>
+          Next <ChevronRight className="size-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---- GeoMap (real interactive map via react-leaflet + OpenStreetMap tiles) --
+// Plots lat/lng points on an actual zoomable/pannable street map, auto-fit to the
+// data. Registered under the name 'Map'. Leaflet is lazy-loaded (code-split) so it
+// only downloads when a map surface actually renders. Needs network tiles — in an
+// offline export / the PDF rasterizer the tiles won't load (markers still show).
+type GeoPoint = {
+  lat?: unknown
+  lng?: unknown
+  label?: unknown
+  value?: unknown
+}
+
+const LeafletMap = lazy(() => import('./LeafletMap'))
+
+export function GeoMap({ node, resolve }: NodeProps) {
+  const title = asStr(resolve(node.title))
+  const theme = useContext(DeckThemeContext)
+  const pts = (asArr(resolve(node.points)) as GeoPoint[])
+    .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), label: asStr(p.label), value: Number(p.value) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+  if (!pts.length) return null
+
+  const hasValues = pts.some((p) => Number.isFinite(p.value) && p.value > 0)
+  const maxVal = Math.max(...pts.map((p) => (Number.isFinite(p.value) ? p.value : 0)), 1)
+  const color = (i: number) => CHART_COLORS[i % CHART_COLORS.length]
+
+  return (
+    <div className="flex flex-col gap-3">
+      {title && <h3 className="text-lg font-semibold tracking-tight" style={{ color: theme.title }}>{title}</h3>}
+      <div className="overflow-hidden rounded-2xl border" style={{ borderColor: theme.panelBorder }}>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height: 420 }}>
+              Loading map…
+            </div>
+          }
+        >
+          <LeafletMap points={pts} hasValues={hasValues} maxVal={maxVal} />
+        </Suspense>
+      </div>
+      {/* Legend (color swatch → label, optional value). Coloured with the chat's
+          own page-text variable (always defined in #kasal-chat-root, flips with
+          the chat theme) + a hardcoded fallback for the exported app — NOT the
+          deck-stage `theme.fg` or the `--a2-foreground` token, which were unset /
+          tuned for the dark map panel and washed out on the light page. */}
+      <div className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2" style={{ color: 'var(--text-primary, #1f2937)' }}>
+        {pts.map((p, i) => (
+          <div key={i} className="flex items-center gap-2 min-w-0">
+            <span className="size-3 shrink-0 rounded-full" style={{ background: color(i) }} />
+            <span className="truncate">{p.label || `${p.lat.toFixed(3)}°, ${p.lng.toFixed(3)}°`}</span>
+            {hasValues && Number.isFinite(p.value) && p.value > 0 && (
+              <span className="ml-auto shrink-0 font-semibold" style={{ color: 'var(--text-muted, #6b7280)' }}>{p.value}</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

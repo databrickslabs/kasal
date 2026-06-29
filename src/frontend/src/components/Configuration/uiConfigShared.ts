@@ -39,6 +39,7 @@ export const DELIVERABLE_TYPES = [
   { key: 'album', label: 'Album' },
   { key: 'quiz', label: 'Quiz' },
   { key: 'flashcards', label: 'Flashcards' },
+  { key: 'map', label: 'Map' },
   { key: 'report', label: 'Report' },
   // The run-activity "context" / logs view (per-step retrieved context shown in
   // the preview pane). Styled distinctly from deliverables — see the Logs preset
@@ -128,6 +129,7 @@ export const DELIVERABLE_LABELS: Record<string, string> = {
   album: 'Photo album',
   quiz: 'Quiz',
   flashcards: 'Flashcard deck',
+  map: 'Map',
   report: 'Report',
   default: 'Document',
 };
@@ -181,6 +183,10 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
     { kind: 'number', key: 'count', label: 'Number of cards', min: 4, max: 40, step: 2, default: 12, phrase: (v) => `make about ${v} flashcards` },
     { kind: 'select', key: 'style', label: 'Card style', default: 'qa', choices: [{ value: 'qa', label: 'Question → Answer' }, { value: 'term', label: 'Term → Definition' }, { value: 'cloze', label: 'Fill in the blank' }], phrase: (v) => (v === 'term' ? 'use term → definition cards' : v === 'cloze' ? 'use fill-in-the-blank (cloze) cards' : 'use question → answer cards') },
     { kind: 'switch', key: 'examples', label: 'Add a short example to each answer', default: false, phrase: (v) => (v ? 'add a brief example to each answer' : 'keep answers concise without examples') },
+  ],
+  map: [
+    { kind: 'switch', key: 'labels', label: 'Show point labels', default: true, phrase: (v) => (v ? 'label each plotted point on the map' : 'plot points without text labels') },
+    { kind: 'switch', key: 'sizeByValue', label: 'Size points by value', default: true, phrase: (v) => (v ? 'scale each map point\'s marker by its value' : 'use uniform-sized map markers') },
   ],
   report: [
     { kind: 'select', key: 'length', label: 'Length', default: 'standard', choices: [{ value: 'brief', label: 'Brief' }, { value: 'standard', label: 'Standard' }, { value: 'detailed', label: 'Detailed' }], phrase: (v) => `keep the report ${v} in length` },

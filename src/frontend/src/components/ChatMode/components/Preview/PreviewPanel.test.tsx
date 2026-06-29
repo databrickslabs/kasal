@@ -436,70 +436,6 @@ describe('PreviewPanel — workspace palettes theme the surface', () => {
   });
 });
 
-describe('PreviewPanel — full screen', () => {
-  const content: PreviewContent = uiContent;
-  let fsEl: Element | null;
-  const origReq = Element.prototype.requestFullscreen;
-  const origExit = document.exitFullscreen;
-
-  beforeEach(() => {
-    fsEl = null;
-    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fsEl });
-    Element.prototype.requestFullscreen = vi.fn(function (this: Element) {
-      // The fullscreen target IS the `this` element; capture it for the getter.
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
-      fsEl = this;
-      document.dispatchEvent(new Event('fullscreenchange'));
-      return Promise.resolve();
-    });
-    document.exitFullscreen = vi.fn(() => {
-      fsEl = null;
-      document.dispatchEvent(new Event('fullscreenchange'));
-      return Promise.resolve();
-    });
-    return () => {
-      Element.prototype.requestFullscreen = origReq;
-      document.exitFullscreen = origExit;
-    };
-  });
-
-  it('hides the ENTIRE header bar in full screen; the browser (Esc) restores it', () => {
-    renderPanel(content, { onRefine: vi.fn() });
-    // header visible: title, type chip, Customize, full-screen toggle, close
-    expect(screen.getByText('App')).toBeInTheDocument();
-    expect(screen.getByText('UI')).toBeInTheDocument();
-    expect(screen.getByText('Customize')).toBeInTheDocument();
-    expect(screen.getByTitle('Close preview')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByLabelText('Full screen'));
-    expect(Element.prototype.requestFullscreen).toHaveBeenCalled();
-    // the whole bar is gone — no header controls at all
-    expect(screen.queryByText('App')).toBeNull();
-    expect(screen.queryByText('UI')).toBeNull();
-    expect(screen.queryByText('Customize')).toBeNull();
-    expect(screen.queryByTitle('Close preview')).toBeNull();
-    expect(screen.queryByLabelText('Full screen')).toBeNull();
-    // ...but the content keeps rendering
-    expect(screen.getByText('Hello App')).toBeInTheDocument();
-
-    // browser exits full screen (Esc) → the bar returns
-    fsEl = null;
-    fireEvent(document, new Event('fullscreenchange'));
-    expect(screen.getByText('App')).toBeInTheDocument();
-    expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
-  });
-
-  it('swallows a rejected requestFullscreen (e.g. blocked in an iframe) and keeps the bar', async () => {
-    Element.prototype.requestFullscreen = vi.fn(() => Promise.reject(new Error('blocked')));
-    renderPanel(content, { onRefine: vi.fn() });
-    fireEvent.click(screen.getByLabelText('Full screen'));
-    await Promise.resolve();
-    // no fullscreenchange fired → bar stays, no unhandled rejection
-    expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
-    expect(screen.getByText('App')).toBeInTheDocument();
-  });
-});
-
 describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
   // The single top-toolbar control is a MENU: clicking it opens PDF / PowerPoint
   // options (replacing the old icon-only PDF button AND the deck's own PowerPoint
@@ -534,11 +470,12 @@ describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
     expect(filename).toBe('Oil Report.pptx');
   });
 
-  it('falls back to a default filename when the preview has no title', async () => {
+  it('falls back to the surface kind (not a generic name) when the preview has no title', async () => {
     renderPanel(uiContent);
     await openMenuAndPick('PDF');
     await waitFor(() => expect(downloadSurfacePdfMock).toHaveBeenCalled());
-    expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('kasal-app');
+    // No title → name after the deliverable kind ('document') rather than 'kasal-app'.
+    expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('document');
   });
 
   it('does nothing when the stored data is not a parseable A2UI document', async () => {

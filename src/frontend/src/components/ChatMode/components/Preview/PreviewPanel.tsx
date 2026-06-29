@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { PanelLeft } from 'lucide-react';
 import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
 import { toSurface } from '../../utils/surfaceAdapter';
@@ -24,6 +24,8 @@ const SURFACE_TO_DELIVERABLE: Record<string, string> = {
   dashboard: 'dashboard',
   mindmap: 'mindmap',
   quiz: 'quiz',
+  flashcards: 'flashcards',
+  map: 'map',
   document: 'report',
   conversation: 'default',
 };
@@ -119,8 +121,6 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat, embedded }) => {
   const [refineOpen, setRefineOpen] = useState(false);
-  const asideRef = useRef<HTMLElement>(null);
-  const [fullscreen, setFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   // The single top-toolbar download is a menu: PDF or PowerPoint.
   const [downloadAnchor, setDownloadAnchor] = useState<HTMLElement | null>(null);
@@ -136,23 +136,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   const toggleActivity = () => {
     setActivityOpen((v) => !v);
     setActiveStep(null); // toggling always returns to the list / deliverable
-  };
-
-  // TRUE browser full screen (hides the browser chrome / top menu) via the
-  // Fullscreen API, kept in sync so an Esc / browser-driven exit also flips the
-  // toggle back.
-  useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === asideRef.current);
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
-
-  // The toggle only shows when NOT full screen (the whole header is hidden in
-  // full screen), so it always *enters*; exiting is the browser's Esc (synced
-  // back via the fullscreenchange listener above).
-  const enterFullscreen = () => {
-    setRefineOpen(false);
-    void asideRef.current!.requestFullscreen().catch(() => {});
   };
 
   // Heal already-stored previews that include the chat layer's bold-title prefix.
@@ -211,7 +194,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // old icon-only PDF button AND the surface's own "PowerPoint" button, which is
   // suppressed in the pane via `hideDownloads`). Decks land one slide per page;
   // other deliverables as one content-sized page (PDF) or slides (PPTX).
-  const baseName = content.title || 'kasal-app';
+  // Name the file after the deliverable's title; fall back to its kind
+  // (dashboard, quiz, document, …) so a downloaded dashboard isn't "kasal-app".
+  const baseName = content.title || uiSurface?.surfaceKind || 'kasal-app';
   const runDownload = async (kind: 'pdf' | 'pptx') => {
     setDownloadAnchor(null);
     if (!uiSurface || downloading) return;
@@ -229,7 +214,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
 
   return (
     <aside
-      ref={asideRef}
       className="flex flex-col h-full"
       style={{
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
@@ -242,7 +226,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           Esc), and when embedded: the host dialog (Jobs "Show result") already
           provides its own title bar + controls, so a second header would just
           stack and steal vertical height (forcing a scroll). */}
-      {!fullscreen && !embedded && (
+      {!embedded && (
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border-color)' }}
@@ -428,19 +412,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           </div>
           {!embedded && (
           <button
-            onClick={enterFullscreen}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-muted)' }}
-            title="Full screen"
-            aria-label="Full screen"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25h-4.5m4.5 0v4.5m0-4.5L15 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-            </svg>
-          </button>
-          )}
-          {!embedded && (
-          <button
             onClick={onClose}
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
             style={{ color: 'var(--text-muted)' }}
@@ -466,7 +437,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
       )}
 
       {/* Customize panel — instant "Look" (deterministic) + AI "Content" refine */}
-      {onRefine && refineOpen && !fullscreen && (
+      {onRefine && refineOpen && (
         <RefinePanel
           deliverable={deliverable}
           deliverableLabel={deliverableLabel}
@@ -493,7 +464,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
       >
         {/* Run activity — collapsed above the result so it's never lost. The list
             shows plain-English steps; clicking one opens its context full-page. */}
-        {runSteps.length > 0 && !fullscreen && (
+        {runSteps.length > 0 && (
           <div style={{ borderBottom: '1px solid var(--border-color)' }}>
             {activeStep ? (
               // Detail header: a Back affordance to return to the step list.
@@ -571,7 +542,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads fit />
             </div>
           ) : (
-            <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
+            // Non-deck surfaces (dashboard, document, quiz) scroll naturally. Center
+            // them in a padded, max-width column so they don't glue to the top-left
+            // edge and leave a vast empty band when the pane is wide (fullscreen).
+            <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+              <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
+            </div>
           )
         )}
       </div>

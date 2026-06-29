@@ -22,6 +22,12 @@ async function rasterizeSurface(
   height?: number,
 ): Promise<HTMLCanvasElement> {
   const container = document.createElement('div');
+  // CRITICAL: the chat's Tailwind utilities are scoped under `.kasal-chat-root`
+  // (tailwind.config `important: '.kasal-chat-root'`), so without this class NONE
+  // of the grid/flex/rounded/background/spacing utilities apply and a dashboard
+  // rasterizes as unstyled, stacked text. The class (not the id) is what the
+  // utilities — and the exported app — key off.
+  container.className = 'kasal-chat-root';
   container.style.cssText =
     `position:fixed;left:-10000px;top:0;width:${width}px;` +
     (height ? `height:${height}px;overflow:hidden;` : '');
@@ -31,8 +37,11 @@ async function rasterizeSurface(
     // hideDownloads: never bake the deck "PowerPoint" / table "CSV" control
     // buttons into the rasterized page.
     root.render(<A2uiSurface surface={surface} hideDownloads />);
-    // Two frames: one for React's commit, one for layout/paint to settle.
+    // Let React commit + layout settle (2 frames), THEN wait out recharts' mount
+    // animation and ResponsiveContainer measure so charts are fully drawn (not
+    // blank or mid-animation) when html2canvas snapshots the DOM.
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise((r) => setTimeout(r, 500));
     return await html2canvas(container, {
       scale: RASTER_SCALE,
       backgroundColor: null,

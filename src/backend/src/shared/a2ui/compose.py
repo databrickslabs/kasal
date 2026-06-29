@@ -99,9 +99,15 @@ DELIVERABLE_KEYWORDS = [
     ("anki", "flashcards"),
     ("quiz", "quiz"),
     ("assessment", "quiz"),
+    # Mindmap keywords MUST precede the bare "map" keyword below, else "mind map"
+    # / "concept map" greedily match "map" and mis-route to the geographic map.
     ("mindmap", "mindmap"),
     ("mind map", "mindmap"),
     ("concept map", "mindmap"),
+    ("geographic", "map"),
+    ("geospatial", "map"),
+    ("on a map", "map"),
+    ("map", "map"),
     ("album", "album"),
     ("gallery", "album"),
     ("presentation", "presentation"),
@@ -576,6 +582,31 @@ def a2ui_system_prompt(
         "option is correct across questions — spread the answer index across 0/1/2/3, never "
         "always the same slot. Put the questions array in dataModel and bind it with "
         '{"path":"/questions"}. The app handles selection, scoring and navigation.\n'
+        "8. For a dashboard build a SYMMETRIC, COHERENT layout, not a random pile of "
+        "cards. Use a Grid with a CONSISTENT column count and group like with like: "
+        "(a) lead with ONE balanced row of KeyValue KPI tiles — pick a count that FILLS "
+        "the row evenly (2, 3, or 4 — e.g. 3 or 6 KPIs in a 3-column grid), never leave a "
+        "lone orphan tile in a half-empty row; (b) then the Chart cells, also balanced per "
+        "row (two or three charts of the SAME kind of size sit together) — give EVERY chart "
+        "a short 'title' and pick the right chartType (bar for comparisons, line for trends "
+        "over time, pie for parts-of-a-whole); (c) put any Table LAST — it renders full-width "
+        "across the bottom, so it is the wide footer, never squeezed into one narrow column. "
+        "Keep tiles in a row visually parallel (each a single value + a short label), keep "
+        "spacing and structure uniform, and use ONE consistent theme — the app styles colors, "
+        "so do NOT specify them. Aim for a grid that reads as a tidy, aligned whole.\n"
+        "9. For flashcards/anki build ONE Flashcards component whose 'cards' is a list of "
+        "REAL study cards, each {front, back, hint?}: front is a concise prompt "
+        "(question / term / cloze), back is the correct answer/definition, hint is an "
+        "OPTIONAL nudge. Produce the ACTUAL cards (as many as the request asks for, else "
+        "about 12), each testing ONE idea — never a description of a deck. Put the cards "
+        'array in dataModel and bind it with {"path":"/cards"}. The app handles flipping, '
+        "navigation and shuffle.\n"
+        "10. For a map use surfaceKind 'map' with ONE Map component ONLY WHEN the data has "
+        "real latitude/longitude coordinates. points is a list of {lat:<number>, "
+        "lng:<number>, label?, value?} — emit the ACTUAL numeric coordinates for each place "
+        '(put the array in dataModel, bind with {"path":"/points"}). value is an optional '
+        "magnitude that sizes the marker (e.g. count, population). If you do NOT have real "
+        "coordinates, use a dashboard or table instead — never invent coordinates.\n"
         f"Crew purpose: {purpose}\n"
         + (f"The user's request this turn: {query}\n" if query else "")
         + (
@@ -635,6 +666,12 @@ RICH_INTENT = (
     "exam",
     "test my",
     "test your",
+    "flashcard",
+    "flash card",
+    "anki",
+    "map",
+    "geographic",
+    "geospatial",
 )
 
 
