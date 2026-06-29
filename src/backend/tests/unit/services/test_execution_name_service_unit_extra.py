@@ -155,3 +155,111 @@ def _async_return(value):
 
 async def _async_noop(*args, **kwargs):
     return None
+
+
+# ---------------------------------------------------------------------------
+# None-session path: open a standalone session for the template read + log
+# ---------------------------------------------------------------------------
+#
+# The chat auto-execute builds the whole execution stack with session=None
+# (ExecutionService(session=None)). Previously the name service crashed on a
+# None session ("'NoneType' has no attribute 'execute'/'add'"); now it opens its
+# OWN request_scoped_session() per DB call, like the rest of that stack.
+
+def _fake_session_cm():
+    """Async-context-manager DB session with awaitable commit/rollback."""
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    return session
+
+
+def test_create_with_none_session_defers_dependencies():
+    svc = Svc.create(None)
+    assert svc.log_service is None
+    assert svc.template_service is None
+    assert svc._session is None
+
+
+@pytest.mark.asyncio
+async def test_get_name_template_opens_standalone_session_when_none():
+    """With no injected session, the template read runs on a fresh session
+    instead of crashing on None."""
+    svc = Svc.create(None)
+    fake_template = MagicMock()
+    fake_template.get_template_content = AsyncMock(return_value="TEMPLATE BODY")
+
+    with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
+         patch("src.services.template_service.TemplateService", return_value=fake_template):
+        out = await svc._get_name_template()
+
+    assert out == "TEMPLATE BODY"
+    fake_template.get_template_content.assert_awaited_once_with("generate_job_name")
+
+
+@pytest.mark.asyncio
+async def test_log_llm_interaction_standalone_commits_when_no_session():
+    """With no injected session, the LLM-interaction log opens a standalone
+    session, writes, and COMMITs (the repository only flushes)."""
+    svc = Svc.create(None)
+    session = _fake_session_cm()
+    fake_log = MagicMock()
+    fake_log.create_log = AsyncMock()
+
+    with patch("src.db.session.request_scoped_session", return_value=session), \
+         patch.object(Svc, "_log_llm_interaction", Svc._log_llm_interaction), \
+         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+        await svc._log_llm_interaction(
+            endpoint="generate-execution-name", prompt="p", response="Name", model="m",
+        )
+
+    fake_log.create_log.assert_awaited_once()
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_log_llm_interaction_standalone_swallows_errors():
+    """A failure on the standalone log path is swallowed (never breaks the run)."""
+    svc = Svc.create(None)
+    session = _fake_session_cm()
+    fake_log = MagicMock()
+    fake_log.create_log = AsyncMock(side_effect=RuntimeError("db down"))
+
+    with patch("src.db.session.request_scoped_session", return_value=session), \
+         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+        # Must not raise.
+        await svc._log_llm_interaction(
+            endpoint="generate-execution-name", prompt="p", response="Name", model="m",
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_execution_name_none_session_end_to_end(monkeypatch):
+    """REGRESSION: create(None).generate_execution_name() must not crash on a
+    None session — generate_execution_name must route the template read through
+    _get_name_template (standalone session), not self.template_service directly."""
+    from src.services import execution_name_service as module
+
+    svc = Svc.create(None)  # session=None → template_service/log_service are None
+
+    fake_template = MagicMock()
+    fake_template.get_template_content = AsyncMock(return_value="SYS TEMPLATE")
+    fake_log = MagicMock()
+    fake_log.create_log = AsyncMock()
+
+    class FakeLLMManager:
+        @staticmethod
+        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
+            return "Cool Run"
+
+    monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
+
+    req = ExecutionNameGenerationRequest(model="m", agents_yaml={"a": {"role": "R"}}, tasks_yaml={"t": {"name": "T"}})
+
+    with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
+         patch("src.services.template_service.TemplateService", return_value=fake_template), \
+         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+        out = await svc.generate_execution_name(req)
+
+    assert out.name == "Cool Run"
+    fake_template.get_template_content.assert_awaited_once_with("generate_job_name")

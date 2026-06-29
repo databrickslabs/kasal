@@ -270,6 +270,11 @@ class TestCapabilityOverrides:
         """GPT-5 reasoning models reject stop — should return False."""
         assert handler.supports_stop_words() is False
 
+    def test_supports_native_structured_output(self, handler):
+        """Responses API validates output_pydantic directly, so the converter
+        selection must keep output_pydantic (not downgrade to output_json)."""
+        assert handler.supports_native_structured_output() is True
+
 
 # ---------------------------------------------------------------------------
 # TestPrepareResponsesParams

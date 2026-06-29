@@ -201,6 +201,35 @@ describe('sessionApi - messages', () => {
     });
   });
 
+  it('round-trips usedWorkspaceMemory through the __chatmode extras', async () => {
+    // Unpack: a persisted usedWorkspaceMemory flag lands on the ChatMessage so
+    // the memory-graph action reflects what the run actually used.
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [{
+          id: 'm1', session_id: 's1', message_type: 'assistant', content: 'done',
+          generation_result: { __chatmode: { resultType: 'crew_actions', usedWorkspaceMemory: true } },
+          timestamp: '2026-06-11T07:00:00',
+        }],
+      },
+    });
+    const [msg] = await api.getSessionMessages('s1');
+    expect(msg.usedWorkspaceMemory).toBe(true);
+
+    // Pack: the flag is persisted back into the extras (false is preserved too,
+    // since it's a meaningful "session-only" value, not just absence).
+    mockPost.mockResolvedValue({ data: {} });
+    await api.addMessageToSession('s1', {
+      id: 'm2', role: 'assistant', content: 'result', timestamp: new Date(),
+      usedWorkspaceMemory: false,
+    });
+    expect(mockPost).toHaveBeenCalledWith('/chat-history/messages', {
+      id: 'm2', session_id: 's1', message_type: 'assistant', content: 'result',
+      intent: null,
+      generation_result: { __chatmode: { usedWorkspaceMemory: false } },
+    });
+  });
+
   it('skips empty-content messages (backend requires content)', async () => {
     await api.addMessageToSession('s1', {
       id: 'm1', role: 'assistant', content: '', timestamp: new Date(),

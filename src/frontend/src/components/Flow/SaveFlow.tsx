@@ -54,8 +54,14 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
 
         setIsSaving(true);
 
+        // CRITICAL: Save the FLOW canvas data (flowNodes/flowEdges), NOT the crew
+        // canvas data (nodes/edges). Reading tab.nodes here routed crew content into
+        // the flow catalog (or saved an empty flow), so the flow never landed.
+        const tabFlowNodes = tab.flowNodes || [];
+        const tabFlowEdges = tab.flowEdges || [];
+
         // Remove duplicate nodes before processing
-        const uniqueNodes = tab.nodes.reduce((acc: typeof tab.nodes, node) => {
+        const uniqueNodes = tabFlowNodes.reduce((acc: typeof tabFlowNodes, node) => {
           if (!acc.some(n => n.id === node.id)) {
             acc.push(node);
           }
@@ -63,13 +69,13 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         }, []);
 
         console.log('SaveFlow: Deduplicated nodes for update:', {
-          originalCount: tab.nodes.length,
+          originalCount: tabFlowNodes.length,
           uniqueCount: uniqueNodes.length,
-          duplicatesRemoved: tab.nodes.length - uniqueNodes.length
+          duplicatesRemoved: tabFlowNodes.length - uniqueNodes.length
         });
 
         // Remove duplicate edges before saving
-        const uniqueEdges = tab.edges.reduce((acc: Edge[], edge) => {
+        const uniqueEdges = tabFlowEdges.reduce((acc: Edge[], edge) => {
           const edgeKey = `${edge.source}-${edge.target}`;
           if (!acc.some(e => `${e.source}-${e.target}` === edgeKey)) {
             acc.push(edge);
