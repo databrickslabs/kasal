@@ -218,26 +218,19 @@ class TestCoerceToResponseModel:
         assert out == bad
 
 
-class TestSupportsNativeStructuredOutput:
-    """DatabricksRetryLLM enforces output_pydantic (response_format json_schema)
-    for all Databricks chat models except gemini, so the converter keeps the real
-    schema instead of the unenforced output_json downgrade."""
+class TestDoesNotClaimNativeStructuredOutput:
+    """DatabricksRetryLLM must NOT report native structured output: enforcing
+    output_pydantic on the litellm path routes through instructor/response_model,
+    which suppresses the ReAct tool loop (Claude crews stopped calling their MCP
+    tools). Databricks chat models therefore keep the output_json downgrade so
+    tool-calling stays intact; only the codex Responses-API handler enforces."""
 
     def _make(self, model: str) -> DatabricksRetryLLM:
-        # Use the "databricks/<model>" prefix llm_manager actually passes; without
-        # it CrewAI's LLM factory dispatches to a provider completion class instead
-        # of keeping DatabricksRetryLLM.
         with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
             return DatabricksRetryLLM(model=model)
 
-    def test_claude_supports_native(self):
-        assert self._make("databricks/databricks-claude-opus-4-8").supports_native_structured_output() is True
-
-    def test_llama_supports_native(self):
-        assert self._make("databricks/llama-4-maverick").supports_native_structured_output() is True
-
-    def test_gpt_oss_supports_native(self):
-        assert self._make("databricks/databricks-gpt-oss-120b").supports_native_structured_output() is True
-
-    def test_gemini_excluded(self):
-        assert self._make("databricks/databricks-gemini-2-5-pro").supports_native_structured_output() is False
+    def test_attribute_absent(self):
+        # The converter probes via getattr(...); the attribute must be absent so
+        # the model is downgraded to output_json (tool loop preserved).
+        handler = self._make("databricks/databricks-claude-opus-4-8")
+        assert not hasattr(handler, "supports_native_structured_output")

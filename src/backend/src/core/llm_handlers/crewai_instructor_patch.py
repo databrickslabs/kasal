@@ -39,6 +39,41 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _instructor_mode_for_llm(llm):
+    """Return the instructor ``Mode`` to use for this LLM's structured-output
+    coercion, or ``None`` to keep instructor's default (TOOLS) mode.
+
+    CrewAI coerces ``output_pydantic`` for litellm models via a separate
+    instructor call (``InternalInstructor.to_pydantic``). Its default TOOLS mode
+    sends the schema as one function and asserts the model replies with exactly
+    ONE tool call. Databricks chat models (Claude, Llama, …) emit multiple /
+    parallel tool calls, so that assertion fails:
+
+        Instructor does not support multiple tool calls, use List[Model] instead
+
+    MD_JSON coerces the schema from JSON-in-text instead of the tool channel:
+    no tool-call collision (works alongside the agent's real tools), still
+    validated + retried by instructor, and no ``response_format`` dependency
+    (Databricks Claude only accepts ``json_schema``, not ``json_object``).
+
+    Only affects structured-output calls — non-pydantic calls never reach
+    instructor. codex never reaches here either (is_litellm=False; it enforces
+    structured output natively via the Responses API). Returns None for
+    non-Databricks litellm models so their instructor behavior is unchanged.
+    """
+    try:
+        if llm is None or isinstance(llm, str) or not getattr(llm, "is_litellm", False):
+            return None
+        if "databricks" not in str(getattr(llm, "model", "")).lower():
+            return None
+        import instructor
+
+        return instructor.Mode.MD_JSON
+    except Exception:  # noqa: BLE001 — never break a call over mode selection
+        return None
+
+
 try:
     from crewai.utilities.internal_instructor import InternalInstructor
 
@@ -61,12 +96,32 @@ try:
             value = getattr(llm, attr, None)
             if value is not None:
                 credential_kwargs[attr] = value
-        if not credential_kwargs:
+
+        # Databricks models must coerce via MD_JSON (see _instructor_mode_for_llm)
+        # to avoid the "multiple tool calls" crash; build a mode-specific client.
+        mode = _instructor_mode_for_llm(llm)
+
+        # No credentials to forward AND no mode override → original behavior.
+        if not credential_kwargs and mode is None:
             return _original_to_pydantic(self)
+
+        client = self._client
+        if mode is not None:
+            try:
+                import instructor
+                from litellm import completion as _litellm_completion
+
+                client = instructor.from_litellm(_litellm_completion, mode=mode)
+            except Exception as mode_err:  # noqa: BLE001
+                logger.warning(
+                    "Could not build %s instructor client for Databricks; "
+                    "falling back to default mode: %s", mode, mode_err
+                )
+                client = self._client
 
         messages = [{"role": "user", "content": self.content}]
         model_name = llm.model
-        return self._client.chat.completions.create(
+        return client.chat.completions.create(
             model=model_name,
             response_model=self.model,
             messages=messages,
@@ -74,7 +129,10 @@ try:
         )
 
     InternalInstructor.to_pydantic = _to_pydantic_with_credentials
-    logger.info("Patched InternalInstructor.to_pydantic to forward LLM credentials")
+    logger.info(
+        "Patched InternalInstructor.to_pydantic (credential forwarding + "
+        "MD_JSON coercion for Databricks)"
+    )
 
 except Exception as patch_err:  # noqa: BLE001 — never break startup over a patch
     logger.warning(

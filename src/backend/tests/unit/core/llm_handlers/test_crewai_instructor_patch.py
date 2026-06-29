@@ -8,11 +8,19 @@ those keywords from structured-output requests, but ONLY for Databricks models.
 """
 
 import litellm
+import instructor
 
 from src.core.llm_handlers.crewai_instructor_patch import (
     strip_numeric_range_keywords,
     sanitize_databricks_request_kwargs,
+    _instructor_mode_for_llm,
 )
+
+
+class _FakeLLM:
+    def __init__(self, model, is_litellm=True):
+        self.model = model
+        self.is_litellm = is_litellm
 
 
 def _memory_analysis_tools():
@@ -109,3 +117,30 @@ class TestSanitizeDatabricksRequestKwargs:
 def test_litellm_completion_is_patched():
     """Importing the patch wraps litellm.completion/acompletion once."""
     assert getattr(litellm, "_kasal_schema_sanitizer_applied", False) is True
+
+
+class TestInstructorModeForLlm:
+    """Databricks litellm models coerce structured output via MD_JSON to avoid
+    instructor's "multiple tool calls" crash; everything else keeps the default."""
+
+    def test_databricks_litellm_uses_md_json(self):
+        llm = _FakeLLM("databricks/databricks-claude-opus-4-8")
+        assert _instructor_mode_for_llm(llm) is instructor.Mode.MD_JSON
+
+    def test_databricks_llama_uses_md_json(self):
+        llm = _FakeLLM("databricks/databricks-llama-4-maverick")
+        assert _instructor_mode_for_llm(llm) is instructor.Mode.MD_JSON
+
+    def test_non_databricks_litellm_keeps_default(self):
+        # Other providers keep instructor's default mode (unchanged behavior).
+        assert _instructor_mode_for_llm(_FakeLLM("gpt-4o")) is None
+
+    def test_non_litellm_keeps_default(self):
+        # e.g. the codex Responses handler (is_litellm=False) never uses instructor.
+        assert _instructor_mode_for_llm(_FakeLLM("databricks-gpt-5-3-codex", is_litellm=False)) is None
+
+    def test_string_llm_keeps_default(self):
+        assert _instructor_mode_for_llm("databricks/whatever") is None
+
+    def test_none_llm_keeps_default(self):
+        assert _instructor_mode_for_llm(None) is None

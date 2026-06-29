@@ -389,23 +389,17 @@ class DatabricksRetryLLM(LLM):
     # Databricks server-side limit is 297s, so we match it.
     REQUEST_TIMEOUT: ClassVar[float] = 297.0
 
-    def supports_native_structured_output(self) -> bool:
-        """Databricks chat models enforce output_pydantic via response_format
-        (json_schema): ``call`` already forwards ``response_model`` to the parent
-        LLM and coerces the result (see _coerce_to_response_model). So the
-        converter selection should KEEP output_pydantic rather than downgrade to
-        the soft output_json prompt, which lets the model omit fields and makes
-        routers that branch on those fields non-deterministic.
-
-        Gemini is excluded — it has known tool-calling / structured-output quirks
-        on Databricks, so it stays on the output_json fallback.
-        """
-        model = (
-            getattr(self, "model", "")
-            or getattr(self, "_original_model_name", "")
-            or ""
-        ).lower()
-        return "gemini" not in model
+    # NOTE: DatabricksRetryLLM intentionally does NOT report
+    # supports_native_structured_output. Enforcing output_pydantic on the litellm
+    # path routes structured output through instructor/response_model, which (a)
+    # conflicts with tool-calling agents and (b) biases the model to fill the
+    # schema directly instead of running the ReAct tool loop — observed as Claude
+    # crews no longer calling their MCP/search tools. Databricks chat models
+    # therefore keep the soft output_json downgrade (which leaves the tool loop
+    # intact). Only the codex/Responses-API handler claims native support, because
+    # it enforces the schema on a separate channel AND forces tool_choice, so
+    # tools + structured output coexist. For deterministic structured output WITH
+    # tools on Databricks, use a Responses-API (codex) model.
 
     def __init__(self, **kwargs):
         """Initialize the Databricks Retry LLM wrapper."""
