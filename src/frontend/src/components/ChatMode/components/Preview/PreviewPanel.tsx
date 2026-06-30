@@ -9,6 +9,7 @@ import type { Theme } from '../../../Configuration/uiConfigShared';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
 import { useA2uiThemes } from '../../hooks/useA2uiThemes';
 import A2uiSurface from '../Chat/A2uiSurface';
+import MessageContent from '../Chat/MessageContent';
 import { friendlyStep, type RunStep } from './RunTimeline';
 import ThinkingStream from './ThinkingStream';
 import LogSurface from './LogSurface';
@@ -34,7 +35,11 @@ const SURFACE_TO_DELIVERABLE: Record<string, string> = {
 // the single source of truth for generated deliverables. Raw HTML, JSON,
 // markdown and plain text deliberately get NO preview: crews are steered toward
 // A2UI by the UI Configurator, and anything else stays in the chat transcript.
-export type PreviewContentType = 'ui';
+// 'ui' = a structured A2UI deliverable (the canonical generated surface).
+// 'text' = a plain-text / markdown answer (chat-mode responses), shown in the
+// pane on demand via the run-activity "Show in panel" icon — it has no A2UI
+// controls (no Customize/refine, no PPTX export), just the rendered markdown.
+export type PreviewContentType = 'ui' | 'text';
 
 export interface PreviewContent {
   type: PreviewContentType;
@@ -140,6 +145,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
 
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
+
+  // A plain-text / markdown deliverable (chat-mode answer). It renders as markdown
+  // and has none of the A2UI machinery (no Surface, theme, Customize, or export) —
+  // every A2UI-only control below additionally gates on `uiSurface`, which is null
+  // here, so they hide automatically.
+  const isText = content.type === 'text';
 
   // Coerce the stored content into the shared Surface (handles the new envelope,
   // a bare surface, or an older legacy doc — adapted). A2uiSurface re-resolves the
@@ -341,7 +352,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               Activity
             </button>
           )}
-          {onRefine && (
+          {onRefine && uiSurface && (
             <button
               onClick={() => setRefineOpen((v) => !v)}
               className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
@@ -359,7 +370,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           )}
           {/* The download is a small menu (PDF / PowerPoint) anchored under its
               button. `downloadAnchor` doubles as the open flag; a transparent
-              backdrop catches the click-away to close. */}
+              backdrop catches the click-away to close. A2UI-only — a plain-text
+              answer has no surface to export, so the menu hides for text. */}
+          {uiSurface && (
           <div className="relative">
             <button
               onClick={(e: React.MouseEvent<HTMLButtonElement>) => setDownloadAnchor(e.currentTarget)}
@@ -410,6 +423,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               </>
             )}
           </div>
+          )}
           {!embedded && (
           <button
             onClick={onClose}
@@ -549,6 +563,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
             </div>
           )
+        )}
+        {/* Plain-text / markdown answer (chat-mode deliverable). Rendered with the
+            same markdown renderer the chat uses, in a roomy, scrollable column. */}
+        {!activityOpen && !activeStep && !uiSurface && isText && (
+          <div
+            className="mx-auto w-full max-w-3xl p-4 sm:p-6 text-[15px] leading-[1.7]"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            <MessageContent content={displayData} />
+          </div>
         )}
       </div>
     </aside>

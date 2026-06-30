@@ -8,6 +8,7 @@ import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
 import ThinkingStream from '../Preview/ThinkingStream';
 import type { RunStep } from '../Preview/RunTimeline';
+import type { PreviewContent } from '../Preview/PreviewPanel';
 
 /**
  * Group trace messages for a readable timeline (shown inside the RunProgress
@@ -100,9 +101,10 @@ const RunProgress: React.FC<{
   /** When provided, the expanded section shows the "thinking" stream (the chat
    *  placement of the run activity) instead of the raw timeline. */
   streamSteps?: RunStep[];
-  /** Dock the activity to the preview pane instead of this chat bar. */
-  onTogglePlacement?: () => void;
-}> = ({ groups, running, generating, onStop, streamSteps, onTogglePlacement }) => {
+  /** Open THIS run in the side preview pane (its deliverable + activity). Shown as
+   *  a pane icon on every run card; the pane is opt-in, so it opens only on click. */
+  onShowInPane?: () => void;
+}> = ({ groups, running, generating, onStop, streamSteps, onShowInPane }) => {
   const [open, setOpen] = useState(false);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
@@ -208,14 +210,14 @@ const RunProgress: React.FC<{
               </svg>
             )}
           </button>
-          {onTogglePlacement && (
+          {onShowInPane && (
             <button
               type="button"
-              onClick={onTogglePlacement}
+              onClick={onShowInPane}
               aria-label="Show in panel"
               className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 transition-colors hover:opacity-80"
               style={{ color: 'var(--text-muted)' }}
-              title="Show the activity in the preview panel instead"
+              title="Show this run in the preview panel"
             >
               <PanelRight size={14} aria-hidden="true" />
             </button>
@@ -292,13 +294,12 @@ interface ChatContainerProps {
    *  expandable timeline of the live segment is hidden. Completed (historical)
    *  segments keep their timeline. */
   hideLiveTimeline?: boolean;
-  /** When true, the run activity lives HERE in the chat: the "Working…" bar
-   *  expands to the same thinking stream as the preview pane. */
-  activityInChat?: boolean;
-  /** The latest run's steps (for the chat thinking stream when activityInChat). */
+  /** The latest run's steps (for the chat thinking stream). */
   runSteps?: RunStep[];
-  /** Toggle the activity between the chat bar and the preview pane. */
-  onToggleActivityPlacement?: () => void;
+  /** Open a run in the side preview pane — its deliverable (A2UI surface or the
+   *  plain-text answer) with the activity collapsed above. Wired to the per-run
+   *  pane icon; the pane is opt-in, so it opens only on this click. */
+  onShowRunInPane?: (deliverable: PreviewContent | undefined, steps: RunStep[]) => void;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -333,9 +334,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   isExecuting,
   isGenerating,
   hideLiveTimeline,
-  activityInChat,
   runSteps,
-  onToggleActivityPlacement,
+  onShowRunInPane,
   models,
   selectedModel,
   onModelChange,
@@ -470,6 +470,23 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 segTraces.set(s, arr);
               }
             }
+            // Each run's deliverable, so its pane icon opens the right artifact: an
+            // A2UI surface (research/deep) wins; otherwise the plain-text answer
+            // (chat mode). A later A2UI surface overrides an earlier text answer;
+            // a text answer never displaces an A2UI surface already found.
+            const segDeliverables = new Map<number, PreviewContent | undefined>();
+            for (const { item, seg: s } of itemsWithSeg) {
+              if (item.kind !== 'msg') continue;
+              const m = item.msg;
+              if (m.role !== 'assistant') continue;
+              if (m.resultType === 'a2ui' && m.resultData) {
+                segDeliverables.set(s, { type: 'ui', data: JSON.stringify(m.resultData) });
+              } else if (!m.resultType && m.content && m.content.trim()) {
+                if (segDeliverables.get(s)?.type !== 'ui') {
+                  segDeliverables.set(s, { type: 'text', data: m.content });
+                }
+              }
+            }
             const placedSegs = new Set<number>();
             const renderRunProgress = (s: number) => {
               const live = running && s === lastSeg;
@@ -484,6 +501,14 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               // their own historical timeline (runSteps only covers the latest run).
               const useStream = s === lastSeg && !inPreviewPane && Array.isArray(runSteps);
               const msgs = inPreviewPane ? [] : (segTraces.get(s) ?? []);
+              // Steps for THIS run when opened in the pane. The LATEST run is left
+              // empty so the pane tracks the live/durable `runActivitySteps` (which
+              // keep updating as the run streams); a HISTORICAL run is pinned to its
+              // own trace steps so its pane shows the activity that belongs to it.
+              const traceMsgs = segTraces.get(s) ?? [];
+              const stepsForSeg: RunStep[] = s === lastSeg
+                ? []
+                : deriveStepsFromGroups([{ kind: 'traceGroup', key: `seg-${s}`, label: 'run', msgs: traceMsgs }]);
               return (
                 <RunProgress
                   key={`run-progress-${s}`}
@@ -492,8 +517,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   generating={live && Boolean(isGenerating)}
                   onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
                   streamSteps={useStream ? (runSteps ?? []) : undefined}
-                  // The "Show in panel" toggle only makes sense in 'chat' placement.
-                  onTogglePlacement={useStream && activityInChat ? onToggleActivityPlacement : undefined}
+                  // Pane icon on every run card — opens THIS run's deliverable +
+                  // activity in the side pane. Opt-in: nothing opens until clicked.
+                  onShowInPane={onShowRunInPane ? () => onShowRunInPane(segDeliverables.get(s), stepsForSeg) : undefined}
                 />
               );
             };

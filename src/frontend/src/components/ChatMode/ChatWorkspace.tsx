@@ -17,6 +17,7 @@ import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
+import type { RunStep } from './components/Preview/RunTimeline';
 import { parseUiDocument, extractDocSummary } from './utils/surfaceAdapter';
 import type { Surface } from '../../shared/a2ui';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
@@ -513,6 +514,11 @@ const ChatWorkspace: React.FC = () => {
   // or collapsed into the chat's "Working…" bar (expandable). A persisted choice.
   const activityPlacement = useExecutionStore((s) => s.activityPlacement);
   const activityInChat = activityPlacement === 'chat';
+  // When the user opens a SPECIFIC run in the pane via its "Show in panel" icon,
+  // these are that run's steps — shown in the pane instead of the latest run's, so
+  // a historical run's pane shows ITS OWN activity. Cleared on close / session
+  // switch / when a new live run starts (so the pane tracks the live run again).
+  const [focusedRunSteps, setFocusedRunSteps] = useState<RunStep[] | null>(null);
   // Memory mode (workspace vs session) is owned by the store so it persists
   // across the empty→conversation input swap (local state would reset to ON).
   const memoryEnabled = useExecutionStore((s) => s.memoryEnabled);
@@ -538,6 +544,37 @@ const ChatWorkspace: React.FC = () => {
   const viewIsGenerating = isGenerating && ownsExecution;
   const viewIsLoading = isLoading && ownsExecution;
   const viewExecutionContext = ownsExecution ? executionContext : null;
+
+  // Drop the focused-run pin when the viewed session changes (the pinned steps
+  // belong to the other session's run).
+  useEffect(() => {
+    setFocusedRunSteps(null);
+  }, [currentSessionId]);
+  // …and when a NEW live run starts (rising edge), so the pane stops pinning a
+  // past run and tracks the fresh one. A run finishing does NOT clear the pin.
+  const prevExecutingRef = useRef(false);
+  useEffect(() => {
+    if (viewIsExecuting && !prevExecutingRef.current) setFocusedRunSteps(null);
+    prevExecutingRef.current = viewIsExecuting;
+  }, [viewIsExecuting]);
+
+  // Open a specific run in the side preview pane: its deliverable (A2UI surface or
+  // the plain-text answer) with that run's activity. The pane is opt-in — this is
+  // the ONLY way it opens for a chat run, and it fires only on the user's click.
+  const handleShowRunInPane = useCallback((deliverable: PreviewContent | undefined, steps: RunStep[]) => {
+    const st = useExecutionStore.getState();
+    setFocusedRunSteps(steps.length ? steps : null);
+    st.setActivityPlacement('preview');
+    if (deliverable) {
+      st.openPreviewPane(deliverable);
+    } else {
+      // No previewable deliverable (a run that only has activity): show the
+      // activity alone — clear any stale content so the skeleton, not a prior
+      // run's deliverable, fills the pane.
+      st.setPreviewContent(null);
+      st.openPreviewPane();
+    }
+  }, []);
 
   // The run-activity timeline shown in the preview pane (live skeleton AND
   // collapsed above the finished result). Sourced from the PERSISTENT chat trace
@@ -626,7 +663,7 @@ const ChatWorkspace: React.FC = () => {
     !activityInChat &&
     !previewContent &&
     (shouldShowPreviewSkeleton({ runActive: viewIsExecuting, hasPreview: !!previewContent }) ||
-      runActivitySteps.length > 0);
+      (focusedRunSteps ?? runActivitySteps).length > 0);
   // Opt-in: the deliverable pane shows only when the user opened it (a deliverable
   // alone no longer forces it open). The run skeleton still shows when activity is
   // routed to the pane.
@@ -2229,25 +2266,8 @@ const ChatWorkspace: React.FC = () => {
               isGenerating={viewIsGenerating}
               executionContext={viewExecutionContext}
               hideLiveTimeline={!activityInChat && previewPaneVisible}
-              activityInChat={activityInChat}
               runSteps={runActivitySteps}
-              onToggleActivityPlacement={() => {
-                const st = useExecutionStore.getState();
-                if (activityInChat) {
-                  // Manual "expand into preview pane": route activity to the pane AND
-                  // open it. The pane stays OPT-IN (showPreviewSkeleton requires
-                  // previewPaneOpen), so a run never auto-expands — only this click
-                  // opens it. Without opening the pane here the activity would leave
-                  // the chat bar but the pane would stay closed and it'd vanish.
-                  st.setActivityPlacement('preview');
-                  st.openPreviewPane();
-                } else {
-                  // Collapse back to the chat Working bar; close the pane if it was
-                  // only showing the activity (no deliverable to keep it open).
-                  st.setActivityPlacement('chat');
-                  if (!previewContent) st.clearPreview();
-                }
-              }}
+              onShowRunInPane={handleShowRunInPane}
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
@@ -2272,7 +2292,7 @@ const ChatWorkspace: React.FC = () => {
         <PreviewPanel
           key={currentSessionId}
           content={previewContent}
-          onClose={() => useExecutionStore.getState().clearPreview()}
+          onClose={() => { setFocusedRunSteps(null); useExecutionStore.getState().clearPreview(); }}
           chatCollapsed={chatCollapsed}
           onToggleChat={() => useExecutionStore.getState().toggleChatCollapsed()}
           onRefine={handleRefine}
@@ -2280,8 +2300,10 @@ const ChatWorkspace: React.FC = () => {
           history={previewHistory}
           index={previewIndex}
           onNavigate={navigatePreview}
-          runSteps={activityInChat ? [] : runActivitySteps}
-          onMoveActivityToChat={() => useExecutionStore.getState().setActivityPlacement('chat')}
+          // A focused run (opened via its "Show in panel" icon) shows ITS steps;
+          // otherwise the latest run's, hidden when activity lives in the chat bar.
+          runSteps={focusedRunSteps ?? (activityInChat ? [] : runActivitySteps)}
+          onMoveActivityToChat={() => { setFocusedRunSteps(null); useExecutionStore.getState().setActivityPlacement('chat'); }}
         />
       )}
 
@@ -2290,7 +2312,7 @@ const ChatWorkspace: React.FC = () => {
           yet). Mutually exclusive with PreviewPanel. */}
       {showPreviewSkeleton && (
         <PreviewSkeleton
-          steps={runActivitySteps}
+          steps={focusedRunSteps ?? runActivitySteps}
           running={viewIsExecuting}
           onMoveActivityToChat={() => {
             // Collapse activity back to the chat bar AND close the pane — the
@@ -2298,6 +2320,7 @@ const ChatWorkspace: React.FC = () => {
             // pane "open" would let the next deliverable auto-expand it (the pane
             // must open only on a manual expand click).
             const st = useExecutionStore.getState();
+            setFocusedRunSteps(null);
             st.setActivityPlacement('chat');
             st.clearPreview();
           }}

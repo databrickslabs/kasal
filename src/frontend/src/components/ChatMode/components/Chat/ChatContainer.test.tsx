@@ -496,23 +496,47 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
     { id: '1', label: 'PerplexityTool', sublabel: 'Switzerland news today', detail: 'Title: SwissInfo\nUrl: https://www.swissinfo.ch/eng/x' },
   ];
 
-  it('shows the Working bar with a "Show in panel" toggle, expandable to the thinking stream', () => {
-    const onToggle = vi.fn();
+  it('shows the Working bar with a "Show in panel" icon that opens the run in the pane, expandable to the thinking stream', () => {
+    const onShow = vi.fn();
     render(
       <ChatContainer
         {...baseProps}
-        messages={[msg('u', 'q')]}
+        messages={[{ ...msg('u', 'q'), role: 'user' }]}
         isExecuting
-        activityInChat
         runSteps={steps}
-        onToggleActivityPlacement={onToggle}
+        onShowRunInPane={onShow}
       />,
     );
     expect(screen.getByText('Working…')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Show in panel'));
-    expect(onToggle).toHaveBeenCalled();
+    // The latest run is left unpinned ([] steps) so the pane tracks the live feed;
+    // it has no deliverable yet (no answer message), so the deliverable is undefined.
+    expect(onShow).toHaveBeenCalledWith(undefined, []);
     // Expanding the bar reveals the thinking stream (friendly phase heading).
     fireEvent.click(screen.getByLabelText('Expand run activity'));
     expect(screen.getByText('Searching the web')).toBeInTheDocument();
+  });
+
+  it('opens a HISTORICAL run\'s plain-text answer in the pane as a text deliverable, pinned to its own steps', () => {
+    const onShow = vi.fn();
+    render(
+      <ChatContainer
+        {...baseProps}
+        messages={[
+          // Run 1 (historical): user prompt, a tool-result trace, the text answer.
+          { ...msg('u1', 'q1'), role: 'user' },
+          { ...msg('t', ''), resultType: 'trace', resultData: { kind: 'tool_result', label: 'PerplexityTool', sublabel: 'q1', detail: 'x' } },
+          { ...msg('a', 'Here is your answer.') },
+          // Run 2 makes run 1 historical (so it isn't the latest segment).
+          { ...msg('u2', 'q2'), role: 'user' },
+        ]}
+        onShowRunInPane={onShow}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Show in panel'));
+    expect(onShow).toHaveBeenCalledWith(
+      { type: 'text', data: 'Here is your answer.' },
+      expect.arrayContaining([expect.objectContaining({ label: 'PerplexityTool' })]),
+    );
   });
 });
