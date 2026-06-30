@@ -4,9 +4,11 @@ This deploys the same project produced by :class:`DatabricksAppExporter` to the
 Databricks Apps platform from the running backend — no local CLI. It mirrors the
 proven create -> upload -> deploy -> start -> poll sequence in ``src/deploy.py``
 but uses the SDK only (the ``databricks`` CLI is not present in the Apps runtime).
-Auth prefers the requesting user's OBO token and falls back to the workspace PAT
-(then service principal) via ``get_workspace_client`` — so it also works when the
-deploy is run locally without a forwarded OBO token.
+Auth prefers the requesting user's OBO token and falls back to a workspace PAT
+(scoped to the user's group). The app's own service principal is deliberately
+NOT used: it lacks permission to create/manage other apps, so falling back to it
+only yields confusing downstream failures instead of a clear auth error. Running
+the deploy locally therefore requires either a forwarded OBO token or a PAT.
 
 The deploy takes several minutes, so it runs as a background task and progress is
 tracked in an in-memory registry the API polls. (The registry is process-local —
@@ -29,7 +31,7 @@ from src.schemas.crew_export import (
     ExportFormat,
 )
 from src.services.crew_export_service import CrewExportService
-from src.utils.databricks_auth import get_workspace_client
+from src.utils.databricks_auth import get_auth_context
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -78,26 +80,9 @@ class CrewAppDeploymentService:
         group_context: Optional[GroupContext] = None,
     ) -> AppDeploymentResponse:
         """Generate the app project, then kick off the deploy in the background."""
-        user_token = group_context.access_token if group_context else None
-        group_id = group_context.primary_group_id if group_context else None
-
         # Build the workspace client up front so auth failures surface now AND so
         # we can create the MLflow experiment before generating the project.
-        # Auth chain (handled by get_workspace_client): OBO user token first,
-        # then the workspace PAT (from the DB, scoped to the group), then the
-        # service principal. The PAT/SPN fallback is what makes this work when
-        # running the deploy locally with no forwarded OBO token.
-        from databricks.sdk.useragent import with_product
-
-        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
-
-        with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-        client = await get_workspace_client(user_token=user_token, group_id=group_id)
-        if client is None:
-            raise PermissionError(
-                "Could not authenticate to Databricks. Provide a workspace PAT "
-                "(or log in via Databricks OAuth) with access to the workspace."
-            )
+        client = await self._get_deploy_client(group_context, "create apps")
 
         # The deployed app creates its OWN MLflow experiment, bound to Unity
         # Catalog at creation — the ONLY way to get UC trace storage, since a UC
@@ -196,6 +181,48 @@ class CrewAppDeploymentService:
             message="Deployment started",
         )
 
+    async def _get_deploy_client(
+        self, group_context: Optional[GroupContext], purpose: str
+    ) -> Any:
+        """Resolve a WorkspaceClient for deploy operations, OBO first then PAT.
+
+        Auth order: (1) the requesting user's OBO token, (2) a workspace PAT
+        scoped to the user's group. The app's own service principal is NOT
+        used — it cannot create/manage other apps, so resolving to it would only
+        surface a confusing downstream permission error. If neither OBO nor PAT
+        is available we fail fast with an actionable message.
+        """
+        user_token = group_context.access_token if group_context else None
+        group_id = group_context.primary_group_id if group_context else None
+
+        from databricks.sdk.useragent import with_product
+
+        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+
+        with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
+
+        auth = await get_auth_context(user_token=user_token, group_id=group_id)
+        # Accept only user-scoped identities (OBO/PAT); reject SPN and no-auth.
+        if auth is None or auth.auth_method not in ("obo", "pat"):
+            resolved = auth.auth_method if auth else "none"
+            logger.warning(
+                "Databricks Apps deploy auth rejected (resolved=%s, user_token=%s): "
+                "OBO/PAT required",
+                resolved,
+                "present" if user_token else "absent",
+            )
+            raise PermissionError(
+                "Could not authenticate to Databricks. Deploys run as the requesting "
+                "user (OBO) or a workspace PAT — log in via Databricks OAuth or "
+                f"configure a workspace PAT with access to {purpose}."
+            )
+        logger.info(
+            "Databricks Apps deploy authenticating via %s (user=%s)",
+            auth.auth_method,
+            auth.user_identity or "service",
+        )
+        return auth.get_workspace_client()
+
     def get_status(self, deployment_id: str) -> Optional[AppDeploymentStatusResponse]:
         record = self._deployments.get(deployment_id)
         if not record:
@@ -210,20 +237,9 @@ class CrewAppDeploymentService:
         Non-fatal: returns [] if Lakebase is unavailable or the lookup fails, so
         the deploy screen can still offer "create new".
         """
-        user_token = group_context.access_token if group_context else None
-        group_id = group_context.primary_group_id if group_context else None
-
-        from databricks.sdk.useragent import with_product
-
-        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
-
-        with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-        client = await get_workspace_client(user_token=user_token, group_id=group_id)
-        if client is None:
-            raise PermissionError(
-                "Could not authenticate to Databricks. Provide a workspace PAT "
-                "(or log in via Databricks OAuth) to list Lakebase instances."
-            )
+        client = await self._get_deploy_client(
+            group_context, "list Lakebase instances"
+        )
 
         def _list() -> List[Dict[str, Any]]:
             out: List[Dict[str, Any]] = []

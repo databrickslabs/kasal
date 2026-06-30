@@ -15,10 +15,13 @@ No global/automatic loading occurs.
 
 import logging
 import os
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional
 from src.core.exceptions import MCPConnectionError
 from src.core.logger import LoggerManager
-from src.engines.crewai.tools.mcp_handler import create_crewai_tool_from_mcp
+from src.engines.crewai.tools.mcp_handler import (
+    create_crewai_tool_from_mcp,
+    format_mcp_exception,
+)
 
 # Get logger from the centralized logging system
 # Use flow logger if running in flow subprocess mode, otherwise use crew logger
@@ -493,7 +496,10 @@ class MCPIntegration:
             # Check for initialization errors on the adapter (MCPConnectionError)
             if hasattr(mcp_adapter, 'initialization_error') and mcp_adapter.initialization_error:
                 err = mcp_adapter.initialization_error
-                detail = err.detail if isinstance(err, MCPConnectionError) else str(err)
+                detail = (
+                    err.detail if isinstance(err, MCPConnectionError)
+                    else f"MCP server '{server_name}': {format_mcp_exception(err)}"
+                )
                 MCPIntegration.add_warning(detail)
 
             # Get tools from the adapter
@@ -523,13 +529,17 @@ class MCPIntegration:
             return tools
             
         except Exception as e:
+            # Unwrap anyio ExceptionGroup ("unhandled errors in a TaskGroup …") to
+            # the real cause(s) so the warning/trace is actionable (e.g. 403 /
+            # PERMISSION_DENIED) instead of an opaque task-group wrapper.
+            cause = format_mcp_exception(e)
             mcp_err = MCPConnectionError(
                 server_name=server_name,
                 server_url=server.get('server_url', ''),
-                detail=f"MCP server '{server_name}': {str(e)}",
+                detail=f"MCP server '{server_name}': {cause}",
                 cause=e,
             )
-            logger.error(f"Error creating tools for server '{server_name}': {str(e)}")
+            logger.error(f"Error creating tools for server '{server_name}': {cause}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             MCPIntegration.add_warning(mcp_err.detail)

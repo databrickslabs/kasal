@@ -288,7 +288,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
       fullWidth
     >
       <DialogTitle>
-        Export Crew: {crewName}
+        Deploy App: {crewName}
         <IconButton
           aria-label="close"
           onClick={handleClose}
