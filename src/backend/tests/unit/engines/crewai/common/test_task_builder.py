@@ -1,7 +1,7 @@
 """Shared Task-args assembly (common/task_builder.build_task_args) used by BOTH
 the crew path (task_helpers.create_task) and the flow path
 (flow.modules.task_adapter.configure_task). Pins the unified behavior: base fields,
-markdown, Genie formatting, code/LLM guardrails, and output_pydantic."""
+markdown, Genie space-id bridging, code/LLM guardrails, and output_pydantic."""
 
 import json
 from types import SimpleNamespace
@@ -11,7 +11,6 @@ import pytest
 
 from src.engines.crewai.kernel.task_builder import build_task_args
 
-GENIE = {"MCP_SERVERS": {"servers": ["Databricks Genie: space"]}}
 GENIE_MCP_URL = (
     "https://ws.databricks.com/api/2.0/mcp/genie/01f16bcd318214ec8ef983b7627e0221"
 )
@@ -45,15 +44,6 @@ class TestBaseAssembly:
         )
         assert "markdown syntax" in args["description"]
         assert "markdown" in args["expected_output"].lower()
-
-    @pytest.mark.asyncio
-    async def test_genie_formatting_applied(self):
-        args = await build_task_args(
-            {"description": "D", "expected_output": "E", "tool_configs": GENIE},
-            _agent(),
-            [],
-        )
-        assert "Genie Tool output structure" in args["expected_output"]
 
     @pytest.mark.asyncio
     async def test_optional_fields_passed_through(self):
@@ -217,7 +207,7 @@ class TestGenieMcpSpaceId:
         genie_tool = self._genie_tool()
         tools = [self._genie_mcp_tool(), genie_tool]
         await build_task_args(
-            {"description": "D", "expected_output": "E", "tool_configs": GENIE},
+            {"description": "D", "expected_output": "E"},
             _agent(),
             tools,
         )

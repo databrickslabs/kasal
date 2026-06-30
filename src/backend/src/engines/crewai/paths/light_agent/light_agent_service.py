@@ -294,9 +294,9 @@ class LightAgentService:
                 # MCP/Genie fixups it performs. Apply them here against the agent's
                 # tools so a Genie MCP server picked in the chat "+" menu actually
                 # works (without this, a co-assigned GenieTool errors "Genie space ID
-                # is not configured" and the answer comes back as pure prose). The
-                # returned suffix is folded into the kickoff prompt only (below).
-                genie_format_suffix = self._apply_genie_mcp_fixups(agent, agent_spec)
+                # is not configured"). Output formatting is intentionally NOT done —
+                # the answer flows through the shared A2UI composer like any other.
+                self._apply_genie_mcp_fixups(agent)
 
                 # ── Cognitive memory (recall + persist) — chat parity w/ crews ──
                 # Attach a unified Memory so kickoff_async auto-recalls relevant
@@ -713,10 +713,6 @@ class LightAgentService:
                         f"{conversation_preamble}\n\nCurrent message:\n{prompt}"
                         if conversation_preamble else prompt
                     )
-                    # Genie MCP output-formatting instructions (parity with the
-                    # crew/flow expected_output); kickoff-only so trace/memory stay clean.
-                    if genie_format_suffix:
-                        kickoff_prompt = f"{kickoff_prompt}\n\n{genie_format_suffix}"
                     kicked = await self._kickoff_with_mlflow_trace(
                         agent, kickoff_prompt, config, execution_id,
                         trace_context, group_context, group_id,
@@ -888,19 +884,17 @@ class LightAgentService:
         return mcp_config, mcp_call_config
 
     @staticmethod
-    def _apply_genie_mcp_fixups(agent: Any, agent_spec: Dict[str, Any]) -> str:
-        """Apply the Genie MCP fixups the crew/flow ``build_task_args`` performs.
+    def _apply_genie_mcp_fixups(agent: Any) -> None:
+        """Bridge a selected Genie MCP server's space id into a co-assigned
+        GenieTool — the functional fixup the crew/flow ``build_task_args`` performs.
 
         The light agent has no Task, so it never runs ``build_task_args`` and would
-        otherwise miss these. Returns the Genie output-formatting suffix to fold
-        into the kickoff prompt (empty string when no Genie MCP server is attached).
+        otherwise miss this (a co-assigned GenieTool errors "Genie space ID is not
+        configured"). Output FORMATTING is intentionally not done here: the answer
+        flows through the shared A2UI composer like every other deliverable.
         """
-        from src.engines.crewai.kernel.genie_formatting import (
-            apply_genie_mcp_space_id,
-            append_genie_mcp_formatting,
-        )
+        from src.engines.crewai.kernel.genie_formatting import apply_genie_mcp_space_id
 
-        tool_configs = (agent_spec or {}).get("tool_configs", {}) or {}
         # Copy the picked Genie MCP server's space id into any co-assigned GenieTool
         # (scans agent.tools) so it doesn't error "Genie space ID is not configured".
         applied_space = apply_genie_mcp_space_id([], agent)
@@ -910,7 +904,6 @@ class LightAgentService:
                 "Genie MCP server",
                 applied_space,
             )
-        return append_genie_mcp_formatting("", tool_configs)
 
     async def _kickoff_with_mlflow_trace(
         self,

@@ -1,7 +1,5 @@
 import React from 'react';
-import { GenieTraceDetail, GenieAnswerCard, matchesGenieDetail } from './GenieTraceDetail';
 import { ToolResultCard } from './ToolResultCard';
-import { SerperResultCard, matchesSerper } from './SerperResultCard';
 
 /** Props an inline trace renderer receives (the whole resolved trace entry). */
 export interface InlineTraceProps {
@@ -25,8 +23,9 @@ export interface InlineTraceProps {
  *   2. add `{ match: matchesMyTool, Component: MyToolTraceDetail }` below.
  *
  * `Inline` is optional: a tool can render its result DIRECTLY in the chat (not
- * behind the collapsed trace pill) — e.g. Genie shows its answer Perplexity-
- * style. When set, ChatMessage renders it inline for that tool's `tool_result`.
+ * behind the collapsed trace pill). When set, ChatMessage renders it inline for
+ * that tool's `tool_result`. (Genie no longer uses this — its answer renders via
+ * the shared A2UI composer/surface like every other deliverable.)
  */
 export interface TraceDetailRenderer {
   /** Return true if this renderer should handle the given detail / tool label. */
@@ -38,14 +37,12 @@ export interface TraceDetailRenderer {
 }
 
 export const TRACE_DETAIL_RENDERERS: TraceDetailRenderer[] = [
-  // Genie renders its answer INLINE in the chat (Perplexity-style card).
-  { match: (detail) => matchesGenieDetail(detail), Component: GenieTraceDetail, Inline: GenieAnswerCard },
-  // Perplexity, Serper and scrape stay in the COLLAPSIBLE trace pill (their full
-  // answers can be long/ugly inline). No `Inline` → they render as the normal
-  // collapsible pill; expanding shows the FORMATTED answer (Markdown / linked
-  // search results), not the raw JSON, via these `Component` renderers.
+  // Perplexity and scrape stay in the COLLAPSIBLE trace pill (their full answers
+  // can be long/ugly inline). No `Inline` → they render as the normal collapsible
+  // pill; expanding shows the answer as Markdown via the generic ToolResultCard.
+  // Tools with no entry (e.g. Serper) fall through to the plain monospace detail
+  // view in TraceDetail — fine for raw JSON, and no per-tool formatting to keep.
   { match: (_detail, label) => /perplexity/i.test(label || ''), Component: ToolResultCard },
-  { match: (detail, label) => matchesSerper(detail, label), Component: SerperResultCard },
   { match: (_detail, label) => /read website|website content|scrape/i.test(label || ''), Component: ToolResultCard },
   // Future tools register here, e.g.:
   // { match: (detail, label) => label === 'SomeTool', Component: SomeToolTraceDetail },
