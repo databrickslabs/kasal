@@ -1,4 +1,4 @@
-import { getBaseUrl } from './client';
+import { getBaseUrl, getClient } from './client';
 import { SSE_ENABLED } from '../../../utils/sseTransport';
 
 export interface StreamEvent {
@@ -152,6 +152,17 @@ export function streamExecution(
   };
 }
 
+// Safety-net polling for the generation terminal event. The chat fast path
+// completes in <1s and the Databricks Apps HTTP/2 proxy drops the first SSE
+// connect of a page often enough that the client can miss the sole
+// `generation_complete` event (which carries the execution_id), orphaning a
+// run that actually finished. We poll the non-streaming result endpoint as a
+// backstop. It reads the same replay buffer the stream replays from, so the
+// terminal outcome is recoverable over plain HTTP even if SSE never connects.
+const POLL_START_DELAY = 2000; // give SSE a head start before polling
+const POLL_INTERVAL = 2000;
+const POLL_MAX_ATTEMPTS = 90; // ~3 min backstop, matches stream timeout budget
+
 export function streamGeneration(
   generationId: string,
   onEvent: EventCallback,
@@ -159,12 +170,92 @@ export function streamGeneration(
 ): () => void {
   // NOTE: generation SSE is intentionally NOT gated on SSE_ENABLED. Unlike the
   // long-lived execution stream, crew generation is short (a few seconds) and
-  // survives the Databricks Apps HTTP/2 proxy — and it has no polling fallback,
-  // so disabling it would stop crews from being created on Apps entirely.
+  // survives the Databricks Apps HTTP/2 proxy — and the result-endpoint poll
+  // below now backstops it, so a dropped stream no longer strands the run.
   let closed = false;
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // Polling state
+  let terminalReceived = false;
+  let pollAttempts = 0;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollStartTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollInFlight = false;
+
+  function stopPolling() {
+    if (pollStartTimer) {
+      clearTimeout(pollStartTimer);
+      pollStartTimer = null;
+    }
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  // Forward an event to the consumer, tracking whether the terminal event has
+  // been delivered. Once it has, we tear down both the stream and the poll —
+  // the consumer's own dedup (st.completed) makes a duplicate harmless if both
+  // the stream and a poll race to deliver it.
+  function forward(event: StreamEvent) {
+    if (event.event === 'generation_complete' || event.event === 'generation_failed') {
+      terminalReceived = true;
+      stopPolling();
+    }
+    onEvent(event);
+  }
+
+  async function pollOnce() {
+    if (closed || terminalReceived || pollInFlight) return;
+    pollInFlight = true;
+    try {
+      const resp = await getClient().get(`/sse/generations/${generationId}/result`);
+      const data = (resp.data || {}) as Record<string, unknown>;
+      const status = data.status as string | undefined;
+      if (status && status !== 'pending') {
+        const eventName = status === 'failed' ? 'generation_failed' : 'generation_complete';
+        console.log(`[SSE] Generation recovered via result poll: ${eventName}`, generationId);
+        forward({ event: eventName, data });
+        return;
+      }
+    } catch (err) {
+      // Endpoint unreachable / transient — keep polling until the cap.
+      console.log('[SSE] Generation result poll failed (will retry):', err);
+    } finally {
+      pollInFlight = false;
+    }
+
+    if (closed || terminalReceived) return;
+    if (pollAttempts < POLL_MAX_ATTEMPTS) {
+      pollAttempts++;
+      pollTimer = setTimeout(pollOnce, POLL_INTERVAL);
+    } else {
+      console.log('[SSE] Generation result poll gave up after max attempts', generationId);
+    }
+  }
+
+  function ensurePolling(immediate = false) {
+    if (closed || terminalReceived) return;
+    if (immediate) {
+      // A transport error means the stream may never deliver — poll now,
+      // cancelling the delayed safety-net start. No-op if a poll is already
+      // in flight or a poll loop is already scheduled.
+      if (pollStartTimer) {
+        clearTimeout(pollStartTimer);
+        pollStartTimer = null;
+      }
+      if (pollTimer || pollInFlight) return;
+      pollOnce();
+      return;
+    }
+    if (pollTimer || pollStartTimer || pollInFlight) return;
+    pollStartTimer = setTimeout(() => {
+      pollStartTimer = null;
+      pollOnce();
+    }, POLL_START_DELAY);
+  }
 
   function connect() {
     if (closed) return;
@@ -180,7 +271,8 @@ export function streamGeneration(
       'entity_error',
       // ChatMode auto-execute folds the backend run's execution_id INTO this
       // single terminal event (no separate execution_started), so the stream
-      // closes on generation_complete — no open window for reconnect/replay.
+      // closes on generation_complete — the result-endpoint poll backstops a
+      // miss.
       'generation_complete',
       'generation_failed',
       'connected',
@@ -192,10 +284,10 @@ export function streamGeneration(
         console.log(`[SSE] Generation event: "${type}", raw data:`, me.data?.slice?.(0, 500) || me.data);
         try {
           const data = JSON.parse(me.data);
-          onEvent({ event: type, data });
+          forward({ event: type, data });
         } catch (err) {
           console.error(`[SSE] JSON parse failed for "${type}":`, err, 'raw:', me.data?.slice?.(0, 200));
-          onEvent({ event: type, data: { message: me.data } });
+          forward({ event: type, data: { message: me.data } });
         }
       });
     }
@@ -209,9 +301,9 @@ export function streamGeneration(
       console.log('[SSE] Generation generic message:', e.data?.slice?.(0, 300) || e.data);
       try {
         const data = JSON.parse(e.data);
-        onEvent({ event: 'message', data });
+        forward({ event: 'message', data });
       } catch {
-        onEvent({ event: 'message', data: { message: e.data } });
+        forward({ event: 'message', data: { message: e.data } });
       }
     };
 
@@ -223,7 +315,11 @@ export function streamGeneration(
         eventSource = null;
       }
 
-      if (closed) return;
+      if (closed || terminalReceived) return;
+
+      // A transport error means the stream may never deliver the terminal
+      // event — start the result poll right away rather than waiting.
+      ensurePolling(true);
 
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
@@ -231,17 +327,22 @@ export function streamGeneration(
         console.log(`[SSE] Generation reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
         reconnectTimeout = setTimeout(connect, delay);
       } else {
-        console.log('[SSE] Generation max reconnect attempts reached');
+        console.log('[SSE] Generation max reconnect attempts reached; relying on result poll');
         if (onError) onError(e);
       }
     };
   }
 
   connect();
+  // Backstop even when the stream "succeeds" but stalls (proxy buffering can
+  // swallow the terminal frame). No-op if the stream delivers the terminal
+  // event before POLL_START_DELAY elapses.
+  ensurePolling(false);
 
   return () => {
     console.log('[SSE] Closing generation stream for', generationId);
     closed = true;
+    stopPolling();
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;

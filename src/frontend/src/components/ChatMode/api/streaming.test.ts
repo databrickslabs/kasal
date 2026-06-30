@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock getBaseUrl so we control how buildSseUrl resolves the SSE URL.
+// Mock getBaseUrl so we control how buildSseUrl resolves the SSE URL, and
+// getClient so we can drive the result-endpoint polling fallback.
 const getBaseUrl = vi.fn<[], string>(() => 'https://example.com/api/v1');
+const httpGet = vi.fn(async () => ({ data: { status: 'pending' } }));
 vi.mock('./client', () => ({
   __esModule: true,
   getBaseUrl: () => getBaseUrl(),
+  getClient: () => ({ get: httpGet }),
 }));
 
 import { streamExecution, streamGeneration } from './streaming';
@@ -48,6 +51,8 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   getBaseUrl.mockReturnValue('https://example.com/api/v1');
+  httpGet.mockReset();
+  httpGet.mockResolvedValue({ data: { status: 'pending' } });
   vi.stubGlobal('EventSource', FakeEventSource as unknown as typeof EventSource);
   vi.useFakeTimers();
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -474,6 +479,119 @@ describe('streamGeneration', () => {
     expect(FakeEventSource.instances.length).toBe(1);
     // Second cleanup: both branches (timeout/source null) skipped.
     expect(() => cleanup()).not.toThrow();
+  });
+});
+
+// The first SSE connect of a page drops often on the Databricks Apps proxy,
+// and the chat fast path folds the execution_id into the single (now-missed)
+// generation_complete event. These cover the result-endpoint poll that
+// backstops that drop so the run is never orphaned.
+describe('streamGeneration result-poll fallback', () => {
+  it('recovers generation_complete via the result poll after a transport error', async () => {
+    httpGet.mockResolvedValue({
+      data: { status: 'completed', execution_id: 'exec-1', run_name: 'Chat', generation_id: 'gen-1' },
+    });
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-1', onEvent);
+    const es = FakeEventSource.instances[0];
+
+    // Transport error: the stream may never deliver -> poll immediately.
+    es.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0); // flush the in-flight poll promise
+
+    expect(httpGet).toHaveBeenCalledWith('/sse/generations/gen-1/result');
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'generation_complete',
+      data: { status: 'completed', execution_id: 'exec-1', run_name: 'Chat', generation_id: 'gen-1' },
+    });
+    cleanup();
+  });
+
+  it('recovers a missed terminal event via the delayed safety-net poll', async () => {
+    httpGet.mockResolvedValue({
+      data: { status: 'completed', execution_id: 'exec-2', generation_id: 'gen-2' },
+    });
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-2', onEvent);
+
+    // No transport error — the stream "connected" but stalled. The safety-net
+    // poll starts after POLL_START_DELAY (2000ms) and recovers the outcome.
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'generation_complete',
+      data: { status: 'completed', execution_id: 'exec-2', generation_id: 'gen-2' },
+    });
+    cleanup();
+  });
+
+  it('does not poll when the stream delivers generation_complete in time', async () => {
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-3', onEvent);
+    const es = FakeEventSource.instances[0];
+
+    // Stream delivers the terminal event before the safety-net poll fires.
+    es.emit('generation_complete', JSON.stringify({ status: 'completed', execution_id: 'exec-3' }));
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'generation_complete',
+      data: { status: 'completed', execution_id: 'exec-3' },
+    });
+
+    // Advancing past the safety-net delay must NOT trigger any poll.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(httpGet).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('normalizes a failed result poll into a generation_failed event', async () => {
+    httpGet.mockResolvedValue({ data: { status: 'failed', error: 'boom', generation_id: 'gen-4' } });
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-4', onEvent);
+    const es = FakeEventSource.instances[0];
+
+    es.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'generation_failed',
+      data: { status: 'failed', error: 'boom', generation_id: 'gen-4' },
+    });
+    cleanup();
+  });
+
+  it('keeps polling while pending, then stops once terminal arrives', async () => {
+    httpGet
+      .mockResolvedValueOnce({ data: { status: 'pending' } })
+      .mockResolvedValueOnce({ data: { status: 'completed', execution_id: 'exec-5' } });
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-5', onEvent);
+    const es = FakeEventSource.instances[0];
+
+    es.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0); // 1st poll -> pending, schedules retry
+    expect(onEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'generation_complete' }),
+    );
+
+    await vi.advanceTimersByTimeAsync(2000); // POLL_INTERVAL -> 2nd poll -> completed
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'generation_complete',
+      data: { status: 'completed', execution_id: 'exec-5' },
+    });
+
+    // No further polling after terminal.
+    const callsAfter = httpGet.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(httpGet.mock.calls.length).toBe(callsAfter);
+    cleanup();
+  });
+
+  it('stops the safety-net poll on cleanup', async () => {
+    const onEvent = vi.fn();
+    const cleanup = streamGeneration('gen-6', onEvent);
+    cleanup();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(httpGet).not.toHaveBeenCalled();
   });
 });
 
