@@ -3,9 +3,9 @@ import { TRACE_DETAIL_RENDERERS } from './registry';
 
 /**
  * Generic expanded-trace-detail dispatcher. Picks the first registered
- * tool-specific renderer that matches (e.g. Genie → sections + table + chart);
- * otherwise falls back to a plain monospace block. Tool-specific UI lives in
- * the registry, not here — so this stays small and ChatMessage stays lean.
+ * renderer that matches (e.g. Perplexity → answer as Markdown); otherwise falls
+ * back to a plain monospace block. Tool-specific UI lives in the registry, not
+ * here — so this stays small and ChatMessage stays lean.
  */
 export const TraceDetail: React.FC<{ detail: string; label?: string; indentClass?: string }> = ({
   detail,

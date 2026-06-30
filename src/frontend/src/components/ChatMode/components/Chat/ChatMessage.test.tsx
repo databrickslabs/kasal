@@ -365,13 +365,13 @@ describe('ChatMessage — trace messages', () => {
     expect(screen.getByText('big output')).toBeInTheDocument();
     fireEvent.click(screen.getByText('search').closest('button')!);
   });
-  it('renders a Genie tool_result inline (answer shown, question + SQL collapsed)', () => {
+  it('renders a Genie tool_result as a normal collapsed trace pill (no bespoke inline card)', () => {
+    // Genie no longer has a special inline renderer — its answer flows through the
+    // shared A2UI composer/surface like every other deliverable. The tool_result is
+    // just the plumbing: a collapsed pill that expands to the raw detail on click.
     const genieDetail = [
       'Question:',
       'Top countries?',
-      '',
-      'SQL Query:',
-      'SELECT country FROM customers',
       '',
       'Answer:',
       'Switzerland leads the customer base.',
@@ -384,11 +384,13 @@ describe('ChatMessage — trace messages', () => {
         })}
       />,
     );
-    // The answer renders inline — no expand needed.
+    // Collapsed by default — the detail is hidden until the pill is expanded, and
+    // there is no Genie-specific "Show question & SQL" inline affordance.
+    expect(screen.queryByText(/Switzerland leads the customer base/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Show question & SQL')).not.toBeInTheDocument();
+    // Expanding the GenieTool pill reveals the raw detail.
+    fireEvent.click(screen.getByText('GenieTool').closest('button')!);
     expect(screen.getByText(/Switzerland leads the customer base/)).toBeInTheDocument();
-    // Question + SQL are collapsed behind the toggle.
-    expect(screen.getByText('Show question & SQL')).toBeInTheDocument();
-    expect(screen.queryByText(/SELECT country FROM customers/)).not.toBeInTheDocument();
   });
   it('renders an event with seconds duration and whitespace-only detail (not expandable)', () => {
     render(
