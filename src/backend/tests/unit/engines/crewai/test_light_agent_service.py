@@ -252,3 +252,139 @@ async def test_preamble_empty_when_no_prior_turns():
             config, ctx, "g1", lambda *_: None
         )
     assert out == ""
+
+
+# ── Genie MCP fixups (parity with crew/flow build_task_args) ──────────────────
+
+
+def _genie_mcp_tool(space_id="01ef"):
+    """A managed-Genie MCP tool whose adapter URL carries the space id."""
+    adapter = SimpleNamespace(
+        server_url=f"https://w.databricks.com/api/2.0/mcp/genie/{space_id}"
+    )
+    return SimpleNamespace(_mcp_tool_wrapper=SimpleNamespace(adapter=adapter))
+
+
+def _genie_tool():
+    """A custom GenieTool starting with no configured space id."""
+    tool = MagicMock()
+    tool.name = "GenieTool"
+    tool._space_id = None
+    return tool
+
+
+def _agent_with_tools(tools):
+    return SimpleNamespace(tools=tools)
+
+
+def test_genie_fixups_apply_space_id_and_return_format_suffix():
+    """A picked Genie MCP server hands its space id to a co-assigned GenieTool and
+    returns the Genie output-formatting suffix to fold into the kickoff prompt."""
+    genie_tool = _genie_tool()
+    agent = _agent_with_tools([_genie_mcp_tool("01efspace"), genie_tool])
+    spec = {
+        "tool_configs": {
+            "MCP_SERVERS": {"servers": ["Databricks Genie: Sales Space"]}
+        }
+    }
+
+    suffix = LightAgentService._apply_genie_mcp_fixups(agent, spec)
+
+    assert genie_tool._space_id == "01efspace"  # bridged from the MCP server URL
+    assert "Genie Tool output structure" in suffix
+
+
+def test_genie_fixups_noop_without_genie_mcp():
+    """No Genie MCP server attached → no space id set and no formatting suffix."""
+    genie_tool = _genie_tool()
+    agent = _agent_with_tools([genie_tool])
+    spec = {"tool_configs": {"MCP_SERVERS": {"servers": ["Some Other Server"]}}}
+
+    suffix = LightAgentService._apply_genie_mcp_fixups(agent, spec)
+
+    assert genie_tool._space_id is None
+    assert suffix == ""
+
+
+def test_genie_fixups_handle_empty_spec():
+    """Missing/empty tool_configs is safe (catalog agents, no tools)."""
+    agent = _agent_with_tools([])
+    assert LightAgentService._apply_genie_mcp_fixups(agent, {}) == ""
+
+
+# ── _build_mcp_configs — OBO token threading for chat MCP ─────────────────────
+
+
+def test_build_mcp_configs_threads_obo_token():
+    """With a user OBO token, both configs carry it so managed MCP (Genie) auths
+    on behalf of the user, not the app SPN."""
+    spec = {"role": "Assistant", "tool_configs": {"MCP_SERVERS": {"servers": ["g"]}}}
+    mcp_config, call_config = LightAgentService._build_mcp_configs(
+        spec, "grp-1", "USER_OBO_TOKEN"
+    )
+    assert mcp_config["group_id"] == "grp-1"
+    assert mcp_config["user_token"] == "USER_OBO_TOKEN"
+    assert call_config == {"group_id": "grp-1", "user_token": "USER_OBO_TOKEN"}
+    # agent_spec is copied, not mutated.
+    assert "user_token" not in spec
+
+
+def test_build_mcp_configs_omits_token_when_absent():
+    """No OBO token → user_token is omitted so PAT/SPN service auth still applies."""
+    mcp_config, call_config = LightAgentService._build_mcp_configs(
+        {"role": "Assistant"}, "grp-1", None
+    )
+    assert "user_token" not in mcp_config
+    assert call_config == {"group_id": "grp-1"}
+
+
+# ── _event_matches_run — bus event → this run attribution ─────────────────────
+
+
+def _evt(**kw):
+    """A bus event with the given identity fields (others default to None)."""
+    defaults = dict(agent_id=None, agent=None, from_agent=None, agent_role=None,
+                    tool_name="t")
+    defaults.update(kw)
+    return SimpleNamespace(**defaults)
+
+
+_SENTINEL_AGENT = SimpleNamespace(id="aid-1", role="Assistant")
+
+
+def _match(event, source, *, agent=_SENTINEL_AGENT, agent_id="aid-1",
+           role_lower="assistant", agent_llm=None):
+    return LightAgentService._event_matches_run(
+        event, source, agent=agent, agent_id=agent_id,
+        role_lower=role_lower, agent_llm=agent_llm,
+    )
+
+
+def test_match_by_llm_source_when_no_agent_attribution():
+    """Native MCP/function tool events arrive with from_agent nulled and a blank
+    agent_id; the LLM-instance source is what attributes them to this run."""
+    llm = MagicMock(name="agent.llm")
+    # Event carries NO agent identity (the regression case).
+    assert _match(_evt(), source=llm, agent_llm=llm) is True
+
+
+def test_no_match_for_other_runs_llm_source():
+    """A concurrent chat run's LLM instance must NOT match this run."""
+    our_llm, other_llm = MagicMock(), MagicMock()
+    assert _match(_evt(), source=other_llm, agent_llm=our_llm) is False
+
+
+def test_match_by_agent_id():
+    assert _match(_evt(agent_id="aid-1"), source=None, agent_id="aid-1") is True
+    assert _match(_evt(agent_id="aid-2"), source=None, agent_id="aid-1") is False
+
+
+def test_match_by_agent_identity_and_role():
+    agent = SimpleNamespace(id="aid-1", role="Assistant")
+    assert _match(_evt(agent=agent), source=None, agent=agent) is True
+    assert _match(_evt(agent_role="Assistant"), source=None) is True
+
+
+def test_no_match_when_nothing_identifies_the_run():
+    """No source, no agent_id, no agent, no role → not ours (gets dropped+logged)."""
+    assert _match(_evt(), source=None, agent_llm=MagicMock()) is False

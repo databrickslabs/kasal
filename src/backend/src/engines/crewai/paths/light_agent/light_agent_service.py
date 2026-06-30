@@ -160,8 +160,8 @@ class LightAgentService:
                 await TraceManager.ensure_writer_started()
             except Exception as w_err:  # noqa: BLE001
                 logger.debug(f"[light_agent] logs writer ensure skipped: {w_err}")
-            _log(f"🚀 Chat agent '{role}' started")
-            _log(f"📝 Prompt: {trace_context}")
+            _log(f"Chat agent '{role}' started")
+            _log(f"Prompt: {trace_context}")
 
             # ── Tool-activity tracing via CrewAI's event bus ──────────────────
             # The agent's per-instance ``step_callback`` only fires on the ReAct
@@ -182,23 +182,54 @@ class LightAgentService:
             except RuntimeError:
                 _main_loop = None
 
+            # Futures for every scheduled trace write, awaited before the run is
+            # marked COMPLETED so a fire-and-forget write is never dropped (the
+            # crew/flow OTel exporter flushes before the subprocess exits — this
+            # is the in-process equivalent).
+            _pending_trace_futures: list = []
+            # Serialize trace writes. Each handler schedules its persist onto the
+            # main loop via run_coroutine_threadsafe, so several (tool_usage,
+            # <tool>_run, llm_call, llm_response, response_run) run as concurrent
+            # tasks. Interleaving their DB work corrupts the async connection's
+            # greenlet state — the symptom is create_trace's model_validate(trace)
+            # raising ``MissingGreenlet`` mid-run (intermittent: one trace lands,
+            # the next fails). A lock makes them strictly one-at-a-time.
+            _persist_lock = asyncio.Lock()
+
             async def _persist_trace(trace_data: Dict[str, Any]) -> None:
                 try:
                     from src.services.execution_trace_service import ExecutionTraceService
-                    async with request_scoped_session() as trace_session:
-                        await ExecutionTraceService(trace_session).create_trace(trace_data)
-                        await trace_session.commit()
+                    from src.db.session import get_isolated_db_session
+                    # One writer at a time, on a PRIVATE connection (NullPool /
+                    # dedicated checkout) — never the shared request/StaticPool
+                    # connection another in-flight persist might be using.
+                    async with _persist_lock:
+                        async with get_isolated_db_session() as trace_session:
+                            await ExecutionTraceService(trace_session).create_trace(trace_data)
+                            await trace_session.commit()
+                    logger.info(
+                        f"[light_agent] trace persisted: job_id={trace_data.get('job_id')} "
+                        f"event_type={trace_data.get('event_type')}"
+                    )
                 except Exception as persist_err:  # noqa: BLE001
-                    logger.debug(f"[light_agent] trace persist skipped: {persist_err}")
+                    logger.warning(
+                        f"[light_agent] trace persist FAILED "
+                        f"(event_type={trace_data.get('event_type')}): {persist_err}",
+                        exc_info=True,
+                    )
 
             def _schedule_trace(trace_data: Dict[str, Any]) -> None:
                 if _main_loop is None:
+                    logger.warning("[light_agent] no main loop — trace dropped")
                     return
                 try:
                     fut = asyncio.run_coroutine_threadsafe(_persist_trace(trace_data), _main_loop)
+                    _pending_trace_futures.append(fut)
                     fut.add_done_callback(lambda f: f.exception())  # drain, never raise
                 except Exception as sched_err:  # noqa: BLE001
-                    logger.debug(f"[light_agent] trace schedule skipped: {sched_err}")
+                    logger.warning(
+                        f"[light_agent] trace schedule FAILED: {sched_err}", exc_info=True
+                    )
 
             def _base_trace(event_type: str, output: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
                 td: Dict[str, Any] = {
@@ -237,8 +268,13 @@ class LightAgentService:
                     except Exception:  # noqa: BLE001
                         pass
 
-                mcp_config = dict(agent_spec)
-                mcp_config["group_id"] = group_id
+                # Thread the requesting user's OBO token into MCP creation (see
+                # _build_mcp_configs) so Databricks-managed MCP servers authenticate
+                # on behalf of the user, not the app service principal.
+                user_obo_token = getattr(group_context, "access_token", None)
+                mcp_config, mcp_call_config = self._build_mcp_configs(
+                    agent_spec, group_id, user_obo_token
+                )
 
                 agent = await build_agent_with_tools(
                     agent_spec,
@@ -250,8 +286,17 @@ class LightAgentService:
                     tool_configs=agent_spec.get("tool_configs", {}),
                     tool_service=None,
                     mcp_config=mcp_config,
-                    mcp_call_config={"group_id": group_id},
+                    mcp_call_config=mcp_call_config,
                 )
+
+                # ── Genie MCP fixups — parity with the crew/flow task_builder ─────
+                # The light agent has no Task, so it skips build_task_args() and the
+                # MCP/Genie fixups it performs. Apply them here against the agent's
+                # tools so a Genie MCP server picked in the chat "+" menu actually
+                # works (without this, a co-assigned GenieTool errors "Genie space ID
+                # is not configured" and the answer comes back as pure prose). The
+                # returned suffix is folded into the kickoff prompt only (below).
+                genie_format_suffix = self._apply_genie_mcp_fixups(agent, agent_spec)
 
                 # ── Cognitive memory (recall + persist) — chat parity w/ crews ──
                 # Attach a unified Memory so kickoff_async auto-recalls relevant
@@ -260,6 +305,25 @@ class LightAgentService:
                     agent, agent_spec, config, group_context,
                     group_id, prompt, execution_id, _log,
                 )
+                # The unified Memory instance attached above is the bus ``source``
+                # for this run's MemoryQuery/Save/Retrieval events (CrewAI emits them
+                # with source=<the Memory>, and — unlike tool/LLM events — WITHOUT an
+                # agent_id). Hold a reference so the memory handlers can scope by
+                # identity (``source is _agent_memory``), tenant-safe for concurrent
+                # in-process light runs. ``None``/``True``/``False`` means memory was
+                # not attached (disabled / no backend) → no memory traces.
+                _attached_mem = getattr(agent, "memory", None)
+                _agent_memory = _attached_mem if _attached_mem not in (None, True, False) else None
+
+                # This agent's own LLM instance. CrewAI emits tool/LLM events with
+                # ``source = <the LLM>`` (crewai/llm.py, llms/base_llm.py), and native
+                # function-calling / MCP tool events can arrive with ``from_agent``
+                # already nulled by ToolUsageEvent.__init__ (it copies agent_id/role
+                # off from_agent then clears it) — or, for a direct LLM tool call,
+                # with NO agent attribution at all. Matching ``source is _agent_llm``
+                # catches those, and is tenant-safe: build_agent builds a fresh LLM
+                # per agent, so each in-process light run has its own instance.
+                _agent_llm = getattr(agent, "llm", None)
 
                 # Register tool-activity handlers scoped to THIS agent's id. A
                 # ``tool_usage`` trace marks the call; a ``<tool>_run`` trace carries
@@ -271,6 +335,7 @@ class LightAgentService:
                 from crewai.events.types.tool_usage_events import (
                     ToolUsageStartedEvent,
                     ToolUsageFinishedEvent,
+                    ToolUsageErrorEvent,
                 )
                 # ``Agent.kickoff_async`` runs as a CrewAI "LiteAgent" and emits these
                 # lifecycle events on the SAME bus — they fire on every run, even one
@@ -281,17 +346,46 @@ class LightAgentService:
                     LiteAgentExecutionCompletedEvent,
                     LiteAgentExecutionErrorEvent,
                 )
+                from crewai.events.types.llm_events import (
+                    LLMCallStartedEvent,
+                    LLMCallCompletedEvent,
+                    LLMCallFailedEvent,
+                )
+                # Memory recall/persist events — emitted by the unified Memory with
+                # source=<the Memory> (no agent_id), so they're matched by identity
+                # (source is _agent_memory). These give the chat trace the same
+                # "Memory Read / Memory Context Retrieved / Memory Write" rows the
+                # crew/flow OTel timeline shows — homogeneous across paths.
+                from crewai.events.types.memory_events import (
+                    MemoryQueryCompletedEvent,
+                    MemoryRetrievalCompletedEvent,
+                    MemorySaveCompletedEvent,
+                )
 
                 _agent_id = str(getattr(agent, "id", "") or "")
                 # Mutable holder so the (sync, possibly worker-thread) started/completed
                 # handlers can share the kickoff start time to compute a duration.
                 _agent_started_at: list = []
 
-                def _matches(event) -> bool:
-                    eid = getattr(event, "agent_id", None)
-                    if eid is not None and _agent_id:
-                        return str(eid) == _agent_id
-                    return getattr(event, "agent", None) is agent  # identity fallback
+                _role_lower = str(role or "").strip().lower()
+
+                def _matches(event, source=None) -> bool:
+                    if self._event_matches_run(
+                        event, source,
+                        agent=agent, agent_id=_agent_id,
+                        role_lower=_role_lower, agent_llm=_agent_llm,
+                    ):
+                        return True
+                    # Nothing matched — log once so a dropped MCP/tool event is
+                    # visible instead of silently vanishing from the trace.
+                    logger.info(
+                        "[light_agent] tool event NOT matched to this run "
+                        "(tool=%s event_agent_id=%s our_agent_id=%s source=%s) — dropped",
+                        getattr(event, "tool_name", "?"),
+                        getattr(event, "agent_id", None), _agent_id,
+                        type(source).__name__ if source is not None else None,
+                    )
+                    return False
 
                 def _args_str(event) -> str:
                     ta = getattr(event, "tool_args", None)
@@ -306,11 +400,11 @@ class LightAgentService:
 
                 def _on_tool_started(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         args = _args_str(event)
-                        _log(f"🔧 Using tool: {tool_name}({args[:200]})")
+                        _log(f"Using tool: {tool_name}({args[:200]})")
                         _schedule_trace(_base_trace(
                             "tool_usage",
                             {"tool_name": tool_name,
@@ -322,7 +416,7 @@ class LightAgentService:
 
                 def _on_tool_finished(source, event) -> None:
                     try:
-                        if not _matches(event):
+                        if not _matches(event, source):
                             return
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         out_val = getattr(event, "output", None)
@@ -348,10 +442,197 @@ class LightAgentService:
                         except Exception:  # noqa: BLE001
                             pass
                         norm = re.sub(r"[^a-z0-9]+", "", tool_name.lower()) or "tool"
-                        _log(f"✅ Tool {tool_name} returned ({len(content)} chars)")
+                        _log(f"Tool {tool_name} returned ({len(content)} chars)")
                         _schedule_trace(_base_trace(f"{norm}_run", output, tool_name))
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] tool-finish trace skipped: {h_err}")
+
+                def _on_tool_error(source, event) -> None:
+                    # Without this a tool that ERRORS (e.g. an MCP server timeout or
+                    # 4xx) fires ToolUsageErrorEvent — NOT Finished — so the chat
+                    # showed "using tool" then nothing. Surface the failure as a
+                    # ``<tool>_error`` trace so the result is never silently missing.
+                    try:
+                        if not _matches(event, source):
+                            return
+                        tool_name = str(getattr(event, "tool_name", "") or "tool")
+                        err = str(getattr(event, "error", "") or "Tool error")
+                        norm = re.sub(r"[^a-z0-9]+", "", tool_name.lower()) or "tool"
+                        _log(f"Tool {tool_name} failed: {err[:200]}")
+                        _schedule_trace(_base_trace(
+                            f"{norm}_error",
+                            {"tool_name": tool_name, "input": _args_str(event),
+                             "content": err, "error": err},
+                            tool_name,
+                        ))
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] tool-error trace skipped: {h_err}")
+
+                # ── LLM call tracing ────────────────────────────────────────
+                # Each LLM round-trip (the reasoning behind the answer and every
+                # tool-calling turn) fires LLMCall{Started,Completed,Failed}. The
+                # crew/flow OTel bridge maps these to ``llm_call`` / ``llm_response``;
+                # mirror that here so the chat trace shows the model calls too.
+                def _msgs_str(event) -> str:
+                    """Flatten the request messages to readable text for the trace
+                    detail (so 'LLM Request' → View shows the actual prompt)."""
+                    msgs = getattr(event, "messages", None)
+                    if msgs is None:
+                        return ""
+                    if isinstance(msgs, str):
+                        return msgs
+                    try:
+                        parts = []
+                        for m in msgs:
+                            if isinstance(m, dict):
+                                parts.append(f"{m.get('role', '?')}: {m.get('content', '')}")
+                            else:
+                                parts.append(str(m))
+                        return "\n\n".join(parts)
+                    except Exception:  # noqa: BLE001
+                        return str(msgs)
+
+                def _on_llm_started(source, event) -> None:
+                    try:
+                        if not _matches(event, source):
+                            return
+                        model_name = str(getattr(event, "model", "") or "llm")
+                        prompt_text = _msgs_str(event)
+                        max_len = 20000
+                        if len(prompt_text) > max_len:
+                            prompt_text = prompt_text[:max_len] + "…[truncated]"
+                        _log(f"LLM call ({model_name})")
+                        _schedule_trace(_base_trace(
+                            "llm_call",
+                            {"tool_name": "LLM",
+                             "input": model_name,
+                             # The Jobs timeline reads output.content; the prompt here
+                             # makes 'LLM Request → View' show the real request.
+                             "content": prompt_text,
+                             "extra_data": {"model": model_name,
+                                            "prompt": prompt_text,
+                                            "prompt_length": len(prompt_text)}},
+                            "LLM",
+                        ))
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] llm-start trace skipped: {h_err}")
+
+                def _on_llm_completed(source, event) -> None:
+                    try:
+                        if not _matches(event, source):
+                            return
+                        model_name = str(getattr(event, "model", "") or "llm")
+                        resp = getattr(event, "response", None)
+                        content = "" if resp is None else str(resp)
+                        max_len = 20000
+                        if len(content) > max_len:
+                            content = content[:max_len] + "…[truncated]"
+                        extra: Dict[str, Any] = {"model": model_name,
+                                                 "output_length": len(content)}
+                        usage = getattr(event, "usage", None)
+                        if usage is not None:
+                            try:
+                                extra["usage"] = json.loads(json.dumps(usage, default=str))
+                            except Exception:  # noqa: BLE001
+                                pass
+                        output: Dict[str, Any] = {
+                            "tool_name": "LLM",
+                            "input": model_name,
+                            "content": content,
+                            "extra_data": extra,
+                        }
+                        td = _base_trace("llm_response", output, "LLM")
+                        # The Jobs timeline's llm_response label reads output_length
+                        # from trace_metadata; mirror it there too.
+                        td["trace_metadata"]["output_length"] = len(content)
+                        td["trace_metadata"]["model"] = model_name
+                        _log(f"LLM responded ({len(content)} chars, {model_name})")
+                        _schedule_trace(td)
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] llm-complete trace skipped: {h_err}")
+
+                def _on_llm_failed(source, event) -> None:
+                    try:
+                        if not _matches(event, source):
+                            return
+                        err = str(getattr(event, "error", "") or "LLM error")
+                        _log(f"LLM call failed: {err[:200]}")
+                        _schedule_trace(_base_trace(
+                            "llm_call_failed",
+                            {"tool_name": "LLM", "content": err, "error": err},
+                            "LLM",
+                        ))
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] llm-fail trace skipped: {h_err}")
+
+                # ── Memory tracing (Memory Read / Context Retrieved / Write) ──
+                # Scoped to THIS run's Memory instance (the bus source), mirroring
+                # the field extraction the crew/flow OTel bridge uses so the Jobs
+                # timeline renders identical rows.
+                def _matches_memory(source) -> bool:
+                    return _agent_memory is not None and source is _agent_memory
+
+                def _cap(text: str, n: int = 8000) -> str:
+                    return text if len(text) <= n else text[:n] + "…[truncated]"
+
+                def _on_memory_query(source, event) -> None:
+                    try:
+                        if not _matches_memory(source):
+                            return
+                        results = getattr(event, "results", None)
+                        count = len(results) if isinstance(results, (list, tuple)) else None
+                        qms = getattr(event, "query_time_ms", None)
+                        content = "" if results is None else _cap(str(results))
+                        extra: Dict[str, Any] = {}
+                        if count is not None:
+                            extra["results_count"] = count
+                        if qms is not None:
+                            extra["query_time_ms"] = float(qms)
+                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        td = _base_trace("memory_retrieval", out, "Memory")
+                        td["trace_metadata"].update(extra)
+                        _log(f"Memory read: {count if count is not None else '?'} result(s)")
+                        _schedule_trace(td)
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] memory-query trace skipped: {h_err}")
+
+                def _on_memory_retrieval(source, event) -> None:
+                    try:
+                        if not _matches_memory(source):
+                            return
+                        mc = getattr(event, "memory_content", None)
+                        content = str(mc).strip() if mc else ""
+                        if not content:
+                            content = "(no memories matched the query)"
+                        content = _cap(content)
+                        rms = getattr(event, "retrieval_time_ms", None)
+                        extra: Dict[str, Any] = {}
+                        if rms is not None:
+                            extra["retrieval_time_ms"] = float(rms)
+                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        td = _base_trace("memory_retrieval_completed", out, "Memory")
+                        td["trace_metadata"].update(extra)
+                        _schedule_trace(td)
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] memory-retrieval trace skipped: {h_err}")
+
+                def _on_memory_save(source, event) -> None:
+                    try:
+                        if not _matches_memory(source):
+                            return
+                        val = getattr(event, "value", None)
+                        content = "" if val is None else _cap(str(val))
+                        sms = getattr(event, "save_time_ms", None)
+                        extra: Dict[str, Any] = {}
+                        if sms is not None:
+                            extra["save_time_ms"] = float(sms)
+                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        td = _base_trace("memory_write", out, "Memory")
+                        td["trace_metadata"].update(extra)
+                        _log("Memory write")
+                        _schedule_trace(td)
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] memory-save trace skipped: {h_err}")
 
                 # ── Agent lifecycle tracing (fires even with NO tools) ──────
                 # The LiteAgent events are emitted with the AGENT instance as the bus
@@ -395,7 +676,7 @@ class LightAgentService:
                                 output["duration_ms"] = int(elapsed.total_seconds() * 1000)
                             except Exception:  # noqa: BLE001
                                 pass
-                        _log(f"✅ Response generated ({len(answer_text)} chars)")
+                        _log(f"Response generated ({len(answer_text)} chars)")
                         _schedule_trace(_base_trace("response_run", output, "Response"))
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] agent-complete trace skipped: {h_err}")
@@ -415,6 +696,13 @@ class LightAgentService:
 
                 crewai_event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
                 crewai_event_bus.register_handler(ToolUsageFinishedEvent, _on_tool_finished)
+                crewai_event_bus.register_handler(ToolUsageErrorEvent, _on_tool_error)
+                crewai_event_bus.register_handler(LLMCallStartedEvent, _on_llm_started)
+                crewai_event_bus.register_handler(LLMCallCompletedEvent, _on_llm_completed)
+                crewai_event_bus.register_handler(LLMCallFailedEvent, _on_llm_failed)
+                crewai_event_bus.register_handler(MemoryQueryCompletedEvent, _on_memory_query)
+                crewai_event_bus.register_handler(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                crewai_event_bus.register_handler(MemorySaveCompletedEvent, _on_memory_save)
                 crewai_event_bus.register_handler(LiteAgentExecutionStartedEvent, _on_agent_started)
                 crewai_event_bus.register_handler(LiteAgentExecutionCompletedEvent, _on_agent_completed)
                 crewai_event_bus.register_handler(LiteAgentExecutionErrorEvent, _on_agent_error)
@@ -425,12 +713,26 @@ class LightAgentService:
                         f"{conversation_preamble}\n\nCurrent message:\n{prompt}"
                         if conversation_preamble else prompt
                     )
-                    kicked = await agent.kickoff_async(kickoff_prompt)
+                    # Genie MCP output-formatting instructions (parity with the
+                    # crew/flow expected_output); kickoff-only so trace/memory stay clean.
+                    if genie_format_suffix:
+                        kickoff_prompt = f"{kickoff_prompt}\n\n{genie_format_suffix}"
+                    kicked = await self._kickoff_with_mlflow_trace(
+                        agent, kickoff_prompt, config, execution_id,
+                        trace_context, group_context, group_id,
+                    )
                 finally:
                     # Always unregister so handlers never leak on the global bus.
                     try:
                         crewai_event_bus.off(ToolUsageStartedEvent, _on_tool_started)
                         crewai_event_bus.off(ToolUsageFinishedEvent, _on_tool_finished)
+                        crewai_event_bus.off(ToolUsageErrorEvent, _on_tool_error)
+                        crewai_event_bus.off(LLMCallStartedEvent, _on_llm_started)
+                        crewai_event_bus.off(LLMCallCompletedEvent, _on_llm_completed)
+                        crewai_event_bus.off(LLMCallFailedEvent, _on_llm_failed)
+                        crewai_event_bus.off(MemoryQueryCompletedEvent, _on_memory_query)
+                        crewai_event_bus.off(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                        crewai_event_bus.off(MemorySaveCompletedEvent, _on_memory_save)
                         crewai_event_bus.off(LiteAgentExecutionStartedEvent, _on_agent_started)
                         crewai_event_bus.off(LiteAgentExecutionCompletedEvent, _on_agent_completed)
                         crewai_event_bus.off(LiteAgentExecutionErrorEvent, _on_agent_error)
@@ -440,7 +742,7 @@ class LightAgentService:
                 if answer is None:
                     answer = str(kicked) if kicked is not None else ""
 
-            _log(f"✅ Chat agent '{role}' completed ({len(answer or '')} chars)")
+            _log(f"Chat agent '{role}' completed ({len(answer or '')} chars)")
 
             # Compose a renderable A2UI surface from the answer — the SAME shared
             # composer the exported app uses (src.shared.a2ui), run post-answer so the
@@ -469,15 +771,38 @@ class LightAgentService:
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}
-                    _log(f"🎨 Composed A2UI surface: {surface.get('surfaceKind', 'conversation')}")
+                    _log(f"Composed A2UI surface: {surface.get('surfaceKind', 'conversation')}")
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[light_agent] a2ui compose timed out for {execution_id}; "
                     "completing with plain answer"
                 )
-                _log("⚠️ UI compose timed out — returning plain answer")
+                _log("UI compose timed out — returning plain answer")
             except Exception as a2ui_err:  # noqa: BLE001
                 logger.debug(f"[light_agent] a2ui compose skipped: {a2ui_err}")
+
+            # Flush trace writes before terminal status — guarantees the
+            # fire-and-forget persists (response_run + every tool trace) actually
+            # land, instead of racing the request teardown. Bounded so a slow/hung
+            # write never wedges completion.
+            if _pending_trace_futures:
+                logger.info(
+                    f"[light_agent] flushing {len(_pending_trace_futures)} pending "
+                    f"trace write(s) for {execution_id}"
+                )
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            *(asyncio.wrap_future(f) for f in _pending_trace_futures),
+                            return_exceptions=True,
+                        ),
+                        timeout=10,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[light_agent] trace flush timed out for {execution_id}; "
+                        "some traces may be written after completion"
+                    )
 
             await ExecutionStatusService.update_status(
                 job_id=execution_id,
@@ -490,7 +815,7 @@ class LightAgentService:
 
         except Exception as e:  # noqa: BLE001
             logger.error(f"[light_agent] Error in light agent execution {execution_id}: {e}", exc_info=True)
-            _log(f"❌ Chat agent failed: {e}")
+            _log(f"Chat agent failed: {e}")
             try:
                 await ExecutionStatusService.update_status(
                     job_id=execution_id,
@@ -501,6 +826,229 @@ class LightAgentService:
             except Exception as status_err:  # noqa: BLE001
                 logger.error(f"[light_agent] Could not mark execution {execution_id} FAILED: {status_err}")
             return {"execution_id": execution_id, "status": ExecutionStatus.FAILED.value, "error": str(e)}
+
+    @staticmethod
+    def _event_matches_run(
+        event: Any,
+        source: Any,
+        *,
+        agent: Any,
+        agent_id: str,
+        role_lower: str,
+        agent_llm: Any,
+    ) -> bool:
+        """True if a bus event belongs to THIS in-process light run.
+
+        Tool events reach the shared bus from several sources — the agent executor
+        (``from_agent`` → ``agent_id``), the LLM's inline function caller, and MCP
+        wrappers — so match on ANY reliable identity signal. Concurrent chat users
+        share this in-process bus, so every clause must be run-unique (tenant-safe).
+
+        ``source is agent_llm`` is checked FIRST: CrewAI emits tool/LLM events with
+        ``source=<the LLM>``, and ``ToolUsageEvent.__init__`` copies agent_id/role off
+        ``from_agent`` then nulls it — so a native function-calling / MCP tool call
+        can arrive with NO agent attribution at all. The LLM instance is unique per
+        run (``build_agent`` builds a fresh LLM per agent), so this is safe.
+        """
+        if source is not None and agent_llm is not None and source is agent_llm:
+            return True
+        eid = getattr(event, "agent_id", None)
+        if eid is not None and agent_id and str(eid) == agent_id:
+            return True
+        if agent is not None and getattr(event, "agent", None) is agent:
+            return True
+        fa = getattr(event, "from_agent", None)
+        if fa is not None and agent_id and str(getattr(fa, "id", "")) == agent_id:
+            return True
+        erole = getattr(event, "agent_role", None)
+        if erole and role_lower and str(erole).strip().lower() == role_lower:
+            return True
+        return False
+
+    @staticmethod
+    def _build_mcp_configs(
+        agent_spec: Dict[str, Any], group_id: str, user_token: Optional[str]
+    ) -> tuple:
+        """Build (mcp_config, mcp_call_config) for the chat agent's MCP tools.
+
+        Threads the requesting user's OBO token through so Databricks-managed MCP
+        servers (Genie, UC functions) authenticate ON BEHALF OF THE USER rather
+        than the app service principal — without it MCPIntegration falls back to
+        SPN and per-user Genie spaces fail with PERMISSION_DENIED. The crew/flow
+        paths already pass user_token; the in-process chat path previously did not.
+        ``user_token`` is omitted when absent so service-level (PAT/SPN) auth still
+        applies for non-OBO runs.
+        """
+        mcp_config = dict(agent_spec)
+        mcp_config["group_id"] = group_id
+        mcp_call_config: Dict[str, Any] = {"group_id": group_id}
+        if user_token:
+            mcp_config["user_token"] = user_token
+            mcp_call_config["user_token"] = user_token
+        return mcp_config, mcp_call_config
+
+    @staticmethod
+    def _apply_genie_mcp_fixups(agent: Any, agent_spec: Dict[str, Any]) -> str:
+        """Apply the Genie MCP fixups the crew/flow ``build_task_args`` performs.
+
+        The light agent has no Task, so it never runs ``build_task_args`` and would
+        otherwise miss these. Returns the Genie output-formatting suffix to fold
+        into the kickoff prompt (empty string when no Genie MCP server is attached).
+        """
+        from src.engines.crewai.kernel.genie_formatting import (
+            apply_genie_mcp_space_id,
+            append_genie_mcp_formatting,
+        )
+
+        tool_configs = (agent_spec or {}).get("tool_configs", {}) or {}
+        # Copy the picked Genie MCP server's space id into any co-assigned GenieTool
+        # (scans agent.tools) so it doesn't error "Genie space ID is not configured".
+        applied_space = apply_genie_mcp_space_id([], agent)
+        if applied_space:
+            logger.info(
+                "[light_agent] configured GenieTool spaceId '%s' from the selected "
+                "Genie MCP server",
+                applied_space,
+            )
+        return append_genie_mcp_formatting("", tool_configs)
+
+    async def _kickoff_with_mlflow_trace(
+        self,
+        agent: Any,
+        kickoff_prompt: str,
+        config: Any,
+        execution_id: str,
+        trace_context: str,
+        group_context: Optional[GroupContext],
+        group_id: str,
+    ) -> Any:
+        """Run ``agent.kickoff_async`` inside an MLflow root trace that lands in
+        the SAME UC trace experiment crew/flow use, so chat LLM spans show up
+        alongside crew/flow runs.
+
+        Crew/flow run in a subprocess and call ``configure_mlflow_in_subprocess``
+        (which ``set_experiment(name, trace_location=UnityCatalog(...))`` and
+        flips global env). The light path runs IN-PROCESS, so instead of mutating
+        the shared process we route THIS run's trace **context-locally** to the
+        configured UC experiment (``mlflow.tracing.set_destination(..., context_local=True)``)
+        — isolated per async task, concurrency-safe. The experiment name comes
+        from the workspace's Databricks config (``mlflow_experiment_name``) + the
+        ``-uc`` suffix, exactly like ``configure_mlflow_in_subprocess`` derives it.
+        MLflow autolog is already enabled process-wide by ``LLMManager``, so the
+        root trace is what groups the kickoff's LLM call(s) into one trace.
+
+        CHAT-ONLY: also tags the trace with the chat ``session_id`` (and user) via
+        MLflow's session metadata keys, so the MLflow UI groups a conversation's
+        turns into one session. Crew/flow deliberately do NOT set this.
+
+        Fully best-effort: any MLflow problem falls back to a plain kickoff, and
+        ``kickoff_async`` runs exactly once (a real kickoff error propagates).
+        """
+        async def _do() -> Any:
+            return await agent.kickoff_async(kickoff_prompt)
+
+        try:
+            import logging as _logging
+            import mlflow
+            from src.services.mlflow_tracing_service import start_root_trace
+            from src.services.otel_tracing.mlflow_setup import (
+                configure_mlflow_in_subprocess,
+                set_trace_attributes,
+                extract_trace_outputs,
+            )
+            from src.db.session import async_session_factory
+            from src.services.databricks_service import DatabricksService
+
+            # Load the workspace's Databricks config (same source crew/flow use).
+            async with async_session_factory() as _session:
+                db_config = await DatabricksService(
+                    session=_session, group_id=group_id
+                ).get_databricks_config()
+
+            # Run the EXACT MLflow setup crew/flow use — auth → bind the `-uc`
+            # experiment to the UC Delta-table trace location → enable native
+            # autolog. The lightweight set_experiment-only variant did NOT work
+            # (autolog stayed bound to the startup experiment), so we use the same
+            # function crew/flow use. It configures the CURRENT process (the light
+            # path is in-process), which is acceptable: traces route to the same UC
+            # experiment crew/flow write to. Its verbose diagnostics are routed to
+            # the "crew" logger (crew.log) — NOT the main app log — to keep the app
+            # console clean.
+            mlflow_result = await configure_mlflow_in_subprocess(
+                db_config=db_config,
+                job_id=execution_id,
+                execution_id=execution_id,
+                group_id=group_id,
+                group_context=group_context,
+                async_logger=_logging.getLogger("crew"),
+            )
+        except Exception as setup_err:  # noqa: BLE001
+            logger.warning(
+                f"[light_agent] MLflow setup failed; running without trace: {setup_err}",
+                exc_info=True,
+            )
+            return await _do()
+
+        if not mlflow_result or not getattr(mlflow_result, "tracing_ready", False):
+            logger.info(
+                "[light_agent] MLflow tracing not ready (enabled=%s, error=%s) — "
+                "running chat kickoff without an MLflow trace",
+                getattr(mlflow_result, "enabled", None),
+                getattr(mlflow_result, "error", None),
+            )
+            return await _do()
+        uc_name = getattr(mlflow_result, "experiment_name", None)
+
+        run_name = (getattr(config, "inputs", None) or {}).get("run_name")
+        flow_config = {
+            "model": getattr(config, "model", None),
+            "execution_type": "agent",
+            "run_name": run_name,
+        }
+        # Show the ACTUAL prompt sent to the model (conversation preamble + the
+        # user's current message) on the trace, not the generic one-line task
+        # label — so the MLflow trace's Inputs reflect the real request. Capped so
+        # a long conversation doesn't bloat the trace.
+        _prompt_for_trace = kickoff_prompt if isinstance(kickoff_prompt, str) else str(kickoff_prompt)
+        if len(_prompt_for_trace) > 20000:
+            _prompt_for_trace = _prompt_for_trace[:20000] + "…[truncated]"
+        inputs = {"run_name": run_name or trace_context, "prompt": _prompt_for_trace}
+        # session_id can ride on the config top-level OR inside inputs depending on
+        # the entry path (the service copies it into execution_config["session_id"]).
+        # Read both so the MLflow session tag is set consistently across runs.
+        session_id = (
+            getattr(config, "session_id", None)
+            or (getattr(config, "inputs", None) or {}).get("session_id")
+        )
+        user = getattr(group_context, "group_email", None)
+
+        logger.info(
+            "[light_agent] MLflow tracing chat kickoff → experiment=%s session=%s",
+            uc_name,
+            session_id,
+        )
+        with start_root_trace(f"chat_kickoff:{run_name or trace_context}", inputs) as root_span:
+            # CHAT-ONLY: group this conversation's turns into one MLflow session.
+            if session_id:
+                try:
+                    metadata = {"mlflow.trace.session": str(session_id)}
+                    if user:
+                        metadata["mlflow.trace.user"] = str(user)
+                    mlflow.update_current_trace(metadata=metadata)
+                except Exception as sess_err:  # noqa: BLE001
+                    logger.debug(f"[light_agent] mlflow session tag skipped: {sess_err}")
+            try:
+                set_trace_attributes(root_span, flow_config, logger, run_name=run_name)
+            except Exception:  # noqa: BLE001
+                pass
+            result = await _do()
+            try:
+                outputs = extract_trace_outputs(result, logger)
+                if outputs and root_span is not None and hasattr(root_span, "set_outputs"):
+                    root_span.set_outputs(outputs)
+            except Exception:  # noqa: BLE001
+                pass
+            return result
 
     async def _conversation_preamble(
         self,
@@ -608,7 +1156,7 @@ class LightAgentService:
         lines = [line for _, line in selected]
         user_count = sum(1 for role, _ in selected if role == "user")
         log(
-            f"🧠 Recalling {len(lines)} prior message(s) from this chat session "
+            f"Recalling {len(lines)} prior message(s) from this chat session "
             f"({user_count} from you)"
         )
         return (
@@ -642,7 +1190,7 @@ class LightAgentService:
         ``agent_spec['memory'] is False`` and is honored here.
         """
         if agent_spec.get("memory") is False:
-            log("🧠 Memory disabled for this run")
+            log("Memory disabled for this run")
             return
         try:
             from src.engines.crewai.memory.crew_memory_service import CrewMemoryService
@@ -688,7 +1236,7 @@ class LightAgentService:
 
             # "Disabled Configuration" → all memory types off → no memory.
             if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
-                log("🧠 Memory backend is the 'Disabled Configuration' — no memory")
+                log("Memory backend is the 'Disabled Configuration' — no memory")
                 return
 
             backend_type = memory_backend_config.get("backend_type")
@@ -720,9 +1268,9 @@ class LightAgentService:
                     if (mem_config["session_id"] and not mem_config["memory_workspace_scope"])
                     else "workspace"
                 )
-                log(f"🧠 Memory enabled ({backend_type}, {scope} scope) — recall + persist")
+                log(f"Memory enabled ({backend_type}, {scope} scope) — recall + persist")
             else:
-                log("🧠 Memory unavailable for this run (no backend/embedder)")
+                log("Memory unavailable for this run (no backend/embedder)")
         except Exception as mem_err:  # noqa: BLE001
             logger.warning(f"[light_agent] memory setup skipped: {mem_err}")
 

@@ -74,6 +74,92 @@ export const useSelectionChangeHandler = (
   }, [setSelectedEdges]);
 };
 
+// Horizontal spacing (px) between node origins on the loaded row. Comfortably
+// clears a crew node's width so adjacent nodes don't overlap.
+const HORIZONTAL_NODE_SPACING = 360;
+// Single shared y so every loaded node sits at the same height; fitView then
+// centers the whole row vertically in the viewport.
+const ROW_Y = 0;
+
+// True when the loaded nodes already carry a real saved layout worth preserving
+// (more than one node, sitting at distinct positions). A flow saved with branches
+// must retain its exact placement; only degenerate loads (a single crew node opened
+// from the catalog, or every node piled at the same/default point) get auto-arranged.
+export const hasSavedLayout = (nodes: Node[]): boolean => {
+  if (nodes.length <= 1) return false;
+  const positions = new Set(
+    nodes.map(n => `${Math.round(n.position?.x ?? 0)},${Math.round(n.position?.y ?? 0)}`),
+  );
+  return positions.size > 1;
+};
+
+// Lay nodes out left-to-right on one row, ordered by edge direction (topological)
+// so a flow with no meaningful saved layout reads as a clean horizontal pipeline
+// instead of a stack. All nodes share ROW_Y; combined with the subsequent fitView
+// this leaves the row horizontally and vertically centered.
+export const layoutFlowHorizontally = (nodes: Node[], edges: Edge[]): Node[] => {
+  if (nodes.length === 0) return nodes;
+
+  const indexById = new Map<string, number>(nodes.map((n, i) => [n.id, i]));
+  const indegree = new Map<string, number>(nodes.map(n => [n.id, 0]));
+  const adjacency = new Map<string, string[]>();
+  edges.forEach(e => {
+    if (!indexById.has(e.source) || !indexById.has(e.target)) return;
+    adjacency.set(e.source, [...(adjacency.get(e.source) || []), e.target]);
+    indegree.set(e.target, (indegree.get(e.target) || 0) + 1);
+  });
+
+  // Kahn's algorithm; ties resolved by original insertion order for stability.
+  const ready = nodes.filter(n => (indegree.get(n.id) || 0) === 0).map(n => n.id);
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  while (ready.length) {
+    ready.sort((a, b) => (indexById.get(a) ?? 0) - (indexById.get(b) ?? 0));
+    const id = ready.shift() as string;
+    seen.add(id);
+    ordered.push(id);
+    (adjacency.get(id) || []).forEach(t => {
+      indegree.set(t, (indegree.get(t) || 0) - 1);
+      if ((indegree.get(t) || 0) <= 0 && !seen.has(t)) ready.push(t);
+    });
+  }
+  // Append any nodes dropped by cycles, preserving their original order.
+  nodes.forEach(n => { if (!seen.has(n.id)) ordered.push(n.id); });
+
+  const columnByNodeId = new Map(ordered.map((id, i) => [id, i] as const));
+  return nodes.map(n => ({
+    ...n,
+    position: { x: (columnByNodeId.get(n.id) ?? 0) * HORIZONTAL_NODE_SPACING, y: ROW_Y },
+  }));
+};
+
+// CrewFlowSelectionDialog tab indices: Crews=0, Agents=1, Tasks=2, Flows=3.
+export const CATALOG_CREWS_TAB = 0;
+export const CATALOG_FLOWS_TAB = 3;
+
+// Pick the catalog tab matching the active canvas: the Flows tab on the flow
+// canvas, the Crews tab on the crew canvas. Keeps "Load from Catalog" in sync
+// with where the user is (loading a flow from the flow canvas, not crews).
+export const catalogTabForCanvas = (areFlowsVisible: boolean): number =>
+  areFlowsVisible ? CATALOG_FLOWS_TAB : CATALOG_CREWS_TAB;
+
+export interface CatalogDialogSetters {
+  setInitialTab: (tab: number) => void;
+  setShowOnlyTab: (tab: number) => void;
+  setOpen: (open: boolean) => void;
+}
+
+// Open the crew/flow catalog dialog pinned to the tab matching the active canvas.
+export const openCatalogForCanvas = (
+  areFlowsVisible: boolean,
+  setters: CatalogDialogSetters,
+): void => {
+  const targetTab = catalogTabForCanvas(areFlowsVisible);
+  setters.setInitialTab(targetTab);
+  setters.setShowOnlyTab(targetTab);
+  setters.setOpen(true);
+};
+
 // Flow selection handler - loads flow into FlowCanvas (separate from crew tabs)
 export const useFlowSelectHandler = (
   setFlowNodes: React.Dispatch<React.SetStateAction<Node[]>>,
@@ -143,8 +229,15 @@ export const useFlowSelectHandler = (
       };
     });
 
+    // Retain the saved branch placement when the flow has a real layout; only
+    // auto-arrange into a centered horizontal row for degenerate loads (single
+    // node, or everything stacked at one point). fitView centers either way.
+    const laidOutNodes = hasSavedLayout(newNodes)
+      ? newNodes
+      : layoutFlowHorizontally(newNodes, newEdges);
+
     // CRITICAL: Set flow state directly (not crew state, not tabs)
-    setFlowNodes(newNodes);
+    setFlowNodes(laidOutNodes);
     setFlowEdges(newEdges);
 
     console.log('Flow loaded into FlowCanvas:', { nodeCount: newNodes.length, edgeCount: newEdges.length });
@@ -516,9 +609,10 @@ export const useEventBindings = (
     const previousActiveTabId = getActiveTab()?.id;
     console.log('Previous active tab ID:', previousActiveTabId);
 
-    // Create a new tab for the loaded crew with the crew name
+    // Create a new tab for the loaded crew with the crew name. Force 'crew' view so
+    // loading a crew always lands on the crew canvas even if the user was in flow mode.
     const actualCrewName = crewName || 'Loaded Crew';
-    const newTabId = createTab(actualCrewName);
+    const newTabId = createTab(actualCrewName, 'crew');
     console.log('Created new tab with ID:', newTabId, 'and name:', actualCrewName);
 
     // Update edge handles and styles to match the current layout orientation

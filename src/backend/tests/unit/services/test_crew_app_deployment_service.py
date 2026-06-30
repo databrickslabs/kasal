@@ -49,34 +49,56 @@ def _export_result():
     }
 
 
+def _auth_ctx(method="obo", client=None):
+    """Mock AuthContext as returned by get_auth_context (OBO/PAT/SPN)."""
+    auth = MagicMock()
+    auth.auth_method = method
+    auth.user_identity = "user@example.com" if method == "obo" else None
+    auth.get_workspace_client.return_value = client or MagicMock()
+    return auth
+
+
 class TestStartDeployment:
     @pytest.mark.asyncio
-    async def test_falls_back_when_no_obo_token(self, service):
-        """With no OBO token, deploy proceeds via the PAT/SPN fallback chain."""
+    async def test_falls_back_to_pat_when_no_obo_token(self, service):
+        """With no OBO token, deploy proceeds via the workspace PAT fallback."""
         ctx = GroupContext(group_ids=["g1"], group_email="u@e.com", access_token=None)
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        mock_get = AsyncMock(return_value=MagicMock())
+        mock_auth = AsyncMock(return_value=_auth_ctx(method="pat"))
         with (
             patch(
-                "src.services.crew_app_deployment_service.get_workspace_client",
-                new=mock_get,
+                "src.services.crew_app_deployment_service.get_auth_context",
+                new=mock_auth,
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
             resp = await service.start_deployment("crew-1", AppDeploymentConfig(), ctx)
 
         assert resp.status == STATUS_PENDING
-        # Fallback path: called with no user token but the group_id for PAT lookup.
-        assert mock_get.await_args.kwargs.get("user_token") is None
-        assert mock_get.await_args.kwargs.get("group_id") == "g1"
+        # Fallback path: resolved with no user token but the group_id for PAT lookup.
+        assert mock_auth.await_args.kwargs.get("user_token") is None
+        assert mock_auth.await_args.kwargs.get("group_id") == "g1"
+
+    @pytest.mark.asyncio
+    async def test_rejects_service_principal(self, service, obo_context):
+        """SPN is never used for deploy — resolving to it raises a clear error."""
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with patch(
+            "src.services.crew_app_deployment_service.get_auth_context",
+            new=AsyncMock(return_value=_auth_ctx(method="service_principal")),
+        ):
+            with pytest.raises(PermissionError):
+                await service.start_deployment(
+                    "crew-1", AppDeploymentConfig(), obo_context
+                )
 
     @pytest.mark.asyncio
     async def test_registers_pending_and_returns_id(self, service, obo_context):
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
         with (
             patch(
-                "src.services.crew_app_deployment_service.get_workspace_client",
-                new=AsyncMock(return_value=MagicMock()),
+                "src.services.crew_app_deployment_service.get_auth_context",
+                new=AsyncMock(return_value=_auth_ctx()),
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
@@ -109,8 +131,8 @@ class TestStartDeployment:
         )
         with (
             patch(
-                "src.services.crew_app_deployment_service.get_workspace_client",
-                new=AsyncMock(return_value=MagicMock()),
+                "src.services.crew_app_deployment_service.get_auth_context",
+                new=AsyncMock(return_value=_auth_ctx()),
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
@@ -139,8 +161,8 @@ class TestStartDeployment:
         cfg = AppDeploymentConfig(app_name="oracle")  # no experiment_name
         with (
             patch(
-                "src.services.crew_app_deployment_service.get_workspace_client",
-                new=AsyncMock(return_value=MagicMock()),
+                "src.services.crew_app_deployment_service.get_auth_context",
+                new=AsyncMock(return_value=_auth_ctx()),
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
@@ -152,8 +174,8 @@ class TestStartDeployment:
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
         with (
             patch(
-                "src.services.crew_app_deployment_service.get_workspace_client",
-                new=AsyncMock(return_value=MagicMock()),
+                "src.services.crew_app_deployment_service.get_auth_context",
+                new=AsyncMock(return_value=_auth_ctx()),
             ),
             patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
         ):
@@ -166,7 +188,7 @@ class TestStartDeployment:
     async def test_auth_failure_raises(self, service, obo_context):
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
         with patch(
-            "src.services.crew_app_deployment_service.get_workspace_client",
+            "src.services.crew_app_deployment_service.get_auth_context",
             new=AsyncMock(return_value=None),
         ):
             with pytest.raises(PermissionError):
@@ -369,8 +391,8 @@ class TestListLakebaseInstances:
         client = MagicMock()
         client.database.list_database_instances.return_value = [inst]
         with patch(
-            "src.services.crew_app_deployment_service.get_workspace_client",
-            new=AsyncMock(return_value=client),
+            "src.services.crew_app_deployment_service.get_auth_context",
+            new=AsyncMock(return_value=_auth_ctx(client=client)),
         ):
             result = await service.list_lakebase_instances(group_context=obo_context)
         assert result == [{"name": "lb-1", "state": "AVAILABLE", "capacity": "CU_1"}]
@@ -380,8 +402,8 @@ class TestListLakebaseInstances:
         client = MagicMock()
         client.database.list_database_instances.side_effect = Exception("boom")
         with patch(
-            "src.services.crew_app_deployment_service.get_workspace_client",
-            new=AsyncMock(return_value=client),
+            "src.services.crew_app_deployment_service.get_auth_context",
+            new=AsyncMock(return_value=_auth_ctx(client=client)),
         ):
             result = await service.list_lakebase_instances(group_context=obo_context)
         assert result == []
@@ -389,7 +411,7 @@ class TestListLakebaseInstances:
     @pytest.mark.asyncio
     async def test_raises_when_auth_fails(self, service, obo_context):
         with patch(
-            "src.services.crew_app_deployment_service.get_workspace_client",
+            "src.services.crew_app_deployment_service.get_auth_context",
             new=AsyncMock(return_value=None),
         ):
             with pytest.raises(PermissionError):

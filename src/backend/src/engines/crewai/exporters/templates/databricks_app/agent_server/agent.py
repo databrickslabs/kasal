@@ -284,6 +284,29 @@ def _is_codex_model(model_name: str) -> bool:
     return bool(model_name) and "gpt-5-3-codex" in str(model_name).lower()
 
 
+def _model_rejects_temperature(model_name: str) -> bool:
+    """True for models whose Databricks endpoint 400s on the `temperature` param.
+
+    Covers GPT-5 / reasoning models and the newest Anthropic models (Claude Opus
+    4.7+, Fable 5) — e.g. ``databricks-claude-opus-4-8`` (served as
+    ``us.anthropic.claude-opus-4-8``) raises BAD_REQUEST: "Model ... does not
+    support the temperature parameter." litellm's DatabricksConfig lists
+    temperature as supported, so we must drop it explicitly. Mirrors Kasal's
+    src/utils/model_config.model_rejects_temperature so the exported app behaves
+    like live chat.
+    """
+    if not model_name:
+        return False
+    m = str(model_name).lower()
+    if "gpt-5" in m or "gpt5" in m:
+        return True
+    if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
+        return True
+    if "claude-fable" in m:
+        return True
+    return False
+
+
 def _gateway_on() -> bool:
     """Whether the workspace routes model traffic through the AI Gateway."""
     return os.environ.get("DATABRICKS_AI_GATEWAY_ENABLED", "false").lower() in (
@@ -373,9 +396,15 @@ def _make_llm(model_name: str, temperature: float = 0.7):
     # AI Gateway on -> /ai-gateway/mlflow/v1 ; off -> /serving-endpoints.
     kwargs = {
         "model": f"databricks/{endpoint}",
-        "temperature": temperature,
         "timeout": LLM_REQUEST_TIMEOUT,
     }
+    # Newer frontier models (GPT-5, Claude Opus 4.7+, Fable 5) 400 on `temperature`.
+    # Drop it from the call AND set additional_drop_params so litellm doesn't
+    # re-add it (its DatabricksConfig advertises temperature as supported).
+    if _model_rejects_temperature(endpoint):
+        kwargs["additional_drop_params"] = ["temperature"]
+    else:
+        kwargs["temperature"] = temperature
     if host:
         kwargs["api_base"] = (
             f"{host}/ai-gateway/mlflow/v1" if _gateway_on() else f"{host}/serving-endpoints"
