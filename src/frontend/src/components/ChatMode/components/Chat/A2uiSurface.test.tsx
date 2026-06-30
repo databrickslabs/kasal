@@ -39,13 +39,13 @@ describe('A2uiSurface', () => {
 
   it('omits the corner expand control when onExpand is not provided', () => {
     render(<A2uiSurface surface={surface} />);
-    expect(screen.queryByLabelText('Open in side panel')).toBeNull();
+    expect(screen.queryByLabelText('Open in preview pane')).toBeNull();
   });
 
   it('renders the expand control and calls onExpand once on click', () => {
     const onExpand = vi.fn();
     render(<A2uiSurface surface={surface} onExpand={onExpand} />);
-    fireEvent.click(screen.getByLabelText('Open in side panel'));
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
@@ -57,7 +57,7 @@ describe('A2uiSurface', () => {
         <A2uiSurface surface={surface} onExpand={onExpand} />
       </div>,
     );
-    fireEvent.click(screen.getByLabelText('Open in side panel'));
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(onExpand).toHaveBeenCalledTimes(1);
     expect(parentClick).not.toHaveBeenCalled();
   });

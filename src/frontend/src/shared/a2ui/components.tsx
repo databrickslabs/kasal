@@ -1046,10 +1046,13 @@ export function Flashcards({ node, resolve }: NodeProps) {
               {hint && <p className="text-sm" style={{ color: theme.muted }}>Hint: {hint}</p>}
               <span className="mt-2 inline-flex items-center gap-1 text-xs" style={{ color: theme.muted }}><RotateCw className="size-3.5" /> Click to flip</span>
             </div>
-            {/* Back */}
+            {/* Back. OPAQUE fill (solid stage color + panel tint) so the answer
+                text contrasts — `theme.panel` alone is semi-transparent on the
+                built-in themes and composites to ~white over a light chat page,
+                hiding the light foreground text. */}
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border p-8 text-center"
-              style={{ background: theme.panel, borderColor: theme.accent, color: theme.fg, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+              style={{ backgroundColor: theme.bg, backgroundImage: `linear-gradient(0deg, ${theme.panel}, ${theme.panel})`, borderColor: theme.accent, color: theme.fg, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
             >
               <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.accent }}>Answer</span>
               <p className="text-lg leading-snug" style={{ color: theme.fg }}>{asStr(card.back)}</p>
@@ -1194,11 +1197,7 @@ const MM_COL = 260
 const MM_ROW = 76
 const MM_MIN_ZOOM = 0.3
 const MM_MAX_ZOOM = 2.5
-const MM_ACCENT = '#2563eb'
-const MM_TEXT = '#1f2330'
-const MM_MUTED = '#6b7280'
-const MM_BORDER = '#e6e8eb'
-const MM_NODE_BG = '#ffffff'
+const MM_ACCENT = '#2563eb' // root branch seed color (nodes derive their own)
 
 function mindmapChildren(node: MindmapData): MindmapData[] {
   return Array.isArray(node.children)
@@ -1299,6 +1298,11 @@ function layoutMindmap(nodes: Record<string, MMNode>, rootId: string): Record<st
 }
 
 function MindmapCanvas({ root }: { root: MindmapData }) {
+  // Theme the canvas from the active deck palette (same source slides/quiz use)
+  // so a picked palette colors the mindmap itself — not a backdrop behind it.
+  // `theme.bg` is the solid palette background (stage is a gradient); nodes mirror
+  // the slide stat-tile treatment (panel + panelBorder + fg).
+  const theme = useContext(DeckThemeContext)
   const { nodes, rootId } = useMemo(() => buildMindmap(root), [root])
   const initial = useMemo(() => layoutMindmap(nodes, rootId), [nodes, rootId])
   const [positions, setPositions] = useState<Record<string, XY>>(() => initial)
@@ -1415,6 +1419,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
   return (
     <div
       ref={canvasRefCb}
+      className="a2-mindmap-canvas"
       onPointerDown={startPan}
       onPointerMove={onMove}
       onPointerUp={endDrag}
@@ -1424,12 +1429,15 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
         height: '64vh',
         minHeight: 460,
         overflow: 'hidden',
-        borderRadius: 14,
-        border: `1px solid ${MM_BORDER}`,
-        background: '#fbfcfd',
+        // Square corners + the palette background so the canvas reads as one
+        // continuous themed surface (no rounded edge revealing the page behind it).
+        borderRadius: 0,
+        border: `1px solid ${theme.panelBorder}`,
+        background: theme.bg,
+        color: theme.fg,
         cursor: grabbing ? 'grabbing' : 'grab',
         touchAction: 'none',
-        backgroundImage: `radial-gradient(${MM_BORDER} 1px, transparent 1px)`,
+        backgroundImage: `radial-gradient(${theme.panelBorder} 1px, transparent 1px)`,
         backgroundSize: `${gridSize}px ${gridSize}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
@@ -1492,9 +1500,13 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
                 cursor: 'grab',
                 userSelect: 'none',
                 touchAction: 'none',
-                background: isRoot ? MM_ACCENT : MM_NODE_BG,
-                color: isRoot ? '#ffffff' : MM_TEXT,
-                border: `1px solid ${isRoot ? MM_ACCENT : MM_BORDER}`,
+                // OPAQUE node fill (solid stage color + the panel tint on top) so
+                // the connector lines drawn behind the node don't show THROUGH it —
+                // `theme.panel` alone is semi-transparent on the built-in themes.
+                backgroundColor: isRoot ? theme.accent : theme.bg,
+                backgroundImage: isRoot ? 'none' : `linear-gradient(0deg, ${theme.panel}, ${theme.panel})`,
+                color: isRoot ? '#ffffff' : theme.fg,
+                border: `1px solid ${isRoot ? theme.accent : theme.panelBorder}`,
                 ...(isRoot
                   ? {}
                   : onLeft
@@ -1549,9 +1561,9 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
                     fontWeight: 700,
                     lineHeight: 1,
                     fontVariantNumeric: 'tabular-nums',
-                    background: isRoot ? 'rgba(255,255,255,0.22)' : '#f1f3f5',
+                    background: isRoot ? 'rgba(255,255,255,0.22)' : 'rgba(127,127,127,0.18)',
                     color: isRoot ? '#ffffff' : node.color,
-                    border: `1px solid ${isRoot ? 'transparent' : MM_BORDER}`,
+                    border: `1px solid ${isRoot ? 'transparent' : theme.panelBorder}`,
                   }}
                 >
                   {isCollapsed ? `+${node.childIds.length}` : '−'}
@@ -1581,9 +1593,9 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
               maxWidth: 300,
               padding: '8px 11px',
               borderRadius: 10,
-              background: '#ffffff',
-              border: `1px solid ${MM_BORDER}`,
-              color: MM_TEXT,
+              background: theme.bg,
+              border: `1px solid ${theme.panelBorder}`,
+              color: theme.fg,
               fontSize: '0.8rem',
               lineHeight: 1.4,
               whiteSpace: 'normal',
@@ -1596,7 +1608,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
             {n.detail ? (
               <>
                 <div style={{ fontWeight: 700, marginBottom: 3 }}>{n.label}</div>
-                <div style={{ color: MM_MUTED }}>{n.detail}</div>
+                <div style={{ color: theme.muted }}>{n.detail}</div>
               </>
             ) : (
               n.label
@@ -1628,9 +1640,9 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
               fontSize: '1rem',
               fontWeight: 700,
               lineHeight: 1,
-              color: MM_TEXT,
-              background: '#ffffff',
-              border: `1px solid ${MM_BORDER}`,
+              color: theme.fg,
+              background: theme.panel,
+              border: `1px solid ${theme.panelBorder}`,
               boxShadow: '0 2px 8px rgba(16,24,40,0.1)',
             }}
           >
@@ -1638,7 +1650,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
           </button>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 12, bottom: 10, fontSize: '0.7rem', color: MM_MUTED, pointerEvents: 'none', userSelect: 'none' }}>
+      <div style={{ position: 'absolute', left: 12, bottom: 10, fontSize: '0.7rem', color: theme.muted, pointerEvents: 'none', userSelect: 'none' }}>
         Drag to pan · scroll to zoom · drag a node to move it
       </div>
     </div>
