@@ -19,6 +19,8 @@ export interface ChatMessage {
    * per-session preview copy is needed. Persisted in the __chatmode extras.
    */
   executionId?: string;
+  /** Whether the run that produced this message used workspace memory. */
+  usedWorkspaceMemory?: boolean;
 }
 
 export interface ChatSession {
