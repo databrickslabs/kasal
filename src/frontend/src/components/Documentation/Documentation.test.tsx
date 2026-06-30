@@ -16,11 +16,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Documentation from './Documentation';
 
-// Documentation uses react-router's useNavigate; these tests don't exercise
-// navigation, so stub the hook to avoid needing a Router wrapper.
+// Documentation uses react-router's useNavigate/useLocation; these tests don't
+// exercise navigation, so stub the hooks to avoid needing a Router wrapper.
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/docs', search: '', hash: '', state: null, key: 'test' }),
 }));
 
 // react-markdown 9.x is ESM-only; mock it to a passthrough that renders the

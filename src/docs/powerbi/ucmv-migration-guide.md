@@ -1,6 +1,6 @@
 # End-to-end UCMV migration guide
 
-Migrate a Power BI semantic model to Databricks Unity Catalog Metric Views - step by step.
+Migrate a Power BI semantic model to Databricks Unity Catalog Metric Views, step by step.
 
 - [Before you begin](#before-you-begin)
 - [What you'll have at the end](#what-youll-have-at-the-end)
@@ -45,24 +45,24 @@ Any BI tool (including Power BI) can query UC Metric Views. The business logic n
 
 ```text
 Phase 1: EXTRACT (automatic, ~5 minutes)
-Tool 74: M-Query → source SQL per table
-Tool 73: Measures → DAX expressions
-Tool 75: Relationships → FK structure (optional, recommended)
-    ↓
+Tool 74: M-Query to source SQL per table
+Tool 73: Measures to DAX expressions
+Tool 75: Relationships to FK structure (optional, recommended)
+    |
 Phase 2: PROPOSE CONFIG (automatic, ~2 minutes)
-Tool 90: Call 4 PBI APIs → proposed pipeline_config.json (26 keys)
-    ↓
+Tool 90: Call 4 PBI APIs to produce proposed pipeline_config.json (26 keys)
+    |
 Phase 3: HUMAN REVIEW (manual, 2-3 hours first time, 30 min for similar models)
 SA fills TODO markers in config:
   - switch_decompositions (biggest effort)
   - filter_sets, measure_resolutions, mapping_only_tables
-    ↓
+    |
 Phase 4: GENERATE (automatic, ~30 seconds)
 Tool 87: Allocate measures to fact tables (if needed)
-Tool 86: Full pipeline → YAML + SQL per fact table + migration report
-    ↓
+Tool 86: Full pipeline to YAML + SQL per fact table + migration report
+    |
 Phase 5: VALIDATE + DEPLOY
-Tool 88: Dry-run validation → human approval → live deployment
+Tool 88: Dry-run validation, human approval, live deployment
 ```
 
 Failures in Phase 5 loop back to Phase 3 (adjust config, re-run Phase 4).
@@ -295,8 +295,8 @@ LIMIT 10;
 The fastest way to demo the pipeline is the **BI Specialist workspace** built into Kasal.
 On startup, Kasal seeds 9 pre-configured crew templates covering the full pipeline:
 
-1. Open Kasal → **Workspaces** → switch to **BI Specialist**
-2. Go to **Crews** — the UCMV Generation Pipeline crew is already there
+1. Open Kasal, then **Workspaces**, then switch to **BI Specialist**
+2. Go to **Crews**. The UCMV Generation Pipeline crew is already there
 3. Build a flow by connecting crews on the **Flows** canvas
 4. Run it against your own data or use the pre-configured demo inputs
 
@@ -304,9 +304,9 @@ No Python setup, no backend access required.
 
 ## Iteration tips
 
-- **Re-run Tool 86 as many times as needed** — it's deterministic and fast (~30 seconds)
-- **LLM fallback** (`use_llm_fallback: true`) can handle complex SWITCH and cross-table patterns that regex rules miss — use it after exhausting config-based improvements
-- **Each fact table is independent** — if one fails validation, the others still deploy; fix and re-run that table alone
+- **Re-run Tool 86 as many times as needed**: it's deterministic and fast (~30 seconds)
+- **LLM fallback** (`use_llm_fallback: true`) can handle complex SWITCH and cross-table patterns that regex rules miss. Use it after exhausting config-based improvements
+- **Each fact table is independent**: if one fails validation, the others still deploy; fix and re-run that table alone
 - **Tool 89** (gap analysis) shows which config keys would unlock the most additional measure translations
 
 ## Example crews (JSON)

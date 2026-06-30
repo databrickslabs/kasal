@@ -6,11 +6,11 @@
 
 ## Why it exists
 
-Power BI semantic models don't just contain measures - they also define *where the data comes from* through M-Query expressions. These can be native SQL queries, Databricks catalog references, SQL Server connections, static tables, and more. When you migrate to Databricks, you need these source definitions recreated as SQL views in Unity Catalog. This tool automates that extraction and conversion.
+Power BI semantic models don't just contain measures; they also define *where the data comes from* through M-Query expressions. These can be native SQL queries, Databricks catalog references, SQL Server connections, static tables, and more. When you migrate to Databricks, you need these source definitions recreated as SQL views in Unity Catalog. This tool automates that extraction and conversion.
 
 ## What problem it solves
 
-- **Without this tool:** An SA has to manually open Power BI Desktop for each table, read the M-Query expression, translate it to SQL, and create the view - hours of repetitive work per model
+- **Without this tool:** An SA has to manually open Power BI Desktop for each table, read the M-Query expression, translate it to SQL, and create the view, which is hours of repetitive work per model
 - **With this tool:** The Admin Scanner API returns all M-Query expressions in one call; the tool converts them automatically
 
 ---
@@ -19,14 +19,18 @@ Power BI semantic models don't just contain measures - they also define *where t
 
 ```text
 Connect to PBI Admin Scanner API (PostWorkspaceInfo)
-    ↓
-Scan workspace metadata → extract all M-Query expressions per table
-    ↓
+  |
+  v
+Scan workspace metadata: extract all M-Query expressions per table
+  |
+  v
 Classify expression type: NativeQuery, DatabricksMultiCloud, Sql.Database, Table.FromRows, etc.
-    ↓
+  |
+  v
 Rule-based conversion for known types
 LLM-assisted conversion for complex/unknown expressions (optional)
-    ↓
+  |
+  v
 Emit CREATE VIEW statements for Unity Catalog
 ```
 
@@ -35,9 +39,9 @@ Emit CREATE VIEW statements for Unity Catalog
 ## Microsoft API reference
 
 Uses (3-step process):
-1. `POST /admin/workspaces/getInfo` - initiate scan
-2. `GET /admin/workspaces/scanStatus/{scanId}` - poll until ready
-3. `GET /admin/workspaces/scanResult/{scanId}` - retrieve results
+1. `POST /admin/workspaces/getInfo`: initiate scan
+2. `GET /admin/workspaces/scanStatus/{scanId}`: poll until ready
+3. `GET /admin/workspaces/scanResult/{scanId}`: retrieve results
 
 Docs: [Admin - WorkspaceInfo PostWorkspaceInfo](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-post-workspace-info)
 
@@ -46,7 +50,7 @@ Docs: [Admin - WorkspaceInfo PostWorkspaceInfo](https://learn.microsoft.com/en-u
 ## Authentication
 
 **Admin SP** (tenant-level), with Power BI Admin Portal settings enabled.
-This is the most complex auth setup - see [Authentication Setup](./01-authentication-setup.md) for the full step-by-step.
+This is the most complex auth setup. See [Authentication Setup](./01-authentication-setup.md) for the full step-by-step.
 
 ---
 
@@ -123,15 +127,15 @@ SELECT * FROM my_catalog.raw.dim_customer;
 ## In the UCMV pipeline
 
 Tool 74 is Phase 1 of the migration alongside Tool 73. Its output (`mquery_json`) feeds:
-- **Tool 86** (UC Metric View Generator) - source SQL for each fact table
-- **Tool 87** (Measure Allocator) - fact table identification
-- **Tool 89/90** (Config Generators) - auto-propose join keys
+- **Tool 86** (UC Metric View Generator): source SQL for each fact table
+- **Tool 87** (Measure Allocator): fact table identification
+- **Tool 89/90** (Config Generators): auto-propose join keys
 
 ---
 
 ## Notes
 
-- **Admin API is required** - this cannot be done with a non-admin SP
+- **Admin API is required:** this cannot be done with a non-admin SP
 - If the Admin Portal settings haven't propagated yet (wait 15 min), you will get `401 Unauthorized`
 - Very complex M-Query transformations (custom functions, nested let expressions) benefit from enabling LLM fallback (`use_llm: true`)
 

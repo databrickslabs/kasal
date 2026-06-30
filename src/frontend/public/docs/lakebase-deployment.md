@@ -2,9 +2,7 @@
 
 Configure Kasal to use managed Lakebase PostgreSQL so crews, agents, tasks, and run history persist across Databricks Apps restarts.
 
-By default, Kasal uses SQLite stored inside the Databricks Apps container. **SQLite is wiped on every restart or redeployment.** Lakebase provides managed PostgreSQL that lives outside the container — crews, agents, tasks, and run history all persist across restarts.
-
----
+By default, Kasal uses SQLite stored inside the Databricks Apps container. **SQLite is wiped on every restart or redeployment.** Lakebase provides managed PostgreSQL that lives outside the container, so crews, agents, tasks, and run history all persist across restarts.
 
 ## Before you begin
 
@@ -12,9 +10,7 @@ By default, Kasal uses SQLite stored inside the Databricks Apps container. **SQL
 - A Databricks workspace with Lakebase enabled
 - A Databricks PAT token (`dapi...`)
 
----
-
-## Step 1 — Provision a Lakebase instance
+## Step 1: Provision a Lakebase instance
 
 ```bash
 databricks lakebase create \
@@ -28,19 +24,15 @@ Wait until the instance is `AVAILABLE`:
 databricks lakebase get --name kasal-db
 ```
 
-Note the `read_write_dns` hostname from the output — you'll need it in Step 3.
+Note the `read_write_dns` hostname from the output; you'll need it in Step 3.
 
----
-
-## Step 2 — Create the kasal database
+## Step 2: Create the kasal database
 
 ```bash
 databricks psql kasal-db -- -c "CREATE DATABASE kasal;"
 ```
 
----
-
-## Step 3 — Store credentials in Databricks Secrets
+## Step 3: Store credentials in Databricks Secrets
 
 ```bash
 # Create a secret scope (skip if it already exists)
@@ -62,9 +54,7 @@ databricks secrets list-secrets kasal
 # Should show: lakebase_server, lakebase_pat
 ```
 
----
-
-## Step 4 — Configure src/app.yaml
+## Step 4: Configure src/app.yaml
 
 Uncomment the Lakebase sections and fill in your values:
 
@@ -104,16 +94,12 @@ apt_packages:
   - libpq-dev
 ```
 
----
-
-## Step 5 — Deploy
+## Step 5: Deploy
 
 ```bash
 python src/build.py   # build frontend static assets
 python src/deploy.py  # deploy to Databricks Apps
 ```
-
----
 
 ## Verify data is persisting
 
@@ -129,12 +115,10 @@ SELECT
 
 Data should survive app restarts and redeployments.
 
----
-
 ## Related
 
-- [Crew export and deployment](./crew-export-deployment.md) — deploy a crew as a Databricks App
-- [MLflow tracing in Kasal](./mlflow-tracing-setup.md) — persist execution traces
-- [Solution architecture guide](./ARCHITECTURE_GUIDE.md) — where persistence fits the platform
+- [Crew export and deployment](./crew-export-deployment.md): deploy a crew as a Databricks App
+- [MLflow tracing in Kasal](./mlflow-tracing-setup.md): persist execution traces
+- [Solution architecture guide](./ARCHITECTURE_GUIDE.md): where persistence fits the platform
 
 Back to the [documentation hub](./README.md).

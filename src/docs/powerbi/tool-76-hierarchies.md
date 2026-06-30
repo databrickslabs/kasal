@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Hierarchies (e.g. Country → Region → City, or Year → Quarter → Month) are a core Power BI UX feature that enables drill-down in reports. When migrating, these hierarchies need to be represented in Unity Catalog so downstream BI tools can reproduce the same drill-down behavior.
+Hierarchies (e.g. Country to Region to City, or Year to Quarter to Month) are a core Power BI UX feature that enables drill-down in reports. When migrating, these hierarchies need to be represented in Unity Catalog so downstream BI tools can reproduce the same drill-down behavior.
 
 ## What problem it solves
 
@@ -104,7 +104,7 @@ INSERT INTO my_catalog.dimensions._metadata_hierarchies VALUES
 
 ## Notes
 
-- Not in the standard UCMV pipeline (Tools 73→86) - run this separately if the customer needs drill-down hierarchies in UC
+- Not in the standard UCMV pipeline (Tools 73 to 86); run this separately if the customer needs drill-down hierarchies in UC
 - The `_metadata_hierarchies` table is useful for BI tools that can read hierarchy metadata programmatically
 - Hidden levels (used in PBI for internal calculations) are excluded by default
 

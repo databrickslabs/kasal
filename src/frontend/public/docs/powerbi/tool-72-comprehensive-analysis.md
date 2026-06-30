@@ -1,6 +1,6 @@
 # Tool 72 - Power BI comprehensive analysis
 
-**What it is:** An all-in-one tool that takes a natural language question, generates a DAX query from it, executes it live against your Power BI semantic model, and returns the answer - with automatic self-correction if the generated DAX fails.
+**What it is:** An all-in-one tool that takes a natural language question, generates a DAX query from it, executes it live against your Power BI semantic model, and returns the answer, with automatic self-correction if the generated DAX fails.
 
 ---
 
@@ -12,8 +12,8 @@ Business analysts want to ask "What were total sales by region last quarter?" an
 
 - **Non-technical users** can explore Power BI data with plain English
 - **SAs demoing Databricks** can answer live customer questions from their PBI model without writing DAX manually
-- **Measure validation** - test whether existing DAX logic returns what you expect
-- **DAX learning** - see how the LLM translates questions into correct DAX expressions
+- **Measure validation:** test whether existing DAX logic returns what you expect
+- **DAX learning:** see how the LLM translates questions into correct DAX expressions
 
 ---
 
@@ -21,17 +21,23 @@ Business analysts want to ask "What were total sales by region last quarter?" an
 
 ```text
 User question
-    ↓
+  |
+  v
 Extract model context (measures, tables, relationships from TMDL / DAX APIs)
-    ↓
+  |
+  v
 LLM generates DAX EVALUATE statement
-    ↓
+  |
+  v
 Validate: are all [measure] references real? (hallucination detection)
-    ↓
+  |
+  v
 Execute via Power BI Execute Queries API
-    ↓
-If failed → LLM reads error, fixes DAX → retry (up to 5x)
-    ↓
+  |
+  v
+If failed: LLM reads error, fixes DAX, retry (up to 5x)
+  |
+  v
 Return results + retry history + visual references (which reports use these measures)
 ```
 
@@ -132,8 +138,8 @@ ORDER BY [Total Sales] DESC
 
 ## Visual References
 Reports using these measures:
-- **Sales Dashboard** - Revenue Overview page
-- **Regional Performance** - All pages
+- **Sales Dashboard**: Revenue Overview page
+- **Regional Performance**: All pages
 ```
 
 ---
@@ -142,8 +148,8 @@ Reports using these measures:
 
 | Scenario | Tool |
 |----------|------|
-| Single natural language question | **Tool 72** (this tool - all-in-one) |
-| Complex multi-step analysis, want to cache model | Tools 79 → 81 → 80 (multi-step) |
+| Single natural language question | **Tool 72** (this tool, all-in-one) |
+| Complex multi-step analysis, want to cache model | Tools 79, 81, 80 (multi-step) |
 | You already have a working DAX query | Tool 82 |
 
 ---
@@ -151,7 +157,7 @@ Reports using these measures:
 ## Notes
 
 - Without LLM configured, falls back to keyword-based measure matching (less accurate)
-- Self-correction handles table name errors, syntax errors, and measure reference issues - but not authentication or timeout errors
+- Self-correction handles table name errors, syntax errors, and measure reference issues, but not authentication or timeout errors
 - Maximum 20 measures/tables sent to LLM context to avoid token limits on very large models
 - All retry attempts and the final query are included in the output for debugging
 

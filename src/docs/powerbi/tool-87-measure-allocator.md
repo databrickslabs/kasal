@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Tool 86 (UC Metric View Generator) organizes measures per fact table - one UC Metric View per fact table. To do this, it needs to know which measures belong to which fact table. When measures come from Tool 73 with a `proposed_allocation` field already populated, Tool 86 uses that directly. When they don't have allocations (raw output from the PBI API), Tool 87 fills that gap.
+Tool 86 (UC Metric View Generator) organizes measures per fact table, one UC Metric View per fact table. To do this, it needs to know which measures belong to which fact table. When measures come from Tool 73 with a `proposed_allocation` field already populated, Tool 86 uses that directly. When they don't have allocations (raw output from the PBI API), Tool 87 fills that gap.
 
 ## What problem it solves
 
@@ -20,15 +20,20 @@ Tool 86 (UC Metric View Generator) organizes measures per fact table - one UC Me
 
 ```text
 Input: measures_json (raw, no allocations) + mquery_json (fact table definitions)
-    ↓
+    |
+    v
 Parse mquery_json: identify fact tables (tables with SUM + GROUP BY in transpiled SQL)
-    ↓
+    |
+    v
 For each measure: scan DAX for Table[Column] references
-    ↓
+    |
+    v
 Match references against known fact tables
-    ↓
+    |
+    v
 Assign confidence: high (one fact), medium (multiple facts), low/none (no match)
-    ↓
+    |
+    v
 Return measures_json with proposed_allocation field added
 ```
 
@@ -46,12 +51,14 @@ Return measures_json with proposed_allocation field added
 ## Example crew position
 
 ```text
-Tool 73 (extract measures - raw, no allocations)
+Tool 73 (extract measures, raw, no allocations)
 Tool 74 (extract M-Query)
-    ↓
-Tool 87 (allocate measures to fact tables)   ← this tool
-    ↓
-Tool 86 (generate UC Metric Views - now measures have allocations)
+    |
+    v
+Tool 87 (allocate measures to fact tables)   <-- this tool
+    |
+    v
+Tool 86 (generate UC Metric Views, now measures have allocations)
 ```
 
 ---
@@ -97,8 +104,8 @@ Tool 86 (generate UC Metric Views - now measures have allocations)
 
 ## Notes
 
-- `confidence: none` measures (like display-only color/format measures) are expected - they will be skipped or flagged by Tool 86
-- `confidence: medium` measures (used across multiple fact tables) should be reviewed by the SA - assign them to the primary fact table in the config
+- `confidence: none` measures (like display-only color/format measures) are expected; they will be skipped or flagged by Tool 86
+- `confidence: medium` measures (used across multiple fact tables) should be reviewed by the SA, who assigns them to the primary fact table in the config
 - When Tool 73 output already includes `proposed_allocation` (from the PBI model's own table assignments), skip Tool 87
 
 ## See also
