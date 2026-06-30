@@ -37,6 +37,28 @@ describe('SlideDeck — empty content slides degrade gracefully', () => {
     expect(screen.getByText('A real bullet point')).toBeInTheDocument();
   });
 
+  it('themes Markdown body prose from the deck theme so bullets are not dark-on-dark', () => {
+    // Regression: a Markdown bullet list inside a slide kept Tailwind's default
+    // near-black prose colors, vanishing on a dark deck stage. The prose wrapper
+    // must drive `--tw-prose-*` from the deck theme (default Midnight → light fg).
+    const mdDeck: Surface = {
+      surfaceKind: 'presentation',
+      root: 'deck',
+      components: [
+        { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+        { id: 's1', component: 'Slide', variant: 'content', kicker: 'AGENDA', title: "What We'll Cover", children: ['m1'] },
+        { id: 'm1', component: 'Markdown', content: '- Why the Swiss Data & AI scene matters\n- The 2026 event landscape' },
+      ],
+    };
+    const { container } = render(<A2UIRenderer payload={mdDeck} />);
+    const prose = container.querySelector('.prose') as HTMLElement;
+    expect(prose).toBeTruthy();
+    // Midnight theme body color (#e6ecff) drives prose body text — not the
+    // default dark gray. (style.getPropertyValue reads the CSS custom property.)
+    expect(prose.style.getPropertyValue('--tw-prose-body')).toBe('#e6ecff');
+    expect(screen.getByText('Why the Swiss Data & AI scene matters')).toBeInTheDocument();
+  });
+
   it('treats a content slide with only BLANK children as title-only (section layout)', () => {
     // children exist but render to nothing (empty Text + whitespace Markdown) —
     // the naive children.length check would miss this; nodeHasContent catches it.
