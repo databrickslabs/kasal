@@ -171,6 +171,43 @@ async def stream_generation_updates(
     )
 
 
+@router.get("/generations/{generation_id}/result")
+async def get_generation_result(
+    generation_id: str,
+    group_context: GroupContextDep,
+):
+    """
+    Non-streaming fallback to recover a generation's terminal outcome.
+
+    The chat fast path completes in well under a second and the Databricks
+    Apps proxy drops the first SSE connect of a page often enough that the
+    client can miss the ``generation_complete`` event — which is the sole
+    carrier of the ``execution_id``. Without it the run is orphaned and the
+    chat appears dead until the user submits again. The frontend polls this
+    endpoint when the stream fails or stalls; it reads the same replay buffer
+    the stream replays from, so it returns the buffered terminal event over
+    plain HTTP.
+
+    Returns:
+        ``{"status": "completed"|"failed", ...event data...}`` once the
+        terminal event is buffered, or ``{"status": "pending"}`` while the
+        generation is still in flight / not yet known.
+    """
+    event = sse_manager.get_terminal_event(generation_id)
+    if event is None:
+        return {"status": "pending", "generation_id": generation_id}
+
+    payload = dict(event.data) if isinstance(event.data, dict) else {"data": event.data}
+    payload.setdefault("generation_id", generation_id)
+    # Normalize a top-level status so the client can branch without inspecting
+    # the SSE event name.
+    if event.event == "generation_failed":
+        payload.setdefault("status", "failed")
+    else:
+        payload.setdefault("status", "completed")
+    return payload
+
+
 @router.get("/stats")
 async def get_sse_stats():
     """

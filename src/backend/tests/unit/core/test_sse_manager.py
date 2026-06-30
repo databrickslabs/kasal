@@ -436,6 +436,80 @@ class TestReplayBuffer:
         assert len(manager._global_replay) == 1
 
 
+class TestGetTerminalEvent:
+    """Test cases for get_terminal_event (non-streaming recovery fallback).
+
+    The chat fast path finishes in <1s and the Databricks Apps proxy drops the
+    first SSE connect often enough that the client can miss generation_complete
+    (the sole carrier of execution_id). get_terminal_event lets the client
+    recover that buffered outcome over plain HTTP.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_buffer(self):
+        """No buffered events for the generation → still in flight / unknown."""
+        manager = SSEConnectionManager()
+        assert manager.get_terminal_event("gen-unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_while_in_flight(self):
+        """Only progress events buffered → no terminal event yet."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("gen-1")
+        await manager.broadcast_to_job("gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready"))
+        await manager.broadcast_to_job("gen-1", SSEEvent(data={"id": "a"}, event="agent_detail"))
+
+        assert manager.get_terminal_event("gen-1") is None
+
+    @pytest.mark.asyncio
+    async def test_returns_generation_complete_with_execution_id(self):
+        """The buffered generation_complete (carrying execution_id) is recoverable."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("gen-1")
+        await manager.broadcast_to_job("gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready"))
+        complete = SSEEvent(
+            data={"status": "completed", "execution_id": "exec-123", "run_name": "Chat"},
+            event="generation_complete",
+        )
+        await manager.broadcast_to_job("gen-1", complete)
+
+        terminal = manager.get_terminal_event("gen-1")
+        assert terminal is complete
+        assert terminal.data["execution_id"] == "exec-123"
+
+    @pytest.mark.asyncio
+    async def test_returns_generation_failed(self):
+        """A buffered generation_failed event is recoverable."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("gen-1")
+        failed = SSEEvent(data={"error": "boom"}, event="generation_failed")
+        await manager.broadcast_to_job("gen-1", failed)
+
+        assert manager.get_terminal_event("gen-1") is failed
+
+    @pytest.mark.asyncio
+    async def test_detects_terminal_by_status_field(self):
+        """Falls back to the data.status field when event name is not set."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("gen-1")
+        evt = SSEEvent(data={"status": "completed", "execution_id": "exec-9"})
+        await manager.broadcast_to_job("gen-1", evt)
+
+        assert manager.get_terminal_event("gen-1") is evt
+
+    @pytest.mark.asyncio
+    async def test_returns_most_recent_terminal_event(self):
+        """When multiple terminal events exist, the latest one wins."""
+        manager = SSEConnectionManager()
+        manager.create_event_queue("gen-1")
+        first = SSEEvent(data={"status": "completed", "execution_id": "exec-1"}, event="generation_complete")
+        second = SSEEvent(data={"status": "completed", "execution_id": "exec-2"}, event="generation_complete")
+        await manager.broadcast_to_job("gen-1", first)
+        await manager.broadcast_to_job("gen-1", second)
+
+        assert manager.get_terminal_event("gen-1") is second
+
+
 class TestEventStreamGenerator:
     """Test cases for event_stream_generator function."""
 

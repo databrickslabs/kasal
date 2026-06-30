@@ -13,6 +13,7 @@ _m = importlib.import_module("src.api.sse_router")
 stream_execution_updates = _m.stream_execution_updates
 stream_all_executions = _m.stream_all_executions
 stream_generation_updates = _m.stream_generation_updates
+get_generation_result = _m.get_generation_result
 get_sse_stats = _m.get_sse_stats
 sse_health = _m.sse_health
 _parse_last_event_id = _m._parse_last_event_id
@@ -173,6 +174,64 @@ async def test_stream_generation_updates_returns_streaming_response():
             request=req, generation_id="gen-1", group_context=ctx
         )
     assert isinstance(out, StreamingResponse)
+
+
+# ── get_generation_result (non-streaming recovery fallback) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_get_generation_result_pending_when_no_terminal_event():
+    """While the generation is in flight, the endpoint reports pending."""
+    ctx = Ctx()
+    with patch.object(_m.sse_manager, "get_terminal_event", return_value=None):
+        out = await get_generation_result(generation_id="gen-1", group_context=ctx)
+    assert out["status"] == "pending"
+    assert out["generation_id"] == "gen-1"
+
+
+@pytest.mark.asyncio
+async def test_get_generation_result_returns_completed_with_execution_id():
+    """A buffered generation_complete is surfaced with its execution_id intact.
+
+    This is the event the first-prompt SSE drop loses; recovering it here is
+    what lets the client fetch and render the run instead of stranding it.
+    """
+    from src.core.sse_manager import SSEEvent
+
+    ctx = Ctx()
+    event = SSEEvent(
+        data={"status": "completed", "execution_id": "exec-123", "run_name": "Chat"},
+        event="generation_complete",
+    )
+    with patch.object(_m.sse_manager, "get_terminal_event", return_value=event):
+        out = await get_generation_result(generation_id="gen-1", group_context=ctx)
+    assert out["status"] == "completed"
+    assert out["execution_id"] == "exec-123"
+    assert out["generation_id"] == "gen-1"
+
+
+@pytest.mark.asyncio
+async def test_get_generation_result_normalizes_failed():
+    """A generation_failed event is normalized to status=failed."""
+    from src.core.sse_manager import SSEEvent
+
+    ctx = Ctx()
+    event = SSEEvent(data={"error": "boom"}, event="generation_failed")
+    with patch.object(_m.sse_manager, "get_terminal_event", return_value=event):
+        out = await get_generation_result(generation_id="gen-1", group_context=ctx)
+    assert out["status"] == "failed"
+    assert out["error"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_get_generation_result_preserves_existing_status():
+    """An event that already carries status keeps it (no clobber)."""
+    from src.core.sse_manager import SSEEvent
+
+    ctx = Ctx()
+    event = SSEEvent(data={"status": "completed", "execution_id": "e1"}, event=None)
+    with patch.object(_m.sse_manager, "get_terminal_event", return_value=event):
+        out = await get_generation_result(generation_id="gen-1", group_context=ctx)
+    assert out["status"] == "completed"
 
 
 # ── get_sse_stats ──────────────────────────────────────────────────────────────

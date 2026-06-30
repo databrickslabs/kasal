@@ -267,6 +267,36 @@ class SSEConnectionManager:
         )
         return [evt for eid, evt in buf if eid > last_event_id]
 
+    def get_terminal_event(self, job_id: str) -> Optional[SSEEvent]:
+        """
+        Return the buffered terminal event for *job_id*, if one exists.
+
+        A generation finishes in well under a second on the chat fast path,
+        broadcasting ``generation_complete`` (which carries the ``execution_id``)
+        to the replay buffer before — or instead of — any subscriber arriving.
+        The Databricks Apps proxy drops the first SSE connect of a page often
+        enough (see ES ticket) that the client can miss this terminal event
+        entirely, orphaning a run that actually completed. This lets a client
+        recover the outcome over plain HTTP without an open stream.
+
+        Returns the most recent ``generation_complete`` / ``generation_failed``
+        event (or any event whose ``status`` is completed/failed/stopped), or
+        ``None`` if the generation is still in flight / unknown.
+        """
+        buf = self._replay_buffer.get(job_id)
+        if not buf:
+            return None
+        for _eid, evt in reversed(buf):
+            if evt.event in ("generation_complete", "generation_failed"):
+                return evt
+            if isinstance(evt.data, dict) and evt.data.get("status") in (
+                "completed",
+                "failed",
+                "stopped",
+            ):
+                return evt
+        return None
+
 
 # Global SSE manager instance
 sse_manager = SSEConnectionManager()
