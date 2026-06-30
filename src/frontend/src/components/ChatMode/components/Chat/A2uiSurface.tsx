@@ -87,6 +87,29 @@ export const A2uiSurface: React.FC<{
   const tokenStyle = tokenPalette
     ? (themeToTokens(tokenPalette) as React.CSSProperties)
     : undefined;
+  // Paint the surface's OWN themed background + foreground so its content reads
+  // correctly instead of compositing over the (possibly opposite-theme) chat page.
+  // Two theming systems → two sources:
+  //   • deck-themed kinds (presentation/quiz/flashcards/mindmap) use DeckThemeContext
+  //     colors (theme.fg, theme.panel, …). Their cards/buttons assume a themed
+  //     backdrop, so without painting the deck bg here a light foreground renders
+  //     invisibly on the white chat page (e.g. a flashcard's "Still learning" button
+  //     or its answer side). The mindmap's own canvas is the same solid bg, so the
+  //     wrapper matches it seamlessly.
+  //   • token-themed kinds (dashboard/document) use the shadcn `--a2-*` tokens.
+  // This mirrors the exported app, which wraps every surface in a solid themed Card.
+  // Presentation is intentionally excluded: its slide stage is already themed and
+  // its body text is fixed via the `.a2-slide` CSS (color: inherit), so painting
+  // the wrapper would only re-tint the area around the slide + its Prev/Next nav.
+  const deckThemed =
+    surface.surfaceKind === 'quiz' ||
+    surface.surfaceKind === 'flashcards' ||
+    surface.surfaceKind === 'mindmap';
+  const surfaceBgStyle: React.CSSProperties = deckThemed
+    ? { backgroundColor: deckTheme.bg, color: deckTheme.fg }
+    : tokenStyle && (surface.surfaceKind === 'dashboard' || surface.surfaceKind === 'document')
+      ? { backgroundColor: 'hsl(var(--a2-background))', color: 'hsl(var(--a2-foreground))' }
+      : {};
   // Apply a preset Look instantly: stamp the picked palette onto the surface
   // (the renderer reads surface.theme as the override) and hand the restyled
   // surface back so the host persists it. Mirrors the preview pane's applyStyle.
@@ -110,10 +133,14 @@ export const A2uiSurface: React.FC<{
   return (
     <div
       ref={containerRef}
+      data-surface-kind={surface.surfaceKind}
       className={className ? `kasal-a2ui ${className}` : 'kasal-a2ui'}
       style={{
         ...tokenStyle,
         position: 'relative',
+        // The surface's own themed background + foreground (see `surfaceBgStyle`),
+        // so its content never composites over the chat page and reads dark-on-dark.
+        ...surfaceBgStyle,
         // fit: become a flex column that fills, so the deck's height chain reaches
         // the SlideDeck (which letterboxes the 16:9 stage to the available height).
         ...(fit ? { display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 } : {}),

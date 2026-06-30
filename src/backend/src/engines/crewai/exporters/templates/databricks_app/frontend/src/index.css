@@ -113,7 +113,34 @@
 .kasal-a2ui:-webkit-full-screen {
   overflow: auto;
   background-color: var(--color-background);
-  padding: 32px;
+  padding: 12px;
+}
+/* Non-deck surfaces used to cling to the top-left; make them fill the width and
+   center vertically. Decks are EXCLUDED: their 16:9 stage already scales to fill,
+   so a width cap / centering would shrink the slide. Mirrors chat.css. */
+.kasal-a2ui:not([data-surface-kind="presentation"]):fullscreen,
+.kasal-a2ui:not([data-surface-kind="presentation"]):-webkit-full-screen {
+  display: flex;
+  flex-direction: column;
+}
+/* Card-like surfaces read best at a bounded, centered width — not stretched
+   edge-to-edge. The mindmap is excluded (it fills via its canvas-height rule). */
+.kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):fullscreen > *,
+.kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):-webkit-full-screen > * {
+  margin: auto;
+  width: 100%;
+  max-width: 1200px;
+}
+/* Top clearance so the surface's floating controls (top-right) sit ABOVE the
+   mindmap canvas instead of grazing its corner. */
+.a2-mindmap-canvas {
+  margin-top: 0.75rem;
+}
+/* The pan/zoom mindmap is a fixed 64vh inline; in fullscreen let it fill the
+   viewport (minus the page padding + the control-band clearance). */
+.kasal-a2ui:fullscreen .a2-mindmap-canvas,
+.kasal-a2ui:-webkit-full-screen .a2-mindmap-canvas {
+  height: calc(100vh - 48px) !important;
 }
 
 /* Slide body inherits the deck theme's text color so prose stays readable on a

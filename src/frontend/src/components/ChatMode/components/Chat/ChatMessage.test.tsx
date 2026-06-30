@@ -759,7 +759,7 @@ describe('ChatMessage — a2ui preview-pane note', () => {
   it('the inline expand control opens the preview pane for this message', () => {
     const spy = vi.spyOn(useExecutionStore.getState(), 'openPreviewPane');
     render(<ChatMessage message={a2uiMsg('m-expand')} />);
-    fireEvent.click(screen.getByLabelText('Open in side panel'));
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(spy).toHaveBeenCalledWith(expect.anything(), 'm-expand');
     spy.mockRestore();
   });

@@ -29,6 +29,31 @@
   --shadow-input: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);
   --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.14);
   --shadow-popover: 0 8px 28px rgba(16, 24, 40, 0.12);
+  /* A2UI design tokens — the SAME `--a2-*` contract the exported app defines in
+     its index.css. tailwind.config.js maps the shadcn utilities (bg-card,
+     text-card-foreground, bg-secondary, …) to these, so inline surfaces
+     (dashboards/cards/tables) have proper contrast even with NO workspace palette.
+     A2uiSurface overrides them per-surface via themeToTokens when a palette is set. */
+  --a2-background: 0 0% 100%;
+  --a2-foreground: 222.2 47.4% 11.2%;
+  --a2-card: 0 0% 100%;
+  --a2-card-foreground: 222.2 47.4% 11.2%;
+  --a2-popover: 0 0% 100%;
+  --a2-popover-foreground: 222.2 47.4% 11.2%;
+  --a2-primary: 221.2 83.2% 53.3%;
+  --a2-primary-foreground: 210 40% 98%;
+  --a2-secondary: 210 40% 96.1%;
+  --a2-secondary-foreground: 222.2 47.4% 11.2%;
+  --a2-muted: 210 40% 96.1%;
+  --a2-muted-foreground: 215.4 16.3% 46.9%;
+  --a2-accent: 210 40% 96.1%;
+  --a2-accent-foreground: 222.2 47.4% 11.2%;
+  --a2-destructive: 0 84.2% 60.2%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 214.3 31.8% 91.4%;
+  --a2-input: 214.3 31.8% 91.4%;
+  --a2-ring: 221.2 83.2% 53.3%;
+  --a2-radius: 0.5rem;
 }
 
 #kasal-chat-root[data-theme="dark"] {
@@ -51,6 +76,27 @@
   --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
   --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.22);
   --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.45);
+  /* A2UI design tokens — dark-theme channels (mirror the exported app's `.dark`). */
+  --a2-background: 222.2 84% 4.9%;
+  --a2-foreground: 210 40% 98%;
+  --a2-card: 222.2 84% 4.9%;
+  --a2-card-foreground: 210 40% 98%;
+  --a2-popover: 222.2 84% 4.9%;
+  --a2-popover-foreground: 210 40% 98%;
+  --a2-primary: 217.2 91.2% 59.8%;
+  --a2-primary-foreground: 222.2 47.4% 11.2%;
+  --a2-secondary: 217.2 32.6% 17.5%;
+  --a2-secondary-foreground: 210 40% 98%;
+  --a2-muted: 217.2 32.6% 17.5%;
+  --a2-muted-foreground: 215 20.2% 65.1%;
+  --a2-accent: 217.2 32.6% 17.5%;
+  --a2-accent-foreground: 210 40% 98%;
+  --a2-destructive: 0 62.8% 30.6%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 217.2 32.6% 17.5%;
+  --a2-input: 217.2 32.6% 17.5%;
+  --a2-ring: 224.3 76.3% 48%;
+  --a2-radius: 0.5rem;
 }
 
 #kasal-chat-root {
@@ -210,8 +256,55 @@
 #kasal-chat-root .kasal-a2ui:fullscreen,
 #kasal-chat-root .kasal-a2ui:-webkit-full-screen {
   overflow: auto;
-  background: var(--bg-primary);
-  padding: 32px;
+  /* Use the surface's own palette background (set on .kasal-a2ui), falling back
+     to the chat page when no palette token is present. A thin page margin only. */
+  background: hsl(var(--a2-background, var(--bg-primary)));
+  padding: 12px;
+}
+/* Non-deck surfaces used to cling to the top-left; make them fill the width and
+   center vertically so they use the whole screen. Decks are EXCLUDED: their 16:9
+   stage already scales to fill, so a width cap / centering would shrink the slide
+   (presentations must stay full-bleed). */
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):fullscreen,
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):-webkit-full-screen {
+  display: flex;
+  flex-direction: column;
+}
+/* Card-like surfaces (quiz, flashcards, dashboard, document, map) read best at a
+   bounded width, centered — NOT stretched edge-to-edge. The mindmap is excluded
+   too: it fills the viewport via its canvas-height rule below. */
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):fullscreen > *,
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):-webkit-full-screen > * {
+  margin: auto;
+  width: 100%;
+  max-width: 1200px;
+}
+/* Top clearance so the surface's floating controls (palette / preview / full
+   screen, top-right) sit ABOVE the mindmap canvas instead of grazing its corner
+   (the canvas reaches the control band, unlike padded card surfaces). */
+#kasal-chat-root .a2-mindmap-canvas {
+  margin-top: 0.75rem;
+}
+/* The pan/zoom mindmap is a fixed 64vh inline; in fullscreen let it fill the
+   viewport (minus the page padding + the control-band clearance) instead of
+   floating small at the top. `!important` beats the inline height; viewport units
+   sidestep the height chain. */
+#kasal-chat-root .kasal-a2ui:fullscreen .a2-mindmap-canvas,
+#kasal-chat-root .kasal-a2ui:-webkit-full-screen .a2-mindmap-canvas {
+  height: calc(100vh - 48px) !important;
+}
+
+/* Slide body inherits the deck theme's text color so prose/lists stay readable on
+   a dark slide (mirrors the exported app's index.css — the ONE source of truth for
+   slide text contrast). Inline-styled elements (stat numbers, titles, kickers)
+   keep their own explicit colors. Without this, Markdown prose + list text fall
+   back to their default near-black color and vanish on a dark stage. */
+#kasal-chat-root .a2-slide :where(p, li, ul, ol, h1, h2, h3, h4, h5, h6, strong, em, blockquote, code, td, th, a) {
+  color: inherit;
+}
+#kasal-chat-root .a2-slide .prose,
+#kasal-chat-root .a2-slide .prose :where(p, li, a, strong, em, blockquote, code, h1, h2, h3, h4, h5, h6, th, td) {
+  color: inherit !important;
 }
 
 /* Scrollbar */

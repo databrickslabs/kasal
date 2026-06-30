@@ -183,7 +183,7 @@ function SurfaceShell({
     else void el.requestFullscreen?.().catch(() => {})
   }
   return (
-    <div ref={frameRef} className="kasal-a2ui mt-3" style={tokenStyle}>
+    <div ref={frameRef} data-surface-kind={kind} className="kasal-a2ui mt-3" style={tokenStyle}>
       <Card className="overflow-hidden">
         <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
           {controls?.(contentRef)}
@@ -299,6 +299,12 @@ function RichSurface({ surface }: { surface: Surface }) {
   if (kind === 'presentation') return <PresentationSurface surface={surface} />
   if (kind === 'quiz') return <QuizSurface surface={surface} />
   const png = kind === 'dashboard' || kind === 'mindmap' || kind === 'map'
+  // Provide the kind's palette via DeckThemeContext so theme-aware visual surfaces
+  // (the mindmap canvas + nodes, the map legend) follow the workspace colors —
+  // parity with Kasal chat. (Dashboards read --a2-* tokens from SurfaceShell, so
+  // the context is a harmless no-op there.)
+  const { themes, defaultId } = themesFor(kind)
+  const theme = resolveTheme(themes, defaultId)
   return (
     <SurfaceShell
       kind={kind}
@@ -317,7 +323,9 @@ function RichSurface({ surface }: { surface: Surface }) {
           : undefined
       }
     >
-      <A2UIRenderer payload={surface} />
+      <DeckThemeContext.Provider value={theme}>
+        <A2UIRenderer payload={surface} />
+      </DeckThemeContext.Provider>
     </SurfaceShell>
   )
 }
