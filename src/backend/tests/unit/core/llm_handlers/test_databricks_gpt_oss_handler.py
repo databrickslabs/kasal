@@ -167,3 +167,70 @@ class TestPlaceholderResponseRetry:
         # Terminal behavior matches the empty-response path (empty string),
         # not a placeholder masquerading as an answer.
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Structured-output coercion (_coerce_to_response_model)
+# ---------------------------------------------------------------------------
+#
+# CrewAI's long-term-memory consolidation / save-analysis pass response_model and
+# then do `isinstance(resp, Model) or Model.model_validate(resp)`. litellm returns
+# structured output as a JSON *string*, so model_validate(<str>) raised and CrewAI
+# fell back ("Consolidation analysis failed, defaulting to insert"). The wrapper
+# now parses the string into the model so the plan is actually used.
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class _Plan(BaseModel):
+    keep: bool
+    note: str = ""
+
+
+class TestCoerceToResponseModel:
+    def test_parses_json_string_into_response_model(self):
+        out = DatabricksRetryLLM._coerce_to_response_model(
+            '{"keep": true, "note": "hi"}', {"response_model": _Plan}
+        )
+        assert isinstance(out, _Plan)
+        assert out.keep is True and out.note == "hi"
+
+    def test_strips_markdown_json_fence(self):
+        fenced = "```json\n{\"keep\": false}\n```"
+        out = DatabricksRetryLLM._coerce_to_response_model(fenced, {"response_model": _Plan})
+        assert isinstance(out, _Plan)
+        assert out.keep is False
+
+    def test_no_response_model_returns_result_unchanged(self):
+        out = DatabricksRetryLLM._coerce_to_response_model('{"keep": true}', {})
+        assert out == '{"keep": true}'
+
+    def test_non_string_result_returned_unchanged(self):
+        plan = _Plan(keep=True)
+        out = DatabricksRetryLLM._coerce_to_response_model(plan, {"response_model": _Plan})
+        assert out is plan
+
+    def test_invalid_json_falls_back_to_original_string(self):
+        # Not valid for the model → return the original string so the caller's
+        # own fallback still applies (behaviour identical to before the fix).
+        bad = "not json at all"
+        out = DatabricksRetryLLM._coerce_to_response_model(bad, {"response_model": _Plan})
+        assert out == bad
+
+
+class TestDoesNotClaimNativeStructuredOutput:
+    """DatabricksRetryLLM must NOT report native structured output: enforcing
+    output_pydantic on the litellm path routes through instructor/response_model,
+    which suppresses the ReAct tool loop (Claude crews stopped calling their MCP
+    tools). Databricks chat models therefore keep the output_json downgrade so
+    tool-calling stays intact; only the codex Responses-API handler enforces."""
+
+    def _make(self, model: str) -> DatabricksRetryLLM:
+        with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
+            return DatabricksRetryLLM(model=model)
+
+    def test_attribute_absent(self):
+        # The converter probes via getattr(...); the attribute must be absent so
+        # the model is downgraded to output_json (tool loop preserved).
+        handler = self._make("databricks/databricks-claude-opus-4-8")
+        assert not hasattr(handler, "supports_native_structured_output")

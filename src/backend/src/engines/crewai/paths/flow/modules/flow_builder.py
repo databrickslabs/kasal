@@ -39,6 +39,92 @@ from src.engines.crewai.paths.flow.exceptions import FlowPausedForApprovalExcept
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
+
+def coerce_scalar_value(val):
+    """Coerce a string scalar to its natural type for reliable router comparisons.
+
+    Booleans first: a crew may return ``has_results: true`` (JSON bool → Python
+    True) on one run and ``"true"``/``"True"`` (string) on another, so a router
+    condition like ``has_results == True`` would silently be False for the string
+    form. Map "true"/"false" (case-insensitive) to Python bool; numeric strings to
+    int/float; everything else is returned unchanged.
+    """
+    if isinstance(val, str):
+        low = val.strip().lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        try:
+            return int(val)
+        except ValueError:
+            pass
+        try:
+            return float(val)
+        except ValueError:
+            pass
+    return val
+
+
+def pick_legacy_route(condition_value, route_names):
+    """Select a route by value when a router has no condition expression.
+
+    Coerces ``condition_value`` first (so a crew that emitted the field as
+    ``"true"``/``"True"`` routes identically to a JSON bool), then matches:
+    exact route-name equality, then bool→named-route (success/true, failed/
+    false/failure). Falls back to the first route. Pure + unit-testable.
+    """
+    cv = coerce_scalar_value(condition_value)
+    names = list(route_names or [])
+    for route_name in names:
+        if cv == route_name:
+            return route_name
+        if cv is True and route_name in ('success', 'true'):
+            return route_name
+        if cv is False and route_name in ('failed', 'false', 'failure'):
+            return route_name
+    return names[0] if names else 'default'
+
+
+def extract_embedded_json(text):
+    """Extract a JSON object/array embedded in prose.
+
+    Models on the soft output_json path commonly wrap their structured answer in
+    a ```json ... ``` block surrounded by prose ("Based on my research… ```json
+    {…} ``` ## Summary …"). The router's direct-JSON check requires the whole
+    string to be JSON, so it misses these and routing silently stops. This pulls
+    the JSON out: first a ```json/``` fenced block, then the first balanced
+    ``{...}`` object. Returns the parsed value, or None.
+    """
+    if not isinstance(text, str):
+        return None
+    import json as _json
+    import re as _re
+
+    # 1) Fenced code block (```json ... ``` or ``` ... ```).
+    for m in _re.finditer(r"```(?:json)?\s*(.*?)```", text, _re.DOTALL):
+        try:
+            return _json.loads(m.group(1).strip())
+        except Exception:
+            continue
+
+    # 2) First balanced {...} object (brace counting; json.loads validates).
+    start = text.find('{')
+    while start != -1:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return _json.loads(text[start:i + 1])
+                    except Exception:
+                        break
+        start = text.find('{', start + 1)
+    return None
+
 # Bare names that user-authored flow router/state expressions may call. These
 # mirror the safe numeric/string helpers injected into the evaluation context;
 # everything else is rejected by safe_eval (no dunder/introspection access).
@@ -893,21 +979,10 @@ class FlowBuilder:
                         import json
                         eval_context = {}
 
-                        # Helper function to convert string values to appropriate types
+                        # Convert string scalars (bool/int/float) so router conditions
+                        # compare reliably — see module-level coerce_scalar_value.
                         def auto_convert_value(val):
-                            """Convert string numeric values to int/float."""
-                            if isinstance(val, str):
-                                # Try int first
-                                try:
-                                    return int(val)
-                                except ValueError:
-                                    pass
-                                # Try float
-                                try:
-                                    return float(val)
-                                except ValueError:
-                                    pass
-                            return val
+                            return coerce_scalar_value(val)
 
                         # Helper function to convert all string numerics in a dict
                         def auto_convert_dict(d):
@@ -1045,9 +1120,16 @@ class FlowBuilder:
                                         except (json.JSONDecodeError, Exception) as e:
                                             logger.debug(f"Could not parse state['{key}'] as JSON: {e}")
                                             pass  # Not JSON, leave as-is
+                                    else:
+                                        # Prose-wrapped JSON (```json ... ``` inside a summary) —
+                                        # extract the embedded object so router fields resolve.
+                                        embedded = extract_embedded_json(value)
+                                        if isinstance(embedded, (dict, list)):
+                                            merge_parsed_json(embedded, f"state['{key}'] (embedded json)")
 
-                        # Add kwargs
-                        eval_context.update(kwargs)
+                        # Add kwargs (coerce string scalars so e.g. has_results
+                        # passed as a bare "true"/"True" kwarg compares correctly).
+                        eval_context.update({k: coerce_scalar_value(v) for k, v in kwargs.items()})
                         return eval_context
 
                     # If we have per-route conditions (routeConditions), evaluate each route's condition
@@ -1131,24 +1213,13 @@ class FlowBuilder:
                             elif isinstance(result, dict) and router_condition_field in result:
                                 condition_value = result.get(router_condition_field)
 
-                        # Determine which route to take
-                        for route_name in router_routes.keys():
-                            # Simple matching: if condition_value matches route_name, take that route
-                            if condition_value == route_name:
-                                logger.info(f"Router {router_method_name} taking route: {route_name}")
-                                return route_name
-                            # Boolean routing
-                            if condition_value is True and route_name in ['success', 'true']:
-                                logger.info(f"Router {router_method_name} taking success route")
-                                return route_name
-                            if condition_value is False and route_name in ['failed', 'false', 'failure']:
-                                logger.info(f"Router {router_method_name} taking failure route")
-                                return route_name
-
-                        # Default to first route if no match
-                        default_route = list(router_routes.keys())[0] if router_routes else "default"
-                        logger.info(f"Router {router_method_name} taking default route: {default_route}")
-                        return default_route
+                        # Legacy value matching. Coercion ("true"/"True" → bool) and
+                        # bool routing live in the shared pick_legacy_route helper so
+                        # this branch is unit-testable and no longer silently fails on
+                        # string-form booleans.
+                        chosen = pick_legacy_route(condition_value, list(router_routes.keys()))
+                        logger.info(f"Router {router_method_name} taking route (legacy match): {chosen}")
+                        return chosen
 
                 route_method.__name__ = router_method_name
                 route_method.__qualname__ = router_method_name

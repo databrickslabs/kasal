@@ -266,6 +266,37 @@ describe('processTraceEvent', () => {
     const result = processTraceEvent(trace);
     expect(result).toBeNull();
   });
+
+  // Light-agent (chat) tool results are emitted as `<tool>_run` and the final
+  // answer as `response_run` (the crew/OTel path uses tool_usage+operation).
+  // processTraceEvent maps these to clickable result rows so their output shows.
+  it('maps a <tool>_run event to a clickable tool_result with "(output)"', () => {
+    // Real light-agent _run traces carry tool_name in trace_metadata (and output);
+    // extractToolName reads trace_metadata/extra_data.
+    const trace = makeTrace({
+      event_type: 'databrickssqlexecutesql_run',
+      trace_metadata: { tool_name: 'databricks_sql_execute_sql', agent_role: 'Researcher' },
+      output: { tool_name: 'databricks_sql_execute_sql', content: 'rows...' },
+    });
+    const result = processTraceEvent(trace);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('tool_result');
+    expect(result!.description).toBe('databricks_sql_execute_sql (output)');
+    // tool_result is clickable when there's output → the result is viewable.
+    expect(isEventClickable(result!.type, !!trace.output)).toBe(true);
+  });
+
+  it('maps response_run to a clickable "Final Response" (llm_response)', () => {
+    const trace = makeTrace({
+      event_type: 'response_run',
+      output: { tool_name: 'Response', content: 'the answer' },
+    });
+    const result = processTraceEvent(trace);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe('llm_response');
+    expect(result!.description).toBe('Final Response');
+    expect(isEventClickable(result!.type, !!trace.output)).toBe(true);
+  });
 });
 
 // ============================================================================

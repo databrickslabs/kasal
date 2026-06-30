@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowUp, Check, ChevronDown, Download, Moon, MoreVertical, PanelLeft, PanelLeftClose, Palette, Pencil, Plus, Sparkles, Square, Sun, Trash2 } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Download, Maximize2, Moon, MoreVertical, PanelLeft, PanelLeftClose, Palette, Pencil, Plus, Sparkles, Square, Sun, Trash2 } from 'lucide-react'
 import { sendMessage, fetchProgress, fetchA2ui, cancelTurn } from './api'
 import type { Surface } from './a2ui/types'
 import { A2UIRenderer } from './a2ui/A2UIRenderer'
@@ -23,6 +23,7 @@ import {
   DEFAULT_DECK_THEME_ID,
   DeckThemeContext,
   themeToDeck,
+  themeToTokens,
 } from '@/a2ui/lib/deckThemes'
 // Aliased: `Palette` is also the lucide-react icon imported above.
 import type { DeckTheme, Palette as ThemePalette } from '@/a2ui/lib/deckThemes'
@@ -45,7 +46,18 @@ interface Session {
 }
 
 // Surface kinds that render as a rich A2UI surface in addition to the text bubble.
-const RICH = new Set(['document', 'presentation', 'dashboard', 'mindmap', 'quiz'])
+// Keep in sync with the shared renderer's surface kinds (src/shared/a2ui — live
+// chat's A2uiSurface). A kind the composer can emit but that's missing here is
+// silently dropped at render time, so new kinds (flashcards, map, …) must be added.
+const RICH = new Set([
+  'document',
+  'presentation',
+  'dashboard',
+  'mindmap',
+  'quiz',
+  'flashcards',
+  'map',
+])
 const STORAGE_KEY = 'kasal.sessions.v1'
 // The quiz keeps its own theme choice (independent of the deck's), using the same
 // palette set as presentations.
@@ -91,6 +103,39 @@ function themesFor(deliverable: string): { themes: DeckTheme[]; defaultId: strin
 const resolveTheme = (themes: DeckTheme[], id: string): DeckTheme =>
   themes.find((t) => t.id === id) ?? themes[0]
 
+// A2UI surfaceKind → UIConfigurator deliverable key, for resolving the workspace
+// branding palette (mirrors live chat's A2uiSurface). 'document' maps to the
+// closest configurable type ('report'); unknowns fall back to 'default'.
+const SURFACE_TO_DELIVERABLE: Record<string, string> = {
+  presentation: 'presentation',
+  dashboard: 'dashboard',
+  mindmap: 'mindmap',
+  quiz: 'quiz',
+  flashcards: 'flashcards',
+  map: 'map',
+  document: 'report',
+}
+
+// Built-in default palette (UIConfigurator "Default") so a surface always has a
+// full --a2-* token set even when this workspace shipped no branding — surfaces
+// are never unstyled.
+const DEFAULT_PALETTE: ThemePalette = {
+  accent: '#2272B4',
+  background: '#FFFFFF',
+  surface: '#F8FAFC',
+  text: '#0F172A',
+  heading: '#0F172A',
+  muted: '#64748B',
+}
+
+// The workspace palette for a surface kind, with sensible fallbacks. Fed to
+// themeToTokens so cards/tables/dashboards/decks inherit the workspace colors —
+// the SAME --a2-* token mechanism the inline chat surface uses.
+function paletteForKind(kind: string): ThemePalette {
+  const deliverable = SURFACE_TO_DELIVERABLE[kind] ?? 'default'
+  return WORKSPACE_THEMES[deliverable] ?? WORKSPACE_THEMES.default ?? DEFAULT_PALETTE
+}
+
 function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -112,8 +157,89 @@ const Prose = ({ text }: { text: string }) => (
   </div>
 )
 
+// The shared frame every rich surface renders in. It injects the workspace
+// branding palette as the `--a2-*` tokens the shadcn primitives consume (the
+// SAME mechanism Kasal chat's A2uiSurface uses, so cards/tables/dashboards/decks
+// match this workspace's colors) and adds a native "Full screen" control. The
+// `.kasal-a2ui` class wires the fullscreen page background/padding (index.css).
+// `controls` receives the content ref so per-surface buttons (e.g. PNG) can
+// snapshot just the content, not the toolbar.
+function SurfaceShell({
+  kind,
+  controls,
+  children,
+}: {
+  kind: string
+  controls?: (contentRef: RefObject<HTMLDivElement | null>) => ReactNode
+  children: ReactNode
+}) {
+  const frameRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const tokenStyle = themeToTokens(paletteForKind(kind)) as CSSProperties
+  const toggleFullscreen = () => {
+    const el = frameRef.current
+    if (!el) return
+    if (document.fullscreenElement === el) void document.exitFullscreen?.()
+    else void el.requestFullscreen?.().catch(() => {})
+  }
+  return (
+    <div ref={frameRef} className="kasal-a2ui mt-3" style={tokenStyle}>
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
+          {controls?.(contentRef)}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={toggleFullscreen}
+            aria-label="Full screen"
+            title="Full screen"
+          >
+            <Maximize2 className="size-3.5" />
+          </Button>
+        </div>
+        <div ref={contentRef} className="bg-card p-5">
+          {children}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// The deck/quiz theme picker (one palette set, shared by presentations + quizzes).
+function ThemePicker({
+  themes,
+  themeId,
+  setThemeId,
+  activeName,
+}: {
+  themes: DeckTheme[]
+  themeId: string
+  setThemeId: (id: string) => void
+  activeName: string
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+          <Palette className="size-3.5" /> Theme: {activeName}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {themes.map((t) => (
+          <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
+            <span className="size-3 rounded-full" style={{ background: t.accent }} />
+            {t.name}
+            {t.id === themeId && <Check className="ml-auto size-3.5" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 // A presentation surface: ONE theme across all slides (default Midnight),
-// switchable via the Customize button; the choice persists and drives the deck's
+// switchable via the Theme picker; the choice persists and drives the deck's
 // PowerPoint export (the download button lives inside the shared SlideDeck, so it
 // behaves identically here and in Kasal chat — one implementation).
 function PresentationSurface({ surface }: { surface: Surface }) {
@@ -126,31 +252,16 @@ function PresentationSurface({ surface }: { surface: Surface }) {
   }, [themeId])
   const theme = resolveTheme(themes, themeId)
   return (
-    <Card className="mt-3 overflow-hidden">
-      <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-              <Palette className="size-3.5" /> Theme: {theme.name}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {themes.map((t) => (
-              <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
-                <span className="size-3 rounded-full" style={{ background: t.accent }} />
-                {t.name}
-                {t.id === themeId && <Check className="ml-auto size-3.5" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <div className="bg-card p-5">
-        <DeckThemeContext.Provider value={theme}>
-          <A2UIRenderer payload={surface} />
-        </DeckThemeContext.Provider>
-      </div>
-    </Card>
+    <SurfaceShell
+      kind="presentation"
+      controls={() => (
+        <ThemePicker themes={themes} themeId={themeId} setThemeId={setThemeId} activeName={theme.name} />
+      )}
+    >
+      <DeckThemeContext.Provider value={theme}>
+        <A2UIRenderer payload={surface} />
+      </DeckThemeContext.Provider>
+    </SurfaceShell>
   )
 }
 
@@ -166,60 +277,48 @@ function QuizSurface({ surface }: { surface: Surface }) {
   }, [themeId])
   const theme = resolveTheme(themes, themeId)
   return (
-    <Card className="mt-3 overflow-hidden">
-      <div className="flex items-center justify-end gap-1 border-b bg-muted/40 px-3 py-1.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-              <Palette className="size-3.5" /> Theme: {theme.name}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {themes.map((t) => (
-              <DropdownMenuItem key={t.id} onSelect={() => setThemeId(t.id)} className="gap-2">
-                <span className="size-3 rounded-full" style={{ background: t.accent }} />
-                {t.name}
-                {t.id === themeId && <Check className="ml-auto size-3.5" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <div className="bg-card p-5">
-        <DeckThemeContext.Provider value={theme}>
-          <A2UIRenderer payload={surface} />
-        </DeckThemeContext.Provider>
-      </div>
-    </Card>
+    <SurfaceShell
+      kind="quiz"
+      controls={() => (
+        <ThemePicker themes={themes} themeId={themeId} setThemeId={setThemeId} activeName={theme.name} />
+      )}
+    >
+      <DeckThemeContext.Provider value={theme}>
+        <A2UIRenderer payload={surface} />
+      </DeckThemeContext.Provider>
+    </SurfaceShell>
   )
 }
 
-// A rich A2UI surface. Presentations get the themed deck above; quizzes get a
-// themed picker; dashboards and mindmaps get a PNG snapshot. (Tables carry their
-// own CSV button.)
+// A rich A2UI surface. Presentations/quizzes get a themed deck picker; visual
+// surfaces (dashboard, mindmap, map) get a PNG snapshot. All render in the shared
+// SurfaceShell, so every kind inherits the workspace palette + full-screen control
+// and looks the same as Kasal chat. (Tables carry their own CSV button.)
 function RichSurface({ surface }: { surface: Surface }) {
-  const ref = useRef<HTMLDivElement>(null)
   const kind = surface.surfaceKind
   if (kind === 'presentation') return <PresentationSurface surface={surface} />
   if (kind === 'quiz') return <QuizSurface surface={surface} />
-  const action =
-    kind === 'dashboard' || kind === 'mindmap'
-      ? { label: 'PNG', run: () => ref.current && downloadElementPng(ref.current, `${kind}.png`) }
-      : null
-
+  const png = kind === 'dashboard' || kind === 'mindmap' || kind === 'map'
   return (
-    <Card className="mt-3 overflow-hidden">
-      {action && (
-        <div className="flex items-center justify-end border-b bg-muted/40 px-3 py-1.5">
-          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={action.run}>
-            <Download className="size-3.5" /> {action.label}
-          </Button>
-        </div>
-      )}
-      <div ref={ref} className="bg-card p-5">
-        <A2UIRenderer payload={surface} />
-      </div>
-    </Card>
+    <SurfaceShell
+      kind={kind}
+      controls={
+        png
+          ? (contentRef) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => contentRef.current && downloadElementPng(contentRef.current, `${kind}.png`)}
+              >
+                <Download className="size-3.5" /> PNG
+              </Button>
+            )
+          : undefined
+      }
+    >
+      <A2UIRenderer payload={surface} />
+    </SurfaceShell>
   )
 }
 

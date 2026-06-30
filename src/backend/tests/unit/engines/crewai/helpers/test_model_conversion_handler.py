@@ -17,7 +17,8 @@ from src.engines.crewai.kernel.model_conversion_handler import (
     detect_llm_provider,
     simplify_schema,
     get_compatible_converter_for_model,
-    configure_output_json_approach
+    configure_output_json_approach,
+    _supports_native_structured_output,
 )
 
 
@@ -314,13 +315,71 @@ class TestGetCompatibleConverterForModel:
     def test_other_models(self):
         """Test other model types."""
         test_cases = ["azure-gpt", "anthropic-claude", "ollama-llama", "openai-gpt", "unknown"]
-        
+
         for model_name in test_cases:
             agent = MagicMock()
             agent.llm.model = model_name
-            
+
             result = get_compatible_converter_for_model(agent, MockOutputModel)
             assert result == (None, MockOutputModel, False, False)
+
+    def test_native_structured_output_keeps_pydantic_even_for_databricks(self):
+        """A Databricks model that enforces structured output natively (e.g. codex)
+        must KEEP output_pydantic, not be downgraded to the unenforced output_json."""
+        agent = MagicMock()
+        agent.llm.model = "databricks-gpt-5-codex"
+        agent.llm.supports_native_structured_output = lambda: True
+
+        result = get_compatible_converter_for_model(agent, MockOutputModel)
+
+        # default_response keeps the real Pydantic class and does NOT use output_json.
+        assert result == (None, MockOutputModel, False, False)
+
+    def test_magicmock_llm_is_not_treated_as_native(self):
+        """A bare MagicMock llm must not be mistaken for native support (its
+        auto-created attribute is callable and returns a truthy Mock)."""
+        agent = MagicMock()
+        agent.llm.model = "databricks-model"
+
+        result = get_compatible_converter_for_model(agent, MockOutputModel)
+
+        # Falls through to the provider downgrade, proving the strict check works.
+        assert result == (None, None, True, True)
+
+
+class TestSupportsNativeStructuredOutput:
+    """Test _supports_native_structured_output - strict True detection."""
+
+    def test_callable_returning_true(self):
+        llm = MagicMock()
+        llm.supports_native_structured_output = lambda: True
+        assert _supports_native_structured_output(llm) is True
+
+    def test_callable_returning_false(self):
+        llm = MagicMock()
+        llm.supports_native_structured_output = lambda: False
+        assert _supports_native_structured_output(llm) is False
+
+    def test_callable_raising_is_false(self):
+        def boom():
+            raise RuntimeError("nope")
+        llm = MagicMock()
+        llm.supports_native_structured_output = boom
+        assert _supports_native_structured_output(llm) is False
+
+    def test_non_callable_true_attribute(self):
+        llm = MagicMock()
+        llm.supports_native_structured_output = True
+        assert _supports_native_structured_output(llm) is True
+
+    def test_missing_attribute_is_false(self):
+        llm = object()  # no such attribute
+        assert _supports_native_structured_output(llm) is False
+
+    def test_bare_magicmock_is_false(self):
+        # The auto-created attribute is a callable Mock returning a truthy Mock;
+        # the strict ``is True`` check must reject it.
+        assert _supports_native_structured_output(MagicMock()) is False
 
 
 class TestConfigureOutputJsonApproach:

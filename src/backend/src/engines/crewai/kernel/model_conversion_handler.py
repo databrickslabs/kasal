@@ -86,31 +86,60 @@ def simplify_schema(schema: Dict) -> Dict:
         
     return simplified
 
+def _supports_native_structured_output(llm) -> bool:
+    """True when the LLM enforces output_pydantic itself.
+
+    Handlers built on CrewAI's OpenAICompletion Responses API path (e.g. the
+    Databricks gpt-5/codex handler) pass the task's output_pydantic to the model
+    as ``text.format`` and validate the result, so the schema is enforced and a
+    typed object is returned. Such models must NOT be downgraded to the soft
+    output_json prompt: that downgrade sets ``output_json = True`` (a bool, not a
+    model), which CrewAI cannot validate, so the schema is silently dropped and
+    the model omits fields — breaking routers that branch on those fields.
+    """
+    cap = getattr(llm, "supports_native_structured_output", None)
+    # Strict identity check (``is True``) so a MagicMock's auto-created attribute
+    # (callable, returns a truthy Mock) is NOT mistaken for real support.
+    if callable(cap):
+        try:
+            return cap() is True
+        except Exception:
+            return False
+    return cap is True
+
+
 def get_compatible_converter_for_model(agent, pydantic_class):
     """
     Get a compatible converter for a given agent model.
-    
+
     Args:
         agent: The agent that will execute the task
         pydantic_class: The Pydantic model class for output conversion
-        
+
     Returns:
         Tuple[converter_cls, output_pydantic, use_output_json, is_compatible]
     """
     # Default response - use standard Pydantic conversion
     default_response = (None, pydantic_class, False, False)
-    
+
     # Check if agent has a model attribute
     if not hasattr(agent, 'llm') or not hasattr(agent.llm, 'model'):
         return default_response
-    
+
+    # Models that natively enforce structured output (codex / Responses API)
+    # keep output_pydantic so the schema is validated and a typed object is
+    # returned — never downgrade these to the unenforced output_json prompt.
+    if _supports_native_structured_output(agent.llm):
+        logger.info("LLM enforces structured output natively; keeping output_pydantic")
+        return default_response
+
     # Detect the provider
     provider = detect_llm_provider(agent.llm.model)
     if not provider:
         return default_response
-    
+
     logger.info(f"Detected {provider} model, using compatible conversion approach")
-    
+
     # For problematic providers, always default to output_json approach
     # which is more reliable than custom converters
     if provider in ["gemini", "databricks"]:

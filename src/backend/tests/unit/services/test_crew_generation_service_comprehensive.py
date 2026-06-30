@@ -4152,6 +4152,38 @@ class TestBuildCrewConfigFromGenerated:
         assert cfg["planning"] is False and cfg["reasoning"] is False
         assert cfg["session_id"] == "s1" and cfg["memory_workspace_scope"] is False
 
+    def test_request_model_applied_as_agent_llm_when_absent(self):
+        """The chat/generation model picker must reach the agent's LLM, so the
+        light-agent path doesn't silently fall back to the engine default
+        (maverick), which can't reliably tool-call MCP servers."""
+        agents = [{"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": []}]
+        tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(model="databricks-claude-sonnet-4-5"), agents, tasks
+        )
+        assert cfg["agents_yaml"]["agent_a1"]["llm"] == "databricks-claude-sonnet-4-5"
+
+    def test_explicit_agent_llm_not_overridden_by_request_model(self):
+        """A per-agent model (from generation) wins over the request model."""
+        agents = [
+            {"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": [],
+             "llm": "databricks-gpt-5"}
+        ]
+        tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(model="databricks-claude-sonnet-4-5"), agents, tasks
+        )
+        assert cfg["agents_yaml"]["agent_a1"]["llm"] == "databricks-gpt-5"
+
+    def test_no_request_model_leaves_agent_llm_unset(self):
+        """Without a picked model, the agent carries no llm (engine default applies)."""
+        agents = [{"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": []}]
+        tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(), agents, tasks
+        )
+        assert "llm" not in cfg["agents_yaml"]["agent_a1"]
+
     def test_chat_mode_type_drives_reasoning_planning_execution_type(self, monkeypatch):
         """The ChatMode answer mode maps to reasoning / planning / execution_type:
         chat → single light agent; research → crew + reasoning; deep → crew +

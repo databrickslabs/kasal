@@ -235,8 +235,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         disabled: false
       }
     ] : []),
-    // Export button - always visible for non-operators (works for both crew and flow)
-    ...(!isOperator ? [
+    // Deploy button - only on the crew canvas (hidden on the flow canvas) for non-operators
+    ...(!isOperator && !areFlowsVisible ? [
       {
         id: 'separator-export',
         isSeparator: true
@@ -244,7 +244,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       {
         id: 'export-notebook',
         icon: <FileDownloadIcon />,
-        tooltip: savedCrewId ? 'Export To Notebook' : 'Save crew first to export',
+        tooltip: savedCrewId ? 'Deploy to Databricks Apps' : 'Save crew first to deploy',
         onClick: () => setIsExportDialogOpen(true),
         disabled: !savedCrewId
       }

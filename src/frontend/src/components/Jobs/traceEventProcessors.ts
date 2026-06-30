@@ -610,6 +610,19 @@ export function processTraceEvent(trace: Trace): ProcessedEvent | null {
     return processor(trace);
   }
 
+  // Light-agent (chat) path emits tool results as `<tool>_run` and the agent's
+  // final answer as `response_run` (the crew/OTel path instead uses
+  // tool_usage+operation, which the registry above handles). Map these to
+  // clickable result rows so their output — the tool's answer / final response —
+  // is viewable, instead of falling to the generic non-clickable Title-Case row.
+  if (trace.event_type.endsWith('_run')) {
+    if (trace.event_type === 'response_run') {
+      return { type: 'llm_response', description: 'Final Response' };
+    }
+    const toolName = extractToolName(trace);
+    return { type: 'tool_result', description: `${toolName} (output)` };
+  }
+
   // Default: convert event_type to Title Case
   const readableDesc = trace.event_type
     .replace(/_/g, ' ')

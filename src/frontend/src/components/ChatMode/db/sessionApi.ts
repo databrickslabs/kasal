@@ -67,6 +67,7 @@ interface ChatModeExtras {
   resultData?: unknown;
   attachments?: string[];
   executionId?: string;
+  usedWorkspaceMemory?: boolean;
 }
 
 const toMessage = (w: MessageWire): ChatMessage => {
@@ -86,6 +87,9 @@ const toMessage = (w: MessageWire): ChatMessage => {
     ...(extras.resultData !== undefined ? { resultData: extras.resultData } : {}),
     ...(extras.attachments ? { attachments: extras.attachments } : {}),
     ...(extras.executionId ? { executionId: extras.executionId } : {}),
+    ...(extras.usedWorkspaceMemory !== undefined
+      ? { usedWorkspaceMemory: extras.usedWorkspaceMemory }
+      : {}),
     isStreaming: false,
   };
 };
@@ -96,6 +100,7 @@ const packExtras = (msg: Partial<ChatMessage>): Record<string, unknown> | undefi
   if (msg.resultData !== undefined) extras.resultData = msg.resultData;
   if (msg.attachments !== undefined) extras.attachments = msg.attachments;
   if (msg.executionId !== undefined) extras.executionId = msg.executionId;
+  if (msg.usedWorkspaceMemory !== undefined) extras.usedWorkspaceMemory = msg.usedWorkspaceMemory;
   return Object.keys(extras).length > 0 ? { [EXTRA_KEY]: extras } : undefined;
 };
 

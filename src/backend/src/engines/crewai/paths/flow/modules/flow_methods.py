@@ -710,16 +710,31 @@ class FlowMethodFactory:
                     previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
                 logger.info(f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)")
 
-            # Create new Task objects with modified descriptions
+            # Create new Task objects with modified descriptions.
+            # CRITICAL: carry over tools/output_pydantic/output_json/converter_cls/
+            # context. Rebuilding with only description/agent/expected_output (the
+            # prior behavior) silently dropped them, so listener crews lost their
+            # tools (no MCP/tool calls) AND their structured-output schema (no
+            # .pydantic → routers fall back to flaky raw-text parsing). The
+            # starting crew keeps its original Task objects, which is why only
+            # listener (@listen) crews were affected.
             for task in listener_tasks:
-                # Create new task with injected context
+                # Create new task with injected context, preserving execution config.
                 runtime_task = Task(
                     description=f"{task.description}{previous_output_context}",
                     agent=task.agent,
-                    expected_output=task.expected_output if hasattr(task, 'expected_output') else "Task completed successfully"
+                    expected_output=task.expected_output if hasattr(task, 'expected_output') else "Task completed successfully",
+                    tools=getattr(task, 'tools', None) or [],
+                    output_pydantic=getattr(task, 'output_pydantic', None),
+                    output_json=getattr(task, 'output_json', None),
+                    converter_cls=getattr(task, 'converter_cls', None),
                 )
                 runtime_tasks.append(runtime_task)
-                logger.info(f"Created runtime task with injected context for agent: {task.agent.role}")
+                logger.info(
+                    f"Created runtime task with injected context for agent: {task.agent.role} "
+                    f"(tools={len(getattr(task, 'tools', None) or [])}, "
+                    f"output_pydantic={'yes' if getattr(task, 'output_pydantic', None) else 'no'})"
+                )
 
             # Create a crew with runtime tasks
             agents = list(set(task.agent for task in runtime_tasks))
