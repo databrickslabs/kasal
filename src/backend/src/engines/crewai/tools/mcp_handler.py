@@ -504,11 +504,26 @@ def create_crewai_tool_from_mcp(mcp_tool_dict):
     for field_name, field_info in properties.items():
         field_type = str  # Default to string
         field_description = field_info.get('description', f'{field_name} parameter')
-        is_required = field_name in required
-        
+        # A param the MCP server lists as "required" but that ALSO declares a
+        # `default` (incl. null) or is nullable is effectively OPTIONAL. Forcing
+        # it makes the LLM fabricate a value: managed-Genie `query_space` marks
+        # `conversation_id` required despite `default: null`, so the agent invents
+        # e.g. "discovery-session"; Genie then rejects it with "PERMISSION_DENIED:
+        # ... does not own conversation discovery-session", which surfaces to the
+        # user as "unhandled errors in a TaskGroup (1 sub-exception)". Models that
+        # happen to omit/null it (e.g. gpt-5.3) work; Claude does not. Drop such
+        # params from `required` so the agent can omit them (→ None → server uses
+        # its default / starts a fresh conversation).
+        has_default = 'default' in field_info
+        is_nullable = field_info.get('type') == 'null' or any(
+            isinstance(s, dict) and s.get('type') == 'null'
+            for s in field_info.get('anyOf', [])
+        )
+        is_required = (field_name in required) and not has_default and not is_nullable
+
         # Add type annotation
         annotations[field_name] = field_type
-        
+
         if is_required:
             fields[field_name] = Field(..., description=field_description)
         else:

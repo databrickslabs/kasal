@@ -472,6 +472,67 @@ class TestCreateCrewAIToolFromMCP:
             assert hasattr(tool, "_run")
             assert hasattr(tool, "args_schema")
 
+    def test_param_with_null_default_is_optional_despite_required(self):
+        """Regression: managed-Genie `query_space` lists `conversation_id` in
+        `required` even though it declares `default: null`. Forcing it made Claude
+        fabricate a value ("discovery-session") that Genie rejected with
+        PERMISSION_DENIED, surfaced to the user as
+        "unhandled errors in a TaskGroup (1 sub-exception)". A param with a
+        default must be OPTIONAL so the agent can omit it (→ None → fresh
+        conversation)."""
+        mcp_dict = {
+            "name": "query_space",
+            "description": "Query the genie space",
+            "input_schema": {
+                "properties": {
+                    "query": {"type": "string", "description": "Query for genie space"},
+                    "conversation_id": {
+                        "default": None,
+                        "type": "string",
+                        "description": "Optional conversation ID to continue an existing conversation",
+                    },
+                },
+                "required": ["query", "conversation_id"],
+            },
+        }
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "query_space"
+            wrapper.description = "Query the genie space"
+            wrapper.input_schema = mcp_dict["input_schema"]
+            MockMCPTool.return_value = wrapper
+
+            tool = create_crewai_tool_from_mcp(mcp_dict)
+            fields = tool.args_schema.model_fields
+            assert fields["query"].is_required() is True
+            assert fields["conversation_id"].is_required() is False
+
+    def test_nullable_anyof_param_is_optional_despite_required(self):
+        """A param typed nullable via `anyOf: [{string},{null}]` and listed in
+        `required` is also treated as optional."""
+        mcp_dict = {
+            "name": "t",
+            "description": "d",
+            "input_schema": {
+                "properties": {
+                    "a": {"type": "string"},
+                    "b": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": ["a", "b"],
+            },
+        }
+        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+            wrapper = MagicMock()
+            wrapper.name = "t"
+            wrapper.description = "d"
+            wrapper.input_schema = mcp_dict["input_schema"]
+            MockMCPTool.return_value = wrapper
+
+            tool = create_crewai_tool_from_mcp(mcp_dict)
+            fields = tool.args_schema.model_fields
+            assert fields["a"].is_required() is True
+            assert fields["b"].is_required() is False
+
     def test_creates_dummy_field_when_no_properties(self):
         mcp_dict = {
             "name": "simple",
