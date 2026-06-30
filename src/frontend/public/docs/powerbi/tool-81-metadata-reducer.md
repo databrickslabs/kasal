@@ -11,7 +11,7 @@ A large Power BI model can have 300+ measures and 50+ tables. Sending all of tha
 ## What problem it solves
 
 - **Token limit:** Large models can't be passed wholesale to an LLM; reduction makes it feasible
-- **Accuracy:** Focused context produces more accurate DAX - fewer irrelevant measures means fewer hallucinated references
+- **Accuracy:** Focused context produces more accurate DAX; fewer irrelevant measures means fewer hallucinated references
 - **Speed:** Smaller prompt = faster LLM response
 
 ---
@@ -20,14 +20,18 @@ A large Power BI model can have 300+ measures and 50+ tables. Sending all of tha
 
 ```text
 Receive full model_context_json (from Tool 79) + user_question
-    ↓
+  |
+  v
 Fuzzy matching: find measures/tables whose names overlap with question keywords
-    ↓
+  |
+  v
 Dependency resolution: include all measures referenced by matched measures
-    ↓
+  |
+  v
 LLM-assisted selection: LLM picks the most relevant tables/measures (optional)
-    ↓
-Return reduced model_context_json (10-20 measures vs 300+)
+  |
+  v
+Return reduced model_context_json (10 to 20 measures vs 300+)
 ```
 
 ---
@@ -52,9 +56,11 @@ Always placed between Tool 79 and Tool 80:
 
 ```text
 Tool 79 (fetch full model)
-    ↓
-Tool 81 (reduce to question-relevant subset)   ← this tool
-    ↓
+  |
+  v
+Tool 81 (reduce to question-relevant subset)   <- this tool
+  |
+  v
 Tool 80 (generate DAX from reduced context)
 ```
 
@@ -63,7 +69,7 @@ Tool 80 (generate DAX from reduced context)
 ## Notes
 
 - Optional but strongly recommended for models with more than 50 measures
-- Without LLM selection, uses fuzzy matching only - faster but slightly less accurate
+- Without LLM selection, uses fuzzy matching only: faster but slightly less accurate
 - The reduced output is a valid `model_context_json` that Tool 80 accepts directly
 - Does not make any PBI API calls - works entirely on the JSON from Tool 79
 

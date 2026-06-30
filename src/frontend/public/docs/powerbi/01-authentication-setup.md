@@ -39,7 +39,7 @@ Used by: Tools 72, 73, 75, 79, 80, 81, 82
 
 ### Step 1 - create app registration
 
-1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations**
+1. Go to [Azure Portal](https://portal.azure.com), then **Azure Active Directory**, then **App registrations**
 2. Click **New registration**
 3. Name: e.g. `KasalPowerBI-NonAdmin`
 4. Account type: **Accounts in this organizational directory only**
@@ -49,7 +49,7 @@ Used by: Tools 72, 73, 75, 79, 80, 81, 82
 
 ### Step 2 - add API permissions
 
-In the App Registration → **API permissions** → **Add a permission**:
+In the App Registration, go to **API permissions**, then **Add a permission**:
 
 | API | Permission | Type | Admin consent |
 |-----|-----------|------|--------------|
@@ -63,7 +63,7 @@ Click **Grant admin consent for [Your Org]** after adding all permissions.
 
 ### Step 3 - create client secret
 
-1. App Registration → **Certificates & secrets** → **New client secret**
+1. App Registration, then **Certificates & secrets**, then **New client secret**
 2. Description: `KasalPowerBI-NonAdmin`
 3. Expiry: 24 months recommended
 4. Click **Add**
@@ -118,7 +118,7 @@ Same process as SP 1. Name it `KasalPowerBI-Admin`.
 
 The Power BI Admin Portal controls which SPs can use read-only admin APIs via a security group allowlist.
 
-1. Azure Portal → **Azure Active Directory** → **Groups** → **New group**
+1. Azure Portal, then **Azure Active Directory**, then **Groups**, then **New group**
 2. Type: Security
 3. Name: `KasalPowerBI-AdminAPI-SPs`
 4. Members: add your `KasalPowerBI-Admin` app registration
@@ -166,13 +166,13 @@ Tool 90 (Pipeline Config Generator) calls 4 different PBI APIs that require diff
 
 Configuration in Tool 90:
 
-```text
-tenant_id         → shared by both SPs (same Azure AD tenant)
-client_id         → Non-Admin SP client ID
-client_secret     → Non-Admin SP client secret
-admin_client_id   → Admin SP client ID
-admin_client_secret → Admin SP client secret
-```
+| Config field | Value |
+|--------------|-------|
+| `tenant_id` | shared by both SPs (same Azure AD tenant) |
+| `client_id` | Non-Admin SP client ID |
+| `client_secret` | Non-Admin SP client secret |
+| `admin_client_id` | Admin SP client ID |
+| `admin_client_secret` | Admin SP client secret |
 
 ## Row-level security (RLS) considerations
 

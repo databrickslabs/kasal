@@ -15,8 +15,8 @@ Kasal dependency used for LLM provider routing. This document analyses the threa
 Kasal's current exposure, and proposes concrete mitigations as future work.
 
 Related documents:
-- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md) — prompt injection and agentic security guardrails
-- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md) — manual and automated test guide
+- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md): prompt injection and agentic security guardrails
+- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md): manual and automated test guide
 
 ---
 
@@ -25,7 +25,7 @@ Related documents:
 ### What happened
 
 `litellm==1.82.7` and `1.82.8` were published to PyPI on March 24, 2026 with a backdoor
-injected into `litellm/proxy/proxy_server.py` at lines 128–139 — code that does not exist in
+injected into `litellm/proxy/proxy_server.py` at lines 128 to 139, code that does not exist in
 the upstream GitHub repository at the corresponding commit. The injection fires at **module
 import time**, meaning any process that imports litellm triggers the payload with no additional
 user interaction.
@@ -38,16 +38,16 @@ never explicitly imported.
 
 The attack runs in three stages:
 
-1. **Credential harvester** — sweeps the host for SSH keys, AWS/GCP/Azure credentials,
+1. **Credential harvester**: sweeps the host for SSH keys, AWS/GCP/Azure credentials,
    Kubernetes secrets, `.env` files (recursively, 6 dirs deep), database passwords, crypto
    wallets, TLS private keys, CI/CD secrets, and shell history. Exfiltrates everything to
-   `models.litellm.cloud` encrypted with RSA-4096 + AES-256-CBC.
+   `models.litellm.cloud` encrypted with RSA-4096 plus AES-256-CBC.
 
-2. **Kubernetes lateral movement** — if a K8s service account token is present, deploys a
+2. **Kubernetes lateral movement**: if a K8s service account token is present, deploys a
    privileged pod (`hostPID`, `hostNetwork`, full host filesystem mount) to every node in the
    cluster, including control-plane nodes.
 
-3. **Persistent backdoor** — installs `~/.config/sysmon/sysmon.py` as a systemd user service
+3. **Persistent backdoor**: installs `~/.config/sysmon/sysmon.py` as a systemd user service
    ("System Telemetry Service") that polls `checkmarx.zone/raw` every 50 minutes and executes
    downloaded binaries.
 
@@ -57,15 +57,15 @@ The Sonatype Security Research team independently analysed the same attack and a
 details not covered by the Endor Labs report:
 
 **Active credential use (not just collection)**
-The harvester doesn't only *collect* credentials — it actively *uses* them. It queries AWS APIs
+The harvester doesn't only *collect* credentials; it actively *uses* them. It queries AWS APIs
 (Secrets Manager, SSM) using SigV4-signed requests, enumerates Kubernetes secrets via the K8s
 API, and deploys privileged pods. An attacker can therefore cause direct damage in AWS and K8s
 within seconds of the payload running, before any rotation is possible.
 
 **Additional harvester targets missed in initial analysis**
-- **Git credentials** — `.gitconfig`, credential helpers, stored GitHub/GitLab tokens
-- **Helm configurations** — `~/.helm/` chart repository credentials
-- **Webhook URLs** — any webhook endpoint found in config files or env vars
+- **Git credentials**: `.gitconfig`, credential helpers, stored GitHub/GitLab tokens
+- **Helm configurations**: `~/.helm/` chart repository credentials
+- **Webhook URLs**: any webhook endpoint found in config files or env vars
 
 **Anti-sandbox kill switch**
 The `checkmarx.zone/raw` C2 returns a link to an English remastering of *Bad Apple!!* (a
@@ -91,7 +91,7 @@ TeamPCP is the threat actor behind a month-long campaign spanning five ecosystem
 
 | Date | Target | Method |
 |------|--------|--------|
-| Feb 28 | Aqua Trivy | Pwn Request workflow — stole PAT |
+| Feb 28 | Aqua Trivy | Pwn Request workflow, stole PAT |
 | Mar 19 | Aqua Trivy (again) | Residual access from incomplete remediation |
 | Mar 20 | npm (45+ packages) | Self-propagating worm via stolen npm tokens |
 | Mar 22 | Docker Hub | Stolen Aqua Docker Hub credentials |
@@ -100,7 +100,7 @@ TeamPCP is the threat actor behind a month-long campaign spanning five ecosystem
 
 The pattern is deliberate: each compromised environment yields credentials that unlock the next
 target. TeamPCP exclusively targets **security-adjacent tooling** (vulnerability scanners, IaC
-analyzers, LLM proxies) — tools that run with elevated privileges by design and are therefore
+analyzers, LLM proxies): tools that run with elevated privileges by design and are therefore
 maximally efficient to compromise.
 
 ---
@@ -109,7 +109,7 @@ maximally efficient to compromise.
 
 ### Are we directly affected
 
-**No.** Kasal pins litellm to an exact version. Dependencies are managed with `uv` —
+**No.** Kasal pins litellm to an exact version. Dependencies are managed with `uv`,
 declared in `src/backend/pyproject.toml` and locked (with sha256 hashes) in
 `src/backend/uv.lock`. There is **no `requirements.txt`**.
 
@@ -123,7 +123,7 @@ directly exposed.
 
 ### Would our existing security guardrails have caught it
 
-**No — they solve a different problem.** Kasal's security work (Phases 1–5, documented in
+**No, they solve a different problem.** Kasal's security work (Phases 1 to 5, documented in
 `README_SECURITY_COMPLIANCE.md`) protects against **prompt injection attacks**: malicious
 instructions embedded in data that LLM agents process at runtime.
 
@@ -133,25 +133,25 @@ require distinct defenses:
 
 | Kasal guardrail | Protects against | Catches supply chain attack? |
 |----------------|-----------------|------------------------------|
-| Prompt injection detector (regex) | Injection in LLM inputs/outputs | ❌ fires before our code runs |
-| Secret leak detector | Credentials in agent outputs | ❌ exfiltration goes direct HTTPS, never through scan pipeline |
-| Trifecta / mixed-task detection | Dangerous tool combinations | ❌ architecture-level, not dependency-level |
-| LLM injection guardrail | Injection in task output | ❌ task pipeline never reached |
-| Security headers / CSP | XSS, clickjacking in browser | ❌ irrelevant to this threat |
+| Prompt injection detector (regex) | Injection in LLM inputs/outputs | No: fires before our code runs |
+| Secret leak detector | Credentials in agent outputs | No: exfiltration goes direct HTTPS, never through scan pipeline |
+| Trifecta / mixed-task detection | Dangerous tool combinations | No: architecture-level, not dependency-level |
+| LLM injection guardrail | Injection in task output | No: task pipeline never reached |
+| Security headers / CSP | XSS, clickjacking in browser | No: irrelevant to this threat |
 
 **Partial indirect mitigations already in place:**
-- OBO authentication means Kasal does not store long-lived Databricks tokens in `.env` files —
+- OBO authentication means Kasal does not store long-lived Databricks tokens in `.env` files,
   reducing what the credential harvester would find
 - API keys are stored in the database encrypted, not as plain environment variables
 - The version pin at `1.74.9` is exact (`==`), not a range (`>=`)
 - `uv.lock` pins a sha256 hash for litellm's sdist and wheel (and the full transitive
-  graph), so `uv sync` rejects a re-uploaded wheel whose content hash doesn't match —
+  graph), so `uv sync` rejects a re-uploaded wheel whose content hash doesn't match;
   this already covers much of Tier 1.1 / 2.4 below
 
 ### Developer machine risk (separate from the deployed app)
 
 Even though the *deployed* Kasal app is safe, any **developer** who ran
-`pip install litellm==1.82.7` or `1.82.8` locally — e.g. to test a litellm bump — would have
+`pip install litellm==1.82.7` or `1.82.8` locally (e.g. to test a litellm bump) would have
 triggered the payload on their dev machine. The Sonatype analysis adds two targets directly
 relevant to Kasal developers:
 
@@ -162,7 +162,7 @@ relevant to Kasal developers:
 | **Databricks CLI token** | `~/.databrickscfg` | Full workspace API access |
 | **API keys** (OpenAI, Serper, etc.) | `.env.local`, shell history | Direct LLM provider billing abuse |
 
-The harvester **actively queries** any AWS/K8s credentials it finds — it doesn't just log them.
+The harvester **actively queries** any AWS/K8s credentials it finds; it doesn't just log them.
 A developer running litellm in a local venv with AWS credentials in their shell would have had
 those credentials actively used within seconds of install.
 
@@ -193,13 +193,13 @@ The proposals below are grouped by implementation effort. None are currently imp
 
 ---
 
-### Tier 1 — low effort, high impact (hours of work)
+### Tier 1: low effort, high impact (hours of work)
 
 #### 1.1 Enforce uv's hash verification (largely already in place)
 
-**Status:** ✅ Mostly satisfied. Kasal already uses `uv`, and `uv.lock` records a sha256
+**Status:** Mostly satisfied. Kasal already uses `uv`, and `uv.lock` records a sha256
 hash for every package (direct and transitive), including litellm's sdist and wheel. `uv sync`
-refuses to install a wheel whose content hash doesn't match the lock — even if the version
+refuses to install a wheel whose content hash doesn't match the lock, even if the version
 string is identical. This is the same protection `pip install --require-hashes` provides.
 
 **Problem (residual):** The guarantee only holds if installs always go through
@@ -220,7 +220,7 @@ overhead.
 #### 1.2 The .pth file integrity check at container start
 
 **Problem:** `litellm==1.82.8` drops a `litellm_init.pth` file in `site-packages` that fires on
-every Python invocation. This vector is invisible to version checks — only a file system scan
+every Python invocation. This vector is invisible to version checks; only a file system scan
 catches it.
 
 **Proposal:** Add a startup assertion to `src/entrypoint.py` (or a Docker `ENTRYPOINT` script):
@@ -241,7 +241,7 @@ if unexpected:
 #### 1.3 litellm source integrity check at boot
 
 **Problem:** The injected code in `proxy_server.py` is not detectable from the version number
-alone — it requires comparing file content against the known-good source.
+alone; it requires comparing file content against the known-good source.
 
 **Proposal:** Hash the installed `proxy_server.py` at startup and compare against a pinned
 expected value:
@@ -281,12 +281,12 @@ introduced, or whether the maintainer account was recently compromised.
 
 ---
 
-### Tier 2 — medium effort, high impact (days of work)
+### Tier 2: medium effort, high impact (days of work)
 
 #### 2.1 PyPI internal proxy (mirror the npm policy)
 
 **Problem:** Databricks has already mandated an internal npm proxy (configured locally, not
-committed) that blocks packages newer than 7 days. PyPI has no equivalent yet — packages are fetched
+committed) that blocks packages newer than 7 days. PyPI has no equivalent yet; packages are fetched
 directly from pypi.org with no hold period or malware scan.
 
 **Proposal:** Extend the same architecture to PyPI. A proxy/mirror that:
@@ -302,10 +302,10 @@ would have been a complete stop.
 attacks, not just litellm.
 
 **Concrete products that implement this today:**
-- **Sonatype Repository Firewall** — automatically detected and blocked `1.82.7` and `1.82.8`
+- **Sonatype Repository Firewall**: automatically detected and blocked `1.82.7` and `1.82.8`
   *within seconds* of publication according to Sonatype's own disclosure. This is exactly the
   automated defense that would have protected any environment using their proxy.
-- **Databricks' internal npm proxy** — already mandated for npm; the same architecture applied
+- **Databricks' internal npm proxy**: already mandated for npm; the same architecture applied
   to PyPI would close this gap internally.
 
 ---
@@ -321,8 +321,8 @@ attacks, not just litellm.
 - Internal cluster services
 
 Any outbound connection to an unlisted domain (like `models.litellm.cloud`) is dropped silently.
-This does not prevent the credential harvest from running locally, but it prevents exfiltration
-— the attacker gets no data.
+This does not prevent the credential harvest from running locally, but it prevents exfiltration,
+so the attacker gets no data.
 
 For the Databricks Apps deployment specifically, this would be a `app.yaml`-level network
 restriction.
@@ -357,8 +357,8 @@ misconfigurations before they become blast radius.
 
 #### 2.4 Full dependency lock file with transitive hashes (already in place)
 
-**Status:** ✅ Satisfied. `uv.lock` already covers every package in the dependency graph —
-direct and transitive — each with a sha256 hash. litellm itself has ~40 transitive
+**Status:** Satisfied. `uv.lock` already covers every package in the dependency graph,
+direct and transitive, each with a sha256 hash. litellm itself has ~40 transitive
 dependencies (`openai`, `anthropic`, `httpx`, `pydantic` are all high-value targets); all of
 them are hash-pinned in the lock.
 
@@ -368,7 +368,7 @@ the same enforcement gap noted in Tier 1.1.
 
 ---
 
-### Tier 3 — significant effort (weeks of work)
+### Tier 3: significant effort (weeks of work)
 
 #### 3.1 Runtime behavioral monitoring (eBPF / Falco)
 
@@ -445,8 +445,8 @@ systemctl --user status sysmon.service 2>/dev/null
 kubectl get pods -n kube-system | grep node-setup
 
 # Check network logs for C2 domains
-# models.litellm.cloud  — exfiltration endpoint
-# checkmarx.zone        — persistence / binary delivery
+# models.litellm.cloud  : exfiltration endpoint
+# checkmarx.zone        : persistence / binary delivery
 ```
 
 Compromised wheel hashes (do not install):
@@ -463,26 +463,26 @@ Last known-clean version: `litellm==1.82.6` (published 2026-03-22, verified by E
 
 | # | Proposal | Effort | Impact | Covers |
 |---|----------|--------|--------|--------|
-| 1 | PyPI internal proxy (7-day hold) | Medium | 🔴 Highest | Whole PyPI attack class |
-| 2 | Hash pinning (`--require-hashes`) | Low | 🔴 High | Re-upload attacks |
-| 3 | `.pth` file check at startup | Low | 🔴 High | `.pth` injection vector |
-| 4 | litellm source integrity check at boot | Low | 🟠 High | Tampered wheel detection |
-| 5 | Network egress policy | Medium | 🟠 High | Blocks exfiltration even if payload runs |
-| 6 | Dependency diff in PR review | Medium | 🟠 Medium | Visibility on bumps |
-| 7 | Extend SecretLeakDetector to env vars | Low | 🟡 Medium | Configuration hygiene |
-| 8 | Full transitive lock file | Medium | 🟠 High | Transitive dep attacks |
-| 9 | Runtime monitoring (Falco) | High | 🔴 High | Detection while running |
-| 10 | Isolated litellm subprocess | High | 🟠 Medium | Blast radius reduction |
-| 11 | SBOM + continuous monitoring | High | 🟠 High | Early disclosure awareness |
+| 1 | PyPI internal proxy (7-day hold) | Medium | Highest | Whole PyPI attack class |
+| 2 | Hash pinning (`--require-hashes`) | Low | High | Re-upload attacks |
+| 3 | `.pth` file check at startup | Low | High | `.pth` injection vector |
+| 4 | litellm source integrity check at boot | Low | High | Tampered wheel detection |
+| 5 | Network egress policy | Medium | High | Blocks exfiltration even if payload runs |
+| 6 | Dependency diff in PR review | Medium | Medium | Visibility on bumps |
+| 7 | Extend SecretLeakDetector to env vars | Low | Medium | Configuration hygiene |
+| 8 | Full transitive lock file | Medium | High | Transitive dep attacks |
+| 9 | Runtime monitoring (Falco) | High | High | Detection while running |
+| 10 | Isolated litellm subprocess | High | Medium | Blast radius reduction |
+| 11 | SBOM plus continuous monitoring | High | High | Early disclosure awareness |
 
 **The single most impactful near-term action:** a PyPI proxy with the same 7-day hold policy
 Databricks has already mandated for npm. It is the supply chain equivalent of what our prompt
-injection guardrails do for agentic attacks — a structural defense that applies to the whole
+injection guardrails do for agentic attacks: a structural defense that applies to the whole
 class, not just the specific known instance.
 
 ## Related
 
-- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md) — how Kasal's runtime guardrails map to Databricks AI security guidance
-- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md) — verify each guardrail manually and with automated tests
+- [Security compliance mapping](./README_SECURITY_COMPLIANCE.md): how Kasal's runtime guardrails map to Databricks AI security guidance
+- [Security guardrails test guide](./README_SECURITY_GUARDRAILS_TESTGUIDE.md): verify each guardrail manually and with automated tests
 
 Back to the [documentation hub](./README.md).

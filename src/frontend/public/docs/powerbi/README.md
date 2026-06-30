@@ -28,14 +28,14 @@ The tables below map common goals to the tools and guide that cover them.
 
 ### Setup
 
-- [Authentication and service principal setup](./01-authentication-setup.md) — start here
+- [Authentication and service principal setup](./01-authentication-setup.md) (start here)
 - [Simple migration story](./02-simple-migration-story.md)
 
 ### Case studies and examples
 
-- [Power BI analytics Q&A — full case study](./powerbi-analytics-qa-case-study.md) — 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
-- [Example crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) — import-ready, credentials scrubbed
-- [Context enrichment config example](../powerbi-context-enrichment-example.json) — copy-paste reference for all 6 enrichment fields
+- [Power BI analytics Q&A full case study](./powerbi-analytics-qa-case-study.md): 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
+- [Example crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json): import-ready, credentials scrubbed
+- [Context enrichment config example](../powerbi-context-enrichment-example.json): copy-paste reference for all 6 enrichment fields
 
 ### Analytics and Q&A tools
 
@@ -70,38 +70,36 @@ The two paths below show how the tools chain together for analytics and for migr
 
 ```text
 ANALYTICS PATH (answer questions from live PBI data)
-─────────────────────────────────────────────────────────────────
-  Tool 79: Fetch & cache model metadata
-      ↓
+
+  Tool 79: Fetch and cache model metadata
+      |
   Tool 81: Reduce to question-relevant subset  (optional but recommended)
-      ↓
-  Tool 80: Generate + execute DAX from natural language
+      |
+  Tool 80: Generate and execute DAX from natural language
                                OR
   Tool 82: Execute a known DAX query directly
                                OR
-  Tool 72: All-in-one: question → DAX → execute (single tool)
+  Tool 72: All-in-one: question to DAX to execute (single tool)
 
 
-MIGRATION PATH (move PBI semantic model → Databricks UC Metric Views)
-─────────────────────────────────────────────────────────────────
+MIGRATION PATH (move PBI semantic model to Databricks UC Metric Views)
+
   PHASE 1: Extract
-  ┌─────────────────────────────────────────────────────────┐
-  │ Tool 74: Extract M-Query (Admin SP required)            │
-  │ Tool 73: Extract DAX measures (Non-Admin SP)            │
-  │ Tool 75: Extract relationships (Non-Admin SP, optional) │
-  └─────────────────────────────────────────────────────────┘
-      ↓
+    Tool 74: Extract M-Query (Admin SP required)
+    Tool 73: Extract DAX measures (Non-Admin SP)
+    Tool 75: Extract relationships (Non-Admin SP, optional)
+      |
   PHASE 2: Propose Config
-  Tool 90 (live PBI API → full config)  OR  Tool 89 (from extracted JSON)
-      ↓
-  PHASE 3: Human Review (~2-3h first time, 30min repeat)
-      ↓
+    Tool 90 (live PBI API to full config)  OR  Tool 89 (from extracted JSON)
+      |
+  PHASE 3: Human Review (about 2-3h first time, 30min repeat)
+      |
   PHASE 4: Generate
-  Tool 87: Allocate measures to fact tables (if needed)
-  Tool 86: Generate YAML + SQL (the main pipeline)
-      ↓
+    Tool 87: Allocate measures to fact tables (if needed)
+    Tool 86: Generate YAML + SQL (the main pipeline)
+      |
   PHASE 5: Validate + Deploy
-  Tool 88: Dry-run validate → human approval → deploy
+    Tool 88: Dry-run validate, human approval, deploy
 ```
 
 ## Authentication at a glance

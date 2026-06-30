@@ -6,11 +6,11 @@
 
 ## Why it exists
 
-UC Metric Views are Databricks's governed semantic layer - they define business metrics in a reusable, queryable format. Manually converting hundreds of DAX measures, M-Query source definitions, and relationship structures to UC Metric View YAML is weeks of work. Tool 86 automates this pipeline end-to-end.
+UC Metric Views are Databricks's governed semantic layer: they define business metrics in a reusable, queryable format. Manually converting hundreds of DAX measures, M-Query source definitions, and relationship structures to UC Metric View YAML is weeks of work. Tool 86 automates this pipeline end-to-end.
 
 ## What problem it solves
 
-- **The core migration challenge:** DAX → SQL translation, dependency ordering, join detection, and YAML generation - all in one deterministic pipeline
+- **The core migration challenge:** DAX to SQL translation, dependency ordering, join detection, and YAML generation, all in one deterministic pipeline
 - **Reproducibility:** Same input always produces the same output (no LLM required by default)
 - **Scale:** A 470-measure model completes in under 30 seconds; 823 tests validate correctness
 
@@ -20,19 +20,26 @@ UC Metric Views are Databricks's governed semantic layer - they define business 
 
 ```text
 Input: measures_json + mquery_json + (optional) relationships_json + config_json
-    ↓
+    |
+    v
 MQuery Parser: identify fact tables and source SQL
-    ↓
-DAX Translator: 14+ patterns → SQL expressions per measure
-    ↓
+    |
+    v
+DAX Translator: 14+ patterns to SQL expressions per measure
+    |
+    v
 Kahn's Algorithm: topological sort of measure dependencies
-    ↓
+    |
+    v
 Join Detector: discover dimension joins from DAX references + relationships
-    ↓
+    |
+    v
 YAML Emitter: generate UC Metric View YAML per fact table
-    ↓
+    |
+    v
 SQL Emitter: generate CREATE METRIC VIEW SQL per fact table
-    ↓
+    |
+    v
 Output: {yaml: {...}, sql: {...}, stats: {...}, migration_report: "..."}
 ```
 
@@ -69,11 +76,11 @@ JSON mode is preferred for the full pipeline (each extraction tool runs separate
 | `llm_workspace_url` | LLM | - | Databricks workspace URL |
 | `llm_token` | LLM | - | Databricks PAT |
 | `inner_dim_joins` | No | `false` | Use INNER JOIN for dimensions |
-| `unflatten_tables` | No | `false` | Convert `cat__sch__tbl` → `cat.sch.tbl` |
+| `unflatten_tables` | No | `false` | Convert `cat__sch__tbl` to `cat.sch.tbl` |
 
 ---
 
-## Example crew (JSON mode - full pipeline)
+## Example crew (JSON mode, full pipeline)
 
 ```json
 {
@@ -162,9 +169,9 @@ Pass the output directly to:
 
 ## Notes
 
-- `config_json` is the key to improving translation rate - see [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) and [Tool 90](./tool-90-pipeline-config-generator.md) for how to generate it
-- LLM fallback (`use_llm_fallback: true`) can push translation rate from 70% to 85%+ on complex models - at the cost of non-determinism
-- Each re-run with the same inputs produces identical output (without LLM fallback) - safe to iterate
+- `config_json` is the key to improving translation rate. See the [Pipeline Config Guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) and [Tool 90](./tool-90-pipeline-config-generator.md) for how to generate it
+- LLM fallback (`use_llm_fallback: true`) can push translation rate from 70% to 85%+ on complex models, at the cost of non-determinism
+- Each re-run with the same inputs produces identical output (without LLM fallback), safe to iterate
 
 ## See also
 

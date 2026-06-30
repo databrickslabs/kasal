@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Tools 72 and 80 generate DAX from natural language. But sometimes you already *have* the DAX - you wrote it, copied it from Power BI Desktop, or validated it previously. In that case, you don't need LLM generation. Tool 82 is the lightweight execution-only tool.
+Tools 72 and 80 generate DAX from natural language. But sometimes you already *have* the DAX: you wrote it, copied it from Power BI Desktop, or validated it previously. In that case, you don't need LLM generation. Tool 82 is the lightweight execution-only tool.
 
 ## What problem it solves
 
@@ -20,11 +20,14 @@ Tools 72 and 80 generate DAX from natural language. But sometimes you already *h
 
 ```text
 Receive DAX EVALUATE statement as plain text
-    ↓
+  |
+  v
 Authenticate to Power BI Execute Queries API
-    ↓
+  |
+  v
 Execute query
-    ↓
+  |
+  v
 Return results in chosen format
 ```
 
@@ -122,15 +125,15 @@ CALCULATETABLE(
 | Scenario | Use |
 |----------|-----|
 | You have a working DAX query | **Tool 82** (this tool) |
-| Natural language → DAX → answer (one shot) | Tool 72 |
-| Multi-step: fetch model → reduce → generate | Tools 79 → 81 → 80 |
+| Natural language to DAX to answer (one shot) | Tool 72 |
+| Multi-step: fetch model, reduce, generate | Tools 79, 81, 80 |
 
 ---
 
 ## Notes
 
-- The DAX query must be a complete `EVALUATE` statement - partial expressions like `[Total Revenue]` will fail
-- No retry on failure - if the query errors, fix it and re-run
+- The DAX query must be a complete `EVALUATE` statement; partial expressions like `[Total Revenue]` will fail
+- No retry on failure: if the query errors, fix it and re-run
 - Results are bounded by Power BI's default row limit for Execute Queries API
 
 ## See also

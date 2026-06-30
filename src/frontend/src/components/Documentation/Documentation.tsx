@@ -9,9 +9,9 @@ import {
   ListItemButton, 
   ListItemText,
   Collapse,
-  AppBar,
   Toolbar,
   IconButton,
+  Tooltip,
   useTheme,
   useMediaQuery
 } from '@mui/material';
@@ -25,95 +25,88 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate, useLocation } from 'react-router-dom';
 import mermaid from 'mermaid';
+import { CodeBlock } from '../Chat/components/CodeBlock';
+import './Documentation.css';
 
 interface DocSection {
   label: string;
   items: { label: string; file: string }[];
 }
 
+// Primary navigation mirrors the canonical doc set published on kasal.io so the
+// in-app docs and the public site stay aligned. The "Additional guides" group
+// keeps repo-specific deep dives (observability, Lakebase, Power BI) that the
+// public site folds into other pages, so no content is lost.
 const docSections: DocSection[] = [
   {
-    label: 'Overview',
+    label: 'Get started',
     items: [
+      { label: 'Quick Start', file: 'QUICK_START' },
       { label: 'Why Kasal', file: 'WHY_KASAL' },
-      { label: 'Solution Architecture', file: 'ARCHITECTURE_GUIDE' },
     ],
   },
   {
-    label: 'Flows',
+    label: 'Platform',
     items: [
-      { label: 'Flow Routing & Output Schemas', file: 'flow-routing' },
-    ],
-  },
-  {
-    label: 'Observability / Tracing',
-    items: [
-      { label: '📊 MLflow Tracing — Setup & Requirements', file: 'mlflow-tracing-setup' },
-      { label: 'Lakebase Setup (Persistence)', file: 'lakebase-deployment' },
-    ],
-  },
-  {
-    label: 'Security',
-    items: [
-      { label: 'Security Compliance', file: 'README_SECURITY_COMPLIANCE' },
-      { label: 'Security Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
-      { label: 'Supply Chain Security', file: 'README_SECURITY_SUPPLY_CHAIN' },
-    ],
-  },
-  {
-    label: 'Development',
-    items: [
-      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Architecture Guide', file: 'ARCHITECTURE_GUIDE' },
       { label: 'Code Structure', file: 'CODE_STRUCTURE_GUIDE' },
+      { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
     ],
   },
   {
-    label: 'API',
+    label: 'Reference',
     items: [
-      { label: 'API Endpoints', file: 'api_endpoints' },
+      { label: 'API Reference', file: 'api_endpoints' },
+      { label: 'Tools', file: 'TOOLS' },
+      { label: 'MCP Servers', file: 'MCP' },
+      { label: 'Models', file: 'MODELS' },
+      { label: 'Memory', file: 'MEMORY' },
+      { label: 'Security', file: 'SECURITY' },
     ],
   },
   {
-    label: 'Power BI - Overview',
+    label: 'Tutorials',
     items: [
-      { label: '📋 Overview & Navigation', file: 'powerbi/README' },
-      { label: '🔐 Authentication & SP Setup', file: 'powerbi/01-authentication-setup' },
-      { label: '📖 Simple Migration Story', file: 'powerbi/02-simple-migration-story' },
+      { label: 'End-User Tutorials', file: 'END_USER_TUTORIAL_CATALOG' },
     ],
   },
   {
-    label: 'Power BI - Analytics / Q&A',
+    label: 'Additional guides',
     items: [
-      { label: '⭐ Analytics Q&A — Case Study', file: 'powerbi/powerbi-analytics-qa-case-study' },
-      { label: 'Tool 72 — Comprehensive Analysis', file: 'powerbi/tool-72-comprehensive-analysis' },
-      { label: 'Tool 79 — Semantic Model Fetcher', file: 'powerbi/tool-79-semantic-model-fetcher' },
-      { label: 'Tool 80 — DAX Generator', file: 'powerbi/tool-80-dax-generator' },
-      { label: 'Tool 81 — Metadata Reducer', file: 'powerbi/tool-81-metadata-reducer' },
-      { label: 'Tool 82 — DAX Executor', file: 'powerbi/tool-82-dax-executor' },
+      { label: 'Flow Routing and Output Schemas', file: 'flow-routing' },
+      { label: 'MLflow Tracing: Setup and Requirements', file: 'mlflow-tracing-setup' },
+      { label: 'Lakebase Setup (Persistence)', file: 'lakebase-deployment' },
+      { label: 'Security: Compliance', file: 'README_SECURITY_COMPLIANCE' },
+      { label: 'Security: Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
+      { label: 'Security: Supply Chain', file: 'README_SECURITY_SUPPLY_CHAIN' },
     ],
   },
   {
-    label: 'Power BI - Migration (Extraction)',
+    label: 'Power BI migration',
     items: [
-      { label: 'Tool 73 — Measure Conversion', file: 'powerbi/tool-73-measure-conversion' },
-      { label: 'Tool 74 — M-Query Conversion', file: 'powerbi/tool-74-mquery-conversion' },
-      { label: 'Tool 75 — Relationships', file: 'powerbi/tool-75-relationships' },
-      { label: 'Tool 76 — Hierarchies (Fabric)', file: 'powerbi/tool-76-hierarchies' },
-      { label: 'Tool 77 — Field Parameters (Fabric)', file: 'powerbi/tool-77-field-parameters' },
-      { label: 'Tool 78 — Report References (Fabric)', file: 'powerbi/tool-78-report-references' },
-    ],
-  },
-  {
-    label: 'Power BI - UC Metric Views',
-    items: [
-      { label: '🚀 End-to-End Migration Guide', file: 'powerbi/ucmv-migration-guide' },
-      { label: 'Tool 85 — DAX to SQL Translator', file: 'powerbi/tool-85-dax-to-sql-translator' },
-      { label: 'Tool 86 — UC Metric View Generator', file: 'powerbi/tool-86-uc-metric-view-generator' },
-      { label: 'Tool 87 — Measure Allocator', file: 'powerbi/tool-87-measure-allocator' },
-      { label: 'Tool 88 — Metric View Deployer', file: 'powerbi/tool-88-metric-view-deployer' },
-      { label: 'Tool 89 — Config Generator', file: 'powerbi/tool-89-config-generator' },
-      { label: 'Tool 90 — Pipeline Config Generator', file: 'powerbi/tool-90-pipeline-config-generator' },
+      { label: 'Overview and Navigation', file: 'powerbi/README' },
+      { label: 'Authentication and SP Setup', file: 'powerbi/01-authentication-setup' },
+      { label: 'Simple Migration Story', file: 'powerbi/02-simple-migration-story' },
+      { label: 'Analytics Q&A Case Study', file: 'powerbi/powerbi-analytics-qa-case-study' },
+      { label: 'End-to-End Migration Guide', file: 'powerbi/ucmv-migration-guide' },
       { label: 'Pipeline Config Reference', file: 'UCMV_PIPELINE_CONFIG_GUIDE' },
+      { label: 'Tool 72: Comprehensive Analysis', file: 'powerbi/tool-72-comprehensive-analysis' },
+      { label: 'Tool 73: Measure Conversion', file: 'powerbi/tool-73-measure-conversion' },
+      { label: 'Tool 74: M-Query Conversion', file: 'powerbi/tool-74-mquery-conversion' },
+      { label: 'Tool 75: Relationships', file: 'powerbi/tool-75-relationships' },
+      { label: 'Tool 76: Hierarchies (Fabric)', file: 'powerbi/tool-76-hierarchies' },
+      { label: 'Tool 77: Field Parameters (Fabric)', file: 'powerbi/tool-77-field-parameters' },
+      { label: 'Tool 78: Report References (Fabric)', file: 'powerbi/tool-78-report-references' },
+      { label: 'Tool 79: Semantic Model Fetcher', file: 'powerbi/tool-79-semantic-model-fetcher' },
+      { label: 'Tool 80: DAX Generator', file: 'powerbi/tool-80-dax-generator' },
+      { label: 'Tool 81: Metadata Reducer', file: 'powerbi/tool-81-metadata-reducer' },
+      { label: 'Tool 82: DAX Executor', file: 'powerbi/tool-82-dax-executor' },
+      { label: 'Tool 85: DAX to SQL Translator', file: 'powerbi/tool-85-dax-to-sql-translator' },
+      { label: 'Tool 86: UC Metric View Generator', file: 'powerbi/tool-86-uc-metric-view-generator' },
+      { label: 'Tool 87: Measure Allocator', file: 'powerbi/tool-87-measure-allocator' },
+      { label: 'Tool 88: Metric View Deployer', file: 'powerbi/tool-88-metric-view-deployer' },
+      { label: 'Tool 89: Config Generator', file: 'powerbi/tool-89-config-generator' },
+      { label: 'Tool 90: Pipeline Config Generator', file: 'powerbi/tool-90-pipeline-config-generator' },
     ],
   },
 ];
@@ -174,7 +167,7 @@ const Documentation: React.FC = () => {
       if (response.ok) {
         const content = await response.text();
         // A dev/SPA server answers an unknown /docs/*.md path with the app's
-        // index.html shell (HTTP 200), not a 404 — so a missing doc would
+        // index.html shell (HTTP 200), not a 404, so a missing doc would
         // otherwise render that raw HTML as if it were the document. Treat an
         // HTML shell as "not found" instead.
         const isHtmlShell =
@@ -214,10 +207,15 @@ const Documentation: React.FC = () => {
 
   const drawer = (
     <Box sx={{ overflow: 'auto' }}>
-      <Toolbar>
+      <Toolbar sx={{ justifyContent: 'space-between' }}>
         <Typography variant="h6" noWrap component="div">
           Kasal Docs
         </Typography>
+        <Tooltip title="Back to app">
+          <IconButton size="small" edge="end" onClick={() => navigate('/workflow')}>
+            <HomeIcon />
+          </IconButton>
+        </Tooltip>
       </Toolbar>
       <List>
         <ListItem disablePadding>
@@ -255,32 +253,24 @@ const Documentation: React.FC = () => {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
-      <AppBar
-        position="fixed"
+      {/* Mobile-only menu toggle (no full-width app bar). */}
+      <IconButton
+        aria-label="open drawer"
+        onClick={handleDrawerToggle}
         sx={{
-          width: { md: `calc(100% - ${drawerWidth}px)` },
-          ml: { md: `${drawerWidth}px` },
+          display: { xs: 'flex', md: 'none' },
+          position: 'fixed',
+          top: 8,
+          left: 8,
+          zIndex: (t) => t.zIndex.drawer + 1,
+          bgcolor: 'background.paper',
+          boxShadow: 1,
+          '&:hover': { bgcolor: 'background.paper' },
         }}
       >
-        <Toolbar>
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
-            onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { md: 'none' } }}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            Kasal Documentation
-          </Typography>
-          <IconButton color="inherit" onClick={() => navigate('/workflow')}>
-            <HomeIcon />
-          </IconButton>
-        </Toolbar>
-      </AppBar>
-      
+        <MenuIcon />
+      </IconButton>
+
       <Box
         component="nav"
         sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
@@ -317,7 +307,6 @@ const Documentation: React.FC = () => {
           flexGrow: 1,
           p: 3,
           width: { md: `calc(100% - ${drawerWidth}px)` },
-          mt: '64px',
           overflow: 'auto',
         }}
       >
@@ -327,67 +316,47 @@ const Documentation: React.FC = () => {
             <Typography sx={{ ml: 2 }}>Loading Documentation...</Typography>
           </Box>
         ) : (
-          <Box sx={{ maxWidth: '800px', mx: 'auto' }}>
+          <Box
+            className="markdown-body"
+            data-theme={theme.palette.mode === 'dark' ? 'dark' : 'light'}
+            sx={{ maxWidth: '860px', mx: 'auto' }}
+          >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                h1: ({ children }) => (
-                  <Typography variant="h3" component="h1" gutterBottom sx={{ color: 'primary.main', fontWeight: 700 }}>
-                    {children}
-                  </Typography>
-                ),
-                h2: ({ children }) => (
-                  <Typography variant="h4" component="h2" gutterBottom sx={{ color: 'primary.dark', fontWeight: 600, mt: 3 }}>
-                    {children}
-                  </Typography>
-                ),
-                h3: ({ children }) => (
-                  <Typography variant="h5" component="h3" gutterBottom sx={{ fontWeight: 600, mt: 2 }}>
-                    {children}
-                  </Typography>
-                ),
-                p: ({ children }) => (
-                  <Typography variant="body1" paragraph sx={{ lineHeight: 1.7 }}>
-                    {children}
-                  </Typography>
-                ),
-                img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
-                  <img
-                    {...props}
-                    style={{
-                      maxWidth: '100%',
-                      height: 'auto',
-                      display: 'block',
-                      marginTop: 16,
-                      marginBottom: 16,
-                    }}
-                  />
-                ),
+                // github-markdown-css styles every standard element; we only
+                // override the ones that carry app-specific behavior.
+                img: ({ src, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+                  // Markdown uses paths relative to the doc (e.g. images/x.png).
+                  // The browser would otherwise resolve them against the current
+                  // page URL (or the SPA serves index.html for them), so rewrite
+                  // relative srcs to an absolute /docs/<dir>/... path that maps to
+                  // the served public/docs (and frontend_static/docs) tree.
+                  let resolved = src || '';
+                  const isExternal = /^(https?:)?\/\//i.test(resolved) || resolved.startsWith('data:');
+                  if (resolved && !isExternal && !resolved.startsWith('/')) {
+                    const relativePart = resolved.replace(/^\.\//, '');
+                    const currentDir = currentDoc.includes('/')
+                      ? currentDoc.substring(0, currentDoc.lastIndexOf('/'))
+                      : '';
+                    resolved = currentDir
+                      ? `/docs/${currentDir}/${relativePart}`
+                      : `/docs/${relativePart}`;
+                  }
+                  return <img src={resolved} {...props} />;
+                },
                 a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
                   if (!href) return <a {...props}>{children}</a>;
 
-                  // Intra-page anchors (e.g., #section)
+                  // Intra-page anchors (e.g., #section): leave to the browser.
                   if (href.startsWith('#')) {
-                    return (
-                      <Box
-                        component="a"
-                        href={href}
-                        sx={{
-                          color: theme.palette.primary.main,
-                          textDecoration: 'underline',
-                          '&:hover': { color: theme.palette.primary.dark },
-                        }}
-                        {...props}
-                      >
-                        {children}
-                      </Box>
-                    );
+                    return <a href={href} {...props}>{children}</a>;
                   }
 
                   const isExternal = /^https?:\/\//i.test(href);
                   const isMd = href.toLowerCase().endsWith('.md');
 
-                  // Normalize internal doc links to our loader (expects filename without .md)
+                  // Internal doc links: route through our loader (no full reload).
                   if (!isExternal && isMd) {
                     // Strip common prefixes like /docs/ or src/docs/
                     const normalized = href
@@ -401,95 +370,47 @@ const Documentation: React.FC = () => {
                       base = currentDir ? `${currentDir}/${relativePart}` : relativePart;
                     }
                     return (
-                      <Box
-                        component="a"
+                      <a
                         href="#"
                         onClick={(e: React.MouseEvent) => {
                           e.preventDefault();
                           handleDocSelect(base);
                         }}
-                        sx={{
-                          color: theme.palette.primary.main,
-                          textDecoration: 'underline',
-                          cursor: 'pointer',
-                          '&:hover': { color: theme.palette.primary.dark },
-                        }}
                       >
                         {children}
-                      </Box>
+                      </a>
                     );
                   }
 
                   // External links open in new tab
                   return (
-                    <Box
-                      component="a"
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{
-                        color: theme.palette.primary.main,
-                        textDecoration: 'underline',
-                        '&:hover': { color: theme.palette.primary.dark },
-                      }}
-                      {...props}
-                    >
+                    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
                       {children}
-                    </Box>
+                    </a>
                   );
                 },
-                code: ({ children, inline, className, ...props }: { children?: React.ReactNode; inline?: boolean; className?: string }) => {
-                  const languageMatch = /language-(\w+)/.exec(className || '');
+                // Fenced code blocks arrive as <pre><code class="language-x">…>.
+                // We intercept at the <pre> level so the highlighted component
+                // (and Mermaid <div>) is never nested inside a <pre>. Inline
+                // code is NOT wrapped in <pre>, so it falls through to
+                // github-markdown-css's default styling.
+                pre: ({ children }) => {
+                  const codeEl = React.Children.toArray(children).find(
+                    (c): c is React.ReactElement => React.isValidElement(c)
+                  );
+                  const codeProps = (codeEl?.props ?? {}) as { className?: string; children?: React.ReactNode };
+                  const languageMatch = /language-(\w+)/.exec(codeProps.className || '');
                   const language = languageMatch ? languageMatch[1] : undefined;
+                  const codeText = String(codeProps.children ?? '').replace(/\n$/, '');
 
                   // Render Mermaid diagrams as <div class="mermaid"> blocks
-                  if (!inline && language === 'mermaid') {
-                    const diagram = String(children || '').replace(/\n$/, '');
-                    return (
-                      <Box component="div" className="mermaid" sx={{ my: 2 }}>
-                        {diagram}
-                      </Box>
-                    );
+                  if (language === 'mermaid') {
+                    return <div className="mermaid">{codeText}</div>;
                   }
 
-                  // Default code rendering (inline vs block)
-                  if (inline) {
-                    return (
-                      <Box
-                        component="code"
-                        sx={{
-                          backgroundColor: theme.palette.background.subtle,
-                          border: '1px solid',
-                          borderColor: theme.palette.divider,
-                          borderRadius: 1,
-                          px: 0.5,
-                          py: 0.25,
-                          fontSize: '0.875rem',
-                          fontFamily: 'monospace',
-                        }}
-                      >
-                        {children}
-                      </Box>
-                    );
-                  }
-
-                  return (
-                    <Box
-                      component="pre"
-                      sx={{
-                        backgroundColor: theme.palette.background.subtle,
-                        border: '1px solid',
-                        borderColor: theme.palette.divider,
-                        borderRadius: 1,
-                        p: 2,
-                        overflow: 'auto',
-                        fontSize: '0.875rem',
-                        fontFamily: 'monospace',
-                      }}
-                    >
-                      <code>{children}</code>
-                    </Box>
-                  );
+                  // Syntax-highlighted block with copy button + language label,
+                  // reusing the same component the chat workspace uses.
+                  return <CodeBlock language={language || 'text'} code={codeText} />;
                 },
               }}
             >

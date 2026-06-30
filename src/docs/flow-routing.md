@@ -1,33 +1,29 @@
-# Flow Routing & Output Schemas
+# Flow Routing and Output Schemas
 
 Routers let a flow **choose which crew runs next** based on the result of the
 previous crew. This guide explains the concept and how to configure it on the
 flow canvas.
 
----
-
 ## What a Router does
 
-In a normal connection, crew **A → B** means "run B after A" (sequential). A
+In a normal connection, crew **A then B** means "run B after A" (sequential). A
 **Router** connection is conditional: after the source crew finishes, the router
 evaluates a condition on its result and only continues down the branches whose
 condition is true.
 
+```text
+                      (risk_level == "high")  -> Escalation crew
+Risk crew -> Router
+                      (risk_level == "low")   -> Auto-approve crew
 ```
-                 ┌─ (risk_level == "high")  → Escalation crew
-Risk crew ──▶ Router ─┤
-                 └─ (risk_level == "low")   → Auto-approve crew
-```
 
----
+## The key idea: a crew produces one structured result
 
-## The key idea: a crew produces **one** structured result
-
-A crew does not emit output "per row" or "per item" — it produces **one result
+A crew does not emit output "per row" or "per item". It produces **one result
 for the whole run**. That result is the output of the crew's **final task**.
 
 To route on it, that result needs a **shape** the router can read. That shape is
-an **output schema** — a small set of named fields (a Pydantic model under the
+an **output schema**: a small set of named fields (a Pydantic model under the
 hood). For example, a crew that loads data into a table can return:
 
 ```json
@@ -40,56 +36,48 @@ hood). For example, a crew that loads data into a table can return:
 }
 ```
 
-You are **not** describing each row — `rows_inserted` is the **aggregate outcome
+You are **not** describing each row: `rows_inserted` is the **aggregate outcome
 of the entire workload**. The router then branches on `rows_inserted` or
 `status` or `success`.
-
----
 
 ## Routing variables come from the output schema
 
 When you pick an output schema in the Router configuration, its fields become the
 **variables** you can branch on. A condition is simply:
 
-```
+```text
 <variable>  <operator>  <value>
 ```
 
 for example `rows_inserted > 0`, `status == "failed"`, or `risk_level == "high"`.
 
-Only **scalar** fields are routable — `string`, `number`, `integer`, `boolean`.
+Only **scalar** fields are routable: `string`, `number`, `integer`, `boolean`.
 List/object fields are not shown in the variable picker because the operators
-(`=`, `>`, `contains`, …) compare single values.
-
----
+(`=`, `>`, `contains`, and so on) compare single values.
 
 ## Configure a Router (step by step)
 
 1. **Connect** the two crews on the canvas, then click the connection.
-2. Set **Flow Logic Type → Router**.
-3. Under **Output schema**, **pick an existing schema** or **Add new schema…**.
+2. Set **Flow Logic Type** to **Router**.
+3. Under **Output schema**, **pick an existing schema** or **Add new schema**.
    - The schema is applied to the **source crew's final task** so that the crew
      produces this structured result on every run.
 4. Choose a **variable** (a field from the schema), an **operator**, and a
    **value** to define the condition.
 5. **Save**.
 
-> A Router requires a schema — without one there are no variables to branch on,
+> A Router requires a schema. Without one there are no variables to branch on,
 > so Save stays disabled until you pick or create one.
-
----
 
 ## Choosing or creating a schema
 
-- **Pick existing** — Kasal ships with ready-made, routing-friendly schemas
+- **Pick existing**: Kasal ships with ready-made, routing-friendly schemas
   (see below). Selecting one immediately lists its fields as variables.
-- **Add new schema…** — define a name and a few fields (name + type). It is
+- **Add new schema**: define a name and a few fields (name and type). It is
   saved to your schema library and applied to the source crew's final task.
 
 Schemas you create here also appear in the normal task editor under
-**Output Pydantic Model**, and vice-versa — it is one shared library.
-
----
+**Output Pydantic Model**, and vice-versa. It is one shared library.
 
 ## Important: the value must actually be produced
 
@@ -104,8 +92,6 @@ to be accurate:
 
 The schema guarantees the **shape**; the task description guarantees the value is
 **populated truthfully**.
-
----
 
 ## Built-in schemas
 
@@ -130,8 +116,6 @@ These are seeded and tuned for routing (every field is a scalar outcome):
 | `InvoiceData` | Finance / AP | `total_amount`, `status` |
 | `WebSearchResult` | Online / web search | `results_found`, `has_results`, `relevance_score` |
 
----
-
 ## Example
 
 A data-pipeline crew uses `DataLoadResult`. The router has two branches:
@@ -144,12 +128,10 @@ A data-pipeline crew uses `DataLoadResult`. The router has two branches:
 On each run the crew reports e.g. `{ "rows_inserted": 1532, "rows_failed": 0, "status": "success" }`,
 the router evaluates the conditions, and the matching branch runs.
 
----
-
 ## Example: routing on a web search
 
 A research crew uses a web search tool (e.g. Serper, Tavily, or DuckDuckGo) to look
-something up online. You don't route on each individual hit — you route on the
+something up online. You don't route on each individual hit; you route on the
 **aggregate outcome** of the search. Assign the **`WebSearchResult`** schema to the
 crew's final task:
 
@@ -165,7 +147,7 @@ crew's final task:
 }
 ```
 
-Set **Flow Logic Type → Router** on the connection, choose `WebSearchResult`, and add
+Set **Flow Logic Type** to **Router** on the connection, choose `WebSearchResult`, and add
 branches:
 
 | Branch (target crew) | Condition |
@@ -175,7 +157,7 @@ branches:
 | Ask a human to verify | `relevance_score < 0.5` |
 
 So a search that returns nothing routes to a "broaden the search" crew, a confident
-result routes to a "summarize" crew, and a weak result routes to a human — all from
+result routes to a "summarize" crew, and a weak result routes to a human, all from
 one structured outcome object, no per-result handling.
 
 > Remember: `results_found` / `relevance_score` are whatever the **agent reports**.
