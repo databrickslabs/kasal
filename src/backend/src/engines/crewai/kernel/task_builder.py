@@ -15,10 +15,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.engines.crewai.kernel.genie_formatting import (
-    append_genie_mcp_formatting,
-    apply_genie_mcp_space_id,
-)
+from src.engines.crewai.kernel.genie_formatting import apply_genie_mcp_space_id
 from src.engines.crewai.guardrails.guardrail_wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew
@@ -62,11 +59,6 @@ async def build_task_args(
     if task_args['markdown']:
         task_args['description'] += "\n\nPlease format your response using markdown syntax."
         task_args['expected_output'] += "\n\nYour response should be formatted in markdown."
-
-    # Genie MCP output formatting (shared with the agent/crew paths)
-    task_args['expected_output'] = append_genie_mcp_formatting(
-        task_args['expected_output'], task_config.get('tool_configs', {}) or {}
-    )
 
     # If a managed-Genie MCP server was selected AND the generator also assigned
     # the custom GenieTool, hand the MCP server's space id to that GenieTool so

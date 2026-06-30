@@ -18,7 +18,6 @@ from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactor
 from src.utils.databricks_url_utils import DatabricksURLUtils
 # Import new service classes
 from src.engines.crewai.memory.crew_memory_service import CrewMemoryService
-from src.engines.crewai.kernel.genie_formatting import append_genie_mcp_formatting
 from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
 from src.engines.crewai.config.manager_config_builder import ManagerConfigBuilder
 from src.engines.crewai.config.crew_config_builder import CrewConfigBuilder
@@ -492,12 +491,6 @@ class CrewPreparation:
                         logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
 
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
-
-                # Add formatting instructions for genie MCP output to match genie tool format
-                task_config['expected_output'] = append_genie_mcp_formatting(
-                    task_config.get('expected_output', ''),
-                    task_config.get('tool_configs', {}),
-                )
 
                 # Create the task
                 # Get execution_name from config (can be run_name or execution_id)

@@ -277,39 +277,31 @@ def _agent_with_tools(tools):
     return SimpleNamespace(tools=tools)
 
 
-def test_genie_fixups_apply_space_id_and_return_format_suffix():
-    """A picked Genie MCP server hands its space id to a co-assigned GenieTool and
-    returns the Genie output-formatting suffix to fold into the kickoff prompt."""
+def test_genie_fixups_bridge_space_id_to_genie_tool():
+    """A picked Genie MCP server hands its space id to a co-assigned GenieTool. No
+    output formatting is injected — the answer renders via the shared A2UI composer."""
     genie_tool = _genie_tool()
     agent = _agent_with_tools([_genie_mcp_tool("01efspace"), genie_tool])
-    spec = {
-        "tool_configs": {
-            "MCP_SERVERS": {"servers": ["Databricks Genie: Sales Space"]}
-        }
-    }
 
-    suffix = LightAgentService._apply_genie_mcp_fixups(agent, spec)
+    LightAgentService._apply_genie_mcp_fixups(agent)
 
     assert genie_tool._space_id == "01efspace"  # bridged from the MCP server URL
-    assert "Genie Tool output structure" in suffix
 
 
 def test_genie_fixups_noop_without_genie_mcp():
-    """No Genie MCP server attached → no space id set and no formatting suffix."""
+    """No Genie MCP server attached → no space id set."""
     genie_tool = _genie_tool()
     agent = _agent_with_tools([genie_tool])
-    spec = {"tool_configs": {"MCP_SERVERS": {"servers": ["Some Other Server"]}}}
 
-    suffix = LightAgentService._apply_genie_mcp_fixups(agent, spec)
+    LightAgentService._apply_genie_mcp_fixups(agent)
 
     assert genie_tool._space_id is None
-    assert suffix == ""
 
 
-def test_genie_fixups_handle_empty_spec():
-    """Missing/empty tool_configs is safe (catalog agents, no tools)."""
+def test_genie_fixups_handle_no_tools():
+    """An agent with no tools is safe (catalog agents)."""
     agent = _agent_with_tools([])
-    assert LightAgentService._apply_genie_mcp_fixups(agent, {}) == ""
+    assert LightAgentService._apply_genie_mcp_fixups(agent) is None
 
 
 # ── _build_mcp_configs — OBO token threading for chat MCP ─────────────────────
