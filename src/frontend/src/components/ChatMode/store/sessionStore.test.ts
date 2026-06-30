@@ -196,6 +196,44 @@ describe('createNewSession', () => {
   });
 });
 
+describe('ensureSession', () => {
+  it('returns the current session id without creating when one exists', async () => {
+    useSessionStore.setState({ currentSessionId: 'existing' });
+    const id = await useSessionStore.getState().ensureSession();
+    expect(id).toBe('existing');
+    expect(db.createSession).not.toHaveBeenCalled();
+  });
+
+  it('lazily creates ONE session and sets currentSessionId when none exists', async () => {
+    useSessionStore.setState({ currentSessionId: null });
+    const newSession = makeSession('lazy-sess', 'New Chat');
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(newSession);
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([newSession]);
+
+    const id = await useSessionStore.getState().ensureSession();
+
+    expect(id).toBe('lazy-sess');
+    expect(useSessionStore.getState().currentSessionId).toBe('lazy-sess');
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('lazy-sess');
+  });
+
+  it('dedupes concurrent callers into a single session (no double create)', async () => {
+    useSessionStore.setState({ currentSessionId: null });
+    const newSession = makeSession('shared-sess', 'New Chat');
+    (db.createSession as ReturnType<typeof vi.fn>).mockResolvedValue(newSession);
+    (db.listSessions as ReturnType<typeof vi.fn>).mockResolvedValue([newSession]);
+
+    const [a, b] = await Promise.all([
+      useSessionStore.getState().ensureSession(),
+      useSessionStore.getState().ensureSession(),
+    ]);
+
+    expect(a).toBe('shared-sess');
+    expect(b).toBe('shared-sess');
+    expect(db.createSession).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('startNewChat', () => {
   it('resets to a blank chat WITHOUT persisting a session (lazy creation)', () => {
     useSessionStore.setState({
