@@ -31,6 +31,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     onExecuteFlow: vi.fn(),
     onExecuteGenerated: vi.fn(),
     getCurrentSessionId: vi.fn(() => 'session-1'),
+    ensureSession: vi.fn(async () => 'session-1'),
     ...overrides,
   };
 }
@@ -110,6 +111,42 @@ describe('useDispatcher', () => {
     await act(async () => {
       resolveDispatch(result('conversation', null));
       await firstCall;
+    });
+  });
+
+  describe('first-turn session binding (fresh chat, no current session yet)', () => {
+    it('awaits ensureSession and registers the generation stream under the REAL id, not empty', async () => {
+      // Regression: on a fresh chat the session is created lazily, so
+      // getCurrentSessionId() is still null when the first prompt is sent (a
+      // window that's ~zero locally but wide under Databricks Apps' remote
+      // Postgres). The run must be registered under the id ensureSession
+      // resolves — not '' — otherwise the completed result is owner-routed to
+      // nowhere and the first prompt renders empty (second prompt works).
+      const opts = makeOptions({
+        getCurrentSessionId: vi.fn(() => null),
+        ensureSession: vi.fn(async () => 'created-session'),
+      });
+      useExecutionStore.getState().setChatModeType('chat');
+      mockedDispatch.mockResolvedValue(
+        result('generate_crew', { type: 'streaming', generation_id: 'g1' }),
+      );
+      const { result: hook } = renderHook(() => useDispatcher(opts));
+
+      await act(async () => {
+        await hook.current.sendMessage('build me a crew');
+      });
+
+      expect(opts.ensureSession).toHaveBeenCalled();
+      // The generation stream owner is the resolved session id, never ''.
+      expect(opts.onStartGenerationStream).toHaveBeenCalledWith('g1', 'created-session');
+      // And the run settings carry the real session id.
+      expect(mockedDispatch).toHaveBeenCalledWith(
+        expect.any(String),
+        undefined,
+        undefined,
+        expect.objectContaining({ session_id: 'created-session' }),
+        'build me a crew',
+      );
     });
   });
 
@@ -667,8 +704,8 @@ describe('useDispatcher', () => {
       expect(opts.onStartGenerationStream).not.toHaveBeenCalled();
     });
 
-    it('passes empty session id when originSessionId is null for streaming', async () => {
-      const opts = makeOptions({ getCurrentSessionId: vi.fn(() => null) });
+    it('passes empty session id when ensureSession yields none for streaming (defensive)', async () => {
+      const opts = makeOptions({ ensureSession: vi.fn(async () => '') });
       mockedDispatch.mockResolvedValue(result('generate_plan', { type: 'streaming', generation_id: 'gen-x' }));
       const { result: hook } = renderHook(() => useDispatcher(opts));
       await act(async () => {
@@ -886,8 +923,8 @@ describe('useDispatcher', () => {
   });
 
   describe('session targeting', () => {
-    it('uses updateMessage fallback when there is no origin session', async () => {
-      const opts = makeOptions({ getCurrentSessionId: vi.fn(() => null) });
+    it('uses updateMessage fallback when there is no origin session (defensive)', async () => {
+      const opts = makeOptions({ ensureSession: vi.fn(async () => '') });
       mockedDispatch.mockResolvedValue(result('conversation', { message: 'hi' }));
       const { result: hook } = renderHook(() => useDispatcher(opts));
 
@@ -936,7 +973,7 @@ describe('useDispatcher', () => {
     });
 
     it('handles non-Error rejection with fallback message and no origin session', async () => {
-      const opts = makeOptions({ getCurrentSessionId: vi.fn(() => null) });
+      const opts = makeOptions({ ensureSession: vi.fn(async () => '') });
       mockedDispatch.mockRejectedValue('a string error');
       const { result: hook } = renderHook(() => useDispatcher(opts));
 

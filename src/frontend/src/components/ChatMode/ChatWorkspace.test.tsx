@@ -35,6 +35,7 @@ const h = vi.hoisted(() => {
       reloadForGroup: vi.fn(async () => {}),
       switchSession: vi.fn(async () => {}),
       createNewSession: vi.fn(async () => 's-new'),
+      ensureSession: vi.fn(async () => 's1'),
       startNewChat: vi.fn(),
       deleteSession: vi.fn(async () => {}),
       renameSession: vi.fn(async () => {}),

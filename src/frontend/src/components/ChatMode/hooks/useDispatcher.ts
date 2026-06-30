@@ -47,6 +47,11 @@ interface UseDispatcherOptions {
   onCrewLoaded?: (plan: PlanData, sessionId: string | null) => void;
   onFlowLoaded?: (flow: FlowData, sessionId: string | null) => void;
   getCurrentSessionId: () => string | null;
+  /** Resolve the current session id, lazily creating one if none exists yet.
+   *  Awaited before capturing the run's origin session so a fresh chat's first
+   *  turn doesn't register the run under an empty owner (the "first prompt
+   *  renders empty" bug, which only surfaces under remote-DB latency). */
+  ensureSession: () => Promise<string>;
 }
 
 function getAssistantResponse(result: DispatchResult): string {
@@ -245,10 +250,16 @@ export function useDispatcher(options: UseDispatcherOptions) {
       if (isDispatchingRef.current) return;
       isDispatchingRef.current = true;
 
-      // Capture the session ID NOW, before any async work.
-      // This ensures all operations target the correct session even if the
-      // user switches sessions while the dispatch API call is in progress.
-      const originSessionId = options.getCurrentSessionId();
+      // Capture the session ID NOW, before any async work, so all operations
+      // target the correct session even if the user switches sessions during the
+      // dispatch API call. On the FIRST turn of a fresh chat the session is
+      // created lazily and `currentSessionId` stays null until the create POST
+      // returns — a window that's effectively zero locally (SQLite) but wide on
+      // Databricks Apps' remote Postgres. Capturing it too early registered the
+      // run under an empty owner, so its completed result never rendered ("first
+      // prompt empty, second works"). Await the (deduped) session-ensure so we
+      // hold the REAL id before dispatch + onStartGenerationStream.
+      const originSessionId = await options.ensureSession();
 
       // Intercept "ec" / "execute crew" locally
       const lower = message.toLowerCase().trim();
