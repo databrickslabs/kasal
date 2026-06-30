@@ -83,7 +83,7 @@ Common examples under src/backend/src/api/:
 ## Development conventions (back end)
 
 ### Layering philosophy
-- API (FastAPI routers) → Services (business logic) → Repositories (data access) → DB
+- API (FastAPI routers) to Services (business logic) to Repositories (data access) to DB
 - Keep routers thin (validation, auth), services cohesive (orchestration/transactions), repositories I/O-only.
 
 ### Naming & structure
@@ -110,7 +110,7 @@ Common examples under src/backend/src/api/:
 
 ---
 
-## Back end deep‑dive (files that matter)
+## Back end deep-dive (files that matter)
 
 ### App bootstrap
 - main.py: lifespan init (logging, DB init, seeders), CORS, user context middleware, include api_router
@@ -171,18 +171,18 @@ Notes:
   - infra/trace_management.py: hook into tracing pipeline
 
 Memory/model caveat:
-- Known limitation for specific Databricks models (Claude / GPT‑OSS) on entity extraction
+- Known limitation for specific Databricks models (Claude / GPT-OSS) on entity extraction
 - Automatic fallback to databricks-llama-4-maverick for memory entity extraction only
 
 ---
 
-## Front end deep‑dive
+## Front end deep-dive
 
 ### Docs viewer (this page)
 - Markdown fetched from /docs/<file>.md (copied from src/docs at build)
 - Mermaid supported via fenced ```mermaid code blocks
 - Images rendered responsively; prefer /docs/images/... or relative ./images/...
-- Internal markdown links are intercepted to load other docs in‑app
+- Internal markdown links are intercepted to load other docs in-app
 
 ### API client
 - src/frontend/src/config/api/ApiConfig.ts determines API base URL
@@ -190,12 +190,12 @@ Memory/model caveat:
 
 ### UI organization
 - src/components/: feature folders and shared components
-- src/api/: type‑safe client wrappers by domain
+- src/api/: type-safe client wrappers by domain
 - src/store/, src/hooks/, src/utils/, src/theme/
 
 ---
 
-## End‑to‑end example (from API call to DB)
+## End-to-end example (from API call to DB)
 
 1) Router (executions_router.py) accepts POST /executions with schema
 2) Service (execution_service.py) validates logic, kicks off orchestration
@@ -206,11 +206,11 @@ Memory/model caveat:
 
 ---
 
-## Anti‑patterns to avoid
+## Anti-patterns to avoid
 - Business logic in routers (keep slim and delegate)
 - Services directly returning ORM entities (use schemas/DTOs)
 - Repositories committing transactions (services own commit/rollback)
-- Ad‑hoc logging without the central logger (use core/logger.py)
+- Ad-hoc logging without the central logger (use core/logger.py)
 
 ---
 

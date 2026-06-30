@@ -1,6 +1,6 @@
 # Tool 73 - measure conversion pipeline
 
-**What it is:** Extracts DAX measures from a Power BI semantic model and converts them to your chosen output format - Unity Catalog Metrics YAML, Databricks SQL, or DAX (reformatted).
+**What it is:** Extracts DAX measures from a Power BI semantic model and converts them to your chosen output format: Unity Catalog Metrics YAML, Databricks SQL, or DAX (reformatted).
 
 ---
 
@@ -11,8 +11,8 @@ Power BI measures encode business logic (revenue calculations, KPIs, ratios) in 
 ## What problem it solves
 
 - **Migration teams** need measure definitions extracted before they can build UC Metric Views
-- **Documentation** - generates a complete inventory of all measures in a model with their SQL equivalents
-- **Multi-format output** - same input, different output: UC Metrics, SQL, or just clean DAX for reference
+- **Documentation:** generates a complete inventory of all measures in a model with their SQL equivalents
+- **Multi-format output:** same input, different output (UC Metrics, SQL, or just clean DAX for reference)
 
 ---
 
@@ -20,11 +20,14 @@ Power BI measures encode business logic (revenue calculations, KPIs, ratios) in 
 
 ```text
 Connect to PBI Execute Queries API
-    ↓
-Run EVALUATE INFO.MEASURES() - fetch all measures + DAX expressions
-    ↓
-Parse DAX patterns (14+ rules) → SQL equivalents
-    ↓
+  |
+  v
+Run EVALUATE INFO.MEASURES(): fetch all measures + DAX expressions
+  |
+  v
+Parse DAX patterns (14+ rules) into SQL equivalents
+  |
+  v
 Emit in target format (UC Metrics YAML / SQL / DAX)
 ```
 
@@ -92,15 +95,15 @@ See [Authentication Setup](./01-authentication-setup.md).
 ## In the UCMV pipeline
 
 Tool 73 is Phase 1 of the full migration. Its output (`measures_json`) feeds directly into:
-- **Tool 87** (Measure Allocator - groups measures to fact tables)
-- **Tool 86** (UC Metric View Generator - the main pipeline)
-- **Tool 89** (Config Generator - proposes the pipeline config)
+- **Tool 87** (Measure Allocator: groups measures to fact tables)
+- **Tool 86** (UC Metric View Generator: the main pipeline)
+- **Tool 89** (Config Generator: proposes the pipeline config)
 
 ---
 
 ## Notes
 
-- Also supports YAML as inbound format - useful if you already have measure definitions in YAML and want to convert to SQL
+- Also supports YAML as inbound format, useful if you already have measure definitions in YAML and want to convert to SQL
 - For the full UCMV pipeline, use this alongside Tool 74 (M-Query) and Tool 75 (Relationships)
 - See the [end-to-end UCMV migration guide](./ucmv-migration-guide.md) for the complete flow
 

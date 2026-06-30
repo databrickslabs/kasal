@@ -1,6 +1,6 @@
 # Tool 89 - config generator
 
-**What it is:** Takes the JSON outputs already extracted by Tools 73, 74, and 75, and proposes a `pipeline_config.json` for Tool 86 - with auto-filled keys, gap analysis, and confidence scores.
+**What it is:** Takes the JSON outputs already extracted by Tools 73, 74, and 75, and proposes a `pipeline_config.json` for Tool 86, with auto-filled keys, gap analysis, and confidence scores.
 
 ---
 
@@ -11,7 +11,7 @@ Tool 86 (UC Metric View Generator) accepts a `config_json` parameter with up to 
 ## What problem it solves
 
 - **Config authoring from extracted JSON:** When Tools 73/74/75 have already run and their JSON is available, Tool 89 proposes the config without going back to the PBI API
-- **Gap analysis:** Shows exactly which config keys are auto-filled, which need review, and which require domain knowledge - so the SA knows what to work on next
+- **Gap analysis:** Shows exactly which config keys are auto-filled, which need review, and which require domain knowledge, so the SA knows what to work on next
 - **Confidence scoring:** Each proposed config key gets a confidence score (0.0-1.0)
 
 ---
@@ -47,12 +47,15 @@ Use Tool 89 when you already have the JSON. Use Tool 90 when you want to go dire
 ## Example crew position
 
 ```text
-Tool 73 + Tool 74 + Tool 75 (run first - extraction phase)
-    ↓
-Tool 89 (propose config from their JSON outputs)   ← this tool
-    ↓
+Tool 73 + Tool 74 + Tool 75 (run first, extraction phase)
+    |
+    v
+Tool 89 (propose config from their JSON outputs)   <-- this tool
+    |
+    v
 SA edits pipeline_config.json (fill TODOs, ~2-3h first time)
-    ↓
+    |
+    v
 Tool 86 (generate UC Metric Views with the config)
 ```
 
@@ -92,9 +95,9 @@ Tool 86 (generate UC Metric Views with the config)
 
 ## Notes
 
-- `switch_decompositions` and `filter_sets` always require manual input - they encode business domain knowledge that can't be extracted from code
+- `switch_decompositions` and `filter_sets` always require manual input; they encode business domain knowledge that can't be extracted from code
 - The `gap_analysis.manual_required` list is your SA's work queue for the Human Review phase
-- After the SA fills in the TODOs, run Tool 86 - if translation rate is below target, re-run Tool 89 gap analysis on the improved config to see what's still missing
+- After the SA fills in the TODOs, run Tool 86. If translation rate is below target, re-run Tool 89 gap analysis on the improved config to see what's still missing
 - See the [pipeline config guide](../UCMV_PIPELINE_CONFIG_GUIDE.md) for what each config key means
 
 ## See also

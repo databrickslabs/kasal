@@ -10,7 +10,7 @@ Power BI models define star/snowflake schema relationships between fact and dime
 
 ## What problem it solves
 
-- **Join detection for UCMV:** Tool 86 uses relationships to automatically discover which dimension tables to join to each fact table - without Tool 75, the SA has to specify joins manually in the config
+- **Join detection for UCMV:** Tool 86 uses relationships to automatically discover which dimension tables to join to each fact table. Without Tool 75, the SA has to specify joins manually in the config
 - **Schema documentation:** Foreign key constraints in UC (even `NOT ENFORCED`) appear in Unity Catalog lineage and serve as self-documenting schema
 - **Migration completeness:** A complete migration includes not just measures and sources but also the relational structure
 
@@ -20,11 +20,14 @@ Power BI models define star/snowflake schema relationships between fact and dime
 
 ```text
 Connect to PBI Execute Queries API
-    ↓
+  |
+  v
 Execute: EVALUATE INFO.VIEW.RELATIONSHIPS()
-    ↓
+  |
+  v
 Parse results: from-table, from-column, to-table, to-column, cardinality, direction
-    ↓
+  |
+  v
 Generate: ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... NOT ENFORCED
 ```
 
@@ -90,14 +93,14 @@ See [Authentication Setup](./01-authentication-setup.md).
 ## Example output
 
 ```sql
--- Relationship: Sales[CustomerID] → Customer[CustomerID]
+-- Relationship: Sales[CustomerID] to Customer[CustomerID]
 ALTER TABLE my_catalog.metrics.fact_sales
 ADD CONSTRAINT fk_fact_sales_customer_id_dim_customer
 FOREIGN KEY (customer_id)
 REFERENCES my_catalog.metrics.dim_customer(customer_id)
 NOT ENFORCED;
 
--- Relationship: Sales[ProductKey] → Product[ProductKey]
+-- Relationship: Sales[ProductKey] to Product[ProductKey]
 ALTER TABLE my_catalog.metrics.fact_sales
 ADD CONSTRAINT fk_fact_sales_product_key_dim_product
 FOREIGN KEY (product_key)
@@ -112,14 +115,14 @@ NOT ENFORCED;
 Tool 75 output (`relationships_json`) is **optional but highly recommended** for Tool 86. When provided:
 - Tool 86 automatically detects `enrichment_joins` (LEFT JOINs to dimension tables)
 - The `join_key_map` in `pipeline_config.json` gets auto-populated
-- Reduces manual config work by ~20-30%
+- Reduces manual config work by roughly 20 to 30 percent
 
 ---
 
 ## Notes
 
-- FK constraints in Unity Catalog are `NOT ENFORCED` - they don't prevent bad data but provide metadata and enable lineage
-- System tables like `LocalDateTable_*` are skipped by default - they are PBI internal tables with no equivalent in Databricks
+- FK constraints in Unity Catalog are `NOT ENFORCED`; they don't prevent bad data but provide metadata and enable lineage
+- System tables like `LocalDateTable_*` are skipped by default; they are PBI internal tables with no equivalent in Databricks
 - Inactive relationships (used in specific CALCULATE/USERELATIONSHIP DAX) are excluded by default; enable `include_inactive: true` if needed
 
 ## See also

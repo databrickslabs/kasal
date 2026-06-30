@@ -1,20 +1,20 @@
 # Power BI analytics Q&A case study and setup guide
 
-Natural language questions against a live Power BI semantic model, answered with DAX — no SQL, no exports, no manual measure lookup.
+Natural language questions against a live Power BI semantic model, answered with DAX: no SQL, no exports, no manual measure lookup.
 
-This guide walks through the full setup: crew architecture, credential wiring, and — most importantly — **context enrichment** that makes the difference between a tool that technically works and one your analysts actually love.
+This guide walks through the full setup: crew architecture, credential wiring, and (most importantly) **context enrichment** that makes the difference between a tool that technically works and one your analysts find useful.
 
 - [Before you begin](#before-you-begin)
 - [The 3-agent crew architecture](#the-3-agent-crew-architecture)
-- [Quick start — import the example crew](#quick-start--import-the-example-crew)
-- [Context enrichment — the real power](#context-enrichment--the-real-power)
+- [Quick start: import the example crew](#quick-start-import-the-example-crew)
+- [Context enrichment](#context-enrichment)
 - [Where to configure these fields in Kasal](#where-to-configure-these-fields-in-kasal)
 - [Full working configuration example](#full-working-configuration-example)
 - [Troubleshooting context issues](#troubleshooting-context-issues)
 
 ## Before you begin
 
-- A Non-Admin service principal with `Dataset.Read.All` ([authentication setup](./01-authentication-setup.md)) — admin permissions are not required for Q&A
+- A Non-Admin service principal with `Dataset.Read.All` ([authentication setup](./01-authentication-setup.md)). Admin permissions are not required for Q&A
 - The Power BI workspace GUID and dataset GUID for the model you want to query
 - A Databricks workspace URL and token for the LLM that generates DAX
 - A running Kasal instance where you can import and run a crew
@@ -29,7 +29,7 @@ User question: "What is my total sampling per customer and material?"
           ▼
 ┌─────────────────────────────────────────────────┐
 │  Agent 1: PBI Fetcher                           │
-│  Tool 79 — Power BI Semantic Model Fetcher      │
+│  Tool 79: Power BI Semantic Model Fetcher       │
 │                                                 │
 │  Connects to PBI REST API, downloads the full   │
 │  semantic model metadata (measures, tables,     │
@@ -39,19 +39,19 @@ User question: "What is my total sampling per customer and material?"
                          ▼
 ┌─────────────────────────────────────────────────┐
 │  Agent 2: PBI Metadata Reducer                  │
-│  Tool 81 — Metadata Reducer                     │
+│  Tool 81: Metadata Reducer                      │
 │                                                 │
 │  Slims the full model context down to the       │
 │  tables, measures, and columns actually         │
 │  relevant to the user's question. Reduces       │
-│  token overhead by 60–80% before sending        │
+│  token overhead by 60-80% before sending        │
 │  to the LLM.                                    │
 └────────────────────────┬────────────────────────┘
                          │ model_context_json (reduced)
                          ▼
 ┌─────────────────────────────────────────────────┐
 │  Agent 3: PBI Analyst                           │
-│  Tool 80 — DAX Generator                        │
+│  Tool 80: DAX Generator                         │
 │                                                 │
 │  Reads reduced context + question, generates    │
 │  DAX EVALUATE statement via LLM, executes it    │
@@ -63,16 +63,16 @@ User question: "What is my total sampling per customer and material?"
                   Answer + data table
 ```
 
-Why three agents instead of one (Tool 72)? Tool 72 does everything in a single call — great for one-off questions. The 3-agent crew shines when:
+Why three agents instead of one (Tool 72)? Tool 72 does everything in a single call, which is convenient for one-off questions. The 3-agent crew is preferable when:
 
-- You have a large semantic model (400+ measures) — the Reducer cuts context by 80%
-- You're running multiple questions in a session — model fetch is cached, so agents 2+3 skip the API call
+- You have a large semantic model (400+ measures); the Reducer cuts context by 80%
+- You're running multiple questions in a session; model fetch is cached, so agents 2 and 3 skip the API call
 - You want to customize the reduction step independently (e.g. apply custom `visible_tables` filtering)
 
-## Quick start — import the example crew
+## Quick start: import the example crew
 
 1. Download [`crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json) from the examples folder
-2. In Kasal UI → **Crews** → **Import** → select the file
+2. In Kasal UI, go to **Crews**, then **Import**, then select the file
 3. Open each task node in the canvas and fill in the credential placeholders (see table below)
 4. Set `user_question` as an execution input variable
 5. Click **Run**
@@ -91,7 +91,7 @@ Why three agents instead of one (Tool 72)? Tool 72 does everything in a single c
 
 The SP needs **Dataset.Read.All** in your Power BI workspace. Admin permissions are not required for Q&A.
 
-## Context enrichment — the real power
+## Context enrichment
 
 This is what separates a passable demo from a production-grade analytics assistant. The DAX Generator (Tool 80) accepts six context enrichment fields that are configured once in the tool's task form and then automatically applied to every question.
 
@@ -117,11 +117,11 @@ With context enrichment:
 User asks:   "What is the number of customers with Complete CGR in the Italian BU in week 1?"
 
 Tool resolves automatically:
-  "Complete CGR"  → [Initial_Sizing][description] = 'Complete CGR'   (business_mappings)
-  "Italian BU"    → [Initial_Sizing][BU] = 'Italy'                    (business_mappings)
-  "week 1"        → [Initial_Sizing][Week] = 1                        (business_mappings)
-  "customers"     → num_customers measure                              (field_synonyms)
-  Mandatory_Version filter → auto-applied from active_filters          (active_filters)
+  "Complete CGR"  maps to [Initial_Sizing][description] = 'Complete CGR'   (business_mappings)
+  "Italian BU"    maps to [Initial_Sizing][BU] = 'Italy'                   (business_mappings)
+  "week 1"        maps to [Initial_Sizing][Week] = 1                       (business_mappings)
+  "customers"     maps to num_customers measure                           (field_synonyms)
+  Mandatory_Version filter auto-applied from active_filters               (active_filters)
 ```
 
 ### Field-by-field reference
@@ -144,7 +144,7 @@ Maps phrases your users actually say to the DAX filter expressions that evaluate
 }
 ```
 
-**How to build yours**: Open Power BI Desktop → Data view → note the exact table and column names → map your team's language to those names.
+**How to build yours**: Open Power BI Desktop, go to Data view, note the exact table and column names, then map your team's language to those names.
 
 #### field_synonyms: alternative names for measures and columns
 
@@ -194,7 +194,7 @@ When to add something here: any time the LLM generates a plausible-looking query
 
 #### reference_dax: working DAX examples
 
-Paste one or more verified, working DAX EVALUATE statements. The LLM uses them as syntax and pattern reference — dramatically reducing hallucination on complex measures.
+Paste one or more verified, working DAX EVALUATE statements. The LLM uses them as syntax and pattern reference, reducing hallucination on complex measures.
 
 ```text
 "reference_dax": "
@@ -216,7 +216,7 @@ CALCULATETABLE(
 )"
 ```
 
-**Tip**: Start with 2–3 representative queries that cover your main measure types (simple aggregation, filtered, time-intelligence). The LLM generalises from these patterns.
+**Tip**: Start with 2 to 3 representative queries that cover your main measure types (simple aggregation, filtered, time-intelligence). The LLM generalises from these patterns.
 
 #### visible_tables: scope the model to relevant tables
 
@@ -226,7 +226,7 @@ For large models (100+ tables), limit which tables the Reducer and Generator con
 "visible_tables": ["Initial_Sizing", "Customer_Details", "Revenue_Summary", "Calendar"]
 ```
 
-If not set, all tables are in scope. Set this to the 5–15 tables your Q&A use case actually touches.
+If not set, all tables are in scope. Set this to the 5 to 15 tables your Q&A use case actually touches.
 
 #### conversation_history: multi-turn context
 
@@ -256,16 +256,16 @@ Context enrichment fields are set on the **Task 3 node** (Run PowerBI DAX Genera
 Crew canvas
   └── Task node: "Run PowerBI DAX Generation Tool..."
         └── Tool config (gear icon / edit panel)
-              ├── user_question        ← set as {user_question} variable
-              ├── workspace_id         ← your workspace GUID
-              ├── dataset_id           ← your dataset GUID
-              ├── [auth credentials]
-              ├── business_mappings    ← paste JSON object
-              ├── field_synonyms       ← paste JSON object
-              ├── active_filters       ← paste JSON object
-              ├── context_knowledge    ← paste plain text
-              ├── reference_dax        ← paste DAX examples
-              └── visible_tables       ← paste JSON array
+              user_question        : set as {user_question} variable
+              workspace_id         : your workspace GUID
+              dataset_id           : your dataset GUID
+              [auth credentials]
+              business_mappings    : paste JSON object
+              field_synonyms       : paste JSON object
+              active_filters       : paste JSON object
+              context_knowledge    : paste plain text
+              reference_dax        : paste DAX examples
+              visible_tables       : paste JSON array
 ```
 
 All fields accept direct JSON input in the Kasal tool config panel. The `user_question` field should be set to `{user_question}` to map it from the execution input form.
@@ -286,7 +286,7 @@ The CGR customer analysis example in that file covers a real scenario:
 |---------|--------------|-----|
 | Wrong measure name in generated DAX | Missing `field_synonyms` entry | Add synonym mapping for that measure |
 | Filter not applied / wrong values | Wrong column path in `business_mappings` | Verify exact `[Table][Column]` path in PBI Desktop |
-| "EVALUATE" syntax error on first attempt | Model uses non-standard table/column names | Add 1–2 `reference_dax` examples using those exact names |
+| "EVALUATE" syntax error on first attempt | Model uses non-standard table/column names | Add 1 to 2 `reference_dax` examples using those exact names |
 | Correct DAX but wrong numbers | Implicit filter missing | Add missing filter to `active_filters` |
 | Slow / high token usage | Full model context passed to generator | Enable Tool 81 (Reducer) and set `visible_tables` |
 | Follow-up question ignores previous answer | `conversation_history` not updated | Append each Q&A pair to history between calls |

@@ -54,10 +54,10 @@ GROUP BY Region
 
 ### Fast path: show me it works (1-2 hours with an SA)
 
-Use the **BI Specialist workspace** in Kasal — no setup required:
+Use the **BI Specialist workspace** in Kasal (no setup required):
 
-1. Open Kasal → **Workspaces** → switch to **BI Specialist**
-2. Go to **Crews** — the UCMV Generation Pipeline crew is pre-configured
+1. Open Kasal, then **Workspaces**, then switch to **BI Specialist**
+2. Go to **Crews**. The UCMV Generation Pipeline crew is pre-configured
 3. Connect the crews on the **Flows** canvas and run
 
 All 9 migration crews are pre-seeded with tools enabled. Fill in credentials and go.
@@ -71,7 +71,7 @@ Use this to demo the capability to a customer before they commit to setting up S
 3. SA reviews and fills in the ~30% that requires domain knowledge (~2-3 hours)
 4. Run Tool 86 to generate YAML + SQL
 5. Run Tool 88 (dry-run) to validate
-6. Customer approves → Tool 88 deploys to Databricks
+6. Customer approves, then Tool 88 deploys to Databricks
 
 Total SA time: **~4-6 hours per semantic model** (first time). Repeat migrations of similar models: **~1-2 hours**.
 
@@ -85,7 +85,7 @@ The table below splits each phase into automated and manual effort.
 | Extract M-Query sources | 100% automated (Tool 74) | None |
 | Extract relationships | 100% automated (Tool 75) | None |
 | Propose config (26 keys) | ~70% auto-filled (Tool 90) | Fill TODOs (~30%) |
-| DAX → SQL translation | 93% deterministic (Tool 86) | Complex SWITCH/cross-table ~7% |
+| DAX to SQL translation | 93% deterministic (Tool 86) | Complex SWITCH/cross-table ~7% |
 | YAML generation | 100% automated (Tool 86) | Review output |
 | Deployment | Automated (Tool 88) | Approve dry-run first |
 
@@ -114,8 +114,8 @@ The table below positions Kasal against the common alternatives.
 | Tool | Approach | Deployment | Our position |
 |------|----------|-----------|--------------|
 | Databricks `powerbi-migrate` | File-based input, LLM-driven (non-deterministic) | No deployment | We: live API + deterministic + deploy |
-| Microsoft | Migration path → Fabric (keeps DAX) | No UC Metric Views | We: UC-native output |
-| Consulting firms | Manual rewrites | Customer-managed | We: 70-93% automated, weeks → hours |
+| Microsoft | Migration path to Fabric (keeps DAX) | No UC Metric Views | We: UC-native output |
+| Consulting firms | Manual rewrites | Customer-managed | We: 70-93% automated, weeks to hours |
 | dbt / Looker | Own metric constructs | Own deployment | No PBI migration tooling |
 
 Our moat: **deterministic translation** (reproducible output, no LLM surprises) + **live API extraction** (no file exports needed) + **human review at the right points** (SA-guided, not blanket automation).

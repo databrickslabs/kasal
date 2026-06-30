@@ -14,7 +14,7 @@ When an SA modifies a measure during migration, they need to know which report p
 ## What problem it solves
 
 - **Impact analysis before migration:** "If I change [Total Revenue], which 12 report pages break?"
-- **Unused measure detection:** Find measures referenced by zero reports - safe to deprioritize
+- **Unused measure detection:** Find measures referenced by zero reports, which are safe to deprioritize
 - **Migration documentation:** Produce a complete inventory of what uses what
 
 ---
@@ -79,7 +79,7 @@ See [Authentication Setup](./01-authentication-setup.md).
 
 - Provide `dataset_id` (not `report_id`) to automatically discover and scan all reports that use the semantic model
 - The direct page URLs in the output let you immediately open the affected page in Power BI to verify impact
-- If a customer is on legacy Power BI Service (not Fabric), this tool returns empty results - Tool 72 can be used to find measure usage instead
+- If a customer is on legacy Power BI Service (not Fabric), this tool returns empty results; Tool 72 can be used to find measure usage instead
 
 ## See also
 

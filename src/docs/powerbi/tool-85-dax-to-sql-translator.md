@@ -1,12 +1,12 @@
 # Tool 85 - DAX to SQL translator
 
-**What it is:** A standalone, deterministic DAX-to-Spark-SQL translator using 14+ pattern-based rules. No LLM, no external API calls - just deterministic regex translation.
+**What it is:** A standalone, deterministic DAX-to-Spark-SQL translator using 14+ pattern-based rules. No LLM, no external API calls, just deterministic regex translation.
 
 ---
 
 ## Why it exists
 
-The DAX-to-SQL translation engine inside Tool 86 (UC Metric View Generator) is also exposed as a standalone tool. This lets you translate individual measures without running the full UCMV pipeline - useful for testing, debugging, or building custom workflows.
+The DAX-to-SQL translation engine inside Tool 86 (UC Metric View Generator) is also exposed as a standalone tool. This lets you translate individual measures without running the full UCMV pipeline: useful for testing, debugging, or building custom workflows.
 
 ## What problem it solves
 
@@ -20,9 +20,11 @@ The DAX-to-SQL translation engine inside Tool 86 (UC Metric View Generator) is a
 
 ```text
 Input: JSON array of {measure_name, dax_expression}
-    ↓
+    |
+    v
 Pattern matching against 14+ regex rules (in priority order)
-    ↓
+    |
+    v
 Output: JSON array with {measure_name, sql_expr, is_translatable, confidence, skip_reason}
 ```
 
@@ -120,7 +122,7 @@ No API calls. No LLM. Pure deterministic transformation.
 
 ## Notes
 
-- This is the same engine that runs inside Tool 86 - if Tool 86 marks something untranslatable, Tool 85 will too
+- This is the same engine that runs inside Tool 86. If Tool 86 marks something untranslatable, Tool 85 will too
 - For measures Tool 85 cannot handle, Tool 86 offers an LLM fallback (`use_llm_fallback: true`)
 - Use this for a quick "what's my translation rate?" check before committing to a full UCMV generation run
 

@@ -1,12 +1,12 @@
 # Tool 80 - semantic model DAX generator
 
-**What it is:** Takes a user question and model context JSON (from Tool 79), uses an LLM to generate a DAX EVALUATE query, executes it against Power BI, and returns the result - with automatic retry and self-correction.
+**What it is:** Takes a user question and model context JSON (from Tool 79), uses an LLM to generate a DAX EVALUATE query, executes it against Power BI, and returns the result, with automatic retry and self-correction.
 
 ---
 
 ## Why it exists
 
-Tool 72 does everything in one step (model fetch + DAX generation + execution). Tool 80 is the "execution step only" - designed for multi-question workflows where the model has already been fetched (Tool 79) and optionally reduced (Tool 81). This avoids fetching the model for every single question.
+Tool 72 does everything in one step (model fetch + DAX generation + execution). Tool 80 is the "execution step only", designed for multi-question workflows where the model has already been fetched (Tool 79) and optionally reduced (Tool 81). This avoids fetching the model for every single question.
 
 ## What problem it solves
 
@@ -20,17 +20,23 @@ Tool 72 does everything in one step (model fetch + DAX generation + execution). 
 
 ```text
 Receive model_context_json (from Tool 79 or Tool 81 output)
-    ↓
+  |
+  v
 Build LLM prompt: user question + relevant model context
-    ↓
+  |
+  v
 LLM generates DAX EVALUATE statement
-    ↓
+  |
+  v
 Validate measure names (hallucination detection)
-    ↓
+  |
+  v
 Execute via Power BI Execute Queries API
-    ↓
-If failed → LLM reads error → corrected DAX → retry (up to N times)
-    ↓
+  |
+  v
+If failed: LLM reads error, produces corrected DAX, retry (up to N times)
+  |
+  v
 Return results + retry history
 ```
 

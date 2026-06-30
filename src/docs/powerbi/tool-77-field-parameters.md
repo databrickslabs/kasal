@@ -16,13 +16,13 @@ Neither has a direct equivalent in Unity Catalog. This tool creates SQL UNION vi
 
 - **Feature parity:** Customers who rely heavily on Field Parameters need an equivalent in the migrated layer
 - **Documentation:** Even if the exact behavior can't be replicated, documenting which measures participate in which parameter helps SAs plan the migration
-- **Time intelligence migration:** Calculation Groups are often the only place where YTD/Prior Year logic lives - this tool extracts and converts it
+- **Time intelligence migration:** Calculation Groups are often the only place where YTD/Prior Year logic lives, and this tool extracts and converts it
 
 ---
 
 ## Fabric-only requirement
 
-Same as Tool 76 - requires Microsoft Fabric workspace and TMDL format.
+Same as Tool 76: requires Microsoft Fabric workspace and TMDL format.
 Classic Power BI Service workspaces are not supported.
 
 ---
@@ -111,7 +111,7 @@ FROM my_catalog.raw.fact_sales WHERE year = YEAR(CURRENT_DATE) - 1;
 
 ## Notes
 
-- Not part of the core UCMV pipeline - run alongside it when the customer has Field Parameters or Calculation Groups
+- Not part of the core UCMV pipeline; run alongside it when the customer has Field Parameters or Calculation Groups
 - The SQL equivalents approximate the behavior but don't replicate the interactive switching (that's a frontend/BI tool concern)
 - Very complex NAMEOF() and SELECTEDMEASURE() patterns may need manual refinement
 

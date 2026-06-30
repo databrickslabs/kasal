@@ -1,12 +1,12 @@
 # Tool 88 - metric view deployer
 
-**What it is:** Validates or deploys the UC Metric View YAML + SQL output from Tool 86 to a Databricks workspace via the UC REST API. Dry-run is the default - no deployment happens unless explicitly requested.
+**What it is:** Validates or deploys the UC Metric View YAML + SQL output from Tool 86 to a Databricks workspace via the UC REST API. Dry-run is the default; no deployment happens unless explicitly requested.
 
 ---
 
 ## Why it exists
 
-Tool 86 generates the YAML and SQL. Tool 88 is the "last mile" - it takes that output and either validates it (dry-run) or executes the `CREATE METRIC VIEW` statements in Databricks. The dry-run default gives the SA and customer an opportunity to review before anything is deployed.
+Tool 86 generates the YAML and SQL. Tool 88 is the "last mile": it takes that output and either validates it (dry-run) or executes the `CREATE METRIC VIEW` statements in Databricks. The dry-run default gives the SA and customer an opportunity to review before anything is deployed.
 
 ## What problem it solves
 
@@ -21,14 +21,16 @@ Tool 86 generates the YAML and SQL. Tool 88 is the "last mile" - it takes that o
 
 ```text
 Input: yaml_specs_json + sql_specs_json (from Tool 86 output)
-    ↓
+    |
+    v
 If dry_run=true:
   Validate YAML structure, SQL syntax, dangerous pattern detection
   Return: validation report per metric view (no Databricks API calls)
-    ↓
+    |
+    v
 If dry_run=false:
   Execute CREATE METRIC VIEW SQL via Databricks SQL Statement API
-  Handle 409 Conflict → attempt UPDATE METRIC VIEW
+  Handle 409 Conflict, attempt UPDATE METRIC VIEW
   Return: deployment status per metric view
 ```
 
@@ -38,7 +40,7 @@ If dry_run=false:
 
 - **SSRF prevention:** `databricks_host` must end in `.cloud.databricks.com`, `.azuredatabricks.net`, `.gcp.databricks.com`, `.databricksapps.com`, or `.databricks.azure.cn`
 - **Dangerous SQL detection:** Scans YAML for `DROP`, `TRUNCATE`, `DELETE` patterns before executing
-- **Dry-run default:** `dry_run: true` is intentional - require explicit opt-in to deploy
+- **Dry-run default:** `dry_run: true` is intentional; require explicit opt-in to deploy
 
 ---
 
@@ -144,8 +146,8 @@ SELECT MEASURE(Total_Revenue) FROM my_catalog.metrics.fact_sales_uc_metric_view 
 ## Notes
 
 - Always run dry-run first and share the validation report with the customer before deploying
-- `409 Conflict` responses are handled automatically with an update attempt - safe to re-deploy after config changes
-- If a metric view fails to deploy, the others continue - per-view error reporting lets you fix and re-run specific views
+- `409 Conflict` responses are handled automatically with an update attempt, so it is safe to re-deploy after config changes
+- If a metric view fails to deploy, the others continue; per-view error reporting lets you fix and re-run specific views
 
 ## See also
 

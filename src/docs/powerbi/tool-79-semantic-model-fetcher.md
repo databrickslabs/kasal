@@ -1,6 +1,6 @@
 # Tool 79 - semantic model fetcher
 
-**What it is:** Fetches and caches the full metadata of a Power BI semantic model - measures, tables, columns, relationships, sample data - using a 3-tier fallback to maximize what it can extract.
+**What it is:** Fetches and caches the full metadata of a Power BI semantic model (measures, tables, columns, relationships, sample data) using a 3-tier fallback to maximize what it can extract.
 
 ---
 
@@ -10,9 +10,9 @@ Tools 80 (DAX Generator) and 81 (Metadata Reducer) both need model context to wo
 
 ## What problem it solves
 
-- **Separation of concerns:** Decouple model fetching from DAX generation - you can fetch once, then ask many questions
+- **Separation of concerns:** Decouple model fetching from DAX generation, so you can fetch once, then ask many questions
 - **Caching:** Same-day cache means fast response for the second, third question about the same model
-- **3-tier fallback:** Fabric TMDL API → Admin Scanner API → DAX-based extraction. If one tier fails, the next is tried automatically
+- **3-tier fallback:** Fabric TMDL API, then Admin Scanner API, then DAX-based extraction. If one tier fails, the next is tried automatically
 
 ---
 
@@ -111,9 +111,9 @@ This JSON is passed as `model_context_json` to Tool 80 (DAX Generator) or Tool 8
 
 ## Notes
 
-- Cache is per-day - same workspace+dataset within the same calendar day reuses the cache automatically
-- For multi-question workflows, always use Tool 79 → 81 → 80 (not Tool 72 each time) to avoid repeated API calls
-- The output JSON can be large for complex models (hundreds of measures) - Tool 81 reduces it to question-relevant subset before sending to the LLM
+- Cache is per-day: same workspace+dataset within the same calendar day reuses the cache automatically
+- For multi-question workflows, always use Tool 79, then 81, then 80 (not Tool 72 each time) to avoid repeated API calls
+- The output JSON can be large for complex models (hundreds of measures); Tool 81 reduces it to question-relevant subset before sending to the LLM
 
 ## See also
 
