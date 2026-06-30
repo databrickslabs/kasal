@@ -396,8 +396,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     const isFailed = taskStatus?.status === 'failed';
 
     const baseStyles = {
-      minWidth: 160,
-      minHeight: 120,
+      width: 270,
+      minWidth: 260,
+      minHeight: 150,
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',

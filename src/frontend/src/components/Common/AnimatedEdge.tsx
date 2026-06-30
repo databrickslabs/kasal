@@ -3,6 +3,7 @@ import { BaseEdge, EdgeProps, getSmoothStepPath, EdgeText } from 'reactflow';
 import { Dialog, DialogContent } from '@mui/material';
 import { EdgeStateForm } from '../Flow';
 import { getEdgeStyle, getEdgeLabel, edgeColors } from '../../config/edgeConfig';
+import { useRunStatusStore } from '../../store/runStatus';
 
 interface ExtendedEdgeProps extends EdgeProps {
   data?: {
@@ -30,6 +31,11 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  // Only flow the dashes while a job is actually running; otherwise the edge is
+  // rendered static (no moving animation) even if it's an "animated" edge.
+  // hasRunningJobs stays true for the whole run (via SSE/polling), unlike the
+  // crew store's isExecuting which only flips true briefly while submitting.
+  const hasRunningJobs = useRunStatusStore(state => state.hasRunningJobs);
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -69,8 +75,19 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
   const width = maxX - minX;
   const height = maxY - minY;
 
-  // Get edge styles from centralized configuration
-  const edgeStyles = getEdgeStyle(source, target, animated, style);
+  // Get edge styles from centralized configuration.
+  // The stored edge `style` may already bake in the flow animation, and ReactFlow's
+  // built-in `.animated` class also animates the path — so force the `animation`
+  // property here, gated on the crew actually running. An inline `animation: 'none'`
+  // overrides both the stored style and ReactFlow's default animated-edge CSS.
+  const computedStyles = getEdgeStyle(source, target, animated, style);
+  const edgeStyles = {
+    ...computedStyles,
+    // While running, leave the animation unset so ReactFlow's built-in `.animated`
+    // class drives the dash flow; when idle, force `none` to override both that
+    // class CSS and any animation baked into the stored edge style.
+    animation: animated && hasRunningJobs ? undefined : 'none',
+  };
 
   const handleMouseEnter = useCallback(() => {
     if (!isHovered) {

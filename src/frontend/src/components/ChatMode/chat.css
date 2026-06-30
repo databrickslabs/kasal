@@ -9,7 +9,9 @@
  * from Kasal's theme store).
  */
 #kasal-chat-root,
-#kasal-chat-root[data-theme="light"] {
+#kasal-chat-root[data-theme="light"],
+.kasal-chat-root,
+.kasal-chat-root[data-theme="light"] {
   --bg-primary: #FFFFFF;
   --bg-secondary: #F5F7FA;
   --bg-sidebar: #F5F7FA;
@@ -56,7 +58,8 @@
   --a2-radius: 0.5rem;
 }
 
-#kasal-chat-root[data-theme="dark"] {
+#kasal-chat-root[data-theme="dark"],
+.kasal-chat-root[data-theme="dark"] {
   --bg-primary: #1B1F23;
   --bg-secondary: #232930;
   --bg-sidebar: #15191E;

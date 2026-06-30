@@ -333,8 +333,8 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
 
   const getAgentNodeStyles = () => {
     const baseStyles = {
-      width: 160,
-      minHeight: 140,
+      width: 200,
+      height: 172,
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -524,10 +524,13 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         fontWeight: 500,
         textAlign: 'center',
         color: (theme: Theme) => theme.palette.primary.main,
-        maxWidth: '140px',
+        maxWidth: '184px',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
+        wordBreak: 'break-word',
       }}>
         {data.role || 'Agent'}
       </Typography>
