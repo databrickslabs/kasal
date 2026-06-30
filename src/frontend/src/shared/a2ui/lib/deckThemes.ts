@@ -81,6 +81,35 @@ export const DECK_THEMES: DeckTheme[] = [
 export const DECK_THEME_KEY = 'kasal.deckTheme'
 export const DEFAULT_DECK_THEME_ID = 'midnight'
 
+// Tailwind-typography (`prose`) sets its OWN text colors via `--tw-prose-*`
+// variables, which override the inherited `color: theme.fg` the slide stage
+// applies. Left at their defaults (a light-scheme near-black), prose body text
+// renders dark-on-dark on any dark deck theme and vanishes (the invisible
+// bullets bug). Deriving the prose variables from the active deck theme keeps
+// Markdown body/bullets/headings/links readable against the stage on EVERY
+// theme — dark or light. `--tw-prose-*` accept any CSS color string, so the
+// theme's rgba muted/border values pass through unchanged.
+export function deckProseVars(theme: DeckTheme): Record<string, string> {
+  return {
+    '--tw-prose-body': theme.fg,
+    '--tw-prose-headings': theme.title,
+    '--tw-prose-lead': theme.fg,
+    '--tw-prose-links': theme.accent,
+    '--tw-prose-bold': theme.title,
+    '--tw-prose-counters': theme.muted,
+    '--tw-prose-bullets': theme.accent,
+    '--tw-prose-hr': theme.panelBorder,
+    '--tw-prose-quotes': theme.fg,
+    '--tw-prose-quote-borders': theme.accent,
+    '--tw-prose-captions': theme.muted,
+    '--tw-prose-code': theme.fg,
+    '--tw-prose-pre-code': theme.fg,
+    '--tw-prose-pre-bg': theme.panel,
+    '--tw-prose-th-borders': theme.panelBorder,
+    '--tw-prose-td-borders': theme.panelBorder,
+  }
+}
+
 export function getDeckTheme(id: string | null | undefined): DeckTheme {
   return DECK_THEMES.find((t) => t.id === id) ?? DECK_THEMES[0]
 }

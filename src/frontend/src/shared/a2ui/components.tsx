@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -12,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Separator } from './ui/separator'
 import { Button } from './ui/button'
 import { downloadCsv, downloadPptx } from './lib/download'
-import { DeckThemeContext } from './lib/deckThemes'
+import { DeckThemeContext, deckProseVars } from './lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from './lib/surfaceContext'
 import { mdComponents, linkifyCitations } from './lib/markdown'
 import { cn } from './lib/utils'
@@ -42,8 +43,19 @@ const asArr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
 const CHART_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7']
 
 export function Markdown({ node, resolve }: NodeProps) {
+  // Inside a slide deck, drive the `prose` text colors from the deck theme so
+  // body/bullets/headings contrast with the stage. Without this, prose keeps its
+  // default near-black colors and disappears on a dark deck theme (the title and
+  // kicker stay visible because they use explicit theme.* colors, the bullets
+  // don't). Outside a deck (chat / document surfaces) prose keeps its defaults.
+  const theme = useContext(DeckThemeContext)
+  const { inDeck } = useContext(SlideCtx)
+  const proseStyle = inDeck ? (deckProseVars(theme) as CSSProperties) : undefined
   return (
-    <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:before:content-none prose-code:after:content-none">
+    <div
+      className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:before:content-none prose-code:after:content-none"
+      style={proseStyle}
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
         {linkifyCitations(asStr(resolve(node.content)))}
       </ReactMarkdown>
