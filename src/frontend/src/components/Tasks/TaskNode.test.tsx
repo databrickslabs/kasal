@@ -398,16 +398,23 @@ describe('TaskNode', () => {
   });
 
   describe('Node Dimensions', () => {
-    it('should have minimum width of 160px', () => {
+    // Task nodes were enlarged to read proportionate to the widened agent nodes.
+    it('should have a fixed width of 270px', () => {
       const { container } = renderTaskNode();
       const nodeBox = container.querySelector('[data-nodetype="task"]');
-      expect(nodeBox).toHaveStyle({ minWidth: '160px' });
+      expect(nodeBox).toHaveStyle({ width: '270px' });
     });
 
-    it('should have minimum height of 120px', () => {
+    it('should have a minimum width of 260px', () => {
       const { container } = renderTaskNode();
       const nodeBox = container.querySelector('[data-nodetype="task"]');
-      expect(nodeBox).toHaveStyle({ minHeight: '120px' });
+      expect(nodeBox).toHaveStyle({ minWidth: '260px' });
+    });
+
+    it('should have a minimum height of 150px', () => {
+      const { container } = renderTaskNode();
+      const nodeBox = container.querySelector('[data-nodetype="task"]');
+      expect(nodeBox).toHaveStyle({ minHeight: '150px' });
     });
   });
 });

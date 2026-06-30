@@ -302,6 +302,23 @@ describe('AgentNode', () => {
     });
   });
 
+  /* ---------- Node Dimensions ---------- */
+
+  describe('Node Dimensions', () => {
+    // Agent nodes are a fixed size so they stay uniform regardless of role length.
+    it('renders a fixed 200x172 node', () => {
+      renderNode();
+      const box = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      expect(box).toHaveStyle({ width: '200px', height: '172px' });
+    });
+
+    it('lets the role label wrap (wider maxWidth, no single-line clamp)', () => {
+      renderNode();
+      const label = screen.getByText('Researcher');
+      expect(label).toHaveStyle({ maxWidth: '184px' });
+    });
+  });
+
   /* ---------- Agent Data Loading ---------- */
 
   describe('Agent Data Loading', () => {

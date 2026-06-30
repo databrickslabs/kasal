@@ -107,7 +107,9 @@ const TabBar: React.FC<TabBarProps> = ({
   const availableForTabs = Math.max(0, containerWidth - ADD_BUTTON_WIDTH);
   const threshold = availableForTabs * 0.95;
   const totalDefaultWidth = visibleTabs.length * DEFAULT_TAB_MAX;
-  const computedTabMaxWidth = totalDefaultWidth > threshold && visibleTabs.length > 0
+  // Only shrink once we've actually measured the container; otherwise (containerWidth === 0,
+  // before the ResizeObserver fires) tabs would wrongly collapse to the 60px minimum.
+  const computedTabMaxWidth = containerWidth > 0 && totalDefaultWidth > threshold && visibleTabs.length > 0
     ? Math.max(DEFAULT_TAB_MIN, Math.floor(threshold / visibleTabs.length))
     : DEFAULT_TAB_MAX;
 
