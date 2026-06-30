@@ -176,6 +176,23 @@ describe('PreviewPanel component', () => {
     expect(screen.getByTestId('preview-body').childElementCount).toBe(0);
   });
 
+  it('renders a plain-text/markdown deliverable as markdown, with a TEXT badge and no A2UI controls', () => {
+    renderPanel(
+      { type: 'text', data: '# Heading\n\nSome **bold** answer.', title: 'Answer' },
+      // onRefine is provided, yet Customize must stay hidden: a text answer has no
+      // surface to restyle. Download (PDF/PPTX) is likewise A2UI-only.
+      { onRefine: vi.fn() },
+    );
+    expect(screen.getByText('Answer')).toBeInTheDocument();
+    expect(screen.getByText('TEXT')).toBeInTheDocument(); // type badge
+    // The markdown renders (heading + body text).
+    expect(screen.getByText('Heading')).toBeInTheDocument();
+    expect(screen.getByText(/bold/)).toBeInTheDocument();
+    // No A2UI-only controls for a text deliverable.
+    expect(screen.queryByText('Customize')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Download')).not.toBeInTheDocument();
+  });
+
   it('close and toggle-chat buttons fire their callbacks', () => {
     const onClose = vi.fn();
     const onToggleChat = vi.fn();
@@ -478,9 +495,11 @@ describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
     expect(downloadSurfacePdfMock.mock.calls[0][1]).toBe('document');
   });
 
-  it('does nothing when the stored data is not a parseable A2UI document', async () => {
+  it('hides the download control when the stored data is not a parseable A2UI document', () => {
+    // No surface to export → the A2UI-only download menu is not rendered at all
+    // (there is nothing to download), so nothing can be exported.
     renderPanel({ type: 'ui', data: 'not a ui document at all' });
-    await openMenuAndPick('PDF');
+    expect(screen.queryByLabelText('Download')).not.toBeInTheDocument();
     expect(downloadSurfacePdfMock).not.toHaveBeenCalled();
   });
 
