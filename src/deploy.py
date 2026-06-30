@@ -142,8 +142,9 @@ def build_frontend(root_dir, api_url=None):
     effective_api_url = api_url or "/api/v1"
     logger.info(f"Pinning VITE_API_URL={effective_api_url} for the production build")
     build_env = {**os.environ, "VITE_API_URL": effective_api_url}
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
     try:
-        subprocess.run(["npm", "run", "build"], cwd=str(root_dir), check=True, env=build_env)
+        subprocess.run([npm_cmd, "run", "build"], cwd=str(root_dir), check=True, env=build_env)
     except FileNotFoundError:
         logger.error("npm not found on PATH — install Node.js to build the frontend.")
         raise
