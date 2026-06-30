@@ -353,8 +353,20 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Only follow the conversation to the bottom when a NEW message arrives or the
+  // LATEST message updates (streaming). Editing an OLDER message in place — e.g.
+  // restyling a surface's colors from a previous turn — must NOT yank the view to
+  // the end (the user scrolled up deliberately). (count starts at 0 so the first
+  // render still scrolls a freshly opened session to its latest message.)
+  const prevCountRef = useRef(0);
+  const prevLastRef = useRef<unknown>(undefined);
   useEffect(() => {
-    scrollToBottom();
+    const last = messages[messages.length - 1];
+    const grew = messages.length > prevCountRef.current;
+    const latestChanged = last !== prevLastRef.current;
+    prevCountRef.current = messages.length;
+    prevLastRef.current = last;
+    if (grew || latestChanged) scrollToBottom();
   }, [messages]);
 
   const handleCommand = (command: string) => {
