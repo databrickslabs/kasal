@@ -1802,6 +1802,7 @@ const ChatWorkspace: React.FC = () => {
     onFlowLoaded: (flow, sessionId) =>
       setPendingRun({ sessionId, label: flow.name || 'flow', run: () => handleExecuteFlow(flow) }),
     getCurrentSessionId: () => useSessionStore.getState().currentSessionId,
+    ensureSession: () => useSessionStore.getState().ensureSession(),
   });
 
   // --- Local command handling ---

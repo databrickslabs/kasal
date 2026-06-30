@@ -51,6 +51,13 @@ interface SessionActions {
   reloadForGroup: (restoreActiveSession?: boolean) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   createNewSession: () => Promise<string>;
+  /** Resolve the current session id, lazily creating ONE session if none exists
+   *  yet (shared with addMessage's lazy create via `pendingSessionCreate`, so
+   *  the first turn never spawns duplicates). Await this BEFORE capturing an
+   *  origin session id for a run — otherwise, under remote-Postgres latency,
+   *  `currentSessionId` is still null and the run gets registered under an empty
+   *  owner, so its completed result never renders (the "first prompt empty" bug). */
+  ensureSession: () => Promise<string>;
   /** Reset to a blank chat WITHOUT persisting a session. Matches the lazy-
    *  creation design: the row is created (and auto-titled) on the first
    *  message, so an empty "New Chat" never clutters the Recent rail. */
@@ -168,6 +175,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     return session.id;
   },
 
+  ensureSession: async () => {
+    const existing = get().currentSessionId;
+    if (existing) return existing;
+    // Reuse an in-flight create so callers in the same tick (the user message,
+    // the "Thinking..." placeholder, AND the dispatcher's origin-id capture)
+    // share ONE session instead of each spawning its own (the double-session
+    // bug). Only one create is ever in flight; the guard blocks a second.
+    if (!pendingSessionCreate) {
+      const create = (async () => {
+        const session = await dbCreateSession('New Chat', currentGroupId());
+        localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
+        const allSessions = await dbListSessions(currentGroupId());
+        set({ currentSessionId: session.id, sessions: allSessions });
+        return session.id;
+      })();
+      pendingSessionCreate = create;
+      void create.finally(() => {
+        pendingSessionCreate = null;
+      });
+    }
+    return pendingSessionCreate;
+  },
+
   // Land on a blank chat WITHOUT persisting a row. The actual session is
   // created lazily (and auto-titled from the first prompt) by addMessage — the
   // same path reloadForGroup uses for a fresh chat. This is what the "New Chat"
@@ -223,28 +253,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     // Persist to IndexedDB (fire-and-forget)
     const ensureAndPersist = async () => {
-      let sessionId = get().currentSessionId;
-      if (!sessionId) {
-        // Reuse an in-flight create so messages arriving in the same tick share
-        // ONE session instead of each spawning its own (the double-session bug).
-        if (!pendingSessionCreate) {
-          const create = (async () => {
-            const session = await dbCreateSession('New Chat', currentGroupId());
-            localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
-            const allSessions = await dbListSessions(currentGroupId());
-            set({ currentSessionId: session.id, sessions: allSessions });
-            return session.id;
-          })();
-          pendingSessionCreate = create;
-          // Release once settled so a later fresh chat can create again. Only one
-          // create is ever in flight (the guard above blocks a second), so a plain
-          // reset is safe.
-          void create.finally(() => {
-            pendingSessionCreate = null;
-          });
-        }
-        sessionId = await pendingSessionCreate;
-      }
+      const sessionId = await get().ensureSession();
       await addMessageToSession(sessionId, { ...message, sessionId });
 
       // Auto-title: first non-command user message becomes the session title
