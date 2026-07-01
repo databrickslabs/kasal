@@ -1528,3 +1528,30 @@ class TestA2uiFrontendVendor:
         )
         mismatched = [rel for rel in want if want[rel] != got.get(rel)]
         assert not mismatched, f"a2ui vendor content drift in: {mismatched}"
+
+
+class TestCodexHandlerVendor:
+    @pytest.mark.asyncio
+    async def test_codex_handler_shipped_and_wired(self, exporter, crew_data):
+        """The export must ship the vendored DatabricksCodexCompletion handler and
+        wire _make_llm to use it — plain OpenAICompletion(api='responses') does NOT
+        run the tool loop for gpt-5-3-codex (returns the raw tool-call)."""
+        files = _files(await exporter.export(crew_data, {}))
+        assert "agent_server/databricks_codex_handler.py" in files, "handler not shipped"
+        agent_py = files["agent_server/agent.py"]
+        assert "DatabricksCodexCompletion" in agent_py, "codex branch not wired to the handler"
+        # The bare OpenAICompletion path must no longer be used for codex.
+        assert "from agent_server.databricks_codex_handler import DatabricksCodexCompletion" in agent_py
+
+    def test_codex_handler_in_sync_with_source(self):
+        """The vendored handler must byte-match Kasal's canonical
+        src/core/llm_handlers/databricks_codex_handler.py. On failure, re-copy it."""
+        canonical = TEMPLATE_DIR.parents[4] / "core" / "llm_handlers" / "databricks_codex_handler.py"
+        vendored = TEMPLATE_DIR / "agent_server" / "databricks_codex_handler.py"
+        assert vendored.is_file(), "vendored codex handler missing from the template"
+        if not canonical.is_file():
+            pytest.skip("canonical handler not present (backend-only checkout)")
+        assert vendored.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8"), (
+            "codex handler drift — re-copy src/core/llm_handlers/databricks_codex_handler.py "
+            "into the template's agent_server/"
+        )

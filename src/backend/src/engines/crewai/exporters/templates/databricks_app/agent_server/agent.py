@@ -376,11 +376,19 @@ def _make_llm(model_name: str, temperature: float = 0.7):
         )
     host, token = _databricks_host_token()
     if _is_codex_model(model_name):
-        from crewai.llms.providers.openai.completion import OpenAICompletion
+        # gpt-5-3-codex ONLY works via the Databricks Responses API, and plain
+        # OpenAICompletion(api="responses") does NOT complete the tool-execution
+        # loop — it emits a tool call and stops (the raw tool-call is returned
+        # instead of the answer). DatabricksCodexCompletion (vendored verbatim from
+        # Kasal's llm_manager) adds the two things that make tool-calling work:
+        #   • phase preservation — re-injects prior output items WITH their `phase`
+        #     field so codex doesn't early-stop after the first tool call;
+        #   • a forced tool loop (tool_choice="required" until enough tool calls).
+        from agent_server.databricks_codex_handler import DatabricksCodexCompletion
 
         # Responses API: AI Gateway on -> /ai-gateway/openai/v1 ; off -> /serving-endpoints.
         base_path = "ai-gateway/openai/v1" if _gateway_on() else "serving-endpoints"
-        return OpenAICompletion(
+        return DatabricksCodexCompletion(
             model=model_name,
             api="responses",
             base_url=f"{host}/{base_path}",
