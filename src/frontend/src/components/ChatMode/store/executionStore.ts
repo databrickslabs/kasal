@@ -85,10 +85,12 @@ interface ExecutionState {
    */
   workspaceMemory: boolean;
   /**
-   * Whether crews run WITH memory at all. true (default) = agents keep memory
-   * (recall scope governed by ``workspaceMemory``); false = "No memory" — agents
-   * are created without memory and nothing is recalled or persisted. Lives in the
-   * store for the same persistence reason as ``workspaceMemory``.
+   * Whether crews run WITH semantic memory. This is the flag the composer's
+   * memory pill toggles: true = "Workspace memory" (semantic memory on), false
+   * (default) = "Session memory" (semantic memory off; recall comes only from
+   * this chat's history). Session-only is the default so a new chat doesn't pull
+   * in unrelated workspace history unless the user opts in. Lives in the store
+   * for the same persistence reason as ``workspaceMemory``.
    */
   memoryEnabled: boolean;
   /**
@@ -290,7 +292,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   executionOwnerSessionId: null,
   executionLog: [],
   workspaceMemory: true,
-  memoryEnabled: true,
+  memoryEnabled: false,
   chatModeType: 'chat',
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
@@ -1003,10 +1005,17 @@ export const useExecutionStore = create<ExecutionStore>()(
       // preview pane is now opt-in). Reset any persisted 'preview' placement once
       // so existing browsers pick up the new default instead of keeping the old
       // value forever.
-      version: 1,
+      // v2: the composer's memory pill now defaults to "Session memory"
+      // (memoryEnabled=false) so a new chat doesn't pull in unrelated workspace
+      // history unless the user opts in. Reset the persisted value once so existing
+      // browsers pick up the new default instead of keeping the old "Workspace".
+      version: 2,
       migrate: (persisted, version) => {
         if (version < 1 && persisted && typeof persisted === 'object') {
           (persisted as { activityPlacement?: string }).activityPlacement = 'chat';
+        }
+        if (version < 2 && persisted && typeof persisted === 'object') {
+          (persisted as { memoryEnabled?: boolean }).memoryEnabled = false;
         }
         return persisted as ExecutionStore;
       },
