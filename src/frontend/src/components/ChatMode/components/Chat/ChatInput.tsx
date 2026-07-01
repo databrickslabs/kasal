@@ -98,8 +98,8 @@ interface ChatInputProps {
   /**
    * Memory mode toggle — owned by the parent so it persists across the
    * empty→conversation input swap and remounts.
-   *   true  (default) = "Workspace memory": semantic memory on (workspace-scoped)
-   *   false           = "Session memory": semantic memory off; recall comes only
+   *   true            = "Workspace memory": semantic memory on (workspace-scoped)
+   *   false (default) = "Session memory": semantic memory off; recall comes only
    *                     from this chat's history (the light-agent preamble).
    */
   memoryEnabled?: boolean;
@@ -173,7 +173,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   sessionId,
   isExecuting = false,
   isGenerating = false,
-  memoryEnabled = true,
+  memoryEnabled = false,
   onMemoryEnabledChange,
   pendingRunLabel,
   onRunPending,

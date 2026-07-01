@@ -10,6 +10,9 @@ import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
 const THEME_STORAGE_KEY = 'kasal-chat-theme';
+// Preferred default model for chat mode when the user hasn't picked one yet.
+// Falls back to the first enabled model if this endpoint isn't available.
+const PREFERRED_DEFAULT_MODEL = 'databricks-gpt-5-3-codex';
 
 export type Theme = 'light' | 'dark';
 
@@ -132,7 +135,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const state = get();
       set({ models: m });
       if (m.length > 0 && !state.selectedModel) {
-        const key = m[0].key;
+        // Default to GPT 5.3 Codex when it's enabled; otherwise fall back to the
+        // first enabled model. Only applies when the user hasn't already chosen one.
+        const key = m.some((x) => x.key === PREFERRED_DEFAULT_MODEL)
+          ? PREFERRED_DEFAULT_MODEL
+          : m[0].key;
         set({ selectedModel: key });
         try {
           localStorage.setItem(MODEL_STORAGE_KEY, key);

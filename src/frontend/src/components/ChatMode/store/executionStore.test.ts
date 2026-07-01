@@ -127,12 +127,17 @@ describe('executionStore - basic setters & log', () => {
   });
 
   it('setWorkspaceMemory toggles the recall scope (default workspace-wide)', () => {
-    // Defaults to workspace-wide so recall spans the whole workspace.
+    // Recall scope defaults to workspace-wide; it only matters when memory is on
+    // (the composer defaults the memory pill to Session — memoryEnabled=false).
     expect(useExecutionStore.getState().workspaceMemory).toBe(true);
     useExecutionStore.getState().setWorkspaceMemory(false);
     expect(useExecutionStore.getState().workspaceMemory).toBe(false);
     useExecutionStore.getState().setWorkspaceMemory(true);
     expect(useExecutionStore.getState().workspaceMemory).toBe(true);
+  });
+
+  it('memoryEnabled defaults to false so the composer shows "Session memory"', () => {
+    expect(useExecutionStore.getState().memoryEnabled).toBe(false);
   });
 
   it('toggleMcpServer adds and removes MCP selections; setSelectedMcpServers replaces them', () => {

@@ -245,6 +245,21 @@ describe('appStore', () => {
       expect(localStorage.getItem(MODEL_STORAGE_KEY)).toBe('k1');
     });
 
+    it('prefers GPT 5.3 Codex as the default when it is enabled', async () => {
+      const store = await freshStore();
+      const models = [
+        { id: 1, key: 'k1', name: 'M1' },
+        { id: 2, key: 'databricks-gpt-5-3-codex', name: 'GPT 5.3 Codex' },
+      ];
+      fetchEnabledModels.mockResolvedValue(models);
+
+      await store.getState().loadModels();
+
+      // Codex is picked over the first model in the list.
+      expect(store.getState().selectedModel).toBe('databricks-gpt-5-3-codex');
+      expect(localStorage.getItem(MODEL_STORAGE_KEY)).toBe('databricks-gpt-5-3-codex');
+    });
+
     it('does not override an already-selected model', async () => {
       localStorage.setItem(MODEL_STORAGE_KEY, 'preset');
       const store = await freshStore();
