@@ -4,10 +4,20 @@ Project-wide instructions for Claude Code (claude.ai/code) when working with the
 
 ## Context Layering
 
-Claude reads context from multiple CLAUDE.md files:
+Claude reads context from multiple CLAUDE.md files. The closest one to the file
+you are editing wins on specifics:
 - **This file**: Project-wide patterns and rules
 - **src/backend/CLAUDE.md**: Backend-specific instructions
 - **src/frontend/CLAUDE.md**: Frontend-specific instructions
+- **Per-layer files** (added for precision):
+  - `src/backend/src/api/CLAUDE.md` — FastAPI routers
+  - `src/backend/src/services/CLAUDE.md` — business logic
+  - `src/backend/src/repositories/CLAUDE.md` — data access
+  - `src/backend/src/models/CLAUDE.md` — SQLAlchemy models + migrations
+  - `src/backend/src/engines/crewai/CLAUDE.md` — the CrewAI engine (post-refactor)
+  - `src/backend/src/engines/crewai/tools/CLAUDE.md` — custom tools
+  - `src/frontend/src/api/CLAUDE.md` — frontend service layer
+  - `src/frontend/src/components/CLAUDE.md` — React components
 
 ## Important Project Rules
 
@@ -54,11 +64,11 @@ Kasal is an AI agent workflow orchestration platform with a **clean architecture
 **Frontend (React + TypeScript)** → **API (FastAPI)** → **Services** → **Repositories** → **Database**
 
 ### Technology Stack
-- **Backend**: FastAPI + SQLAlchemy 2.0 + Alembic (Python 3.9+)
-- **Frontend**: React 18 + TypeScript + Material-UI + ReactFlow
+- **Backend**: FastAPI + SQLAlchemy 2.0 (async) + Alembic (Python 3.11, pinned `>=3.11,<3.12`)
+- **Frontend**: React 18 + TypeScript + Material-UI + ReactFlow, built with **Vite**
 - **AI Engine**: CrewAI framework for agent orchestration
-- **Database**: SQLite (dev) / PostgreSQL (prod)
-- **Authentication**: JWT tokens with Databricks OAuth
+- **Database**: SQLite (dev) / PostgreSQL / Databricks Lakebase (prod)
+- **Authentication**: Databricks OAuth (OBO / SPN); JWT for app sessions
 
 ### Project Structure
 ```

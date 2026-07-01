@@ -5,12 +5,12 @@ Backend-specific instructions for Claude Code when working in the backend direct
 ## Commands
 
 ### Development
-- **Activate virtual environment**: `source ../../venv/bin/activate` (from backend dir) or `source venv/bin/activate` (from project root)
-- **Start server**: `./run.sh` (defaults to PostgreSQL) or `./run.sh sqlite` for SQLite
+- **Dependencies are managed with `uv`** (not Poetry). Install/sync: `uv sync` (or `uv sync --frozen`). The venv lives at `src/backend/.venv`.
+- **Start server**: `./run.sh` (defaults to PostgreSQL) or `./run.sh sqlite` for SQLite. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`.
 - **Run tests**: `python run_tests.py` (runs all tests with linting)
 - **Run specific tests**: `python run_tests.py --type unit` or `python run_tests.py --type integration`
 - **Run tests with coverage**: `python run_tests.py --coverage --html-coverage`
-- **Run single test file**: `python -m pytest tests/unit/test_file.py -v`
+- **Run single test file**: `.venv/bin/python -m pytest tests/unit/test_file.py -v`
 
 ### Database
 - **Migrations**: `alembic upgrade head`
@@ -34,15 +34,27 @@ Backend-specific instructions for Claude Code when working in the backend direct
 ### Directory Structure
 ```
 src/
-├── api/             # FastAPI route handlers
-├── core/            # Dependencies, logging, UOW
-├── models/          # SQLAlchemy database models
+├── api/             # FastAPI route handlers (see api/CLAUDE.md)
+├── core/            # Dependencies, base repo/service, permissions, UoW, exceptions
+├── models/          # SQLAlchemy database models (see models/CLAUDE.md)
 ├── schemas/         # Pydantic validation schemas
-├── services/        # Business logic layer
-├── repositories/    # Data access layer
-├── engines/crewai/  # CrewAI engine implementation
-└── main.py          # Application entry point
+├── services/        # Business logic layer (see services/CLAUDE.md)
+├── repositories/    # Data access layer (see repositories/CLAUDE.md)
+├── engines/crewai/  # CrewAI engine — POST-REFACTOR layout (see engines/crewai/CLAUDE.md)
+└── main.py          # Application entry point (uvicorn target: src.main:app)
 ```
+
+### CrewAI engine (three execution paths)
+The engine has three answer paths selected by `execution_type`:
+- `"agent"` → **light** path = **ChatMode / chat answer mode**, a single agent run
+  in-process (`Agent.kickoff_async`) for sub-second latency.
+- `"crew"` → crew path, runs in a **subprocess** (`process_crew_executor.py`).
+- `"flow"` → flow path, also **subprocess**.
+
+The engine was restructured into `paths/{light_agent,crew,flow}/` over a shared
+`kernel/`, plus `infra/`, `memory/`, `guardrails/{core,demo}/`. The old
+`common/`, `helpers/`, `utils/`, `services/`, `mcp/` packages are gone. See
+`src/backend/src/engines/crewai/CLAUDE.md` for details.
 
 ## Database Patterns
 
@@ -196,14 +208,17 @@ Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
 ## AI Engine Integration
 
 ### CrewAI Integration Points
-- **Engine Service**: Main orchestration service
-- **Configuration Adapter**: Transforms frontend configs to CrewAI format
-- **Execution Runner**: Manages async execution workflows
-- **Tool Factory**: Extensible tool system with custom tools
+- **Engine Service** (`engines/crewai/crewai_engine_service.py`): the hub that dispatches to one of three paths.
+- **Three execution paths** (`engines/crewai/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
+- **Kernel** (`engines/crewai/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
+- **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to CrewAI shape.
+- **Tool Factory** (`engines/crewai/tools/`): extensible tool system (see tools/CLAUDE.md).
+
+See `engines/crewai/CLAUDE.md` for the full path model and the subprocess-boundary rules.
 
 ## Environment
 
-- Python 3.9+ required
-- Uses Poetry for dependency management (see pyproject.toml)
-- Database type controlled by environment variables
-- API keys for LLM services configured via environment
+- Python 3.11 required (pinned `>=3.11,<3.12` in `pyproject.toml`)
+- Dependencies managed with **uv** (`pyproject.toml` + `uv.lock`, both committed). Never hand-edit `uv.lock`; run `uv lock` then `uv sync`.
+- Database type controlled by environment variables / DB config (SQLite, PostgreSQL, or Databricks Lakebase)
+- API keys for LLM services configured via environment or the API Keys service
