@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from src.engines.crewai.exporters.databricks_app_exporter import (
+    SHARED_A2UI_FRONTEND_DIR,
     TEMPLATE_DIR,
     DatabricksAppExporter,
 )
@@ -1469,3 +1470,61 @@ class TestDatabricksAppKasalUI:
         assert "Recent" in app  # section label
         # Per-session running spinner ("icon") keyed on the in-flight set.
         assert "pending.has(s.id)" in app and "animate-spin" in app
+
+
+def _rel_text_files(base):
+    """Relative-path → content for every text file under ``base``, excluding
+    unit tests and OS junk (mirrors the exporter's vendoring filter)."""
+    out = {}
+    for p in base.rglob("*"):
+        if not p.is_file():
+            continue
+        if ".test." in p.name or p.name in {".DS_Store", "Thumbs.db"}:
+            continue
+        if "__pycache__" in p.parts:
+            continue
+        out[p.relative_to(base).as_posix()] = p.read_text(encoding="utf-8")
+    return out
+
+
+class TestA2uiFrontendVendor:
+    @pytest.mark.asyncio
+    async def test_renderer_and_lib_shipped(self, exporter, crew_data):
+        """The exported app must ship the A2UI renderer + the lib files its
+        App.tsx imports; otherwise its standalone `vite build` fails with
+        'Could not resolve ./a2ui/A2UIRenderer'."""
+        files = _files(await exporter.export(crew_data, {}))
+        for required in [
+            "frontend/src/a2ui/A2UIRenderer.tsx",
+            "frontend/src/a2ui/types.ts",
+            "frontend/src/a2ui/lib/download.ts",
+            "frontend/src/a2ui/lib/markdown.tsx",
+            "frontend/src/a2ui/lib/deckThemes.ts",
+        ]:
+            assert required in files, f"missing {required}"
+
+    @pytest.mark.asyncio
+    async def test_a2ui_frontend_emitted_verbatim(self, exporter, crew_data):
+        """The vendored A2UI is emitted verbatim (the token-substituting template
+        walk skips it) and only ONCE (no duplicate path)."""
+        result = await exporter.export(crew_data, {})
+        paths = [f["path"] for f in result["files"]]
+        a2ui_paths = [p for p in paths if p.startswith("frontend/src/a2ui/")]
+        assert a2ui_paths, "no a2ui frontend files emitted"
+        assert len(a2ui_paths) == len(set(a2ui_paths)), "duplicate a2ui paths emitted"
+
+    def test_vendor_in_sync_with_frontend_source(self):
+        """The committed template copy must match the canonical frontend A2UI
+        source. On failure, re-vendor: copy src/frontend/src/shared/a2ui into
+        SHARED_A2UI_FRONTEND_DIR (excluding *.test.*)."""
+        canonical = TEMPLATE_DIR.parents[6] / "frontend" / "src" / "shared" / "a2ui"
+        if not canonical.is_dir():
+            pytest.skip("frontend source not present (backend-only checkout)")
+        want = _rel_text_files(canonical)
+        got = _rel_text_files(SHARED_A2UI_FRONTEND_DIR)
+        assert set(got) == set(want), (
+            f"a2ui vendor file-set drift — only in template: {set(got) - set(want)}; "
+            f"only in source: {set(want) - set(got)}"
+        )
+        mismatched = [rel for rel in want if want[rel] != got.get(rel)]
+        assert not mismatched, f"a2ui vendor content drift in: {mismatched}"
