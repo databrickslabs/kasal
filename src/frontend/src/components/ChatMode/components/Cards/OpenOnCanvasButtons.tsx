@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { buildCrewGraph, deriveCrewName, CrewNameConflictError } from '../../api/crews';
 import { useUILayoutStore } from '../../../../store/uiLayout';
+import { useExecutionStore } from '../../store/executionStore';
 
 /**
  * Two actions that load a generated/saved crew straight onto a builder canvas:
@@ -44,7 +45,16 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
   const handleOpenAgentBuilder = () => {
     setError(null);
     try {
-      const { nodes, edges } = buildCrewGraph(data);
+      // Mirror the chat's "Save to catalog" opts so the canvas crew is IDENTICAL
+      // to the saved one — otherwise the MCP servers / Agent Bricks endpoints
+      // picked in the chat "+" would be dropped and the tasks would open with no
+      // MCP tools assigned.
+      const exec = useExecutionStore.getState();
+      const { nodes, edges } = buildCrewGraph(data, {
+        memoryEnabled: exec.memoryEnabled,
+        mcpServers: exec.selectedMcpServers,
+        agentBricksEndpoints: exec.selectedAgentBricksEndpoints,
+      });
       window.dispatchEvent(
         new CustomEvent('catalogLoadCrew', {
           detail: { nodes, edges, name: savedName || deriveCrewName(data) },
