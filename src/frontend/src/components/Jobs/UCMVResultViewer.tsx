@@ -80,6 +80,10 @@ export interface UCMVResult {
   sql: Record<string, string>;
   stats: Record<string, UCMVStats> | UCMVStats;
   migration_report?: string;
+  /** Raw source measures with their original DAX expressions (echoed from the generator). */
+  measures_with_dax?: unknown[];
+  /** Raw source M-Query entries (echoed from the generator). */
+  mquery_raw?: unknown[];
 }
 
 interface UCMVResultViewerProps {
@@ -487,6 +491,20 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, [result.sql, viewNames]);
 
+  // Download raw JSON (original DAX measures or original M-Query) as a file
+  const downloadJson = useCallback((data: unknown[], filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const hasDax = Array.isArray(result.measures_with_dax) && result.measures_with_dax.length > 0;
+  const hasMquery = Array.isArray(result.mquery_raw) && result.mquery_raw.length > 0;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
       {/* Header */}
@@ -530,6 +548,30 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           >
             Download SQL
           </Button>
+          {hasDax && (
+            <Tooltip title="Download the original DAX measure expressions as JSON">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={() => downloadJson(result.measures_with_dax as unknown[], 'original_dax_measures.json')}
+              >
+                Download DAX
+              </Button>
+            </Tooltip>
+          )}
+          {hasMquery && (
+            <Tooltip title="Download the original M-Query source as JSON">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={() => downloadJson(result.mquery_raw as unknown[], 'original_mquery.json')}
+              >
+                Download M-Query
+              </Button>
+            </Tooltip>
+          )}
         </Box>
       </Box>
 
