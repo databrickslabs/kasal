@@ -4,22 +4,23 @@ Frontend-specific instructions for Claude Code when working in the frontend dire
 
 ## Commands
 
-### Development
+### Development (Vite-based)
 - **Install dependencies**: `npm install`
-- **Start dev server**: `npm start` (runs on http://localhost:3000)
-- **Build for production**: `npm run build`
-- **Run tests**: `npm test`
-- **Lint code**: `npm run lint`
+- **Start dev server**: `npm start` (alias for `vite`, runs on http://localhost:3000)
+- **Build for production**: `npm run build` (`tsc -b && vite build`, outputs to `dist/`)
+- **Run tests**: `npm test` (Vitest) or `npm run test:run` (single run)
+- **Lint code**: `npm run lint` (ESLint)
 - **Type check**: `npm run tsc`
 
 ## Architecture
 
 ### Technology Stack
-- React 18 with TypeScript
+- React 18 with TypeScript, bundled with **Vite** (not Create React App)
 - Material-UI (MUI) for components
 - ReactFlow for workflow visualization
-- Zustand for state management (migrated from Redux)
-- Axios for HTTP requests
+- **Zustand** for state management (primary; some legacy Redux Toolkit still present)
+- Axios for HTTP requests, wrapped by `apiClient`
+- **Vitest** + React Testing Library for tests (no Cypress in this repo)
 
 ### Directory Structure
 ```
@@ -57,21 +58,24 @@ src/
 
 ## Documentation Management
 
-When adding new documentation:
-1. Copy `.md` files from `../../docs/` to `public/docs/`
-2. Update `docSections` array in `src/components/Documentation/Documentation.tsx`
+User-facing docs live in `src/docs/` (project-wide rule). The copy to
+`public/docs/` is **automated by `src/build.py`** at build time (it recursively
+copies `.md` + image assets), so you do not copy files by hand. When adding a doc
+that should appear in the in-app Documentation viewer, update the `docSections`
+array in `src/components/Documentation/Documentation.tsx`.
 
-## Testing Strategy
+## Testing Strategy (Vitest)
 
 ### Test Types
 - **Component Tests**: React Testing Library
 - **Hook Tests**: Custom hooks testing
-- **E2E Tests**: Cypress for user workflows
+- Test files are colocated as `*.test.ts(x)` next to the code they cover
 
 ### Testing Commands
-- Run all tests: `npm test`
-- Run with coverage: `npm test -- --coverage`
-- Run specific test: `npm test -- --testNamePattern="TestName"`
+- Run all tests (watch): `npm test`
+- Run once (CI): `npm run test:run`
+- Run with coverage: `npm run test:run -- --coverage`
+- Run a single file: `npm run test:run -- src/path/File.test.tsx`
 
 ## Workflow Editor
 
@@ -84,9 +88,9 @@ When adding new documentation:
 ## Build Process
 
 ### Production Build
-- Run `npm run build` to create optimized production build
-- Output goes to `build/` directory
-- Static assets are copied to `../../frontend_static/` for deployment
+- Run `npm run build` (`tsc -b && vite build`) to create an optimized build
+- Output goes to the **`dist/`** directory (Vite default)
+- `src/build.py` copies `dist/` to `../../frontend_static/` for deployment
 
 ## Critical Rules
 
@@ -98,7 +102,7 @@ When adding new documentation:
 
 ## Environment
 
-- Node.js 16+ required
-- React 18 with TypeScript
+- Node.js 18+ recommended
+- React 18 with TypeScript, Vite dev server (HMR)
 - Development server auto-refreshes on file changes
-- Environment variables in `.env` file (not committed)
+- Environment variables use Vite's `VITE_` prefix (e.g. `VITE_API_URL`); `.env` is not committed
