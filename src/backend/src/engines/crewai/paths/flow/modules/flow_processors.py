@@ -283,6 +283,14 @@ class FlowProcessorManager:
                         if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
                             if isinstance(crew_data.tool_configs, dict):
                                 effective_tool_configs.update(crew_data.tool_configs)
+                        # The crew canvas node carries tool_configs saved from chat /
+                        # Agent Builder (e.g. MCP_SERVERS) that are NOT persisted onto
+                        # the task DB record. A flow run loads the DB task, so without
+                        # this it would lose the MCP servers the crew was saved with.
+                        # Merge the node config BEFORE the DB task so it fills the gap
+                        # without overriding real values the DB task does carry.
+                        if task_node_data and isinstance(task_node_data.get('tool_configs'), dict):
+                            effective_tool_configs.update(task_node_data.get('tool_configs') or {})
                         if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
@@ -663,6 +671,11 @@ class FlowProcessorManager:
                         if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
                             if isinstance(crew_data.tool_configs, dict):
                                 effective_tool_configs.update(crew_data.tool_configs)
+                        # See starting-point path: the crew canvas node carries MCP_SERVERS
+                        # saved from chat that never lands on the DB task record; merge it
+                        # in before the DB task so a flow run keeps the crew's MCP servers.
+                        if task_node_data and isinstance(task_node_data.get('tool_configs'), dict):
+                            effective_tool_configs.update(task_node_data.get('tool_configs') or {})
                         if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
@@ -945,6 +958,11 @@ class FlowProcessorManager:
                             if crew_data and hasattr(crew_data, 'tool_configs') and crew_data.tool_configs:
                                 if isinstance(crew_data.tool_configs, dict):
                                     effective_tool_configs.update(crew_data.tool_configs)
+                            # See starting-point path: the crew canvas node carries MCP_SERVERS
+                            # saved from chat that never lands on the DB task record; merge it
+                            # in before the DB task so a flow run keeps the crew's MCP servers.
+                            if task_node_data and isinstance(task_node_data.get('tool_configs'), dict):
+                                effective_tool_configs.update(task_node_data.get('tool_configs') or {})
                             if hasattr(task_data, 'tool_configs') and task_data.tool_configs:
                                 if isinstance(task_data.tool_configs, dict):
                                     effective_tool_configs.update(task_data.tool_configs)
