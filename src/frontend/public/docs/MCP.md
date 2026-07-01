@@ -67,6 +67,8 @@ How the tiers resolve:
 
 - Base servers (`group_id IS NULL`) form the system-admin catalog. A base server is visible to a workspace only when its `enabled` flag is true. System admins manage this catalog via the `servers/base` and `servers/global` endpoints and `PATCH /mcp/servers/{id}/global-availability`.
 - A workspace-scoped row (a row with a `group_id`) shadows a base server of the same name for that workspace only. Other workspaces keep seeing the base. This is how a workspace admin can enable or disable a globally-available server for their own workspace without affecting anyone else (`PATCH /mcp/servers/{id}/workspace-enabled` and `POST /mcp/servers/{id}/enable-for-workspace`). Disabling a base server for one workspace creates a workspace-scoped override with `enabled=false`; the base row is never mutated.
+- The global tier gates the workspace tier. A workspace override is only effective while its base server is `enabled`. When a system admin disables a base server, that server becomes unavailable to **every** workspace — hidden from the list and not resolvable at execution — even where a workspace had enabled its own override. Workspace-only servers (no base row) are unaffected.
+- Deleting a base server cascades: it hard-deletes every per-workspace override row of the same name, so a globally-removed server disappears from all workspaces with no orphaned rows. Deleting a workspace-scoped row removes only that row.
 
 Who manages each tier:
 
@@ -75,8 +77,11 @@ Who manages each tier:
 
 What different users see from `GET /mcp/servers`:
 
-- Workspace admins see the full effective list, including disabled servers, so they can manage state.
+- Workspace admins see the full effective list, including disabled servers, so they can manage state in Configuration → MCP.
 - Everyone else sees only the servers an admin has enabled (the curated allow-list), so regular users cannot pick servers the workspace has not sanctioned.
+- Globally-disabled servers never appear for anyone (admin or not): the global disable cascades before the per-user filter.
+
+The chat "+" MCP picker is stricter than that management list: it shows only **enabled** servers — disabled ones are omitted entirely (not greyed out), since only an enabled server can be attached to a run. Disabled servers are managed in Configuration → MCP, not the picker.
 
 Servers are deduplicated by name, preferring a workspace-specific row over the base row.
 

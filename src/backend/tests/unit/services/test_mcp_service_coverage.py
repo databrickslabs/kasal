@@ -589,3 +589,62 @@ async def test_test_connection_streamable_type():
         mock_stream.return_value = MCPTestConnectionResponse(success=True, message="ok")
         result = await svc.test_connection(req)
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# get_all_servers_effective — OPT-IN workspace model
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_all_servers_effective_inherited_base_shown_disabled():
+    """An enabled base server (group_id=None) a workspace hasn't opted into is
+    reported with enabled=False so the workspace toggle starts off."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=1, name="global_a", group_id=None, enabled=True)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[base])
+
+    resp = await svc.get_all_servers_effective("ws1")
+    assert resp.count == 1
+    assert resp.servers[0].name == "global_a"
+    assert resp.servers[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_get_all_servers_effective_workspace_override_shown_enabled():
+    """A workspace's own enabled override is reported as enabled."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=1, name="global_a", group_id=None, enabled=True)
+    override = mk_server(id=2, name="global_a", group_id="ws1", enabled=True)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[base, override])
+
+    resp = await svc.get_all_servers_effective("ws1")
+    assert resp.count == 1
+    assert resp.servers[0].group_id == "ws1"
+    assert resp.servers[0].enabled is True
+
+
+@pytest.mark.asyncio
+async def test_get_all_servers_effective_enabled_only_hides_inherited_base():
+    """Non-admin callers (enabled_only) don't see a not-opted-in inherited base."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=1, name="global_a", group_id=None, enabled=True)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[base])
+
+    resp = await svc.get_all_servers_effective("ws1", enabled_only=True)
+    assert resp.count == 0
+
+
+@pytest.mark.asyncio
+async def test_get_all_servers_effective_no_group_keeps_base_enabled():
+    """With no workspace context (global admin), base enabled state is preserved."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=1, name="global_a", group_id=None, enabled=True)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[base])
+
+    resp = await svc.get_all_servers_effective(None)
+    assert resp.count == 1
+    assert resp.servers[0].enabled is True

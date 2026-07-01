@@ -588,3 +588,38 @@ async def test_streamable_connection_auth_context_returns_none():
     assert res.success is True
     mock_auth.assert_awaited_once_with(user_token=None)
 
+
+
+@pytest.mark.asyncio
+async def test_delete_server_cascades_overrides_for_global_base():
+    """Deleting a GLOBAL (base, group_id=None) server hard-deletes the per-workspace
+    override rows for that name so the deletion propagates to every workspace."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=5, name="shared", group_id=None)
+    svc.server_repository.get = AsyncMock(return_value=base)
+    svc.server_repository.delete = AsyncMock()
+    svc.server_repository.delete_overrides_by_name = AsyncMock(return_value=2)
+
+    ok = await svc.delete_server(5)
+
+    assert ok is True
+    svc.server_repository.delete.assert_awaited_once_with(5)
+    svc.server_repository.delete_overrides_by_name.assert_awaited_once_with("shared")
+
+
+@pytest.mark.asyncio
+async def test_delete_server_workspace_row_does_not_cascade():
+    """Deleting a WORKSPACE-scoped row (group_id set) deletes only itself."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    ws = mk_server(id=7, name="shared", group_id="ws1")
+    svc.server_repository.get = AsyncMock(return_value=ws)
+    svc.server_repository.delete = AsyncMock()
+    svc.server_repository.delete_overrides_by_name = AsyncMock()
+
+    ok = await svc.delete_server(7)
+
+    assert ok is True
+    svc.server_repository.delete.assert_awaited_once_with(7)
+    svc.server_repository.delete_overrides_by_name.assert_not_awaited()

@@ -330,6 +330,56 @@ def test_build_mcp_configs_omits_token_when_absent():
     assert call_config == {"group_id": "grp-1"}
 
 
+# ── _resolve_group_id — workspace scoping for chat (regression: MCP overrides) ─
+
+
+def test_resolve_group_id_prefers_config_group_id_over_default_context():
+    """Regression: when the runtime group_context lacks primary_group_id/group_ids
+    (would yield "default"), the execution's authoritative config.group_id must win
+    — otherwise workspace-scoped MCP servers resolve to 0 in chat "answer mode"."""
+    config = SimpleNamespace(group_id="user_ws")
+    ctx = SimpleNamespace(primary_group_id=None, group_ids=[])
+    assert LightAgentService._resolve_group_id(config, ctx) == "user_ws"
+
+
+def test_resolve_group_id_falls_back_to_primary_group_id():
+    config = SimpleNamespace(group_id=None)
+    ctx = SimpleNamespace(primary_group_id="pg", group_ids=["x"])
+    assert LightAgentService._resolve_group_id(config, ctx) == "pg"
+
+
+def test_resolve_group_id_falls_back_to_first_group_id():
+    config = SimpleNamespace(group_id=None)
+    ctx = SimpleNamespace(primary_group_id=None, group_ids=["g1", "g2"])
+    assert LightAgentService._resolve_group_id(config, ctx) == "g1"
+
+
+def test_resolve_group_id_derives_personal_group_from_email():
+    """Regression (chat answer mode): with no selected workspace — no config.group_id,
+    no primary_group_id, no group_ids — the personal workspace must be derived from
+    the user's email (the id MCP workspace overrides are stored under), NOT "default"
+    (which matches no MCP rows and silently drops workspace-enabled servers)."""
+    config = SimpleNamespace(group_id=None)
+    ctx = SimpleNamespace(
+        primary_group_id=None, group_ids=[], group_email="nehme.tohme@databricks.com"
+    )
+    assert (
+        LightAgentService._resolve_group_id(config, ctx)
+        == "user_nehme_tohme_databricks_com"
+    )
+
+
+def test_resolve_group_id_defaults_when_no_group_or_email():
+    config = SimpleNamespace(group_id=None)
+    ctx = SimpleNamespace(primary_group_id=None, group_ids=[], group_email=None)
+    assert LightAgentService._resolve_group_id(config, ctx) == "default"
+
+
+def test_resolve_group_id_handles_missing_group_context():
+    config = SimpleNamespace(group_id=None)
+    assert LightAgentService._resolve_group_id(config, None) == "default"
+
+
 # ── _event_matches_run — bus event → this run attribution ─────────────────────
 
 

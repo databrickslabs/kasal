@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -132,8 +132,17 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         group_override_names = (
             select(self.model.name).where(self.model.group_id == group_id).distinct()
         )
+        # Names whose GLOBAL base row is disabled — a system admin disabling a
+        # global server cascades to workspaces, so hide the workspace override too.
+        disabled_base_names = (
+            select(self.model.name)
+            .where((self.model.group_id.is_(None)) & (self.model.enabled == False))
+        )
         query = select(self.model).where(
-            (self.model.group_id == group_id)
+            (
+                (self.model.group_id == group_id)
+                & (~self.model.name.in_(disabled_base_names))
+            )
             | (
                 (self.model.group_id.is_(None))
                 & (self.model.enabled == True)
@@ -145,11 +154,20 @@ class MCPServerRepository(BaseRepository[MCPServer]):
 
     async def find_by_names_group_scope(self, names: List[str], group_id: Optional[str]) -> List[MCPServer]:
         """
-        Find ENABLED servers by names effective for a workspace, honoring the
-        global + per-workspace override model (so a workspace's disabled override
-        also hides the base server at execution time):
-        - Include this workspace's group-specific rows.
-        - Include base servers ONLY when THIS group has not overridden the name.
+        Find ENABLED servers by names usable in a workspace under the OPT-IN
+        global + per-workspace model:
+        - A workspace can only use servers it has explicitly enabled — i.e. its
+          OWN group-specific rows (``group_id == group_id``) with ``enabled``.
+          A globally-available base server (``group_id IS NULL``) does NOT
+          auto-resolve for a workspace; the workspace admin must opt in (which
+          creates an enabled override row) in Configuration -> MCP (Workspace).
+        - With no group_id (system/personal-global context, e.g. seeding or the
+          global admin), fall back to enabled base rows.
+        - A workspace override is ALSO gated by the GLOBAL base: if a base row of
+          the same name exists and is DISABLED, the server is unavailable to the
+          workspace even if its override is enabled — a system admin disabling a
+          global server cascades to every workspace. Servers with no base row
+          (workspace-only) are unaffected.
         """
         if not names:
             return []
@@ -160,24 +178,38 @@ class MCPServerRepository(BaseRepository[MCPServer]):
                 & (self.model.group_id.is_(None))
             )
         else:
-            group_override_names = (
+            # Names whose GLOBAL base row is disabled — excluded so a global
+            # disable cascades to workspaces regardless of their own override.
+            disabled_base_names = (
                 select(self.model.name)
-                .where(self.model.group_id == group_id)
-                .distinct()
+                .where((self.model.group_id.is_(None)) & (self.model.enabled == False))
             )
             query = select(self.model).where(
                 (self.model.name.in_(names))
                 & (self.model.enabled == True)
-                & (
-                    (self.model.group_id == group_id)
-                    | (
-                        (self.model.group_id.is_(None))
-                        & (~self.model.name.in_(group_override_names))
-                    )
-                )
+                & (self.model.group_id == group_id)
+                & (~self.model.name.in_(disabled_base_names))
             )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def delete_overrides_by_name(self, name: str) -> int:
+        """Hard-delete all per-workspace override rows (group_id IS NOT NULL) for
+        a server name.
+
+        Used when a system admin deletes a GLOBAL (base) server so the deletion
+        cascades to every workspace that had opted in — otherwise the override
+        rows are orphaned and those workspaces keep the server. Does not commit
+        (the session dependency owns the transaction, matching BaseRepository).
+
+        Returns the number of override rows deleted.
+        """
+        stmt = sa_delete(self.model).where(
+            (self.model.name == name) & (self.model.group_id.isnot(None))
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return getattr(result, "rowcount", 0) or 0
 
 
     async def toggle_enabled(self, server_id: int) -> Optional[MCPServer]:

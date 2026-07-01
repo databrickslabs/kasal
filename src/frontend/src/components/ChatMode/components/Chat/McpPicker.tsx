@@ -8,9 +8,10 @@ import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBr
  * The chat input's "+" control (left of Send): pick the MCP servers (and Agent
  * Bricks endpoints) the next crew should be equipped with.
  *
- * It lists ONLY the MCP servers configured for this workspace — the curated,
- * group-scoped allow-list returned by /mcp/servers (admins additionally see
- * any they've disabled, shown greyed out). Browsing and registering the full
+ * It lists ONLY the MCP servers ENABLED for this workspace — the curated,
+ * group-scoped allow-list returned by /mcp/servers, filtered to enabled servers
+ * (disabled ones aren't usable in a run, so they're omitted). Browsing and
+ * registering the full
  * Databricks catalog (external connections, Databricks SQL, Unity Catalog
  * Functions, Genie spaces, AI Search indexes) now lives in
  * Configuration → MCP, so this picker never enumerates the whole workspace.
