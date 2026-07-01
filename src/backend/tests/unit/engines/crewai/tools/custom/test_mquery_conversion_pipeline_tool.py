@@ -1866,3 +1866,151 @@ class TestExecuteWithValidation:
                 result = self._run(self.tool._execute_with_validation(cfg))
 
         assert "No semantic models" in result
+
+
+# ===========================================================================
+# Durable raw M-Query persistence (conversion_history / Lakebase)
+# ===========================================================================
+
+from types import SimpleNamespace
+
+
+class TestBuildRawMqueryExtract:
+    """_build_raw_mquery_extract collects full untruncated M-Query per table."""
+
+    def _conv(self, original, sql="SELECT 1", success=True, expr_type="native_query"):
+        return SimpleNamespace(
+            expression_type=SimpleNamespace(value=expr_type),
+            success=success,
+            original_expression=original,
+            databricks_sql=sql,
+            create_view_sql=None,
+        )
+
+    def test_collects_untruncated_expression(self):
+        long_expr = "let Source = " + ("X" * 2000) + " in Source"
+        result = {
+            "models": {
+                "Model A": {
+                    "tables": {
+                        "Fact_Sales": [self._conv(long_expr)],
+                    }
+                }
+            }
+        }
+        extract = MqueryConversionPipelineTool._build_raw_mquery_extract(result)
+        assert len(extract) == 1
+        # Full expression retained — NOT truncated at 500 chars like the cache report
+        assert extract[0]["original_mquery"] == long_expr
+        assert len(extract[0]["original_mquery"]) > 500
+        assert extract[0]["model"] == "Model A"
+        assert extract[0]["table"] == "Fact_Sales"
+        assert extract[0]["expression_type"] == "native_query"
+        assert extract[0]["success"] is True
+
+    def test_multiple_models_and_tables_flattened(self):
+        result = {
+            "models": {
+                "M1": {"tables": {"T1": [self._conv("q1")], "T2": [self._conv("q2")]}},
+                "M2": {"tables": {"T3": [self._conv("q3")]}},
+            }
+        }
+        extract = MqueryConversionPipelineTool._build_raw_mquery_extract(result)
+        assert len(extract) == 3
+        assert {e["table"] for e in extract} == {"T1", "T2", "T3"}
+
+    def test_falls_back_to_create_view_sql(self):
+        conv = SimpleNamespace(
+            expression_type=SimpleNamespace(value="table_from_rows"),
+            success=True,
+            original_expression="let x in x",
+            databricks_sql=None,
+            create_view_sql="CREATE VIEW v AS SELECT 1",
+        )
+        result = {"models": {"M": {"tables": {"T": [conv]}}}}
+        extract = MqueryConversionPipelineTool._build_raw_mquery_extract(result)
+        assert extract[0]["databricks_sql"] == "CREATE VIEW v AS SELECT 1"
+
+    def test_empty_result_returns_empty_list(self):
+        assert MqueryConversionPipelineTool._build_raw_mquery_extract({}) == []
+        assert MqueryConversionPipelineTool._build_raw_mquery_extract({"models": {}}) == []
+
+    def test_missing_original_expression_becomes_empty_string(self):
+        conv = SimpleNamespace(
+            expression_type=None, success=False,
+            original_expression=None, databricks_sql=None, create_view_sql=None,
+        )
+        result = {"models": {"M": {"tables": {"T": [conv]}}}}
+        extract = MqueryConversionPipelineTool._build_raw_mquery_extract(result)
+        assert extract[0]["original_mquery"] == ""
+        assert extract[0]["expression_type"] == ""
+
+
+class TestSaveToConversionHistory:
+    """_save_to_conversion_history persists to conversion_history, fail-open."""
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro) if False else run_sync(coro)
+
+    def test_persists_record_with_raw_mquery(self):
+        tool = MqueryConversionPipelineTool()
+        raw_extract = [{"model": "M", "table": "T", "original_mquery": "let x in x",
+                        "expression_type": "native_query", "success": True, "databricks_sql": "SELECT 1"}]
+
+        captured = {}
+        mock_repo = MagicMock()
+        mock_record = SimpleNamespace(id=42, group_id=None)
+
+        async def _create(data):
+            captured["data"] = data
+            return mock_record
+        mock_repo.create = AsyncMock(side_effect=_create)
+        mock_repo.session = MagicMock()
+        mock_repo.session.commit = AsyncMock()
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _repo_ctx():
+            yield mock_repo
+
+        with patch(
+            "src.engines.crewai.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            _repo_ctx,
+        ):
+            self._run(tool._save_to_conversion_history(
+                raw_extract=raw_extract, formatted_output="report",
+                workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID,
+                status="success", model_count=1,
+            ))
+
+        data = captured["data"]
+        assert data["source_format"] == "powerbi_mquery"
+        assert data["target_format"] == "sql"
+        assert data["input_data"]["mquery_raw"] == raw_extract
+        assert data["input_data"]["workspace_id"] == WORKSPACE_ID
+        assert data["status"] == "success"
+        mock_repo.session.commit.assert_awaited_once()
+
+    def test_fail_open_on_repo_error(self):
+        """A repository failure must NOT raise — conversion must not break."""
+        tool = MqueryConversionPipelineTool()
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _boom_ctx():
+            raise RuntimeError("db down")
+            yield  # pragma: no cover
+
+        with patch(
+            "src.engines.crewai.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            _boom_ctx,
+        ):
+            # Should swallow the error and return None
+            result = self._run(tool._save_to_conversion_history(
+                raw_extract=[], formatted_output="r",
+                workspace_id=WORKSPACE_ID, dataset_id=None,
+                status="success", model_count=0,
+            ))
+        assert result is None

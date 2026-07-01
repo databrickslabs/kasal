@@ -268,6 +268,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             'limitations': results.get('limitations', {}),
             'validation': validation_results,
             'measures_with_dax': _measures_for_validation,
+            'mquery_raw': mquery_entries if isinstance(mquery_entries, list) else [],
             'specs_summary': {
                 k: {
                     'view_name': v.get('view_name'),
@@ -296,7 +297,125 @@ class UCMetricViewGeneratorTool(BaseTool):
         except Exception as _tmp_err:
             logger.debug(f"[UCMVGenerator] Could not write /tmp fallback: {_tmp_err}")
 
+        # ── Durable raw DAX persistence (Lakebase / conversion_history) ──────
+        try:
+            _run_async(self._save_dax_to_conversion_history(
+                raw_dax=self._build_raw_dax_extract(_measures_for_validation),
+                yaml_output=yaml_output,
+                sql_output=sql_output,
+                workspace_id=_get('workspace_id'),
+                dataset_id=_get('dataset_id'),
+                catalog=catalog,
+                schema=schema,
+            ))
+        except Exception as _hist_err:
+            logger.warning(f"[UCMVGenerator] conversion_history persistence skipped: {_hist_err}")
+        # ────────────────────────────────────────────────────────────────────
+
         return output_json
+
+    # ------------------------------------------------------------------
+    # Durable raw DAX persistence (conversion_history / Lakebase)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_raw_dax_extract(measures: Any) -> list:
+        """Collect the full, untruncated original DAX expression per measure.
+
+        Mirrors the M-Query extract produced by the MQuery Conversion Pipeline:
+        the complete raw source DAX is retained verbatim so it can be persisted
+        and retrieved later, rather than only living in the transient result.
+        """
+        extract = []
+        if not isinstance(measures, list):
+            return extract
+        for m in measures:
+            if not isinstance(m, dict):
+                continue
+            extract.append({
+                'measure_name': m.get('measure_name') or m.get('original_name') or '',
+                'original_name': m.get('original_name') or m.get('measure_name') or '',
+                'dax_expression': m.get('dax_expression') or '',
+                'proposed_allocation': m.get('proposed_allocation') or '',
+            })
+        return extract
+
+    async def _save_dax_to_conversion_history(
+        self,
+        raw_dax: list,
+        yaml_output: Any,
+        sql_output: Any,
+        workspace_id: Optional[str],
+        dataset_id: Optional[str],
+        catalog: Optional[str],
+        schema: Optional[str],
+    ) -> None:
+        """Persist the full raw DAX extract to conversion_history (fail-open).
+
+        Durable, queryable counterpart to the transient tool result: the
+        untruncated source DAX lands in ``input_data.dax_raw`` and is retrievable
+        afterwards via ``GET /conversion-history`` (filter by
+        ``source_format=powerbi_dax`` / ``execution_id``) or
+        ``GET /conversion-history/{id}``. Any failure here is non-fatal — it must
+        never break the generation itself.
+        """
+        try:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            from src.schemas.conversion import ConversionHistoryCreate
+            from src.utils.user_context import UserContext
+
+            measure_count = len(raw_dax)
+            history_data = ConversionHistoryCreate(
+                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                source_format="powerbi_dax",
+                target_format="uc_metrics",
+                input_data={
+                    "workspace_id": workspace_id or "",
+                    "dataset_id": dataset_id or "",
+                    "dax_raw": raw_dax,
+                },
+                input_summary=(
+                    f"DAX extract: {measure_count} measure(s)"
+                    + (f" from workspace {workspace_id}" if workspace_id else "")
+                )[:500],
+                output_data={
+                    "yaml": yaml_output,
+                    "sql": sql_output,
+                    "catalog": catalog,
+                    "schema": schema,
+                },
+                output_summary=(
+                    f"Generated UC metric views for {measure_count} measure(s)"
+                )[:500],
+                configuration={
+                    "workspace_id": workspace_id,
+                    "dataset_id": dataset_id,
+                    "catalog": catalog,
+                    "schema": schema,
+                },
+                status="success",
+                measure_count=measure_count,
+            )
+
+            group_id = None
+            try:
+                group_context = UserContext.get_group_context()
+                if group_context:
+                    group_id = getattr(group_context, "primary_group_id", None)
+            except Exception as _gc_err:
+                logger.debug(f"[UCMVGenerator] Could not resolve group_id for history: {_gc_err}")
+
+            async with ToolSessionProvider.conversion_repo() as repo:
+                record = await repo.create(history_data.model_dump())
+                if group_id:
+                    record.group_id = group_id
+                await repo.session.commit()
+                logger.info(
+                    f"[UCMVGenerator] Saved conversion_history record id={record.id} "
+                    f"(source_format=powerbi_dax, measures={measure_count})"
+                )
+        except Exception as e:
+            logger.warning(f"[UCMVGenerator] Failed to save conversion_history (non-fatal): {e}")
 
     # ------------------------------------------------------------------
     # PBI API input validation (SSRF prevention)
