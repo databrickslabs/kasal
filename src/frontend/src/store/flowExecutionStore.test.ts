@@ -180,10 +180,11 @@ describe('flowExecutionStore', () => {
       expect(state.crewTaskCounts.get('Research Crew')).toBe(1);
     });
 
-    it('should set crew to completed when all tasks finish', () => {
+    it('should set crew to completed only on CREW_COMPLETED, not on the first task', () => {
       const store = useFlowExecutionStore.getState();
 
-      // Start a task
+      // Start + complete one task — the crew must stay running (more tasks may
+      // follow; task_count only reflects tasks started so far).
       store.handleTraceUpdate({
         id: 1,
         job_id: 'test-job-1',
@@ -191,8 +192,6 @@ describe('flowExecutionStore', () => {
         trace_metadata: { crew_name: 'Crew A' },
         created_at: '2024-01-01T00:00:00Z',
       });
-
-      // Complete the task
       store.handleTraceUpdate({
         id: 2,
         job_id: 'test-job-1',
@@ -201,13 +200,25 @@ describe('flowExecutionStore', () => {
         created_at: '2024-01-01T00:01:00Z',
       });
 
-      const state = useFlowExecutionStore.getState();
-      const crewState = state.crewNodeStates.get('Crew A');
+      let crewState = useFlowExecutionStore.getState().crewNodeStates.get('Crew A');
+      expect(crewState?.status).toBe('running');
+      expect(crewState?.completed_count).toBe(1);
+
+      // The crew-level completion event turns the node green.
+      store.handleTraceUpdate({
+        id: 3,
+        job_id: 'test-job-1',
+        event_type: 'CREW_COMPLETED',
+        trace_metadata: { crew_name: 'Crew A' },
+        created_at: '2024-01-01T00:02:00Z',
+      });
+
+      crewState = useFlowExecutionStore.getState().crewNodeStates.get('Crew A');
       expect(crewState?.status).toBe('completed');
-      expect(crewState?.completed_at).toBe('2024-01-01T00:01:00Z');
+      expect(crewState?.completed_at).toBe('2024-01-01T00:02:00Z');
     });
 
-    it('should not set crew to completed if tasks remain', () => {
+    it('should not set crew to completed while only some tasks have completed', () => {
       const store = useFlowExecutionStore.getState();
 
       // Start two tasks
@@ -272,6 +283,8 @@ describe('flowExecutionStore', () => {
       });
 
       // Backend sends event_context = 'task_completion' with a different event_type
+      // → treated as a TASK_COMPLETED (bumps completed_count) but does NOT complete
+      // the crew (that waits for CREW_COMPLETED).
       store.handleTraceUpdate({
         id: 2,
         job_id: 'test-job-1',
@@ -282,7 +295,8 @@ describe('flowExecutionStore', () => {
 
       const state = useFlowExecutionStore.getState();
       const crewState = state.crewNodeStates.get('Crew A');
-      expect(crewState?.status).toBe('completed');
+      expect(crewState?.status).toBe('running');
+      expect(crewState?.completed_count).toBe(1);
     });
 
     it('should extract crew_name from extra_data as fallback', () => {
@@ -330,6 +344,12 @@ describe('flowExecutionStore', () => {
         id: 3,
         job_id: 'test-job-1',
         event_type: 'TASK_COMPLETED',
+        trace_metadata: { crew_name: 'Crew A' },
+      });
+      store.handleTraceUpdate({
+        id: 4,
+        job_id: 'test-job-1',
+        event_type: 'CREW_COMPLETED',
         trace_metadata: { crew_name: 'Crew A' },
       });
 
@@ -592,6 +612,13 @@ describe('flowExecutionStore', () => {
               created_at: '2024-06-01T10:01:00Z',
             },
             {
+              id: 4,
+              job_id: 'load-job-1',
+              event_type: 'CREW_COMPLETED',
+              trace_metadata: { crew_name: 'Alpha Crew' },
+              created_at: '2024-06-01T10:01:30Z',
+            },
+            {
               id: 3,
               job_id: 'load-job-1',
               event_type: 'TASK_STARTED',
@@ -612,11 +639,11 @@ describe('flowExecutionStore', () => {
       expect(state.currentJobId).toBe('load-job-1');
       expect(state.isExecuting).toBe(true);
 
-      // Alpha Crew: 1 started + 1 completed = completed
+      // Alpha Crew: task done + CREW_COMPLETED = completed
       const alpha = state.crewNodeStates.get('Alpha Crew');
       expect(alpha).toBeDefined();
       expect(alpha?.status).toBe('completed');
-      expect(alpha?.completed_at).toBe('2024-06-01T10:01:00Z');
+      expect(alpha?.completed_at).toBe('2024-06-01T10:01:30Z');
 
       // Beta Crew: 1 started, 0 completed = running
       const beta = state.crewNodeStates.get('Beta Crew');
@@ -824,6 +851,13 @@ describe('flowExecutionStore', () => {
               event_type: 'TASK_COMPLETED',
               trace_metadata: { crew_name: 'Crew 1' },
               created_at: '2024-06-01T10:01:00Z',
+            },
+            {
+              id: 6,
+              job_id: 'multi-job',
+              event_type: 'CREW_COMPLETED',
+              trace_metadata: { crew_name: 'Crew 1' },
+              created_at: '2024-06-01T10:01:10Z',
             },
             {
               id: 3,
