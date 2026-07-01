@@ -69,3 +69,39 @@ describe('OpenOnCanvasButtons — Open in Agent Builder', () => {
     expect(nodes.find((n) => n.type === 'taskNode')!.data.tool_configs).toBeUndefined();
   });
 });
+
+describe('OpenOnCanvasButtons — Open in Flow Builder', () => {
+  const MULTI = {
+    agents: [{ id: 'a1', name: 'A', role: 'r', tools: [] }],
+    tasks: [
+      { id: 't1', name: 'Fetch News', description: 'search', agent_id: 'a1' },
+      { id: 't2', name: 'Summarize', description: 'synthesize', agent_id: 'a1' },
+    ],
+  } as never;
+
+  it("populates the crew node's allTasks so the flow has starting points", async () => {
+    // Regression: a bare flow node (no allTasks) makes buildFlowConfiguration emit
+    // ZERO startingPoints — the flow loads but runs nothing. The node must mirror
+    // the Flow canvas "add crew" shape: crew-<id>-<ts> id + allTasks from the crew.
+    const events: CanvasEvent[] = [];
+    vi.spyOn(window, 'dispatchEvent').mockImplementation((e: Event) => {
+      if (e.type === 'catalogLoadFlow') events.push(e as CanvasEvent);
+      return true;
+    });
+
+    render(<OpenOnCanvasButtons data={MULTI} savedCrewId="crew-123" savedName="News Crew" />);
+    fireEvent.click(screen.getByLabelText('Open in Flow Builder'));
+
+    await vi.waitFor(() => expect(events.length).toBe(1));
+    const node = events[0].detail.nodes[0];
+    expect(node.type).toBe('crewNode');
+    expect(String(node.id)).toMatch(/^crew-crew-123-\d+$/);
+    expect(node.data.id).toBe('crew-crew-123');
+    expect(node.data.crewId).toBe('crew-123');
+    const allTasks = node.data.allTasks as Array<{ id: string; name: string }>;
+    expect(allTasks).toEqual([
+      { id: 't1', name: 'Fetch News', description: 'search' },
+      { id: 't2', name: 'Summarize', description: 'synthesize' },
+    ]);
+  });
+});
