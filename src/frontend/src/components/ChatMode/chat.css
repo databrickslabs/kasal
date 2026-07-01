@@ -251,6 +251,18 @@
   box-shadow: var(--shadow-popover);
 }
 
+/* ---- Inline quiz surface breathing room ----
+ * The quiz's deck wrapper (flex flex-col gap-*) carries no padding of its own —
+ * in the exported app the wrapping themed Card supplies the inset, but the inline
+ * chat surface has none, so the title / progress bar / question card cling to the
+ * surface edge. The quiz also has no Download row (removed), which previously
+ * reserved the top band, so the title otherwise rides the very top-left corner
+ * next to the floating controls. Add a small inset. Scoped to #kasal-chat-root so
+ * the exported standalone app (no such id) is unaffected. */
+#kasal-chat-root .kasal-a2ui[data-surface-kind="quiz"] {
+  padding: 16px 20px;
+}
+
 /* ---- A2UI surface in native full screen (the inline "Full screen" control) ----
  * The element stays a DOM descendant of #kasal-chat-root in fullscreen, so the
  * scoped Tailwind utilities still apply; it just needs a page background, some

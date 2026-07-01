@@ -249,7 +249,16 @@ export const A2uiSurface: React.FC<{
         </div>
       )}
       <DeckThemeContext.Provider value={deckTheme}>
-        <SurfaceChromeContext.Provider value={{ downloads: !hideDownloads, onDownloadPdf, fit }}>
+        {/* A quiz is an interactive, multi-question surface — a PDF/PPTX snapshot
+            captures only the current question, so it has nothing meaningful to
+            export. Suppress its Download control (the other kinds keep it). */}
+        <SurfaceChromeContext.Provider
+          value={{
+            downloads: !hideDownloads && surface.surfaceKind !== 'quiz',
+            onDownloadPdf,
+            fit,
+          }}
+        >
           <A2UIRenderer payload={surface} />
         </SurfaceChromeContext.Provider>
       </DeckThemeContext.Provider>

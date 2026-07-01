@@ -8,12 +8,20 @@ import { A2uiSurface } from './A2uiSurface';
 // control (the de-MUI'd plain <button> with a lucide Maximize2 icon).
 vi.mock('../../../../shared/a2ui', async () => {
   const React = await import('react');
+  const SurfaceChromeContext = React.createContext({ downloads: true });
   return {
-    A2UIRenderer: ({ payload }: { payload: { surfaceKind?: string } }) => (
-      <div data-testid="a2ui-rendered">{payload?.surfaceKind}</div>
-    ),
+    // Surface the chrome `downloads` flag the wrapper provides, so tests can
+    // assert whether the Download control would render for this surface.
+    A2UIRenderer: ({ payload }: { payload: { surfaceKind?: string } }) => {
+      const chrome = React.useContext(SurfaceChromeContext) as { downloads?: boolean };
+      return (
+        <div data-testid="a2ui-rendered" data-downloads={String(chrome.downloads)}>
+          {payload?.surfaceKind}
+        </div>
+      );
+    },
     DeckThemeContext: React.createContext({}),
-    SurfaceChromeContext: React.createContext({ downloads: true }),
+    SurfaceChromeContext,
     getDeckTheme: () => ({ id: 'midnight' }),
     DEFAULT_DECK_THEME_ID: 'midnight',
     themeToDeck: (p: unknown) => p,
@@ -35,6 +43,18 @@ describe('A2uiSurface', () => {
   it('renders the shared renderer with the surface', () => {
     render(<A2uiSurface surface={surface} />);
     expect(screen.getByTestId('a2ui-rendered')).toHaveTextContent('document');
+  });
+
+  it('keeps the Download control enabled for a non-quiz surface', () => {
+    render(<A2uiSurface surface={surface} />);
+    expect(screen.getByTestId('a2ui-rendered')).toHaveAttribute('data-downloads', 'true');
+  });
+
+  it('suppresses the Download control for a quiz surface', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const quiz: any = { ...surface, surfaceKind: 'quiz' };
+    render(<A2uiSurface surface={quiz} />);
+    expect(screen.getByTestId('a2ui-rendered')).toHaveAttribute('data-downloads', 'false');
   });
 
   it('omits the corner expand control when onExpand is not provided', () => {
