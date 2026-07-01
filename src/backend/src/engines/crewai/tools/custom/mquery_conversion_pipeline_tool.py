@@ -657,6 +657,20 @@ class MqueryConversionPipelineTool(BaseTool):
                 logger.warning(f"[Cache] Failed to save M-Query cache: {_save_err}")
             # ────────────────────────────────────────────────────────────────
 
+            # ── Durable raw M-Query persistence (Lakebase / conversion_history) ─
+            try:
+                run_sync(self._save_to_conversion_history(
+                    raw_extract=self._build_raw_mquery_extract(result),
+                    formatted_output=formatted_output,
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    status="success",
+                    model_count=result.get("model_count", 0),
+                ))
+            except Exception as _hist_err:
+                logger.warning(f"[MQueryTool] conversion_history persistence skipped: {_hist_err}")
+            # ────────────────────────────────────────────────────────────────
+
             return formatted_output
 
         except Exception as e:
@@ -735,6 +749,108 @@ class MqueryConversionPipelineTool(BaseTool):
                 metadata=metadata,
                 report_id=None,
             )
+
+    # ── Durable raw M-Query persistence (conversion_history / Lakebase) ────────
+
+    @staticmethod
+    def _build_raw_mquery_extract(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Collect the full, untruncated original M-Query per table.
+
+        Unlike the same-day cache (which stores a 500-char-truncated Markdown
+        report), this returns the complete raw source expression for every table
+        so it can be persisted and retrieved verbatim later.
+        """
+        extract: List[Dict[str, Any]] = []
+        for model_name, model_data in (result.get("models") or {}).items():
+            for table_name, conversions in (model_data.get("tables") or {}).items():
+                for conv in conversions or []:
+                    expr_type = getattr(conv, "expression_type", None)
+                    extract.append({
+                        "model": model_name,
+                        "table": table_name,
+                        "expression_type": (
+                            expr_type.value if hasattr(expr_type, "value")
+                            else (str(expr_type) if expr_type else "")
+                        ),
+                        "success": bool(getattr(conv, "success", False)),
+                        "original_mquery": getattr(conv, "original_expression", None) or "",
+                        "databricks_sql": (
+                            getattr(conv, "databricks_sql", None)
+                            or getattr(conv, "create_view_sql", None) or ""
+                        ),
+                    })
+        return extract
+
+    async def _save_to_conversion_history(
+        self,
+        raw_extract: List[Dict[str, Any]],
+        formatted_output: str,
+        workspace_id: str,
+        dataset_id: Optional[str],
+        status: str,
+        model_count: int,
+    ) -> None:
+        """Persist the full raw M-Query extract to conversion_history (fail-open).
+
+        This is the durable, queryable counterpart to the same-day cache: the
+        untruncated source M-Query lands in ``input_data.mquery_raw`` and is
+        retrievable afterwards via ``GET /conversion-history`` (filter by
+        ``source_format=powerbi_mquery`` / ``execution_id``) or
+        ``GET /conversion-history/{id}``. Any failure here is non-fatal — it must
+        never break the conversion itself.
+        """
+        try:
+            from src.schemas.conversion import ConversionHistoryCreate
+            from src.utils.user_context import UserContext
+
+            table_count = len(raw_extract)
+            history_data = ConversionHistoryCreate(
+                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                source_format="powerbi_mquery",
+                target_format="sql",
+                input_data={
+                    "workspace_id": workspace_id,
+                    "dataset_id": dataset_id or "",
+                    "mquery_raw": raw_extract,
+                },
+                input_summary=(
+                    f"M-Query extract: {table_count} table(s) from workspace {workspace_id}"
+                )[:500],
+                output_data={
+                    "formatted_output": formatted_output,
+                    "model_count": model_count,
+                    "table_count": table_count,
+                },
+                output_summary=(
+                    f"Converted {table_count} table(s) across {model_count} model(s)"
+                )[:500],
+                configuration={
+                    "workspace_id": workspace_id,
+                    "dataset_id": dataset_id,
+                },
+                status=status,
+                measure_count=table_count,
+            )
+
+            group_id = None
+            try:
+                group_context = UserContext.get_group_context()
+                if group_context:
+                    group_id = getattr(group_context, "primary_group_id", None)
+            except Exception as _gc_err:
+                logger.debug(f"[MQueryTool] Could not resolve group_id for history: {_gc_err}")
+
+            async with ToolSessionProvider.conversion_repo() as repo:
+                record = await repo.create(history_data.model_dump())
+                if group_id:
+                    record.group_id = group_id
+                await repo.session.commit()
+                logger.info(
+                    f"[MQueryTool] Saved conversion_history record id={record.id} "
+                    f"(source_format=powerbi_mquery, tables={table_count}, status={status})"
+                )
+        except Exception as e:
+            logger.warning(f"[MQueryTool] Failed to save conversion_history (non-fatal): {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -929,6 +1045,7 @@ class MqueryConversionPipelineTool(BaseTool):
         validated: list = []
         inserted: list = []
         skipped: list = []
+        raw_extract: List[Dict[str, Any]] = []
 
         try:
             async with MQueryConnector(mq_cfg) as connector:
@@ -948,6 +1065,15 @@ class MqueryConversionPipelineTool(BaseTool):
                             expr_type_str = (et.value if hasattr(et, "value") else str(et)) if et else "other"
 
                         lane = self._classify_table(expr_type_str, raw_expr)
+
+                        # Capture the full, untruncated original M-Query for durable persistence.
+                        raw_extract.append({
+                            "model": model.name,
+                            "table": tname,
+                            "expression_type": expr_type_str,
+                            "lane": lane,
+                            "original_mquery": raw_expr,
+                        })
 
                         if lane == "databricks":
                             logger.info(f"[Validation] Databricks table: {tname}")
@@ -983,7 +1109,22 @@ class MqueryConversionPipelineTool(BaseTool):
             logger.error(f"[Validation] Error: {e}", exc_info=True)
             return f"Error during validation: {e}"
 
-        return self._format_validation_report(validated, inserted, skipped, target)
+        report = self._format_validation_report(validated, inserted, skipped, target)
+
+        # ── Durable raw M-Query persistence (Lakebase / conversion_history) ─
+        try:
+            await self._save_to_conversion_history(
+                raw_extract=raw_extract,
+                formatted_output=report,
+                workspace_id=workspace_id,
+                dataset_id=dataset_id,
+                status="success",
+                model_count=len(models),
+            )
+        except Exception as _hist_err:
+            logger.warning(f"[MQueryTool] conversion_history persistence skipped: {_hist_err}")
+
+        return report
 
     # ── Databricks table: convert + validate ──────────────────────────────────
 
