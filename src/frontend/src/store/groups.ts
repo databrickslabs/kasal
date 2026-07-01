@@ -64,10 +64,17 @@ export const useGroupStore = create<GroupState>()(
         // Add personal group at the beginning
         const allGroups = [personalGroup, ...userGroups.filter(g => g.id !== primaryGroupId)];
         
-        // Determine effective group id
+        // Determine effective group id. Validate the previously-selected group
+        // against the workspaces the user actually has RIGHT NOW: a stored group
+        // can be stale (e.g. after a redeploy the workspace list is temporarily
+        // empty until Lakebase is reconnected, or the user lost access). Falling
+        // back to the personal workspace keeps the app usable instead of sending a
+        // group_id header the backend rejects; the user re-selects the workspace
+        // once it reappears.
         const selectedFromStorage = localStorage.getItem('selectedGroupId');
         const prevCurrent = get().currentGroupId || selectedFromStorage;
-        const effectiveGroupId = prevCurrent || primaryGroupId;
+        const isPrevValid = !!prevCurrent && allGroups.some(g => g.id === prevCurrent);
+        const effectiveGroupId = isPrevValid ? (prevCurrent as string) : primaryGroupId;
 
         // Update store with groups and effective current group
         set({
@@ -76,12 +83,10 @@ export const useGroupStore = create<GroupState>()(
           currentGroupId: effectiveGroupId
         });
 
-        // Persist to localStorage if not set yet
-        if (!selectedFromStorage) {
-          console.log('[GroupStore] Setting selectedGroupId in localStorage:', effectiveGroupId);
+        // Persist whenever the effective group differs from what's stored — covers
+        // both "not set yet" and "stored group was stale/invalid → reset to personal".
+        if (effectiveGroupId !== selectedFromStorage) {
           localStorage.setItem('selectedGroupId', effectiveGroupId);
-        } else {
-          console.log('[GroupStore] selectedGroupId already in localStorage:', selectedFromStorage);
         }
       } catch (error) {
         console.error('Failed to fetch user groups:', error);

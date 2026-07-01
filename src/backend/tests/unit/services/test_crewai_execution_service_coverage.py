@@ -946,3 +946,62 @@ async def test_run_light_agent_execution_delegates_to_engine():
     engine.run_light_agent_execution.assert_awaited_once_with(
         execution_id=exec_id, config=config, group_context=ctx, session=None
     )
+
+
+# ---------------------------------------------------------------------------
+# run_light_agent_execution — Lakebase bootstrap at the runner boundary
+# (mirrors process_crew_executor's activate_lakebase_in_subprocess for the
+# in-process light/chat path, so downstream service->repo->db uses Lakebase).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_run_light_agent_activates_lakebase_when_not_active():
+    svc = CrewAIExecutionService()
+    mock_engine = SimpleNamespace(
+        run_light_agent_execution=AsyncMock(return_value={"execution_id": "e1", "status": "completed"})
+    )
+    svc._prepare_engine = AsyncMock(return_value=mock_engine)
+    activate = AsyncMock(return_value=True)
+
+    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)), \
+         patch("src.db.database_router.activate_lakebase_in_subprocess", activate):
+        result = await svc.run_light_agent_execution("e1", make_config(), group_context=None)
+
+    activate.assert_awaited_once()
+    mock_engine.run_light_agent_execution.assert_awaited_once()
+    assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_light_agent_skips_lakebase_when_already_active():
+    svc = CrewAIExecutionService()
+    mock_engine = SimpleNamespace(
+        run_light_agent_execution=AsyncMock(return_value={"status": "completed"})
+    )
+    svc._prepare_engine = AsyncMock(return_value=mock_engine)
+    activate = AsyncMock(return_value=True)
+
+    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=True)), \
+         patch("src.db.database_router.activate_lakebase_in_subprocess", activate):
+        await svc.run_light_agent_execution("e1", make_config(), group_context=None)
+
+    activate.assert_not_awaited()
+    mock_engine.run_light_agent_execution.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_light_agent_lakebase_activation_failure_is_non_fatal():
+    """A failing Lakebase activation must not block the run (best-effort)."""
+    svc = CrewAIExecutionService()
+    mock_engine = SimpleNamespace(
+        run_light_agent_execution=AsyncMock(return_value={"status": "completed"})
+    )
+    svc._prepare_engine = AsyncMock(return_value=mock_engine)
+    boom = AsyncMock(side_effect=RuntimeError("lakebase down"))
+
+    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)), \
+         patch("src.db.database_router.activate_lakebase_in_subprocess", boom):
+        result = await svc.run_light_agent_execution("e1", make_config(), group_context=None)
+
+    mock_engine.run_light_agent_execution.assert_awaited_once()
+    assert result["status"] == "completed"

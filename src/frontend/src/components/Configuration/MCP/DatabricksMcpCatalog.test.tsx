@@ -118,6 +118,22 @@ describe('DatabricksMcpCatalog', () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it('flips the toggle optimistically without waiting for a parent reload', async () => {
+    // onChanged is a no-op mock (it does NOT update registeredServers), mirroring
+    // the silent parent refresh. The row must still switch to ON immediately —
+    // no dialog reload needed for the toggle to reflect the change.
+    await renderCatalog('global');
+    const sql = screen.getByLabelText('Enable Databricks SQL');
+    expect(sql).not.toBeChecked();
+
+    fireEvent.click(sql);
+
+    await waitFor(() => expect(mockService.ensureDatabricksServer).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByLabelText('Enable Databricks SQL')).toBeChecked(),
+    );
+  });
+
   it('global scope: disabling a registered entry flips its global availability', async () => {
     const { onChanged } = await renderCatalog('global');
 

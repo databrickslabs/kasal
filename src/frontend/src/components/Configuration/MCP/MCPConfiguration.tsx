@@ -499,8 +499,11 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
   const [loadError, setLoadError] = useState<string | null>(null);
 
 
-  const loadMcpServers = async () => {
-    setLoading(true);
+  // `silent` re-syncs the server list WITHOUT flipping the loading state — used by
+  // the Databricks catalog toggles so enabling a server updates in place instead of
+  // reloading (flashing) the whole dialog.
+  const loadMcpServers = async (silent = false) => {
+    if (!silent) setLoading(true);
     setLoadError(null);
     try {
       const mcpService = MCPService.getInstance();
@@ -526,7 +529,7 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
         severity: 'error',
       });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -686,7 +689,7 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
         <Alert severity="error" sx={{ mb: 2 }}>
           {loadError}
         </Alert>
-        <Button variant="outlined" onClick={loadMcpServers}>
+        <Button variant="outlined" onClick={() => loadMcpServers()}>
           Retry
         </Button>
       </Box>
@@ -918,8 +921,8 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
           open={catalogOpen}
           onClose={() => setCatalogOpen(false)}
           fullWidth
-          maxWidth="sm"
-          PaperProps={{ sx: { borderRadius: 2 } }}
+          maxWidth="lg"
+          PaperProps={{ sx: { borderRadius: 2, height: '85vh' } }}
         >
           <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -939,7 +942,7 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
             {catalogOpen && (
               <DatabricksMcpCatalog
                 registeredServers={mcpConfig.servers}
-                onChanged={loadMcpServers}
+                onChanged={() => loadMcpServers(true)}
                 scope="global"
                 embedded
               />
