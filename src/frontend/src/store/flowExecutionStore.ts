@@ -91,8 +91,9 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
       effectiveEventType = 'TASK_STARTED';
     }
 
-    // Only process task-related events
-    if (!['TASK_STARTED', 'TASK_COMPLETED', 'TASK_FAILED'].includes(effectiveEventType)) {
+    // Only process task-related events plus the crew-level completion signal
+    // (CREW_COMPLETED drives the crew node turning green — see the handler below).
+    if (!['TASK_STARTED', 'TASK_COMPLETED', 'TASK_FAILED', 'CREW_COMPLETED'].includes(effectiveEventType)) {
       return;
     }
 
@@ -166,20 +167,24 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
       } else if (effectiveEventType === 'TASK_COMPLETED') {
         const completedCount = (newCrewCompletedTasks.get(crewName!) || 0) + 1;
         newCrewCompletedTasks.set(crewName!, completedCount);
-        const taskCount = newCrewTaskCounts.get(crewName!) || 0;
 
-        // Check if all tasks are completed and crew hasn't failed
-        if (completedCount >= taskCount && taskCount > 0 && !newCrewFailed.has(crewName!)) {
+        // NOTE: do NOT mark the crew 'completed' on a task completing. Tasks run
+        // sequentially, so task_count only reflects tasks STARTED so far — after
+        // the first task, completedCount >= taskCount is trivially true (the next
+        // task hasn't emitted TASK_STARTED yet) and the node would turn green
+        // prematurely. Completion is driven by the crew-level CREW_COMPLETED event,
+        // which fires only after ALL of the crew's tasks finish.
+        newCrewNodeStates.set(crewName!, {
+          ...currentState,
+          completed_count: completedCount,
+        });
+      } else if (effectiveEventType === 'CREW_COMPLETED') {
+        // Authoritative "this crew node finished all its tasks" signal.
+        if (!newCrewFailed.has(crewName!)) {
           newCrewNodeStates.set(crewName!, {
             ...currentState,
             status: 'completed',
             completed_at: timestamp,
-            completed_count: completedCount,
-          });
-        } else {
-          newCrewNodeStates.set(crewName!, {
-            ...currentState,
-            completed_count: completedCount,
           });
         }
       } else if (effectiveEventType === 'TASK_FAILED') {
@@ -277,7 +282,7 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
       for (const trace of traces) {
         const eventType = trace.event_type?.toUpperCase() || '';
 
-        if (!['TASK_STARTED', 'TASK_COMPLETED', 'TASK_FAILED'].includes(eventType)) {
+        if (!['TASK_STARTED', 'TASK_COMPLETED', 'TASK_FAILED', 'CREW_COMPLETED'].includes(eventType)) {
           continue;
         }
 
@@ -334,19 +339,19 @@ export const useFlowExecutionStore = create<FlowExecutionState>((set, get) => ({
         } else if (eventType === 'TASK_COMPLETED') {
           const completedCount = (crewCompletedTasks.get(crewName) || 0) + 1;
           crewCompletedTasks.set(crewName, completedCount);
-          const taskCount = crewTaskCounts.get(crewName) || 0;
 
-          if (completedCount >= taskCount && taskCount > 0 && !crewFailed.has(crewName)) {
+          // Completion is driven by CREW_COMPLETED, not the per-task count — see
+          // the equivalent note in handleTraceUpdate. Just track progress here.
+          crewNodeStates.set(crewName, {
+            ...currentState,
+            completed_count: completedCount,
+          });
+        } else if (eventType === 'CREW_COMPLETED') {
+          if (!crewFailed.has(crewName)) {
             crewNodeStates.set(crewName, {
               ...currentState,
               status: 'completed',
               completed_at: timestamp,
-              completed_count: completedCount,
-            });
-          } else {
-            crewNodeStates.set(crewName, {
-              ...currentState,
-              completed_count: completedCount,
             });
           }
         } else if (eventType === 'TASK_FAILED') {
