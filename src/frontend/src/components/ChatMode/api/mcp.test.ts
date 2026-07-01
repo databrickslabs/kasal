@@ -31,4 +31,16 @@ describe('listKasalMcpServers', () => {
     client.get.mockResolvedValue({ data: {} });
     expect(await listKasalMcpServers()).toEqual([]);
   });
+
+  it('omits disabled servers (picker only offers usable ones)', async () => {
+    client.get.mockResolvedValue({
+      data: {
+        servers: [
+          { id: 1, name: 'Enabled', enabled: true },
+          { id: 2, name: 'Disabled', enabled: false },
+        ],
+      },
+    });
+    expect(await listKasalMcpServers()).toEqual([{ id: 1, name: 'Enabled', enabled: true }]);
+  });
 });

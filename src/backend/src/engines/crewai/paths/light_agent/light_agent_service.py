@@ -135,12 +135,21 @@ class LightAgentService:
             if not prompt.strip():
                 raise ValueError("Light agent execution requires a prompt (task description)")
 
-            group_id = (
-                getattr(group_context, "primary_group_id", None)
-                or (group_context.group_ids[0] if group_context and group_context.group_ids else None)
-                or "default"
-            )
+            group_id = self._resolve_group_id(config, group_context)
             group_email = getattr(group_context, "group_email", None)
+            # Diagnostic: MCP servers are workspace-scoped, so the resolved group_id
+            # must match the workspace where a server was enabled or MCP resolves to
+            # 0. Log every input so a mismatch (e.g. resolving to a domain/team group
+            # instead of the personal workspace) is visible in the run logs.
+            logger.info(
+                "[light_agent] group resolution: resolved=%r config.group_id=%r "
+                "primary_group_id=%r group_ids=%r group_email=%r",
+                group_id,
+                getattr(config, "group_id", None),
+                getattr(group_context, "primary_group_id", None),
+                getattr(group_context, "group_ids", None),
+                group_email,
+            )
             role = str(agent_spec.get("role") or agent_spec.get("name") or "Assistant")
             # Short label for the trace's event_context (the user's ask, one line).
             trace_context = (prompt.strip().splitlines()[0] if prompt.strip() else "chat")[:120]
@@ -860,6 +869,38 @@ class LightAgentService:
         if erole and role_lower and str(erole).strip().lower() == role_lower:
             return True
         return False
+
+    @staticmethod
+    def _resolve_group_id(config: Any, group_context: Optional[GroupContext]) -> str:
+        """Resolve the workspace group_id for this light-agent (chat) run.
+
+        Prefers the execution's authoritative ``config.group_id`` (set by the
+        pipeline — the SAME value the crew/task path uses) over the runtime
+        ``group_context``. The group_context can reach the execution worker
+        without ``primary_group_id``/``group_ids`` and would otherwise fall back
+        to ``"default"``, which breaks workspace-scoped lookups: e.g. an MCP
+        server enabled only for this workspace resolves to 0 servers under
+        ``"default"`` (find_by_names_group_scope matches group_id exactly), so
+        chat "answer mode" silently dropped MCP tools while crew/research kept them.
+        """
+        resolved = (
+            getattr(config, "group_id", None)
+            or getattr(group_context, "primary_group_id", None)
+            or (group_context.group_ids[0] if group_context and getattr(group_context, "group_ids", None) else None)
+        )
+        if resolved:
+            return resolved
+        # Personal-workspace fallback: when no workspace is selected (no group_id
+        # header), the request carries no primary_group_id/group_ids — but the
+        # user's OWN workspace id is deterministically derived from their email,
+        # the SAME id GroupContext.from_email uses and that workspace-scoped MCP
+        # overrides are stored under (e.g. user_nehme_tohme_databricks_com).
+        # Without this the chat "answer mode" path falls back to "default", which
+        # matches no MCP rows, so workspace-enabled servers resolve to 0.
+        email = getattr(group_context, "group_email", None)
+        if email and "@" in email:
+            return GroupContext.generate_individual_group_id(email)
+        return "default"
 
     @staticmethod
     def _build_mcp_configs(

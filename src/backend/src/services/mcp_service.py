@@ -74,6 +74,13 @@ class MCPService:
         ``enabled_only`` restricts the result to enabled servers — used for
         non-admin callers, who must only see the servers a workspace admin has
         enabled (the curated allow-list), never the disabled ones.
+
+        OPT-IN model: a globally-available base server (``group_id IS NULL``)
+        that THIS workspace has not yet opted into (no override row) is reported
+        with ``enabled=False`` so the workspace toggle starts off and the server
+        is not usable (picker/execution) until a workspace admin enables it,
+        which creates an enabled override. The base ``enabled`` flag only means
+        "published / available to workspaces", not "active for this workspace".
         """
         servers = await self.server_repository.list_for_group_scope(group_id)
         # Deduplicate by name, preferring group-specific
@@ -88,9 +95,17 @@ class MCPService:
                     dedup[key] = s
         server_responses: List[MCPServerResponse] = []
         for server in dedup.values():
-            if enabled_only and not getattr(server, "enabled", False):
+            # Inherited base row with no workspace override → not opted in yet.
+            is_inherited_base = (
+                bool(group_id) and getattr(server, "group_id", None) is None
+            )
+            effective_enabled = False if is_inherited_base else bool(
+                getattr(server, "enabled", False)
+            )
+            if enabled_only and not effective_enabled:
                 continue
             resp = MCPServerResponse.model_validate(server)
+            resp.enabled = effective_enabled
             resp.api_key = ""  # do not include in list
             server_responses.append(resp)
         return MCPServerListResponse(servers=server_responses, count=len(server_responses))
@@ -488,9 +503,22 @@ class MCPService:
                 detail=f"MCP server with ID {server_id} not found"
             )
 
+        # A GLOBAL (base) server has no group_id. Deleting it must cascade to every
+        # workspace that opted in — otherwise their override rows are orphaned and
+        # those workspaces keep the server. Workspace-only rows (group_id set) delete
+        # just themselves.
+        is_base = getattr(server, "group_id", None) is None
+        server_name = server.name
+
         try:
             # Delete server
             await self.server_repository.delete(server_id)
+            if is_base:
+                removed = await self.server_repository.delete_overrides_by_name(server_name)
+                if removed:
+                    logger.info(
+                        f"Cascade-deleted {removed} workspace override(s) for global MCP server '{server_name}'"
+                    )
             return True
         except Exception as e:
             logger.error(f"Failed to delete MCP server: {str(e)}")
