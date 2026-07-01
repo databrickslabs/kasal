@@ -18,6 +18,7 @@ status is lost on a backend restart, which is acceptable for this transient op.)
 import asyncio
 import io
 import logging
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -31,7 +32,6 @@ from src.schemas.crew_export import (
     ExportFormat,
 )
 from src.services.crew_export_service import CrewExportService
-from src.utils.databricks_auth import get_auth_context
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -184,44 +184,95 @@ class CrewAppDeploymentService:
     async def _get_deploy_client(
         self, group_context: Optional[GroupContext], purpose: str
     ) -> Any:
-        """Resolve a WorkspaceClient for deploy operations, OBO first then PAT.
+        """Resolve a WorkspaceClient for deploy operations — PAT ONLY.
 
-        Auth order: (1) the requesting user's OBO token, (2) a workspace PAT
-        scoped to the user's group. The app's own service principal is NOT
-        used — it cannot create/manage other apps, so resolving to it would only
-        surface a confusing downstream permission error. If neither OBO nor PAT
-        is available we fail fast with an actionable message.
+        Databricks Apps deploy is PAT-only for now: an OBO/OAuth token lacks the
+        ``apps`` scope and the app's own Service Principal can't create/manage
+        other apps. This looks the PAT up directly from the DB (on the request
+        session, bypassing get_auth_context's SPN fallback + PAT cache) under the
+        user's groups and personal workspace, then returns a WorkspaceClient
+        pinned to ``auth_type="pat"``. Raises if no PAT is configured.
         """
-        user_token = group_context.access_token if group_context else None
-        group_id = group_context.primary_group_id if group_context else None
-
+        from databricks.sdk import WorkspaceClient
         from databricks.sdk.useragent import with_product
 
+        from src.services.api_keys_service import ApiKeysService
+        from src.utils.databricks_auth import _clean_environment, _databricks_auth
+        from src.utils.encryption_utils import EncryptionUtils
         from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
         with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
 
-        auth = await get_auth_context(user_token=user_token, group_id=group_id)
-        # Accept only user-scoped identities (OBO/PAT); reject SPN and no-auth.
-        if auth is None or auth.auth_method not in ("obo", "pat"):
-            resolved = auth.auth_method if auth else "none"
+        # Candidate groups to look the PAT up under: the request's groups PLUS the
+        # user's PERSONAL workspace. With strict workspace isolation a request
+        # scoped to a shared workspace carries ONLY that group_id (personal is
+        # dropped — see UserContext), but the PAT is commonly stored under the
+        # personal workspace, so we always add it (derived from the email).
+        candidate_group_ids: List[str] = (
+            list(group_context.group_ids)
+            if group_context and group_context.group_ids
+            else []
+        )
+        if group_context and group_context.group_email:
+            personal_gid = GroupContext.generate_individual_group_id(
+                group_context.group_email
+            )
+            if personal_gid and personal_gid not in candidate_group_ids:
+                candidate_group_ids.append(personal_gid)
+
+        # Resolve the PAT DIRECTLY from the DB on the request-scoped session.
+        # We deliberately DO NOT use get_auth_context here: (1) deploy MUST use a
+        # PAT (auth_type="pat") — an OBO token lacks the `apps` scope and the app's
+        # own Service Principal can't create/manage other apps; (2) get_auth_context
+        # keeps a process-wide PAT cache that can hold a stale negative (a key added
+        # straight to the DB never invalidates it), so it kept skipping the PAT and
+        # falling through to SPN. Querying the request session sees the row the UI
+        # wrote and bypasses that cache entirely.
+        pat_token: Optional[str] = None
+        found_gid: Optional[str] = None
+        for gid in candidate_group_ids:
+            if not gid:
+                continue
+            try:
+                api_service = ApiKeysService(self.session, group_id=gid)
+                for key_name in ("DATABRICKS_API_KEY", "DATABRICKS_TOKEN"):
+                    api_key = await api_service.find_by_name(key_name)
+                    if api_key and api_key.encrypted_value:
+                        pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                        found_gid = gid
+                        break
+            except Exception as exc:
+                logger.warning("Deploy PAT lookup failed for group %s: %s", gid, exc)
+            if pat_token:
+                break
+
+        if not pat_token:
             logger.warning(
-                "Databricks Apps deploy auth rejected (resolved=%s, user_token=%s): "
-                "OBO/PAT required",
-                resolved,
-                "present" if user_token else "absent",
+                "Databricks Apps deploy: no PAT found. Groups tried: %s",
+                candidate_group_ids,
             )
             raise PermissionError(
-                "Could not authenticate to Databricks. Deploys run as the requesting "
-                "user (OBO) or a workspace PAT — log in via Databricks OAuth or "
-                f"configure a workspace PAT with access to {purpose}."
+                "Databricks Apps deploy requires a workspace PAT. OBO/OAuth is not "
+                "supported for deploy right now — its token is not granted the "
+                "`apps` scope. Add a DATABRICKS_API_KEY (or DATABRICKS_TOKEN) API "
+                f"key with access to {purpose}."
             )
+
+        # Resolve the workspace host (no token needed just to read it).
+        await _databricks_auth._load_config()
+        host = _databricks_auth._workspace_host or os.environ.get("DATABRICKS_HOST")
+        if not host:
+            raise PermissionError(
+                "Could not resolve the Databricks workspace host for deploy."
+            )
+
         logger.info(
-            "Databricks Apps deploy authenticating via %s (user=%s)",
-            auth.auth_method,
-            auth.user_identity or "service",
+            "Databricks Apps deploy authenticating via PAT (group=%s)", found_gid
         )
-        return auth.get_workspace_client()
+        # _clean_environment strips SPN env vars (CLIENT_ID/SECRET) so the SDK
+        # can't hijack the client — the deploy runs with auth_type="pat".
+        with _clean_environment():
+            return WorkspaceClient(host=host, token=pat_token, auth_type="pat")
 
     def get_status(self, deployment_id: str) -> Optional[AppDeploymentStatusResponse]:
         record = self._deployments.get(deployment_id)
