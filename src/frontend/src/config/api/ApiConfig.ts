@@ -44,6 +44,34 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
+    // Recover from a stale selected workspace. The `group_id` header can point at
+    // a workspace the user can no longer access — most commonly right after a
+    // redeploy, when the DB is temporarily on local storage (SQLite) until the
+    // admin reconnects Lakebase, so the previously-selected workspace doesn't
+    // exist yet. The backend then 403s EVERY group-scoped call, including
+    // /users/me, which would otherwise leave the app stuck on a blank screen with
+    // no way to self-correct. Clear the stale selection and retry once WITHOUT the
+    // header so the request falls back to the personal workspace; the group store
+    // then re-validates and the user can re-select the workspace once it returns.
+    const original = error.config;
+    const detail = error.response?.data?.detail;
+    const isGroupAccessDenied =
+      error.response?.status === 403 &&
+      typeof detail === 'string' &&
+      detail.toLowerCase().includes('access to group');
+    if (isGroupAccessDenied && original && !original._groupAccessRetry) {
+      original._groupAccessRetry = true;
+      try {
+        localStorage.removeItem('selectedGroupId');
+      } catch { /* localStorage may be unavailable */ }
+      if (original.headers) {
+        delete original.headers['group_id'];
+      }
+      // Retry with the header cleared — the request interceptor reads the (now
+      // removed) localStorage value, so no group_id header is attached.
+      return apiClient(original);
+    }
+
     if (error.response) {
       // List of endpoints where 404 is expected and shouldn't be logged as an error
       const expectedNotFoundEndpoints = [
