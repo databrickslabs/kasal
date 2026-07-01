@@ -183,7 +183,7 @@ fi
 # Frontend test files - be specific about extensions
 FRONTEND_TEST_COUNT=$(find src/frontend -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" 2>/dev/null | wc -l || echo "0")
 if [ "$FRONTEND_TEST_COUNT" -gt 0 ]; then
-    find src/frontend -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" -type f -delete 2>/dev/null || true
+    find src/frontend \( -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" \) -type f -delete 2>/dev/null || true
     echo "  ✓ Removed $FRONTEND_TEST_COUNT frontend test files"
 fi
 
