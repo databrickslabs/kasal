@@ -373,6 +373,13 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
             <FormControl component="fieldset">
               <FormLabel component="legend">Databricks App</FormLabel>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Deploy authenticates with a workspace <strong>Personal Access
+                  Token (PAT)</strong>, the only supported option for now.
+                  OBO/OAuth login is not supported for deploy (its token isn&apos;t
+                  granted the <code>apps</code> scope). Configure a workspace PAT
+                  before deploying.
+                </Alert>
                 <TextField
                   label="App name (for direct deploy)"
                   value={appName}

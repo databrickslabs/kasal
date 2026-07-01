@@ -295,12 +295,14 @@ async def deploy_crew_app(
     """
     Deploy a crew as a Databricks App, directly from the UI.
 
-    Generates the Databricks-App project (same as the export) and, on behalf of
-    the requesting user (OBO), creates/updates the app, uploads the project,
-    deploys it, and starts it. The deploy runs in the background — poll
-    `/{crew_id}/deploy-app/status?deployment_id=...` for progress and the app URL.
+    Generates the Databricks-App project (same as the export), creates/updates
+    the app, uploads the project, deploys it, and starts it. The deploy runs in
+    the background — poll `/{crew_id}/deploy-app/status?deployment_id=...` for
+    progress and the app URL.
 
-    Only editors and admins can deploy. A Databricks OAuth (OBO) token is required.
+    Only editors and admins can deploy. Deploy is PAT-only for now: it
+    authenticates with a workspace Personal Access Token, not OBO/OAuth (whose
+    token is not granted the `apps` scope).
     """
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can deploy crews")

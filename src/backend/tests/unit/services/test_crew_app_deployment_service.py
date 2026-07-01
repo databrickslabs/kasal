@@ -2,6 +2,7 @@
 Unit tests for CrewAppDeploymentService (one-click Databricks Apps deploy).
 """
 
+from contextlib import contextmanager, nullcontext
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -49,59 +50,110 @@ def _export_result():
     }
 
 
-def _auth_ctx(method="obo", client=None):
-    """Mock AuthContext as returned by get_auth_context (OBO/PAT/SPN)."""
-    auth = MagicMock()
-    auth.auth_method = method
-    auth.user_identity = "user@example.com" if method == "obo" else None
-    auth.get_workspace_client.return_value = client or MagicMock()
-    return auth
+@contextmanager
+def _patch_deploy_pat(pat_groups, capture=None):
+    """Patch the deploy's DIRECT PAT-resolution chain (bypasses get_auth_context).
+
+    Deploy looks the PAT up straight from the DB on the request session, then
+    builds a WorkspaceClient(auth_type="pat"). This patches every step:
+      - ApiKeysService.find_by_name → returns a fake DATABRICKS_API_KEY only for
+        the group_ids in ``pat_groups``;
+      - EncryptionUtils.decrypt_value → returns a fake token;
+      - the workspace-host lookup and _clean_environment;
+      - WorkspaceClient (so no real SDK client is built).
+
+    ``capture`` (optional dict) receives ``groups`` = the group_ids tried, in order.
+    """
+    tried = capture if capture is not None else {}
+    tried.setdefault("groups", [])
+
+    class _FakeApiKeysService:
+        def __init__(self, session, group_id=None):
+            self.group_id = group_id
+            tried["groups"].append(group_id)
+
+        async def find_by_name(self, name):
+            if name == "DATABRICKS_API_KEY" and self.group_id in pat_groups:
+                key = MagicMock()
+                key.encrypted_value = f"enc::{self.group_id}"
+                return key
+            return None
+
+    dbx = MagicMock()
+    dbx._load_config = AsyncMock(return_value=True)
+    dbx._workspace_host = "https://ws.example.com"
+
+    with (
+        patch("src.services.api_keys_service.ApiKeysService", _FakeApiKeysService),
+        patch(
+            "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
+            side_effect=lambda v: f"pat-token-{v}",
+        ),
+        patch("src.utils.databricks_auth._databricks_auth", dbx),
+        patch("src.utils.databricks_auth._clean_environment", lambda: nullcontext()),
+        patch("databricks.sdk.WorkspaceClient", MagicMock()),
+        patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
+    ):
+        yield tried
 
 
 class TestStartDeployment:
     @pytest.mark.asyncio
-    async def test_falls_back_to_pat_when_no_obo_token(self, service):
-        """With no OBO token, deploy proceeds via the workspace PAT fallback."""
-        ctx = GroupContext(group_ids=["g1"], group_email="u@e.com", access_token=None)
+    async def test_resolves_pat_from_request_group(self, service, obo_context):
+        """Deploy resolves a PAT directly from the DB for the request's group and
+        never forwards the OBO token."""
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        mock_auth = AsyncMock(return_value=_auth_ctx(method="pat"))
-        with (
-            patch(
-                "src.services.crew_app_deployment_service.get_auth_context",
-                new=mock_auth,
-            ),
-            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
-        ):
-            resp = await service.start_deployment("crew-1", AppDeploymentConfig(), ctx)
-
+        with _patch_deploy_pat({"g1"}) as tried:
+            resp = await service.start_deployment(
+                "crew-1", AppDeploymentConfig(), obo_context
+            )
         assert resp.status == STATUS_PENDING
-        # Fallback path: resolved with no user token but the group_id for PAT lookup.
-        assert mock_auth.await_args.kwargs.get("user_token") is None
-        assert mock_auth.await_args.kwargs.get("group_id") == "g1"
+        assert "g1" in tried["groups"]
 
     @pytest.mark.asyncio
-    async def test_rejects_service_principal(self, service, obo_context):
-        """SPN is never used for deploy — resolving to it raises a clear error."""
+    async def test_raises_when_no_pat_configured(self, service, obo_context):
+        """No PAT under any of the user's groups → clear PAT-required error
+        (deploy never falls back to OBO/SPN)."""
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        with patch(
-            "src.services.crew_app_deployment_service.get_auth_context",
-            new=AsyncMock(return_value=_auth_ctx(method="service_principal")),
-        ):
-            with pytest.raises(PermissionError):
+        with _patch_deploy_pat(set()):
+            with pytest.raises(PermissionError, match="PAT"):
                 await service.start_deployment(
                     "crew-1", AppDeploymentConfig(), obo_context
                 )
 
     @pytest.mark.asyncio
+    async def test_finds_pat_under_a_non_primary_group(self, service):
+        """The PAT may be configured under ANY of the user's groups, not just the
+        primary (group_ids[0]). Here only g2 has one — deploy still succeeds."""
+        ctx = GroupContext(
+            group_ids=["g1", "g2"], group_email="u@e.com", access_token=None
+        )
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with _patch_deploy_pat({"g2"}) as tried:
+            resp = await service.start_deployment("crew-1", AppDeploymentConfig(), ctx)
+        assert resp.status == STATUS_PENDING
+        # g1 tried first (no PAT), then g2 (found) — stops before the personal group.
+        assert tried["groups"] == ["g1", "g2"]
+
+    @pytest.mark.asyncio
+    async def test_finds_pat_under_personal_workspace_with_strict_isolation(self, service):
+        """With strict isolation, a request scoped to a shared workspace carries
+        ONLY that group_id. A PAT under the user's PERSONAL workspace must still be
+        found — deploy adds the personal workspace id (derived from the email)."""
+        ctx = GroupContext(
+            group_ids=["shared_ws"], group_email="alice@acme.com", access_token=None
+        )
+        personal_gid = "user_alice_acme_com"
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with _patch_deploy_pat({personal_gid}) as tried:
+            resp = await service.start_deployment("crew-1", AppDeploymentConfig(), ctx)
+        assert resp.status == STATUS_PENDING
+        assert tried["groups"] == ["shared_ws", personal_gid]
+
+    @pytest.mark.asyncio
     async def test_registers_pending_and_returns_id(self, service, obo_context):
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        with (
-            patch(
-                "src.services.crew_app_deployment_service.get_auth_context",
-                new=AsyncMock(return_value=_auth_ctx()),
-            ),
-            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
-        ):
+        with _patch_deploy_pat({"g1"}):
             resp = await service.start_deployment(
                 "crew-1", AppDeploymentConfig(app_name="My App"), obo_context
             )
@@ -129,13 +181,7 @@ class TestStartDeployment:
             experiment_name="news-exp",
             warehouse_id="wh-1",
         )
-        with (
-            patch(
-                "src.services.crew_app_deployment_service.get_auth_context",
-                new=AsyncMock(return_value=_auth_ctx()),
-            ),
-            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
-        ):
+        with _patch_deploy_pat({"g1"}):
             await service.start_deployment("crew-1", cfg, obo_context)
 
         opts = captured["options"]
@@ -159,42 +205,18 @@ class TestStartDeployment:
 
         service.export_service.export_crew = fake_export
         cfg = AppDeploymentConfig(app_name="oracle")  # no experiment_name
-        with (
-            patch(
-                "src.services.crew_app_deployment_service.get_auth_context",
-                new=AsyncMock(return_value=_auth_ctx()),
-            ),
-            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
-        ):
+        with _patch_deploy_pat({"g1"}):
             await service.start_deployment("crew-1", cfg, obo_context)
         assert captured["options"].mlflow_experiment_name == "oracle"
 
     @pytest.mark.asyncio
     async def test_defaults_app_name_from_metadata(self, service, obo_context):
         service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        with (
-            patch(
-                "src.services.crew_app_deployment_service.get_auth_context",
-                new=AsyncMock(return_value=_auth_ctx()),
-            ),
-            patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
-        ):
+        with _patch_deploy_pat({"g1"}):
             resp = await service.start_deployment(
                 "crew-1", AppDeploymentConfig(), obo_context
             )
         assert resp.app_name == "research-crew"
-
-    @pytest.mark.asyncio
-    async def test_auth_failure_raises(self, service, obo_context):
-        service.export_service.export_crew = AsyncMock(return_value=_export_result())
-        with patch(
-            "src.services.crew_app_deployment_service.get_auth_context",
-            new=AsyncMock(return_value=None),
-        ):
-            with pytest.raises(PermissionError):
-                await service.start_deployment(
-                    "crew-1", AppDeploymentConfig(), obo_context
-                )
 
 
 class TestDeployBlocking:
@@ -390,9 +412,8 @@ class TestListLakebaseInstances:
         inst.capacity = "CU_1"
         client = MagicMock()
         client.database.list_database_instances.return_value = [inst]
-        with patch(
-            "src.services.crew_app_deployment_service.get_auth_context",
-            new=AsyncMock(return_value=_auth_ctx(client=client)),
+        with patch.object(
+            service, "_get_deploy_client", new=AsyncMock(return_value=client)
         ):
             result = await service.list_lakebase_instances(group_context=obo_context)
         assert result == [{"name": "lb-1", "state": "AVAILABLE", "capacity": "CU_1"}]
@@ -401,18 +422,19 @@ class TestListLakebaseInstances:
     async def test_returns_empty_on_error(self, service, obo_context):
         client = MagicMock()
         client.database.list_database_instances.side_effect = Exception("boom")
-        with patch(
-            "src.services.crew_app_deployment_service.get_auth_context",
-            new=AsyncMock(return_value=_auth_ctx(client=client)),
+        with patch.object(
+            service, "_get_deploy_client", new=AsyncMock(return_value=client)
         ):
             result = await service.list_lakebase_instances(group_context=obo_context)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_raises_when_auth_fails(self, service, obo_context):
-        with patch(
-            "src.services.crew_app_deployment_service.get_auth_context",
-            new=AsyncMock(return_value=None),
+        # No PAT configured → _get_deploy_client raises; list surfaces it.
+        with patch.object(
+            service,
+            "_get_deploy_client",
+            new=AsyncMock(side_effect=PermissionError("PAT required")),
         ):
             with pytest.raises(PermissionError):
                 await service.list_lakebase_instances(group_context=obo_context)
