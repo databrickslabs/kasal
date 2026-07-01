@@ -397,6 +397,24 @@ class CrewAIExecutionService:
         status, so a sub-second answer is fetchable via the REST poller even if
         the SSE listener attaches late.
         """
+        # Bootstrap the DB backend for this in-process run, exactly as the crew
+        # SUBPROCESS does in process_crew_executor.prepare_and_run(): activate
+        # Lakebase on async_session_factory up front so every downstream
+        # service → repository → db call (chat history, model configs, MCP
+        # servers) transparently uses Lakebase. The startup swap in main.py only
+        # runs if Lakebase was already enabled at boot; a detached background task
+        # otherwise keeps the local SQLite factory, which is why the light agent's
+        # MCP lookup silently resolved to 0. Idempotent — skips when already
+        # Lakebase; keeps the engine/services/repositories free of DB-infra concerns.
+        try:
+            from src.db.session import async_session_factory
+            if not async_session_factory.is_lakebase:
+                from src.db.database_router import activate_lakebase_in_subprocess
+                activated = await activate_lakebase_in_subprocess()
+                crew_logger.info(f"[light_agent] Lakebase activation ensured before run: {activated}")
+        except Exception as lb_err:  # noqa: BLE001
+            crew_logger.warning(f"[light_agent] Lakebase activation check failed (non-fatal): {lb_err}")
+
         engine = await self._prepare_engine(config)
         return await engine.run_light_agent_execution(
             execution_id=execution_id,

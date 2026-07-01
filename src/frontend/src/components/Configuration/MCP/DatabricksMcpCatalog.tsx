@@ -74,6 +74,9 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Optimistic enabled state per option, so a toggle flips instantly without
+  // waiting for (or visibly reloading from) the parent's server-list refresh.
+  const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState('');
 
   const [expandedType, setExpandedType] = useState<'genie' | 'ai-search' | null>(null);
@@ -185,17 +188,20 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
     try {
       const service = MCPService.getInstance();
       const match = matchFor(option);
+      const desired = match ? !match.enabled : true;
       if (match) {
         // Already registered → flip its enabled flag (keep the row). In 'global'
         // scope that's the base server's availability; in 'workspace' scope it's
         // a per-workspace override (created on the fly for inherited globals).
-        const desired = !match.enabled;
         if (scope === 'global') await service.setGlobalAvailability(match.id, desired);
         else await service.setWorkspaceEnabled(match.id, desired);
       } else {
         // Not registered yet → register + enable it at the requested scope.
         await service.ensureDatabricksServer(option, scope);
       }
+      // Flip the toggle optimistically so the row updates in place; the parent
+      // then re-syncs silently (no dialog reload) to pick up ids for re-toggles.
+      setPendingEnabled((p) => ({ ...p, [option.id]: desired }));
       await onChanged();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Could not update the Databricks MCP server');
@@ -209,7 +215,8 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
 
   const optionRow = (option: DatabricksMcpOption, indent = false) => {
     const match = matchFor(option);
-    const enabled = !!match && match.enabled;
+    // Optimistic override wins until the silent parent refresh catches up.
+    const enabled = option.id in pendingEnabled ? pendingEnabled[option.id] : (!!match && match.enabled);
     const busy = busyId === option.id;
     return (
       <Box
