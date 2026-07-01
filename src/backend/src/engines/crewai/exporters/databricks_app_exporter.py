@@ -28,12 +28,14 @@ TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
 # vendored verbatim into every export so generative UI never forks into a second
 # implementation. ``parents[3]`` is ``src/backend/src``.
 SHARED_A2UI_DIR = Path(__file__).parents[3] / "shared" / "a2ui"
-# The ONE shared frontend A2UI renderer (self-contained React+TS module). Vendored
+# The shared frontend A2UI renderer (self-contained React+TS module), vendored
 # verbatim into the export so the deployed UI draws surfaces with the SAME renderer
-# as Kasal chat. ``parents[5]`` is the top-level ``src/`` (alongside ``frontend/``).
-SHARED_A2UI_FRONTEND_DIR = (
-    Path(__file__).parents[5] / "frontend" / "src" / "shared" / "a2ui"
-)
+# as Kasal chat. It lives IN the template tree (not the frontend source) so it
+# ships with the backend and an export from the DEPLOYED app — which does NOT ship
+# the frontend source — still gets it. The canonical source is
+# ``src/frontend/src/shared/a2ui``; this committed copy is kept in sync by a test
+# (test_a2ui_frontend_vendor_in_sync). See _a2ui_frontend_files().
+SHARED_A2UI_FRONTEND_DIR = TEMPLATE_DIR / "frontend" / "src" / "a2ui"
 # Standalone tool implementations bundled into the app (no Kasal `src.*` deps).
 BUNDLED_TOOLS_DIR = Path(__file__).parent / "templates" / "_app_bundled_tools"
 # Kasal's runtime custom-tool implementations (some are self-contained).
@@ -244,6 +246,10 @@ class DatabricksAppExporter(BaseExporter):
                 path.name in _SKIP_FILES
                 or "__pycache__" in parts
                 or parts & {"node_modules", "dist", ".vite", "build", ".turbo"}
+                # The vendored A2UI frontend is emitted VERBATIM by
+                # _a2ui_frontend_files() (no token substitution — TS must not have
+                # {{...}} tokens rewritten). Skip it here to avoid a double emission.
+                or rel.startswith("frontend/src/a2ui/")
             ):
                 continue
             try:
@@ -672,14 +678,16 @@ class DatabricksAppExporter(BaseExporter):
         return files
 
     async def _a2ui_frontend_files(self) -> List[Dict[str, str]]:
-        """Vendor the shared frontend A2UI renderer verbatim into the export.
+        """Vendor the frontend A2UI renderer verbatim into the export.
 
-        Copies the whole self-contained ``src/frontend/src/shared/a2ui`` tree (its
-        own ``lib/`` + ``ui/``, relative imports only) to ``frontend/src/a2ui/`` so
-        the deployed app renders surfaces with the SAME components Kasal chat uses —
-        no drifted second copy. Unit-test files are skipped (the export only builds).
-        The drifted template copies are removed from the template tree so only this
-        vendored set ships.
+        Copies the self-contained A2UI module (its own ``lib/`` + ``ui/``, relative
+        imports only) to ``frontend/src/a2ui/`` so the deployed app renders surfaces
+        with the SAME components Kasal chat uses. The source is the committed copy in
+        the template tree (``SHARED_A2UI_FRONTEND_DIR``) — NOT the frontend source —
+        so this works even when the export runs inside the DEPLOYED Kasal app, which
+        ships the backend but not the frontend source tree. The copy is kept in sync
+        with the canonical ``src/frontend/src/shared/a2ui`` by a test. Emitted
+        VERBATIM (the token-substituting template walk skips this subtree).
         """
         files: List[Dict[str, str]] = []
         base = SHARED_A2UI_FRONTEND_DIR
