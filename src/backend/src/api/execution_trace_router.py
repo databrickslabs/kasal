@@ -167,7 +167,7 @@ async def get_current_crew_node_states(
         event_type_upper = trace.event_type.upper() if trace.event_type else ""
 
         # Check for crew-related events from flow execution
-        if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
+        if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED", "CREW_COMPLETED"]:
             # Extract crew name from metadata if available
             crew_name = None
             if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
@@ -207,12 +207,18 @@ async def get_current_crew_node_states(
                     crew_states[crew_name]["completed_count"] = crew_completed_tasks[
                         crew_name
                     ]
-                    # Check if all tasks are completed
-                    if (
-                        crew_completed_tasks[crew_name]
-                        >= crew_task_counts.get(crew_name, 0)
-                        and crew_name not in crew_failed
-                    ):
+                    # NOTE: do NOT mark the crew "completed" here. Tasks run
+                    # sequentially, so task_count only reflects the tasks that have
+                    # STARTED so far — after the first task completes,
+                    # completed_count >= task_count is trivially true (the next task
+                    # hasn't emitted TASK_STARTED yet) and the node would turn green
+                    # prematurely. Completion is driven by the crew-level
+                    # CREW_COMPLETED event below, which fires only after ALL of the
+                    # crew's tasks finish.
+
+                elif event_type_upper == "CREW_COMPLETED":
+                    # Authoritative "this crew node finished all its tasks" signal.
+                    if crew_name not in crew_failed:
                         crew_states[crew_name]["status"] = "completed"
                         crew_states[crew_name]["completed_at"] = (
                             trace.created_at.isoformat() if trace.created_at else None

@@ -545,8 +545,16 @@ class TestExecutionTraceRouter:
         mock_trace_completed.event_context = "Research Task"
         mock_trace_completed.created_at = datetime(2024, 1, 1, 10, 5, 0)
 
+        # The crew node only turns "completed" on the crew-level CREW_COMPLETED
+        # event, which fires after ALL of the crew's tasks finish.
+        mock_trace_crew_done = MagicMock()
+        mock_trace_crew_done.event_type = "crew_completed"
+        mock_trace_crew_done.trace_metadata = {"crew_name": "research_crew"}
+        mock_trace_crew_done.event_context = ""
+        mock_trace_crew_done.created_at = datetime(2024, 1, 1, 10, 6, 0)
+
         mock_result = MagicMock()
-        mock_result.traces = [mock_trace_started, mock_trace_completed]
+        mock_result.traces = [mock_trace_started, mock_trace_completed, mock_trace_crew_done]
 
         with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
             mock_get_traces.return_value = mock_result
@@ -557,6 +565,45 @@ class TestExecutionTraceRouter:
             data = response.json()
             assert "research_crew" in data
             assert data["research_crew"]["status"] == "completed"
+
+    def test_crew_stays_running_until_all_tasks_done(self, client, mock_group_context):
+        """A crew node with multiple tasks must NOT turn completed when only the
+        first task finishes. Tasks run sequentially, so at that point task_count
+        reflects one started task and the old completed_count >= task_count check
+        fired prematurely. Completion is gated on CREW_COMPLETED instead."""
+        def _trace(event_type, ts):
+            m = MagicMock()
+            m.event_type = event_type
+            m.trace_metadata = {"crew_name": "news_crew"}
+            m.event_context = ""
+            m.created_at = datetime(2024, 1, 1, 10, 0, ts)
+            return m
+
+        # Task 1 starts + completes; Task 2 has started but not completed.
+        traces = [
+            _trace("task_started", 0),
+            _trace("task_completed", 5),
+            _trace("task_started", 6),
+        ]
+        mock_result = MagicMock()
+        mock_result.traces = traces
+
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+            data = client.get("/traces/job/job-123/crew-node-states").json()
+
+        assert data["news_crew"]["status"] == "running"
+        assert data["news_crew"]["completed_count"] == 1
+        assert data["news_crew"]["task_count"] == 2
+
+        # Now the crew emits CREW_COMPLETED → the node turns completed.
+        traces.append(_trace("task_completed", 9))
+        traces.append(_trace("crew_completed", 10))
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result
+            data = client.get("/traces/job/job-123/crew-node-states").json()
+
+        assert data["news_crew"]["status"] == "completed"
 
     def test_get_crew_node_states_with_failure(self, client, mock_group_context):
         """Test crew node states when a task fails."""
