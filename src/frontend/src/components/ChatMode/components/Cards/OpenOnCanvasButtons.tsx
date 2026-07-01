@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GenerationCompleteData } from '../../types/dispatcher';
-import { buildCrewGraph, deriveCrewName, CrewNameConflictError } from '../../api/crews';
+import { buildCrewGraph, deriveCrewName, normalizeGeneration, CrewNameConflictError } from '../../api/crews';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useExecutionStore } from '../../store/executionStore';
 
@@ -79,11 +79,31 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
       }
       if (!crewId) throw new Error('no crew id');
       const crewName = savedName || deriveCrewName(data);
+      // Build the crew node EXACTLY like the Flow canvas does when you add a crew
+      // from the library (FlowCanvas.tsx addCrewNode): it MUST carry `allTasks`
+      // and use the `crew-<id>-<ts>` id shape, or buildFlowConfiguration finds no
+      // tasks and produces ZERO startingPoints — a flow that loads but runs
+      // nothing. The chat data already holds the crew's tasks (id/name/desc).
+      const { tasks } = normalizeGeneration(data);
+      const allTasks = tasks
+        .filter((t) => t.id)
+        .map((t) => ({
+          id: String(t.id),
+          name: t.name || 'Task',
+          description: t.description,
+        }));
       const flowNode = {
-        id: `crew-node-${crewId}`,
+        id: `crew-${crewId}-${Date.now()}`,
         type: 'crewNode',
-        position: { x: 250, y: 150 },
-        data: { id: String(crewId), label: crewName, crewName, crewId },
+        position: { x: 100, y: 150 },
+        data: {
+          id: `crew-${crewId}`,
+          label: crewName,
+          crewName,
+          crewId,
+          selectedTasks: [],
+          allTasks,
+        },
       };
       window.dispatchEvent(
         new CustomEvent('catalogLoadFlow', {
