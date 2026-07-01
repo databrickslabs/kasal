@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 
@@ -26,9 +26,10 @@ class FlowState(Base):
     method_name = Column(String(255), nullable=False)
     # JSON-serialized flow state dict.
     state_json = Column(Text, nullable=False)
-    created_at = Column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-    )
+    # Timezone-naive UTC to match the TIMESTAMP WITHOUT TIME ZONE column (asyncpg
+    # rejects binding a tz-aware datetime to a naive Postgres/Lakebase column), and
+    # to stay consistent with flow_execution / execution_history.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_flow_states_uuid_created", "flow_uuid", "created_at"),

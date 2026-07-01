@@ -420,7 +420,8 @@ class TestRunFlowResumeScenario:
              patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)):
 
             repo_inst = MagicMock()
-            # resume_from_execution_id is the integer PK; lookup is by id, not job_id
+            # Integer PK passed: job_id lookup misses, int-PK fallback finds it.
+            repo_inst.get_execution_by_job_id = AsyncMock(return_value=None)
             repo_inst.get_execution_by_id = AsyncMock(return_value=existing_execution)
             MockExecRepo.return_value = repo_inst
 
