@@ -14,22 +14,38 @@ import {
   Alert,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  ToggleButtonGroup,
+  ToggleButton
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SecurityIcon from '@mui/icons-material/Security';
+import PersonIcon from '@mui/icons-material/Person';
+
+// Auth method choice per credential set. Matches the shared AadService:
+// 'service_principal' (client_id + client_secret) or
+// 'service_account' (client_id + username + password).
+export type PipelineAuthMethod = 'service_principal' | 'service_account';
 
 export interface PipelineConfigGeneratorConfig {
   // PBI Configuration
   workspace_id?: string;
   dataset_id?: string;
   report_id?: string;
-  // Non-Admin SP (Execute Queries API)
+  // Explicit auth method (applies to both credential sets; auto-detected when unset)
+  auth_method?: PipelineAuthMethod;
+  // Non-Admin credentials (Execute Queries API — data / mapping extraction)
   tenant_id?: string;
   client_id?: string;
-  client_secret?: string;
-  // Admin SP (Admin Scanner API)
+  client_secret?: string;   // Service Principal
+  username?: string;        // Service Account
+  password?: string;        // Service Account
+  access_token?: string;    // pre-obtained OAuth (optional)
+  // Admin credentials (Admin Scanner API)
   admin_client_id?: string;
-  admin_client_secret?: string;
+  admin_client_secret?: string;  // Service Principal
+  admin_username?: string;       // Service Account
+  admin_password?: string;       // Service Account
   // Target
   catalog?: string;
   schema_name?: string;
@@ -55,6 +71,30 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
     });
   };
 
+  // A single auth_method applies to both credential sets (the backend's
+  // AadService honours it for each). Default to Service Principal.
+  const authMethod: PipelineAuthMethod = value.auth_method || 'service_principal';
+
+  const handleAuthMethodChange = (
+    _e: React.MouseEvent<HTMLElement>,
+    newMethod: PipelineAuthMethod | null
+  ) => {
+    if (!newMethod) return;
+    const updated: PipelineConfigGeneratorConfig = { ...value, auth_method: newMethod };
+    if (newMethod === 'service_principal') {
+      // Clear Service Account fields on both sets.
+      updated.username = undefined;
+      updated.password = undefined;
+      updated.admin_username = undefined;
+      updated.admin_password = undefined;
+    } else {
+      // Clear Service Principal secrets on both sets.
+      updated.client_secret = undefined;
+      updated.admin_client_secret = undefined;
+    }
+    onChange(updated);
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Info note */}
@@ -62,7 +102,8 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
         <Typography variant="caption">
           This tool calls 4 Power BI APIs directly to generate <code>pipeline_config.json</code> with
           all 26 config keys. No LLM intermediation &mdash; no data truncation.
-          Requires two Service Principals with different permission levels.
+          Requires two credential sets with different permission levels &mdash; each can be a
+          Service Principal or a Service Account (selected below).
         </Typography>
       </Alert>
 
@@ -93,10 +134,46 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
         />
       </Box>
 
-      {/* Non-Admin SP */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(76, 175, 80)' }}>
-        Non-Admin Service Principal (Execute Queries API)
+      {/* Authentication method toggle (applies to both credential sets) */}
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(25, 118, 210)' }}>
+        Authentication Method
       </Typography>
+      <ToggleButtonGroup
+        value={authMethod}
+        exclusive
+        onChange={handleAuthMethodChange}
+        disabled={disabled}
+        fullWidth
+        size="small"
+      >
+        <ToggleButton value="service_principal">
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+            <SecurityIcon sx={{ fontSize: 18, mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Service Principal
+            </Typography>
+          </Box>
+        </ToggleButton>
+        <ToggleButton value="service_account">
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+            <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Service Account
+            </Typography>
+          </Box>
+        </ToggleButton>
+      </ToggleButtonGroup>
+      {authMethod === 'service_account' && (
+        <Alert severity="info" variant="outlined">
+          <Typography variant="caption">
+            <strong>Service Account:</strong> use a user account (Client ID + username + password)
+            instead of a Service Principal secret. Useful when only an SA has access to the semantic
+            model &mdash; without it, data extraction for the mapping may return nothing.
+          </Typography>
+        </Alert>
+      )}
+
+      {/* Shared Tenant ID */}
       <TextField
         label="Tenant ID"
         value={value.tenant_id || ''}
@@ -105,8 +182,13 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
         fullWidth
         size="small"
         required
-        helperText="Azure AD Tenant ID (shared by both SPs)"
+        helperText="Azure AD Tenant ID (shared by both credential sets)"
       />
+
+      {/* Non-Admin credentials */}
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(76, 175, 80)' }}>
+        Non-Admin {authMethod === 'service_account' ? 'Service Account' : 'Service Principal'} (Execute Queries API)
+      </Typography>
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField
           label="Client ID"
@@ -118,22 +200,49 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
           required
           helperText="Workspace member with SemanticModel.ReadWrite.All"
         />
-        <TextField
-          label="Client Secret"
-          value={value.client_secret || ''}
-          onChange={(e) => handleFieldChange('client_secret', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          type="password"
-          helperText="Non-admin SP secret"
-        />
+        {authMethod === 'service_principal' && (
+          <TextField
+            label="Client Secret"
+            value={value.client_secret || ''}
+            onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            type="password"
+            helperText="Non-admin SP secret"
+          />
+        )}
       </Box>
+      {authMethod === 'service_account' && (
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <TextField
+            label="Username (UPN)"
+            value={value.username || ''}
+            onChange={(e) => handleFieldChange('username', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            helperText="Service account email/UPN"
+          />
+          <TextField
+            label="Password"
+            value={value.password || ''}
+            onChange={(e) => handleFieldChange('password', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            type="password"
+            helperText="Service account password"
+          />
+        </Box>
+      )}
 
-      {/* Admin SP */}
+      {/* Admin credentials */}
       <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(255, 152, 0)' }}>
-        Admin Service Principal (Admin Scanner API)
+        Admin {authMethod === 'service_account' ? 'Service Account' : 'Service Principal'} (Admin Scanner API)
       </Typography>
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField
@@ -146,18 +255,45 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
           required
           helperText="Power BI Admin with Tenant.Read.All"
         />
-        <TextField
-          label="Admin Client Secret"
-          value={value.admin_client_secret || ''}
-          onChange={(e) => handleFieldChange('admin_client_secret', e.target.value)}
-          disabled={disabled}
-          fullWidth
-          size="small"
-          required
-          type="password"
-          helperText="Admin SP secret"
-        />
+        {authMethod === 'service_principal' && (
+          <TextField
+            label="Admin Client Secret"
+            value={value.admin_client_secret || ''}
+            onChange={(e) => handleFieldChange('admin_client_secret', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            type="password"
+            helperText="Admin SP secret"
+          />
+        )}
       </Box>
+      {authMethod === 'service_account' && (
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <TextField
+            label="Admin Username (UPN)"
+            value={value.admin_username || ''}
+            onChange={(e) => handleFieldChange('admin_username', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            helperText="Admin service account email/UPN"
+          />
+          <TextField
+            label="Admin Password"
+            value={value.admin_password || ''}
+            onChange={(e) => handleFieldChange('admin_password', e.target.value)}
+            disabled={disabled}
+            fullWidth
+            size="small"
+            required
+            type="password"
+            helperText="Admin service account password"
+          />
+        </Box>
+      )}
 
       {/* Target Configuration */}
       <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(76, 175, 80)' }}>

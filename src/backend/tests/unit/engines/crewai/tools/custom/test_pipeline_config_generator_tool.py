@@ -216,3 +216,180 @@ class TestOutputStructure:
         tool = PipelineConfigGeneratorTool()
         result = tool._run()
         assert len(result) > 0
+
+
+# ---------------------------------------------------------------------------
+# Service Account (SA) support — non-admin + admin credential paths
+# ---------------------------------------------------------------------------
+
+SA_USERNAME = "svc-account@contoso.com"
+SA_PASSWORD = "sa-password"
+ADMIN_SA_USERNAME = "admin-svc@contoso.com"
+ADMIN_SA_PASSWORD = "admin-sa-password"
+
+
+def _make_sa_kwargs(include_admin=True):
+    """Service Account credentials for both paths (no client_secret)."""
+    kwargs = dict(
+        workspace_id=WORKSPACE_ID,
+        dataset_id=DATASET_ID,
+        tenant_id=TENANT_ID,
+        client_id=CLIENT_ID,
+        username=SA_USERNAME,
+        password=SA_PASSWORD,
+        catalog="my_catalog",
+        schema_name="metrics",
+    )
+    if include_admin:
+        kwargs.update(
+            admin_client_id=ADMIN_CLIENT_ID,
+            admin_username=ADMIN_SA_USERNAME,
+            admin_password=ADMIN_SA_PASSWORD,
+        )
+    return kwargs
+
+
+class TestServiceAccountSchema:
+    def test_sa_fields_present(self):
+        s = PipelineConfigGeneratorSchema(
+            username=SA_USERNAME, password=SA_PASSWORD,
+            admin_username=ADMIN_SA_USERNAME, admin_password=ADMIN_SA_PASSWORD,
+        )
+        assert s.username == SA_USERNAME
+        assert s.password == SA_PASSWORD
+        assert s.admin_username == ADMIN_SA_USERNAME
+        assert s.admin_password == ADMIN_SA_PASSWORD
+
+    def test_auth_method_field(self):
+        s = PipelineConfigGeneratorSchema(auth_method="service_account")
+        assert s.auth_method == "service_account"
+
+
+class TestServiceAccountValidation:
+    """Credential validation accepts SP, SA, or access_token for non-admin."""
+
+    def _patch_resolve(self):
+        # Isolate validation logic from real token acquisition.
+        return patch.object(
+            PipelineConfigGeneratorTool, "_resolve_token", return_value="tok"
+        )
+
+    def test_sa_only_passes_validation(self):
+        """SA creds (no client_secret) must NOT be rejected as missing creds."""
+        tool = PipelineConfigGeneratorTool()
+        with self._patch_resolve(), patch("requests.post", side_effect=Exception("stop")):
+            result = tool._run(**_make_sa_kwargs())
+        assert "credentials required" not in result.lower()
+        assert "tenant_id is required" not in result.lower()
+
+    def test_access_token_only_passes_validation(self):
+        """A pre-obtained access_token (no SP/SA, no tenant) is accepted for the data path."""
+        tool = PipelineConfigGeneratorTool()
+        kwargs = dict(
+            workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID,
+            access_token="pre-obtained-oauth-token",
+            # admin path still needs its own creds
+            tenant_id=TENANT_ID,
+            admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        )
+        with self._patch_resolve(), patch("requests.post", side_effect=Exception("stop")):
+            result = tool._run(**kwargs)
+        assert "non-admin credentials required" not in result.lower()
+
+    def test_missing_all_noncredentials_rejected(self):
+        """client_id with neither secret nor username/password nor token is rejected."""
+        tool = PipelineConfigGeneratorTool()
+        result = tool._run(
+            workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID,
+            tenant_id=TENANT_ID, client_id=CLIENT_ID,
+            admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        )
+        assert "error" in result.lower()
+        assert "non-admin" in result.lower() or "credentials" in result.lower()
+
+    def test_mixed_sp_nonadmin_sa_admin(self):
+        """Non-admin SP + admin SA is a valid combination."""
+        tool = PipelineConfigGeneratorTool()
+        kwargs = dict(
+            workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID, tenant_id=TENANT_ID,
+            client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+            admin_client_id=ADMIN_CLIENT_ID,
+            admin_username=ADMIN_SA_USERNAME, admin_password=ADMIN_SA_PASSWORD,
+        )
+        with self._patch_resolve(), patch("requests.post", side_effect=Exception("stop")):
+            result = tool._run(**kwargs)
+        assert "credentials required" not in result.lower()
+
+
+class TestResolveTokenUsesAadService:
+    """_resolve_token routes through the shared AadService (same as fetcher/UCMV)."""
+
+    def test_service_principal_autodetect(self):
+        tool = PipelineConfigGeneratorTool()
+        with patch(
+            "src.converters.services.powerbi.authentication.AadService"
+        ) as MockAad:
+            inst = MockAad.return_value
+            inst.get_access_token.return_value = "sp-token"
+            inst._determine_auth_method.return_value = "service_principal"
+            tok = tool._resolve_token(
+                tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+                username=None, password=None, access_token=None,
+                auth_method=None, label="non-admin",
+            )
+        assert tok == "sp-token"
+        # AadService constructed with the credentials we passed
+        _, kw = MockAad.call_args
+        assert kw["client_id"] == CLIENT_ID
+        assert kw["client_secret"] == CLIENT_SECRET
+        assert kw["tenant_id"] == TENANT_ID
+
+    def test_service_account_passthrough(self):
+        tool = PipelineConfigGeneratorTool()
+        with patch(
+            "src.converters.services.powerbi.authentication.AadService"
+        ) as MockAad:
+            inst = MockAad.return_value
+            inst.get_access_token.return_value = "sa-token"
+            inst._determine_auth_method.return_value = "service_account"
+            tok = tool._resolve_token(
+                tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=None,
+                username=SA_USERNAME, password=SA_PASSWORD, access_token=None,
+                auth_method=None, label="non-admin",
+            )
+        assert tok == "sa-token"
+        _, kw = MockAad.call_args
+        assert kw["username"] == SA_USERNAME
+        assert kw["password"] == SA_PASSWORD
+
+    def test_explicit_auth_method_forwarded(self):
+        tool = PipelineConfigGeneratorTool()
+        with patch(
+            "src.converters.services.powerbi.authentication.AadService"
+        ) as MockAad:
+            inst = MockAad.return_value
+            inst.get_access_token.return_value = "t"
+            inst._determine_auth_method.return_value = "service_account"
+            tool._resolve_token(
+                tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=None,
+                username=SA_USERNAME, password=SA_PASSWORD, access_token=None,
+                auth_method="service_account", label="non-admin",
+            )
+        _, kw = MockAad.call_args
+        assert kw["auth_method"] == "service_account"
+
+    def test_access_token_passthrough(self):
+        tool = PipelineConfigGeneratorTool()
+        with patch(
+            "src.converters.services.powerbi.authentication.AadService"
+        ) as MockAad:
+            inst = MockAad.return_value
+            inst.get_access_token.return_value = "oauth-token"
+            tok = tool._resolve_token(
+                tenant_id=None, client_id=None, client_secret=None,
+                username=None, password=None, access_token="oauth-token",
+                auth_method=None, label="non-admin",
+            )
+        assert tok == "oauth-token"
+        _, kw = MockAad.call_args
+        assert kw["access_token"] == "oauth-token"

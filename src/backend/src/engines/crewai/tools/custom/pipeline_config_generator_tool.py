@@ -28,19 +28,36 @@ class PipelineConfigGeneratorSchema(BaseModel):
     report_id: Optional[str] = Field(
         None, description="[PBI] Optional Report ID (GUID) for visual metadata")
 
-    # ── Non-Admin Service Principal (Execute Queries API) ──
+    # ── Non-Admin credentials (Execute Queries API — data / mapping extraction) ──
+    # Provide EITHER a Service Principal (client_id + client_secret) OR a
+    # Service Account (client_id + username + password). SA is used when
+    # username + password are supplied.
     tenant_id: Optional[str] = Field(
-        None, description="[Auth] Azure AD Tenant ID (shared by both SPs)")
+        None, description="[Auth] Azure AD Tenant ID (shared by all credentials)")
     client_id: Optional[str] = Field(
-        None, description="[Auth - Non-Admin SP] Client ID (workspace member, SemanticModel.ReadWrite.All)")
+        None, description="[Auth - Non-Admin] Client ID (SP or SA app; workspace member, SemanticModel.ReadWrite.All)")
     client_secret: Optional[str] = Field(
-        None, description="[Auth - Non-Admin SP] Client Secret")
+        None, description="[Auth - Non-Admin SP] Client Secret (Service Principal). Optional for a Service Account.")
+    username: Optional[str] = Field(
+        None, description="[Auth - Non-Admin SA] Service Account username/UPN (enables password grant)")
+    password: Optional[str] = Field(
+        None, description="[Auth - Non-Admin SA] Service Account password")
+    access_token: Optional[str] = Field(
+        None, description="[Auth - Non-Admin] Pre-obtained OAuth access token (bypasses SP/SA for the data path)")
+    auth_method: Optional[str] = Field(
+        None, description="[Auth] Optional explicit method: 'service_principal' or 'service_account'. Auto-detected from the fields provided when unset (SP-first, matching the shared AadService).")
 
-    # ── Admin Service Principal (Admin Scanner API) ──
+    # ── Admin credentials (Admin Scanner API) ──
+    # Also accepts SP (admin_client_id + admin_client_secret) or SA
+    # (admin_client_id + admin_username + admin_password).
     admin_client_id: Optional[str] = Field(
-        None, description="[Auth - Admin SP] Client ID (Tenant.Read.All / Power BI Admin)")
+        None, description="[Auth - Admin] Client ID (SP or SA app; Tenant.Read.All / Power BI Admin)")
     admin_client_secret: Optional[str] = Field(
-        None, description="[Auth - Admin SP] Client Secret")
+        None, description="[Auth - Admin SP] Client Secret (Service Principal). Optional for a Service Account.")
+    admin_username: Optional[str] = Field(
+        None, description="[Auth - Admin SA] Service Account username/UPN (enables password grant)")
+    admin_password: Optional[str] = Field(
+        None, description="[Auth - Admin SA] Service Account password")
 
     # ── Target UC Namespace ──
     catalog: Optional[str] = Field(
@@ -57,9 +74,11 @@ class PipelineConfigGeneratorTool(BaseTool):
         "Generate pipeline_config.json by calling 4 Power BI APIs directly — "
         "no LLM intermediation, no data truncation. Produces all 26 config keys "
         "with auto-filled values and TODO markers where human input is needed. "
-        "Requires two Service Principals: non-admin (Execute Queries API) and "
-        "admin (Admin Scanner API). Output is the full config JSON ready for "
-        "the UC Metric View Generator (Tool 86)."
+        "Requires two credential sets — non-admin (Execute Queries API) and "
+        "admin (Admin Scanner API) — each of which may be a Service Principal "
+        "(client_id + client_secret) or a Service Account (client_id + username "
+        "+ password). Output is the full config JSON ready for the UC Metric "
+        "View Generator (Tool 86)."
     )
     args_schema: Type[BaseModel] = PipelineConfigGeneratorSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -70,7 +89,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         config_keys = (
             "workspace_id", "dataset_id", "report_id",
             "tenant_id", "client_id", "client_secret",
+            "username", "password", "access_token", "auth_method",
             "admin_client_id", "admin_client_secret",
+            "admin_username", "admin_password",
             "catalog", "schema_name",
         )
         default_config = {}
@@ -95,26 +116,62 @@ class PipelineConfigGeneratorTool(BaseTool):
         tenant_id = _get("tenant_id")
         client_id = _get("client_id")
         client_secret = _get("client_secret")
+        username = _get("username")
+        password = _get("password")
+        access_token = _get("access_token")
+        auth_method = _get("auth_method")
         admin_client_id = _get("admin_client_id")
         admin_client_secret = _get("admin_client_secret")
+        admin_username = _get("admin_username")
+        admin_password = _get("admin_password")
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
+
+        # A credential set is valid as a Service Principal (client_id +
+        # client_secret), a Service Account (client_id + username + password),
+        # or a pre-obtained OAuth access_token (non-admin only).
+        def _creds_ok(cid, secret, user, pw) -> bool:
+            has_sp = bool(cid and secret)
+            has_sa = bool(cid and user and pw)
+            return has_sp or has_sa
 
         # Validate required fields
         if not workspace_id or not dataset_id:
             return json.dumps({"error": "workspace_id and dataset_id are required."})
-        if not all([tenant_id, client_id, client_secret]):
-            return json.dumps({"error": "Non-admin SP credentials required: tenant_id, client_id, client_secret."})
-        if not all([admin_client_id, admin_client_secret]):
-            return json.dumps({"error": "Admin SP credentials required: admin_client_id, admin_client_secret."})
+        if not access_token and not tenant_id:
+            return json.dumps({"error": "tenant_id is required (unless a pre-obtained access_token is supplied)."})
+        if not access_token and not _creds_ok(client_id, client_secret, username, password):
+            return json.dumps({"error": (
+                "Non-admin credentials required: a Service Principal "
+                "(client_id + client_secret), a Service Account "
+                "(client_id + username + password), or a pre-obtained access_token."
+            )})
+        if not _creds_ok(admin_client_id, admin_client_secret, admin_username, admin_password):
+            return json.dumps({"error": (
+                "Admin credentials required: either a Service Principal "
+                "(admin_client_id + admin_client_secret) or a Service Account "
+                "(admin_client_id + admin_username + admin_password)."
+            )})
 
         try:
             # Import generate_config module
             gen = self._import_generate_config()
 
-            logger.info("[PipelineConfigGen] Acquiring tokens...")
-            token = gen.get_token(tenant_id, client_id, client_secret)
-            admin_token = gen.get_token(tenant_id, admin_client_id, admin_client_secret)
+            # Resolve both tokens through the shared AadService — the SAME auth
+            # path the Semantic Model Fetcher and UC Metric View Generator use.
+            # AadService supports Service Principal, Service Account, and User
+            # OAuth, with explicit auth_method honoured and SP-first auto-detect.
+            logger.info("[PipelineConfigGen] Acquiring tokens via shared AadService...")
+            token = self._resolve_token(
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                username=username, password=password, access_token=access_token,
+                auth_method=auth_method, label="non-admin",
+            )
+            admin_token = self._resolve_token(
+                tenant_id=tenant_id, client_id=admin_client_id, client_secret=admin_client_secret,
+                username=admin_username, password=admin_password, access_token=None,
+                auth_method=auth_method, label="admin",
+            )
             warnings: list[str] = []
 
             # API 1: Relationships (graceful — XMLA may be disabled)
@@ -346,6 +403,40 @@ class PipelineConfigGeneratorTool(BaseTool):
             config['switch_decompositions'] = switch_decompositions
             config['measure_resolutions'] = measure_resolutions
         return changed
+
+    @staticmethod
+    @staticmethod
+    def _resolve_token(
+        tenant_id: Optional[str],
+        client_id: Optional[str],
+        client_secret: Optional[str],
+        username: Optional[str],
+        password: Optional[str],
+        access_token: Optional[str],
+        auth_method: Optional[str],
+        label: str,
+    ) -> str:
+        """Resolve a Power BI token via the shared AadService.
+
+        Same auth path as the Semantic Model Fetcher and UC Metric View
+        Generator: honours an explicit ``auth_method``; otherwise auto-detects
+        Service Principal first, then Service Account. ``AadService`` is
+        synchronous, so it is safe to call directly from this sync tool.
+        """
+        from src.converters.services.powerbi.authentication import AadService
+
+        service = AadService(
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_id=tenant_id,
+            access_token=access_token,
+            username=username,
+            password=password,
+            auth_method=auth_method,
+        )
+        detected = service._determine_auth_method() if not access_token else "user_oauth"
+        logger.info(f"[PipelineConfigGen] {label} token via: {detected or 'UNKNOWN'}")
+        return service.get_access_token()
 
     @staticmethod
     def _import_generate_config():

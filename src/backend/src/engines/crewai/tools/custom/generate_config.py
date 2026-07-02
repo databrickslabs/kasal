@@ -55,7 +55,14 @@ except ImportError:
 # ═══════════════════════════════════════════════════════════════════════
 
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire OAuth2 token via client_credentials grant."""
+    """Acquire OAuth2 token via client_credentials grant (Service Principal).
+
+    Standalone helper used by this module's own CLI (``main()``). The
+    Pipeline Config Generator *tool* does not call this — it resolves tokens
+    through the shared ``AadService`` (which additionally supports Service
+    Account and User-OAuth), then passes the resulting token into the
+    ``extract_*`` functions below.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     resp = requests.post(url, data={
         "grant_type": "client_credentials",
