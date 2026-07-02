@@ -34,6 +34,11 @@ export default defineConfig({
       '/me': { target: `http://localhost:${AGENT_PORT}`, changeOrigin: true },
       '/progress': { target: `http://localhost:${AGENT_PORT}`, changeOrigin: true },
       '/cancel': { target: `http://localhost:${AGENT_PORT}`, changeOrigin: true },
+      '/a2ui': { target: `http://localhost:${AGENT_PORT}`, changeOrigin: true },
+      '/conversations': {
+        target: `http://localhost:${AGENT_PORT}`,
+        changeOrigin: true,
+      },
     },
   },
   preview: { port: 3000, host: true },

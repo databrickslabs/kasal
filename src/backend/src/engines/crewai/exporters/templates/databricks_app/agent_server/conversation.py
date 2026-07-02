@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 import mlflow
 from crewai import Agent
 
-from agent_server import cancel, progress
+from agent_server import cancel, progress, state_store
 
 # Injected once by agent.configure_conversation() — keeps this layer crew-agnostic.
 _CFG: Dict[str, Any] = {
@@ -28,9 +28,30 @@ _CFG: Dict[str, Any] = {
     "chat_runner": None,  # Callable[[str], str] — single LiteAgent answer (chat mode)
 }
 
-# Per-conversation history keyed by the AgentServer conversation id (in-process;
-# resets on restart — fine for a chat session).
+# Per-conversation history keyed by the AgentServer conversation id. The
+# in-process dict is the fast path; every turn is also mirrored to the durable
+# ``state_store`` (Lakebase/SQLite) so multi-turn context survives an app
+# restart and ``GET /conversations/{id}`` can restore a chat after a reload.
 _HISTORY: Dict[str, List[dict]] = {}
+_HISTORY_KEY = "history"
+# Keep the last N messages (user+assistant pairs) as crew/LLM context.
+_HISTORY_MAX_MESSAGES = 20
+
+
+def get_history(conversation_id: Optional[str]) -> List[dict]:
+    """The persisted [{role, content}] history for a conversation (may be [])."""
+    if not conversation_id:
+        return []
+    stored = state_store.get_json(conversation_id, _HISTORY_KEY)
+    if isinstance(stored, list):
+        return [m for m in stored if isinstance(m, dict)]
+    return list(_HISTORY.get(conversation_id, []))
+
+
+def _save_history(conversation_id: str, history: List[dict]) -> None:
+    trimmed = history[-_HISTORY_MAX_MESSAGES:]
+    _HISTORY[conversation_id] = trimmed
+    state_store.set_json(conversation_id, _HISTORY_KEY, trimmed)
 
 
 def configure(
@@ -210,7 +231,7 @@ def respond(
     # (crew_progress) can report live, ephemeral "doing X" status for this turn.
     progress.set_current(conversation_id)
     try:
-        history = list(_HISTORY.get(conversation_id, [])) if conversation_id else []
+        history = get_history(conversation_id)
         is_chat = mode == "chat" and _CFG.get("chat_runner") is not None
         try:
             if is_chat:
@@ -240,7 +261,7 @@ def respond(
         if conversation_id is not None:
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": response})
-            _HISTORY[conversation_id] = history[-20:]
+            _save_history(conversation_id, history)
         return response
     except cancel.CrewCancelled:
         # Aborted mid-turn: return a clean message; don't pollute history.
