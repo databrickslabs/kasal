@@ -52,6 +52,21 @@ def _progress(conversation_id: str):
     return progress.get(conversation_id) or {"status": None}
 
 
+@app.get("/conversations/{conversation_id}")
+def _conversation_history(conversation_id: str):
+    """The persisted multi-turn history for a conversation, plus whether a turn
+    looks in-flight right now. Backed by the durable state store (Lakebase /
+    SQLite — see agent_server.state_store), so the UI can restore a chat after
+    a page reload or an app restart instead of showing a dead conversation."""
+    from agent_server import conversation, progress
+
+    return {
+        "conversation_id": conversation_id,
+        "messages": conversation.get_history(conversation_id),
+        "in_flight": progress.get(conversation_id) is not None,
+    }
+
+
 @app.get("/a2ui/{conversation_id}")
 def _a2ui(conversation_id: str):
     """Poll for this turn's A2UI surface. It is composed out-of-band so the answer

@@ -1555,3 +1555,51 @@ class TestCodexHandlerVendor:
             "codex handler drift — re-copy src/core/llm_handlers/databricks_codex_handler.py "
             "into the template's agent_server/"
         )
+
+
+class TestDurableConversationState:
+    """Phase-1 durability: every export must ship the state_store layer so
+    conversation history, Stop flags, progress, and A2UI surfaces survive an
+    app restart (Databricks Apps restart on every deploy/config change)."""
+
+    @pytest.mark.asyncio
+    async def test_state_store_shipped_and_wired(self, exporter, crew_data):
+        files = _files(await exporter.export(crew_data, {}))
+        assert "agent_server/state_store.py" in files, "state_store not shipped"
+        store = files["agent_server/state_store.py"]
+        # Lakebase is Postgres 15+: non-owners get 42501 in `public`, and the
+        # app's CAN_CONNECT_AND_CREATE grants database-level CREATE only — the
+        # table must live in an app-created schema (observed in prod otel_logs).
+        assert "CREATE SCHEMA IF NOT EXISTS" in store, "no dedicated-schema create"
+        assert "agent_server" in store and "kasal_app_state" in store
+        for module in ("cancel", "progress", "a2ui_store", "conversation"):
+            assert "state_store" in files[f"agent_server/{module}.py"], (
+                f"{module} not backed by state_store"
+            )
+
+    @pytest.mark.asyncio
+    async def test_conversation_recovery_endpoint(self, exporter, crew_data):
+        """GET /conversations/{id} lets the UI restore a chat after a page
+        reload or app restart (persisted messages + in-flight hint)."""
+        start_server = _files(await exporter.export(crew_data, {}))[
+            "agent_server/start_server.py"
+        ]
+        assert '"/conversations/{conversation_id}"' in start_server
+        assert "get_history" in start_server
+        assert "in_flight" in start_server
+
+    @pytest.mark.asyncio
+    async def test_postgres_driver_is_permissive_pg8000(self, exporter, crew_data):
+        """pg8000 (BSD) is the Lakebase driver — psycopg is LGPL and must not
+        land in customer-exported apps as a dependency."""
+        pyproject = _files(await exporter.export(crew_data, {}))["pyproject.toml"]
+        assert '"pg8000' in pyproject, "pg8000 dependency missing"
+        assert '"psycopg' not in pyproject, "psycopg must not be a dependency"
+
+    @pytest.mark.asyncio
+    async def test_dev_proxy_forwards_state_endpoints(self, exporter, crew_data):
+        """The Vite dev proxy must forward every backend route the UI polls —
+        /a2ui was missing (surface polling silently broken in local dev)."""
+        vite = _files(await exporter.export(crew_data, {}))["frontend/vite.config.ts"]
+        for route in ("/a2ui", "/conversations", "/progress", "/cancel"):
+            assert f"'{route}'" in vite, f"dev proxy missing {route}"

@@ -1,7 +1,7 @@
 """Ephemeral "what is the agent doing right now" channel.
 
-NOT persisted: a tiny in-memory, per-conversation status that the frontend polls
-while a turn is in flight and discards when it finishes. It exists only to give
+A tiny per-conversation status that the frontend polls while a turn is in
+flight and that is discarded when the turn finishes. It exists only to give
 the user a subtle, live hint (which task / which tool) — there is no history.
 
 Fed by ``crew_progress`` (a CrewAI event-bus listener). Correlation: we stamp the
@@ -11,6 +11,10 @@ the worker thread that runs the kickoff propagates into the (separate) bus handl
 thread. Each turn runs in its own copied context (``asyncio.to_thread``), so
 concurrent turns stay isolated; if an event ever fires without context, ``report``
 simply no-ops.
+
+Status is held in a process-local dict (fast path) and mirrored — throttled —
+to the durable ``state_store`` so a poll that lands on a different process
+than the one running the turn still sees the live status.
 """
 
 from __future__ import annotations
@@ -20,11 +24,19 @@ import threading
 import time
 from typing import Dict, Optional
 
+from agent_server import state_store
+
 _lock = threading.Lock()
 _store: Dict[str, dict] = {}
 _current: "contextvars.ContextVar[Optional[str]]" = contextvars.ContextVar(
     "kasal_progress_cid", default=None
 )
+_KEY = "progress"
+_TTL_SECONDS = 600
+# Mirror to the durable layer at most this often per conversation; event-bus
+# handlers can fire rapidly and must stay cheap.
+_MIRROR_INTERVAL_SECONDS = 0.7
+_last_mirror: Dict[str, float] = {}
 
 
 def set_current(conversation_id: Optional[str]) -> None:
@@ -46,17 +58,27 @@ def report(status: str) -> None:
     cid = current()
     if not cid or not status:
         return
+    now = time.time()
     with _lock:
         prev = _store.get(cid)
         seq = (prev["seq"] + 1) if prev else 1
-        _store[cid] = {"status": status, "seq": seq, "ts": time.time()}
+        item = {"status": status, "seq": seq, "ts": now}
+        _store[cid] = item
+        mirror = now - _last_mirror.get(cid, 0.0) >= _MIRROR_INTERVAL_SECONDS
+        if mirror:
+            _last_mirror[cid] = now
+    if mirror:
+        state_store.set_json(cid, _KEY, item)
 
 
 def get(conversation_id: str) -> Optional[dict]:
     """The current {status, seq, ts} for a conversation, or None when idle."""
     with _lock:
         item = _store.get(conversation_id)
-        return dict(item) if item else None
+        if item:
+            return dict(item)
+    stored = state_store.get_json(conversation_id, _KEY, max_age=_TTL_SECONDS)
+    return stored if isinstance(stored, dict) else None
 
 
 def clear(conversation_id: Optional[str]) -> None:
@@ -65,3 +87,5 @@ def clear(conversation_id: Optional[str]) -> None:
         return
     with _lock:
         _store.pop(conversation_id, None)
+        _last_mirror.pop(conversation_id, None)
+    state_store.delete(conversation_id, _KEY)

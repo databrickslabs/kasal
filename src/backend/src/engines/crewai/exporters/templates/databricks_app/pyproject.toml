@@ -25,6 +25,10 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.2.1",
     "opentelemetry-exporter-otlp-proto-grpc>=1.25.0",
+    # Durable conversation state (agent_server/state_store.py) on the attached
+    # Lakebase instance; without Lakebase the store falls back to SQLite (stdlib).
+    # pg8000 is pure Python and BSD-licensed (psycopg is LGPL — avoid).
+    "pg8000>=1.31",
 {{EXTRA_DEPENDENCIES}}]
 
 [build-system]
