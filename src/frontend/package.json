@@ -64,7 +64,7 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "build:analyze": "ANALYZE=true vite build",
     "preview": "vite preview",
     "prod": "serve -s dist",
