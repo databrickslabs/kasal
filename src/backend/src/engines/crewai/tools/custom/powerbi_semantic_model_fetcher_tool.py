@@ -2068,23 +2068,18 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> str:
         """Extract active/default selection from a slicer visual.
 
-        Checks the visual's filters array for any pre-set values.
+        Checks the visual's filters for any pre-set values. Visual-level
+        filters live under a bare 'filters' key (embedded/legacy PBIR) or
+        nested under 'filterConfig.filters' (separate-file PBIR 2.9.0+) —
+        see _extract_filter_defs.
         Returns a human-readable description of the selection, or empty string.
         """
         try:
-            # Visual-level filters can be in vis_data["filters"] (JSON string or list)
-            filters_raw = vis_data.get("filters") or parsed_config.get("filters")
-            if not filters_raw:
-                return ""
-
-            if isinstance(filters_raw, str):
-                try:
-                    filters_list = json.loads(filters_raw)
-                except json.JSONDecodeError:
-                    return ""
-            elif isinstance(filters_list := filters_raw, list):
-                pass
-            else:
+            filters_list = (
+                self._extract_filter_defs(vis_data)
+                or self._extract_filter_defs(parsed_config)
+            )
+            if not filters_list:
                 return ""
 
             for f in filters_list:
@@ -2103,8 +2098,121 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
         return ""
 
+    @staticmethod
+    def _ci_get(d: Dict[str, Any], *keys: str) -> Any:
+        """Return the first present key's value from a dict, trying case variants.
+
+        PBIR query/filter internals (query.queryState, filterConfig) use
+        PascalCase; some queryDefinition-style payloads use lowerCamelCase
+        for the same structure.
+        """
+        if not isinstance(d, dict):
+            return {}
+        for k in keys:
+            if k in d:
+                return d[k]
+        return {}
+
+    def _resolve_field_entity_and_name(
+        self, field: Dict[str, Any], entity_map: Dict[str, str]
+    ) -> tuple:
+        """Resolve (entity, name) from a query/filter 'field' reference.
+
+        A field reference is a plain Column, a Measure, or a HierarchyLevel
+        (hierarchy-drill field, e.g. a Region/BU/Country or Date Hierarchy
+        level — including the PropertyVariationSource wrapper auto date/time
+        tables use). All three resolve to the same (table, column-like name)
+        shape so slicer bindings and filters can be handled uniformly.
+        SourceRef may carry the entity directly ('Entity') or via an alias
+        ('Source') that must be resolved through entity_map (built from the
+        query's 'From' clause).
+        """
+        if not isinstance(field, dict):
+            return ("", "")
+
+        def source_entity(expr: Dict[str, Any]) -> str:
+            source_ref = self._ci_get(expr, "SourceRef", "sourceRef")
+            entity = self._ci_get(source_ref, "Entity", "entity")
+            if isinstance(entity, str) and entity:
+                return entity
+            alias = self._ci_get(source_ref, "Source", "source")
+            if isinstance(alias, str) and alias:
+                return entity_map.get(alias, alias)
+            return ""
+
+        col = self._ci_get(field, "Column", "column")
+        if col:
+            entity = source_entity(self._ci_get(col, "Expression", "expression"))
+            prop = self._ci_get(col, "Property", "property")
+            if entity and prop:
+                return (entity, prop)
+
+        measure = self._ci_get(field, "Measure", "measure")
+        if measure:
+            entity = source_entity(self._ci_get(measure, "Expression", "expression"))
+            prop = self._ci_get(measure, "Property", "property")
+            if entity and prop:
+                return (entity, prop)
+
+        hl = self._ci_get(field, "HierarchyLevel", "hierarchyLevel")
+        if hl:
+            level = self._ci_get(hl, "Level", "level")
+            hl_expr = self._ci_get(hl, "Expression", "expression")
+            hier = self._ci_get(hl_expr, "Hierarchy", "hierarchy")
+            hier_expr = self._ci_get(hier, "Expression", "expression")
+
+            entity = source_entity(hier_expr)
+            if entity:
+                hierarchy_name = self._ci_get(hier, "Hierarchy", "hierarchy")
+                return (entity, level or hierarchy_name or "")
+
+            pvs = self._ci_get(hier_expr, "PropertyVariationSource", "propertyVariationSource")
+            if pvs:
+                entity = source_entity(self._ci_get(pvs, "Expression", "expression"))
+                if entity:
+                    pvs_prop = self._ci_get(pvs, "Property", "property")
+                    return (entity, level or pvs_prop or "")
+
+        return ("", "")
+
+    def _extract_filter_defs(self, container: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Return raw filter definitions from a report/page/visual JSON container.
+
+        Handles both PBIR filter shapes: a bare 'filters' key (JSON-string or
+        already a list — the legacy/embedded layout) and 'filterConfig.filters'
+        (already a list — the newer separate-file layout, schema 2.9.0+).
+        Both may be present; results are combined.
+        """
+        defs: List[Dict[str, Any]] = []
+        raw = container.get("filters") if isinstance(container, dict) else None
+        if raw:
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, list):
+                    defs.extend(parsed)
+            except json.JSONDecodeError:
+                pass
+        filter_config = container.get("filterConfig") if isinstance(container, dict) else None
+        if isinstance(filter_config, dict):
+            fc_filters = filter_config.get("filters")
+            if fc_filters:
+                try:
+                    parsed = json.loads(fc_filters) if isinstance(fc_filters, str) else fc_filters
+                    if isinstance(parsed, list):
+                        defs.extend(parsed)
+                except json.JSONDecodeError:
+                    pass
+        return defs
+
     def _extract_slicer_binding(self, visual: Dict[str, Any]) -> tuple:
-        """Extract table and column from a PBIR separate-file visual's queryDefinition.
+        """Extract table and column from a PBIR separate-file visual.
+
+        Handles the query shapes seen in the wild:
+        - PBIR 2.9.0+: visual.query.queryState.<role>.projections[].field
+        - Legacy/alternate: visual.queryDefinition.from / .select
+        - Last resort: visual.dataTransforms.selects (queryRef heuristic)
+        A field reference may be a plain Column, a Measure, or a
+        HierarchyLevel — see _resolve_field_entity_and_name.
 
         Returns:
             (table_name, column_name) tuple
@@ -2112,8 +2220,22 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         table = ""
         column = ""
         try:
+            # Shape 1 (confirmed live format, PBIR 2.9.0+): query.queryState.<role>.projections[]
+            query_state = visual.get("query", {}).get("queryState", {})
+            for role_data in query_state.values():
+                if not isinstance(role_data, dict):
+                    continue
+                projections = role_data.get("projections", [])
+                if not projections:
+                    continue
+                # Prefer the actively-selected drill level; else the first projection.
+                projection = next((p for p in projections if p.get("active")), projections[0])
+                entity, name = self._resolve_field_entity_and_name(projection.get("field", {}), {})
+                if entity and name:
+                    return (entity, name)
+
+            # Shape 2 (legacy/alternate): queryDefinition.from / .select
             query_def = visual.get("queryDefinition", {})
-            # Try "from" → entities
             from_items = query_def.get("from", [])
             entity_map: Dict[str, str] = {}
             for item in from_items:
@@ -2122,19 +2244,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 if alias and entity:
                     entity_map[alias] = entity
 
-            # Try "select" → column property
-            select_items = query_def.get("select", [])
-            for sel in select_items:
-                col_ref = sel.get("column", sel.get("Column", {}))
-                if col_ref:
-                    expr = col_ref.get("expression", col_ref.get("Expression", {}))
-                    source_ref = expr.get("sourceRef", expr.get("SourceRef", {}))
-                    alias = source_ref.get("source", source_ref.get("Source", ""))
-                    prop = col_ref.get("property", col_ref.get("Property", ""))
-                    if alias and prop:
-                        table = entity_map.get(alias, alias)
-                        column = prop
-                        return (table, column)
+            for sel in query_def.get("select", []):
+                entity, name = self._resolve_field_entity_and_name(sel, entity_map)
+                if entity and name:
+                    return (entity, name)
 
             # Fallback: dataTransforms.selects
             data_transforms = visual.get("dataTransforms", {})
@@ -2163,6 +2276,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     def _extract_slicer_binding_embedded(self, parsed_config: Dict[str, Any]) -> tuple:
         """Extract table and column from an embedded-format visual's prototypeQuery.
 
+        A Select item may be a plain Column, a Measure, or a HierarchyLevel
+        (hierarchy-drill field, e.g. an auto date-table's Date Hierarchy) —
+        see _resolve_field_entity_and_name.
+
         Returns:
             (table_name, column_name) tuple
         """
@@ -2181,18 +2298,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 if alias and entity:
                     entity_map[alias] = entity
 
-            select_items = proto_query.get("Select", [])
-            for sel in select_items:
-                col_ref = sel.get("Column", {})
-                if col_ref:
-                    expr = col_ref.get("Expression", {})
-                    source_ref = expr.get("SourceRef", {})
-                    alias = source_ref.get("Source", "")
-                    prop = col_ref.get("Property", "")
-                    if alias and prop:
-                        table = entity_map.get(alias, alias)
-                        column = prop
-                        return (table, column)
+            for sel in proto_query.get("Select", []):
+                entity, name = self._resolve_field_entity_and_name(sel, entity_map)
+                if entity and name:
+                    return (entity, name)
 
             # Fallback: dataTransforms
             data_transforms = sv.get("dataTransforms", parsed_config.get("dataTransforms", {}))
@@ -2238,23 +2347,24 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     def _is_parameter_filter(self, filter_def: Dict[str, Any]) -> str:
         """Check if a filter definition is a parameter (dynamic/what-if).
 
+        Note: this used to treat ANY HierarchyLevel-shaped expression as a
+        parameter, on the theory that Power BI Field Parameters are
+        implemented as a hierarchy. That's too broad — ordinary hierarchy
+        drill filters (Region/BU/Country, Date Hierarchy, ...) use the exact
+        same shape and were being silently discarded. Field Parameters are
+        still caught here because their backing table is always the
+        report's own generated parameter table, which is checked below by
+        name regardless of whether the field reference is a Column or a
+        HierarchyLevel.
+
         Returns:
             Empty string if not a parameter, otherwise the reason why it was identified as one.
         """
-        # Method 1: Check if expression uses HierarchyLevel (parameter pattern)
-        expression = filter_def.get("expression", {})
-        if "HierarchyLevel" in expression:
-            return "HierarchyLevel expression"
-
-        # Method 2: Check table name against known parameter patterns
-        column_expr = expression.get("Column", {})
-        expr = column_expr.get("Expression", {})
-        source_ref = expr.get("SourceRef", {})
-        table = source_ref.get("Entity", "")
+        field = filter_def.get("expression") or filter_def.get("field") or {}
+        table, _ = self._resolve_field_entity_and_name(field, {})
         if table and self._is_parameter_table(table):
             return f"table name matches parameter pattern ('{table}')"
 
-        # Method 3: Check filter "type" field
         filter_type = filter_def.get("type", "")
         if filter_type in ("RelativeDate", "RelativeTime", "TopN"):
             return f"filter type is '{filter_type}'"
@@ -2267,8 +2377,21 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> Dict[str, Any]:
         """Parse report definition (PBIR format) to extract filters.
 
+        Handles report-level, page-level, and visual-level filter scopes
+        across both known PBIR layouts:
+        - Newer (schema 2.9.0+): separate definition/report.json +
+          pages/*/page.json + pages/*/visuals/*/visual.json files, filters
+          nested under filterConfig.filters.
+        - Older/embedded: a single report.json with 'sections' (pages) and
+          'visualContainers' (visuals) embedded directly, filters as a bare
+          'filters' JSON string at each level.
+        Both shapes are checked via _extract_filter_defs regardless of which
+        layout produced the part, since either can in principle carry either
+        filter-storage shape.
+
         Skips parameter/dynamic filters and validates filter value datatypes
-        against column metadata when model_context is available.
+        against column metadata when model_context is available. Precedence
+        on name conflicts: report-level > page-level > visual-level.
         """
         filters: Dict[str, Any] = {}
 
@@ -2281,20 +2404,22 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     column_type_map[f"{table_name}[{col_name}]"] = str(dtype)
 
         def _process_filter_list(filter_definitions: list, source: str) -> None:
-            """Parse a list of PBI filter defs into the outer `filters` dict."""
+            """Parse a list of PBI filter defs directly into the outer `filters` dict."""
             for filter_def in filter_definitions:
+                if not isinstance(filter_def, dict):
+                    continue
                 param_reason = self._is_parameter_filter(filter_def)
                 if param_reason:
-                    expression = filter_def.get("expression", {})
-                    col = expression.get("Column", {})
-                    entity = col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
-                    prop = col.get("Property", "")
+                    field = filter_def.get("expression") or filter_def.get("field") or {}
+                    entity, prop = self._resolve_field_entity_and_name(field, {})
                     logger.info(
                         f"[Filter Extraction] Skipping parameter filter: "
                         f"{entity}[{prop}] — reason: {param_reason} (source: {source})"
                     )
                     continue
-                filter_name, filter_description = self._extract_filter_from_definition(filter_def)
+                filter_name, filter_description = self._extract_filter_from_definition(
+                    filter_def
+                )
                 if filter_name and filter_description:
                     if column_type_map and filter_name in column_type_map:
                         filter_description = self._validate_filter_datatype(
@@ -2302,19 +2427,37 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                     if filter_name not in filters:
                         filters[filter_name] = filter_description
-                        logger.info(f"[Filter Extraction] {source}: {filter_name} = {filter_description}")
+                        logger.info(
+                            f"[Filter Extraction] {source}: {filter_name} = {filter_description}"
+                        )
                 else:
-                    expr_keys = list(filter_def.get("expression", {}).keys())
                     logger.info(
-                        f"[Filter Extraction] Could not parse filter from {source} "
-                        f"(expression keys: {expr_keys}): "
+                        f"[Filter Extraction] Could not parse filter from {source}: "
                         f"{json.dumps(filter_def, default=str)[:300]}"
                     )
 
-        # Accumulate page-level filters separately so we can merge them after
-        # report-level filters (report-level takes precedence on conflicts).
-        page_filter_raw: Dict[str, Any] = {}   # filter_name → description
-        page_filter_pages: Dict[str, set] = {}  # filter_name → set of page names
+        # Accumulate page-level and visual-level filters separately so they
+        # can be merged after report-level (precedence: report > page > visual).
+        page_filter_raw: Dict[str, Any] = {}
+        page_filter_pages: Dict[str, set] = {}
+        visual_filter_raw: Dict[str, Any] = {}
+        visual_filter_scopes: Dict[str, set] = {}
+
+        def _accumulate(
+            filter_definitions: list, raw_store: Dict[str, Any],
+            scope_store: Dict[str, set], scope_name: str,
+        ) -> None:
+            for filter_def in filter_definitions:
+                if not isinstance(filter_def, dict) or self._is_parameter_filter(filter_def):
+                    continue
+                fname, fdesc = self._extract_filter_from_definition(filter_def)
+                if fname and fdesc:
+                    scope_store.setdefault(fname, set()).add(scope_name)
+                    if fname not in raw_store:
+                        raw_store[fname] = fdesc
+
+        total_pages = 0
+        total_visuals = 0
 
         try:
             for part in tmdl_parts:
@@ -2322,48 +2465,88 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 path = part.get("path", "")
                 path_lower = path.lower()
 
-                # ── Report-level filters ("Filters on all pages") ──
-                if "report.json" in path_lower:
+                # ── report.json: report-level filters, plus (older/embedded
+                # PBIR) pages and visuals embedded directly inside it ──
+                if path_lower == "report.json" or path_lower.endswith("/report.json"):
                     try:
                         content = base64.b64decode(payload).decode("utf-8")
                         report_json = json.loads(content)
-                        if "filters" in report_json:
-                            filters_str = report_json["filters"]
-                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
-                            _process_filter_list(defs, "report-level")
+                        _process_filter_list(
+                            self._extract_filter_defs(report_json), "report-level"
+                        )
+
+                        pages_data = (
+                            report_json.get("pages")
+                            or report_json.get("sections")
+                            or report_json.get("reportPages")
+                        )
+                        if pages_data and isinstance(pages_data, list):
+                            for page_data in pages_data:
+                                if not isinstance(page_data, dict):
+                                    continue
+                                total_pages += 1
+                                page_name = page_data.get(
+                                    "displayName", page_data.get("name", "Unknown")
+                                )
+                                _accumulate(
+                                    self._extract_filter_defs(page_data),
+                                    page_filter_raw, page_filter_pages, page_name,
+                                )
+                                visuals_data = (
+                                    page_data.get("visualContainers")
+                                    or page_data.get("visuals")
+                                )
+                                if not visuals_data or not isinstance(visuals_data, list):
+                                    continue
+                                for vis_data in visuals_data:
+                                    if not isinstance(vis_data, dict):
+                                        continue
+                                    total_visuals += 1
+                                    _accumulate(
+                                        self._extract_filter_defs(vis_data),
+                                        visual_filter_raw, visual_filter_scopes,
+                                        f"{page_name}/visual",
+                                    )
                     except json.JSONDecodeError as e:
                         logger.warning(f"[Filter Extraction] Failed to parse report.json: {e}")
 
-                # ── Page-level filters ("Filters on this page") ──
+                # ── Newer PBIR: separate page.json files ("Filters on this page") ──
                 elif "/pages/" in path_lower and path_lower.endswith("/page.json"):
                     try:
                         content = base64.b64decode(payload).decode("utf-8")
                         page_json = json.loads(content)
-                        if "filters" in page_json:
-                            page_name = page_json.get("displayName", page_json.get("name", path))
-                            filters_str = page_json["filters"]
-                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
-                            for filter_def in defs:
-                                if self._is_parameter_filter(filter_def):
-                                    continue
-                                fname, fdesc = self._extract_filter_from_definition(filter_def)
-                                if fname and fdesc:
-                                    page_filter_pages.setdefault(fname, set()).add(page_name)
-                                    if fname not in page_filter_raw:
-                                        page_filter_raw[fname] = fdesc
+                        total_pages += 1
+                        page_name = page_json.get("displayName", page_json.get("name", path))
+                        _accumulate(
+                            self._extract_filter_defs(page_json),
+                            page_filter_raw, page_filter_pages, page_name,
+                        )
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[Filter Extraction] Failed to parse page.json at {path}: {e}")
+                        logger.warning(
+                            f"[Filter Extraction] Failed to parse page.json at {path}: {e}"
+                        )
+
+                # ── Newer PBIR: separate visual.json files ("Filters on this visual") ──
+                elif "/visuals/" in path_lower and path_lower.endswith("/visual.json"):
+                    try:
+                        content = base64.b64decode(payload).decode("utf-8")
+                        visual_json = json.loads(content)
+                        total_visuals += 1
+                        page_id = (
+                            path.split("/pages/", 1)[-1].split("/", 1)[0]
+                            if "/pages/" in path else "Unknown"
+                        )
+                        _accumulate(
+                            self._extract_filter_defs(visual_json),
+                            visual_filter_raw, visual_filter_scopes, f"{page_id}/visual",
+                        )
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"[Filter Extraction] Failed to parse visual.json at {path}: {e}")
 
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error parsing report: {e}")
 
         # Merge page-level filters — report-level already in `filters` takes precedence.
-        # Count total pages to describe scope in logs.
-        total_pages = len([
-            p for p in tmdl_parts
-            if "/pages/" in p.get("path", "").lower()
-            and p.get("path", "").lower().endswith("/page.json")
-        ])
         for fname, page_names in page_filter_pages.items():
             if fname in filters:
                 continue  # already captured at report level
@@ -2376,6 +2559,20 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 else f"{len(page_names)}/{total_pages} pages"
             )
             logger.info(f"[Filter Extraction] page-level ({scope}): {fname} = {fdesc}")
+
+        # Merge visual-level filters last — lowest precedence, only fills gaps
+        # report/page level didn't already cover.
+        for fname, scopes in visual_filter_scopes.items():
+            if fname in filters:
+                continue
+            fdesc = visual_filter_raw[fname]
+            if column_type_map and fname in column_type_map:
+                fdesc = self._validate_filter_datatype(fname, fdesc, column_type_map[fname])
+            filters[fname] = fdesc
+            logger.info(
+                f"[Filter Extraction] visual-level "
+                f"({len(scopes)}/{total_visuals} visuals): {fname} = {fdesc}"
+            )
 
         return filters
 
@@ -2426,14 +2623,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         return filter_description
 
     def _extract_filter_from_definition(self, filter_def: Dict[str, Any]) -> tuple:
-        """Extract filter name and description from Power BI filter definition."""
+        """Extract filter name and description from a Power BI filter definition.
+
+        The field reference lives under 'expression' (bare 'filters' JSON
+        format) or 'field' (filterConfig.filters format) depending on PBIR
+        layout, and may be a plain Column, a Measure, or a HierarchyLevel —
+        see _resolve_field_entity_and_name.
+        """
         try:
-            expression = filter_def.get("expression", {})
-            column_expr = expression.get("Column", {})
-            expr = column_expr.get("Expression", {})
-            source_ref = expr.get("SourceRef", {})
-            table = source_ref.get("Entity", "")
-            column = column_expr.get("Property", "")
+            field = filter_def.get("expression") or filter_def.get("field") or {}
+            table, column = self._resolve_field_entity_and_name(field, {})
             if not table or not column:
                 return (None, None)
             filter_name = f"{table}[{column}]"
