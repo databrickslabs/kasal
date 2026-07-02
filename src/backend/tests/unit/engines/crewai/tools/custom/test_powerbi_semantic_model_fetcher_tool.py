@@ -774,13 +774,47 @@ class TestIsParameterFilter:
         result = self.tool._is_parameter_filter({})
         assert result == ""
 
-    def test_hierarchy_level_expression_detected(self):
+    def test_hierarchy_level_on_ordinary_table_not_flagged(self):
+        # A HierarchyLevel expression alone is NOT evidence of a parameter —
+        # ordinary hierarchy-drill filters (Region/BU/Country, Date
+        # Hierarchy, ...) use the exact same shape and must not be
+        # discarded. Only the resolved table name matters (see below).
         filter_def = {
-            "expression": {"HierarchyLevel": {"Hierarchy": {"Expression": {}}}}
+            "expression": {
+                "HierarchyLevel": {
+                    "Expression": {
+                        "Hierarchy": {
+                            "Expression": {"SourceRef": {"Entity": "dim_Country"}},
+                            "Hierarchy": "BU/Country",
+                        }
+                    },
+                    "Level": "Region",
+                }
+            }
+        }
+        result = self.tool._is_parameter_filter(filter_def)
+        assert result == ""
+
+    def test_hierarchy_level_on_parameter_table_detected(self):
+        # A genuine Power BI Field Parameter is implemented as a hierarchy
+        # too, but its backing table follows the parameter naming pattern —
+        # that's still caught via the table-name check.
+        filter_def = {
+            "expression": {
+                "HierarchyLevel": {
+                    "Expression": {
+                        "Hierarchy": {
+                            "Expression": {"SourceRef": {"Entity": "param_KPI"}},
+                            "Hierarchy": "KPI Hierarchy",
+                        }
+                    },
+                    "Level": "KPI",
+                }
+            }
         }
         result = self.tool._is_parameter_filter(filter_def)
         assert result != ""
-        assert "HierarchyLevel" in result
+        assert "param_KPI" in result
 
     def test_relative_date_type_detected(self):
         filter_def = {"type": "RelativeDate", "expression": {}}
