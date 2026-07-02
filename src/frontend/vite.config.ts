@@ -52,15 +52,10 @@ export default defineConfig(({ mode }) => {
       // fraction of the memory. Console/debugger stripping is preserved via
       // the top-level `esbuild.drop` option below.
       minify: 'esbuild',
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            vendor: ['react', 'react-dom', 'react-router-dom'],
-            mui: ['@mui/material', '@mui/icons-material'],
-            redux: ['@reduxjs/toolkit', 'react-redux', 'redux'],
-          },
-        },
-      },
+      // Manual vendor/mui/redux chunk grouping removed: rolldown-vite types
+      // reject the object form of manualChunks, and rolldown's default
+      // chunking already splits vendors sensibly. Re-add via
+      // output.advancedChunks if finer control is ever needed.
       chunkSizeWarningLimit: 512,
       // Skip the post-build "computing gzip size..." pass: it gzips every
       // chunk in memory just to print a size summary and OOMs the Apps build
