@@ -57,20 +57,11 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      minify: 'terser',
-      terserOptions: {
-        compress: {
-          drop_console: true,
-          drop_debugger: true,
-          pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
-        },
-        mangle: {
-          safari10: true,
-        },
-        output: {
-          comments: false,
-        },
-      },
+      // esbuild minifier (not terser): terser exhausts the Databricks Apps
+      // build container's ~2GB Node heap on this bundle. esbuild uses a
+      // fraction of the memory. Console/debugger stripping is preserved via
+      // the top-level `esbuild.drop` option below.
+      minify: 'esbuild',
       rollupOptions: {
         output: {
           manualChunks: {
@@ -81,6 +72,12 @@ export default defineConfig(({ mode }) => {
         },
       },
       chunkSizeWarningLimit: 512,
+    },
+
+    // Strip console.*/debugger from production bundles (previously handled by
+    // terserOptions.compress; esbuild's `drop` is the equivalent).
+    esbuild: {
+      drop: ['console', 'debugger'],
     },
 
     optimizeDeps: {
