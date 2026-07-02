@@ -87,11 +87,10 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
       updated.password = undefined;
       updated.admin_username = undefined;
       updated.admin_password = undefined;
-    } else {
-      // Clear Service Principal secrets on both sets.
-      updated.client_secret = undefined;
-      updated.admin_client_secret = undefined;
     }
+    // NOTE: switching to Service Account does NOT clear client_secret /
+    // admin_client_secret — in SA mode they are an optional Service-Principal
+    // fallback for the Admin Scanner (used when Fabric TMDL is unavailable).
     onChange(updated);
   };
 
@@ -168,7 +167,9 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
           <Typography variant="caption">
             <strong>Service Account:</strong> use a user account (Client ID + username + password)
             instead of a Service Principal secret. Useful when only an SA has access to the semantic
-            model &mdash; without it, data extraction for the mapping may return nothing.
+            model. The Admin Scanner is read via Fabric TMDL for the SA; you may optionally also
+            provide a Service Principal secret below as a fallback (used if the workspace is not
+            Fabric-enabled). Leave the secret fields blank for SA-only.
           </Typography>
         </Alert>
       )}
@@ -239,6 +240,18 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
           />
         </Box>
       )}
+      {authMethod === 'service_account' && (
+        <TextField
+          label="Client Secret (optional)"
+          value={value.client_secret || ''}
+          onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+          disabled={disabled}
+          fullWidth
+          size="small"
+          type="password"
+          helperText="Optional — Service Principal secret used as a fallback if the Service Account can't read the data. Leave blank for SA-only."
+        />
+      )}
 
       {/* Admin credentials */}
       <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(255, 152, 0)' }}>
@@ -293,6 +306,18 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
             helperText="Admin service account password"
           />
         </Box>
+      )}
+      {authMethod === 'service_account' && (
+        <TextField
+          label="Admin Client Secret (optional)"
+          value={value.admin_client_secret || ''}
+          onChange={(e) => handleFieldChange('admin_client_secret', e.target.value)}
+          disabled={disabled}
+          fullWidth
+          size="small"
+          type="password"
+          helperText="Optional — Service Principal secret retried on the Admin Scanner if the Service Account is blocked and the workspace is not Fabric-enabled. Leave blank for SA-only."
+        />
       )}
 
       {/* Target Configuration */}

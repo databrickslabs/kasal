@@ -393,3 +393,185 @@ class TestResolveTokenUsesAadService:
         assert tok == "oauth-token"
         _, kw = MockAad.call_args
         assert kw["access_token"] == "oauth-token"
+
+
+# ---------------------------------------------------------------------------
+# Level 2: Fabric TMDL fallback for the Admin Scanner (SA-only support)
+# ---------------------------------------------------------------------------
+
+import base64
+
+
+def _gen():
+    return PipelineConfigGeneratorTool()._import_generate_config()
+
+
+class TestParseTmdlToAdminTables:
+    """parse_tmdl_to_admin_tables produces the same shape as parse_admin_tables."""
+
+    def _part(self, name, body):
+        return {"path": f"definition/tables/{name}.tmdl",
+                "payload": base64.b64encode(body.encode()).decode()}
+
+    def test_extracts_columns_measures_and_mquery(self):
+        gen = _gen()
+        tmdl = (
+            "table Fact_Sales\n"
+            "\tcolumn amount\n\t\tdataType: double\n"
+            "\tcolumn region_key\n"
+            "\tmeasure 'Total Revenue' = SUM(Fact_Sales[amount])\n\t\tformatString: 0.00\n"
+            "\tmeasure Margin = DIVIDE([Profit],[Revenue])\n"
+            "\tpartition Fact_Sales = m\n\t\tsource =\n\t\t\tlet S = Value.NativeQuery(x) in S\n"
+        )
+        out = gen.parse_tmdl_to_admin_tables([self._part("Fact_Sales", tmdl)], dataset_id="ds1")
+        assert "Fact_Sales" in out
+        t = out["Fact_Sales"]
+        assert {c["name"] for c in t["columns"]} == {"amount", "region_key"}
+        assert {m["name"] for m in t["measures"]} == {"Total Revenue", "Margin"}
+        # formatString line must be stripped from the measure expression
+        rev = next(m for m in t["measures"] if m["name"] == "Total Revenue")
+        assert rev["expression"] == "SUM(Fact_Sales[amount])"
+        assert "formatString" not in rev["expression"]
+        assert "Value.NativeQuery" in t["mquery_expression"]
+
+    def test_skips_local_date_tables(self):
+        gen = _gen()
+        parts = [self._part("LocalDateTable_abc", "table LocalDateTable_abc\n\tcolumn Date\n")]
+        assert gen.parse_tmdl_to_admin_tables(parts) == {}
+
+    def test_ignores_non_table_parts(self):
+        gen = _gen()
+        parts = [{"path": "definition/model.tmdl", "payload": base64.b64encode(b"model M").decode()}]
+        assert gen.parse_tmdl_to_admin_tables(parts) == {}
+
+    def test_empty_or_none(self):
+        gen = _gen()
+        assert gen.parse_tmdl_to_admin_tables([]) == {}
+        assert gen.parse_tmdl_to_admin_tables(None) == {}
+
+
+class TestGetFabricTokenGrants:
+    """get_fabric_token uses SP or SA grant with the Fabric scope."""
+
+    def test_sp_grant_fabric_scope(self):
+        gen = _gen()
+        cap = {}
+
+        def _post(url, data=None, timeout=None):
+            cap["data"] = data
+            r = MagicMock(); r.status_code = 200; r.json.return_value = {"access_token": "fab-sp"}
+            return r
+        with patch("requests.post", side_effect=_post):
+            tok = gen.get_fabric_token(TENANT_ID, CLIENT_ID, CLIENT_SECRET)
+        assert tok == "fab-sp"
+        assert cap["data"]["grant_type"] == "client_credentials"
+        assert cap["data"]["scope"] == "https://api.fabric.microsoft.com/.default"
+
+    def test_sa_grant_fabric_scope(self):
+        gen = _gen()
+        cap = {}
+
+        def _post(url, data=None, timeout=None):
+            cap["data"] = data
+            r = MagicMock(); r.status_code = 200; r.json.return_value = {"access_token": "fab-sa"}
+            return r
+        with patch("requests.post", side_effect=_post):
+            tok = gen.get_fabric_token(TENANT_ID, CLIENT_ID, None,
+                                       username="sa@x.com", password="pw")
+        assert tok == "fab-sa"
+        assert cap["data"]["grant_type"] == "password"
+        assert cap["data"]["username"] == "sa@x.com"
+        assert cap["data"]["scope"] == "https://api.fabric.microsoft.com/.default"
+
+
+class TestAdminScannerFallbackTrigger:
+    """When the Admin Scanner fails/empties, the tool falls back to Fabric TMDL."""
+
+    def test_tmdl_fallback_runs_when_admin_scan_401(self):
+        tool = PipelineConfigGeneratorTool()
+        gen = tool._import_generate_config()
+
+        calls = {"fabric": False, "tmdl": False}
+
+        def _boom_scan(*a, **k):
+            raise RuntimeError("API 3 (Admin Scan trigger) HTTP 401: ")
+        def _fabric(*a, **k):
+            calls["fabric"] = True
+            return "fab-token"
+        def _tmdl(*a, **k):
+            calls["tmdl"] = True
+            return [{"path": "definition/tables/T.tmdl", "payload": base64.b64encode(b"table T\n\tcolumn c\n").decode()}]
+
+        with patch.object(PipelineConfigGeneratorTool, "_resolve_token", return_value="tok"), \
+             patch.object(gen, "extract_relationships", return_value=[]), \
+             patch.object(gen, "extract_measures", return_value=[]), \
+             patch.object(gen, "trigger_admin_scan", side_effect=_boom_scan), \
+             patch.object(gen, "get_fabric_token", side_effect=_fabric), \
+             patch.object(gen, "fetch_tmdl_parts", side_effect=_tmdl):
+            result = tool._run(**_make_sa_kwargs())
+
+        # Fallback path must have been taken, and the run must NOT hard-error with 401
+        assert calls["fabric"] is True
+        assert calls["tmdl"] is True
+        assert "401" not in result
+
+
+class TestServicePrincipalLastResortFallback:
+    """When admin scan 401s AND Fabric TMDL is empty, retry admin scan with SP secret."""
+
+    def test_sp_fallback_runs_when_tmdl_empty_and_secret_present(self):
+        tool = PipelineConfigGeneratorTool()
+        gen = tool._import_generate_config()
+
+        calls = {"sp_scan": 0, "sa_scan": 0}
+
+        def _scan(token, ws):
+            # First call (SA token) 401s; second call (SP token) succeeds.
+            if token == "sp-admin-token":
+                calls["sp_scan"] += 1
+                return {"workspaces": [{"datasets": [{"id": "ds", "tables": []}]}]}
+            calls["sa_scan"] += 1
+            raise RuntimeError("API 3 (Admin Scan trigger) HTTP 401: ")
+
+        def _resolve(self, **kw):
+            # admin-SP-fallback uses the SP secret path
+            if kw.get("label") == "admin-SP-fallback":
+                return "sp-admin-token"
+            return "sa-token"
+
+        # SA kwargs + an admin_client_secret present (so SP fallback is eligible)
+        kwargs = dict(_make_sa_kwargs())
+        kwargs["admin_client_secret"] = "sp-secret"
+
+        with patch.object(PipelineConfigGeneratorTool, "_resolve_token", _resolve), \
+             patch.object(gen, "extract_relationships", return_value=[]), \
+             patch.object(gen, "extract_measures", return_value=[]), \
+             patch.object(gen, "trigger_admin_scan", side_effect=_scan), \
+             patch.object(gen, "parse_admin_tables", return_value={"T": {"columns": [], "mquery_expression": "", "measures": []}}), \
+             patch.object(gen, "get_fabric_token", return_value="fab"), \
+             patch.object(gen, "fetch_tmdl_parts", return_value=None):  # TMDL unavailable
+            result = tool._run(**kwargs)
+
+        assert calls["sp_scan"] == 1  # SP fallback actually retried the scanner
+        assert "401" not in result
+
+    def test_no_sp_fallback_without_secret(self):
+        """SA-only (no secret) must NOT attempt the SP fallback."""
+        tool = PipelineConfigGeneratorTool()
+        gen = tool._import_generate_config()
+        sp_attempted = {"v": False}
+
+        def _resolve(self, **kw):
+            if kw.get("label") == "admin-SP-fallback":
+                sp_attempted["v"] = True
+            return "sa-token"
+
+        with patch.object(PipelineConfigGeneratorTool, "_resolve_token", _resolve), \
+             patch.object(gen, "extract_relationships", return_value=[]), \
+             patch.object(gen, "extract_measures", return_value=[]), \
+             patch.object(gen, "trigger_admin_scan", side_effect=RuntimeError("HTTP 401: ")), \
+             patch.object(gen, "get_fabric_token", return_value="fab"), \
+             patch.object(gen, "fetch_tmdl_parts", return_value=None):
+            tool._run(**_make_sa_kwargs())  # no admin_client_secret
+
+        assert sp_attempted["v"] is False

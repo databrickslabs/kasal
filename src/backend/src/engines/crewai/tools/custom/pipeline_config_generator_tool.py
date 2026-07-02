@@ -77,8 +77,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         "Requires two credential sets — non-admin (Execute Queries API) and "
         "admin (Admin Scanner API) — each of which may be a Service Principal "
         "(client_id + client_secret) or a Service Account (client_id + username "
-        "+ password). Output is the full config JSON ready for the UC Metric "
-        "View Generator (Tool 86)."
+        "+ password). If the Admin Scanner rejects a Service Account token, it "
+        "falls back to Fabric TMDL to read the model. Output is the full config "
+        "JSON ready for the UC Metric View Generator (Tool 86)."
     )
     args_schema: Type[BaseModel] = PipelineConfigGeneratorSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
@@ -196,11 +197,64 @@ class PipelineConfigGeneratorTool(BaseTool):
                 logger.warning(f"[PipelineConfigGen] {msg}")
                 warnings.append(msg)
 
-            # API 3: Admin Scanner (required — uses admin token, no XMLA needed)
+            # API 3: Admin Scanner (uses admin token). Graceful — the Power BI
+            # Admin Scanner rejects Service-Account tokens (401/403), so this is
+            # NOT fatal: on failure we fall back to Fabric TMDL (which a Service
+            # Account CAN read), mirroring the Semantic Model Fetcher.
+            admin_tables = {}
             logger.info("[PipelineConfigGen] API 3: Admin Scanner (workspace scan)...")
-            scan_result = gen.trigger_admin_scan(admin_token, workspace_id)
-            admin_tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
-            logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables")
+            try:
+                scan_result = gen.trigger_admin_scan(admin_token, workspace_id)
+                admin_tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
+                logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (admin scanner)")
+            except Exception as e:
+                msg = f"API 3 (Admin Scanner) failed: {e}"
+                logger.warning(f"[PipelineConfigGen] {msg}")
+                warnings.append(msg)
+
+            # API 3 fallback: Fabric TMDL (works for Service Accounts that the
+            # Admin Scanner blocks). Uses whichever non-admin creds are present
+            # (SA username/password OR SP client_secret) to mint a Fabric token.
+            if not admin_tables:
+                logger.info("[PipelineConfigGen] Admin scan empty — trying Fabric TMDL fallback...")
+                try:
+                    fabric_token = gen.get_fabric_token(
+                        tenant_id, client_id, client_secret,
+                        username=username, password=password,
+                    )
+                    tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                    if tmdl_parts:
+                        admin_tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
+                        logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (Fabric TMDL)")
+                    else:
+                        logger.warning("[PipelineConfigGen] Fabric TMDL returned no parts (workspace may not be Fabric-enabled)")
+                        warnings.append("Fabric TMDL fallback returned no data (workspace may not be Fabric-enabled).")
+                except Exception as e:
+                    msg = f"Fabric TMDL fallback failed: {e}"
+                    logger.warning(f"[PipelineConfigGen] {msg}")
+                    warnings.append(msg)
+
+            # API 3 last-resort fallback: retry the Admin Scanner with a Service
+            # PRINCIPAL token, if an admin client_secret was supplied. Covers the
+            # case where the workspace is NOT Fabric-enabled (TMDL unavailable)
+            # and the SA cannot use the Admin Scanner — an SP with admin rights
+            # still can. Only runs when a distinct SP secret is available.
+            if not admin_tables and admin_client_secret:
+                logger.info("[PipelineConfigGen] TMDL empty — retrying Admin Scanner with Service Principal...")
+                try:
+                    sp_admin_token = self._resolve_token(
+                        tenant_id=tenant_id, client_id=admin_client_id,
+                        client_secret=admin_client_secret,
+                        username=None, password=None, access_token=None,
+                        auth_method="service_principal", label="admin-SP-fallback",
+                    )
+                    scan_result = gen.trigger_admin_scan(sp_admin_token, workspace_id)
+                    admin_tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
+                    logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (SP fallback)")
+                except Exception as e:
+                    msg = f"Service Principal Admin Scanner fallback failed: {e}"
+                    logger.warning(f"[PipelineConfigGen] {msg}")
+                    warnings.append(msg)
 
             # If API 1+2 failed but admin scan has measures, extract from scan
             if not measures and admin_tables:

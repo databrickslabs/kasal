@@ -31,8 +31,9 @@ from collections import defaultdict
 from typing import Any
 
 __all__ = [
-    "get_token", "extract_relationships", "extract_measures",
+    "get_token", "get_fabric_token", "extract_relationships", "extract_measures",
     "trigger_admin_scan", "parse_admin_tables", "extract_report_definition",
+    "fetch_tmdl_parts", "parse_tmdl_to_admin_tables",
     "build_config", "to_snake_case",
     "derive_join_key_map", "derive_enrichment_joins", "derive_dim_alias_map",
     "derive_switch_decompositions", "derive_filter_sets",
@@ -72,6 +73,115 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     }, timeout=30)
     _check_response(resp, f"Auth (client_id={client_id[:8]}...)")
     return resp.json()["access_token"]
+
+
+def fetch_tmdl_parts(
+    fabric_token: str, workspace_id: str, dataset_id: str
+) -> list[dict] | None:
+    """Fetch the semantic model's TMDL definition parts via the Fabric REST API.
+
+    Returns the list of ``{path, payload}`` parts, or ``None`` if the workspace
+    is not Fabric-enabled / the model is unavailable. Handles the async 202
+    long-running-operation poll.
+    """
+    url = (
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
+        f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+    )
+    headers = {"Authorization": f"Bearer {fabric_token}", "Content-Type": "application/json"}
+    try:
+        resp = requests.post(url, headers=headers, timeout=180)
+        if resp.status_code == 200:
+            return resp.json().get("definition", {}).get("parts", [])
+        if resp.status_code == 202:
+            location = resp.headers.get("Location")
+            if not location:
+                return None
+            for _ in range(60):
+                time.sleep(2)
+                poll = requests.get(location, headers=headers, timeout=60)
+                pdata = poll.json()
+                status = pdata.get("status")
+                if status == "Succeeded":
+                    result = requests.get(location + "/result", headers=headers, timeout=60)
+                    _check_response(result, "TMDL getDefinition result")
+                    return result.json().get("definition", {}).get("parts", [])
+                if status == "Failed":
+                    return None
+            return None
+        # 401/403/404 etc. — Fabric not available for these creds/workspace
+        return None
+    except Exception:
+        return None
+
+
+def parse_tmdl_to_admin_tables(
+    tmdl_parts: list[dict], dataset_id: str | None = None
+) -> dict[str, dict]:
+    """Parse TMDL parts into the SAME shape as :func:`parse_admin_tables`.
+
+    Returns ``{table_name: {columns: [...], mquery_expression: "...",
+    measures: [...]}}`` so ``build_config`` consumes it identically to admin-scan
+    output. ``dataset_id`` is accepted for signature parity; TMDL is already
+    scoped to one model so it is not used to filter.
+    """
+    import base64
+
+    tables: dict[str, dict] = {}
+    for part in tmdl_parts or []:
+        path = part.get("path", "")
+        payload = part.get("payload", "")
+        if not path.startswith("definition/tables/") or not path.endswith(".tmdl"):
+            continue
+        try:
+            content = base64.b64decode(payload).decode("utf-8")
+            tmatch = re.match(r"table\s+(?:'([^']+)'|(\w+))", content.strip())
+            if not tmatch:
+                continue
+            table_name = tmatch.group(1) or tmatch.group(2)
+            if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                continue
+
+            # Columns
+            columns = []
+            for cmatch in re.finditer(r"column\s+(?:'([^']+)'|(\w+))", content, re.MULTILINE):
+                columns.append({
+                    "name": cmatch.group(1) or cmatch.group(2),
+                    "dataType": "",
+                    "isHidden": False,
+                })
+
+            # Measures / calculationItems
+            measures = []
+            mpattern = re.compile(
+                r"(?:measure|calculationItem)\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)"
+                r"(?=\n\s*(?:measure|calculationItem)|\n\s*column|\n\t[^\t]|\Z)",
+                re.MULTILINE,
+            )
+            for mmatch in mpattern.finditer(content):
+                mname = mmatch.group(1) or mmatch.group(2)
+                expr = mmatch.group(3).strip()
+                clean = []
+                for line in expr.split("\n"):
+                    if line.strip().startswith(("lineageTag:", "formatString:", "annotation", "isHidden")):
+                        break
+                    clean.append(line)
+                measures.append({"name": mname, "expression": "\n".join(clean).strip()})
+
+            # M-Query (partition source) — best-effort
+            source_expr = ""
+            smatch = re.search(r"source\s*=\s*([\s\S]*?)(?=\n\s*\w+\s*=|\Z)", content)
+            if smatch:
+                source_expr = smatch.group(1).strip()
+
+            tables[table_name] = {
+                "columns": columns,
+                "mquery_expression": source_expr,
+                "measures": measures,
+            }
+        except Exception:
+            continue
+    return tables
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -878,16 +988,45 @@ def derive_period_dims(
 # API 4: Report Definition (optional)
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_fabric_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire Fabric API token (different scope from PBI API)."""
+def get_fabric_token(
+    tenant_id: str,
+    client_id: str,
+    client_secret: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Acquire a Microsoft Fabric-scoped OAuth token (different scope from PBI API).
+
+    Supports both Service Principal (client_credentials) and Service Account
+    (ROPC password grant, when username + password are supplied). The SA grant
+    is what lets an SA-only caller read the model via TMDL when the Power BI
+    Admin Scanner rejects the service-account token.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    resp = requests.post(url, data={
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://api.fabric.microsoft.com/.default",
-    }, timeout=30)
-    _check_response(resp, "Auth (Fabric API)")
+    scope = "https://api.fabric.microsoft.com/.default"
+
+    if username and password:
+        data = {
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "scope": scope,
+        }
+        if client_secret:
+            data["client_secret"] = client_secret
+        context = "Auth (Fabric API, service account)"
+    else:
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": scope,
+        }
+        context = "Auth (Fabric API)"
+
+    resp = requests.post(url, data=data, timeout=30)
+    _check_response(resp, context)
     return resp.json()["access_token"]
 
 
