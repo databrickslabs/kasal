@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 import httpx
 
+from src.utils.sensitive_data_utils import is_sensitive_key, REDACTED_PLACEHOLDER
+
 logger = logging.getLogger(__name__)
 
 
@@ -148,7 +150,8 @@ class PowerBIRelationshipsTool(BaseTool):
                             if placeholder in execution_inputs:
                                 replacement = str(execution_inputs[placeholder])
                                 resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}")
+                                shown = REDACTED_PLACEHOLDER if is_sensitive_key(key) else replacement
+                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {shown}")
                         resolved_config[key] = resolved_value
                     else:
                         resolved_config[key] = value
@@ -191,7 +194,8 @@ class PowerBIRelationshipsTool(BaseTool):
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
                 resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}")
+                shown = REDACTED_PLACEHOLDER if is_sensitive_key(placeholder) else replacement
+                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {shown}")
             else:
                 logger.warning(f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs")
 

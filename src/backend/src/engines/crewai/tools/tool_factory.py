@@ -7,7 +7,7 @@ import json
 
 # SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
 # access_token, ...) before they are written to logs / the volume log sink.
-from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.utils.sensitive_data_utils import is_sensitive_key, mask_sensitive_fields
 
 # Import only the CrewAI tools we're keeping
 from crewai_tools import (
@@ -846,7 +846,7 @@ class ToolFactory:
                                         replacement = str(execution_inputs[placeholder])
                                         resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
                                         # Log resolution (mask sensitive values)
-                                        if 'secret' in key.lower() or 'password' in key.lower() or 'token' in key.lower():
+                                        if is_sensitive_key(key):
                                             logger.info(f"[ToolFactory RESOLVE] {key}: {{{placeholder}}} → [REDACTED]")
                                         else:
                                             logger.info(f"[ToolFactory RESOLVE] {key}: {{{placeholder}}} → {replacement}")

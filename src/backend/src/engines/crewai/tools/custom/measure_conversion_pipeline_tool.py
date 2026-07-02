@@ -12,6 +12,11 @@ from pydantic import BaseModel, Field, PrivateAttr
 # Import converters
 from src.converters.pipeline import ConversionPipeline, OutboundFormat
 from src.converters.base.connectors import ConnectorType
+from src.utils.sensitive_data_utils import (
+    is_sensitive_key,
+    mask_sensitive_fields,
+    REDACTED_PLACEHOLDER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +266,8 @@ class MeasureConversionPipelineTool(BaseTool):
                             if placeholder in execution_inputs:
                                 replacement = str(execution_inputs[placeholder])
                                 resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}")
+                                shown = REDACTED_PLACEHOLDER if is_sensitive_key(key) else replacement
+                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {shown}")
                         resolved_config[key] = resolved_value
                     else:
                         resolved_config[key] = value
@@ -279,7 +285,7 @@ class MeasureConversionPipelineTool(BaseTool):
         self._default_config = default_config
         self._pipeline = ConversionPipeline()
 
-        logger.info(f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {default_config}")
+        logger.info(f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {mask_sensitive_fields(default_config)}")
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:
         """
@@ -313,7 +319,8 @@ class MeasureConversionPipelineTool(BaseTool):
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
                 resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}")
+                shown = REDACTED_PLACEHOLDER if is_sensitive_key(placeholder) else replacement
+                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {shown}")
             else:
                 logger.warning(f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs")
 
