@@ -17,10 +17,17 @@ from cryptography.hazmat.backends import default_backend
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+# Process-lifetime caches of the parsed RSA key objects. The keypair is static
+# for the life of the process, so we deserialize the PEM once instead of on every
+# encrypt/decrypt call (which otherwise re-ran mkdir + two blocking file reads +
+# a full PEM parse before any crypto — paid once per row in list-decrypt loops).
+_PUBLIC_KEY_OBJ = None
+_PRIVATE_KEY_OBJ = None
+
 
 class EncryptionUtils:
     """Utility class for encryption and decryption operations."""
-    
+
     @staticmethod
     def get_key_directory() -> Path:
         """Get the directory where SSH keys are stored"""
@@ -80,6 +87,31 @@ class EncryptionUtils:
         return private_key, public_key
 
     @staticmethod
+    def _get_public_key():
+        """Return the parsed RSA public key object, loading + caching it once."""
+        global _PUBLIC_KEY_OBJ
+        if _PUBLIC_KEY_OBJ is None:
+            _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
+            _PUBLIC_KEY_OBJ = serialization.load_pem_public_key(
+                public_key_bytes,
+                backend=default_backend()
+            )
+        return _PUBLIC_KEY_OBJ
+
+    @staticmethod
+    def _get_private_key():
+        """Return the parsed RSA private key object, loading + caching it once."""
+        global _PRIVATE_KEY_OBJ
+        if _PRIVATE_KEY_OBJ is None:
+            private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
+            _PRIVATE_KEY_OBJ = serialization.load_pem_private_key(
+                private_key_bytes,
+                password=None,
+                backend=default_backend()
+            )
+        return _PRIVATE_KEY_OBJ
+
+    @staticmethod
     def get_encryption_key() -> bytes:
         """Get or generate a Fernet encryption key (for backward compatibility)"""
         key = os.getenv("ENCRYPTION_KEY")
@@ -96,12 +128,8 @@ class EncryptionUtils:
     def encrypt_with_ssh(value: str) -> str:
         """Encrypt a value using RSA public key encryption"""
         try:
-            _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
-            public_key = serialization.load_pem_public_key(
-                public_key_bytes,
-                backend=default_backend()
-            )
-            
+            public_key = EncryptionUtils._get_public_key()
+
             # RSA can only encrypt limited data size, so we'll use a hybrid approach
             # Generate a symmetric key
             symmetric_key = Fernet.generate_key()
@@ -131,13 +159,8 @@ class EncryptionUtils:
     def decrypt_with_ssh(encrypted_value: str) -> str:
         """Decrypt a value using RSA private key encryption"""
         try:
-            private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
-            private_key = serialization.load_pem_private_key(
-                private_key_bytes,
-                password=None,
-                backend=default_backend()
-            )
-            
+            private_key = EncryptionUtils._get_private_key()
+
             # Decode the combined value
             combined = base64.b64decode(encrypted_value.encode())
             encrypted_key, encrypted_data = combined.split(b":", 1)

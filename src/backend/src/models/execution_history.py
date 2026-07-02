@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from uuid import uuid4
@@ -69,7 +69,14 @@ class ExecutionHistory(Base):
     """
     
     __tablename__ = "executionhistory"
-    
+
+    # Composite index for the most-polled list endpoint, which filters by
+    # group_id and orders by created_at DESC. A plain ascending btree serves the
+    # DESC order via a backward index scan, so no DESC-specific index is needed.
+    __table_args__ = (
+        Index("idx_executionhistory_group_created", "group_id", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, primary_key=False, unique=True, default=generate_job_id, index=True)
     status = Column(String, nullable=False, default="pending")

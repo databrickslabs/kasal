@@ -64,7 +64,7 @@ class TestCountLogs:
     @pytest.mark.asyncio
     async def test_returns_count(self, repo, mock_session):
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [MagicMock()] * 5
+        mock_result.scalar.return_value = 5
         mock_session.execute.return_value = mock_result
 
         result = await repo.count_logs()
@@ -74,7 +74,7 @@ class TestCountLogs:
     @pytest.mark.asyncio
     async def test_returns_zero_for_empty(self, repo, mock_session):
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
+        mock_result.scalar.return_value = 0
         mock_session.execute.return_value = mock_result
 
         result = await repo.count_logs()
@@ -84,7 +84,7 @@ class TestCountLogs:
     @pytest.mark.asyncio
     async def test_filters_by_endpoint(self, repo, mock_session):
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [MagicMock()] * 3
+        mock_result.scalar.return_value = 3
         mock_session.execute.return_value = mock_result
 
         result = await repo.count_logs(endpoint="chat/completions")
@@ -219,7 +219,7 @@ class TestCountLogsByGroup:
     @pytest.mark.asyncio
     async def test_counts_for_group(self, repo, mock_session):
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [MagicMock()] * 7
+        mock_result.scalar.return_value = 7
         mock_session.execute.return_value = mock_result
 
         result = await repo.count_logs_by_group(group_ids=["g1"])

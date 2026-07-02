@@ -11,6 +11,22 @@ from unittest.mock import Mock, patch, mock_open
 from cryptography.fernet import Fernet
 
 from src.utils.encryption_utils import EncryptionUtils
+from src.utils import encryption_utils
+
+
+@pytest.fixture(autouse=True)
+def _reset_key_cache():
+    """Reset the process-lifetime RSA key cache so each test starts cold.
+
+    encrypt/decrypt now cache the parsed key objects for the life of the process,
+    so tests that patch the keys (or expect get_or_create_ssh_keys to be called)
+    must clear the cache first to exercise the load path.
+    """
+    encryption_utils._PUBLIC_KEY_OBJ = None
+    encryption_utils._PRIVATE_KEY_OBJ = None
+    yield
+    encryption_utils._PUBLIC_KEY_OBJ = None
+    encryption_utils._PRIVATE_KEY_OBJ = None
 
 
 class TestEncryptionUtils:

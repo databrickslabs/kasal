@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -147,8 +148,11 @@ class PowerBIService:
 
             logger.info("Device Code authentication initiated - user should follow authentication prompt")
 
-            # Get token for Power BI API
-            token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            # Get token for Power BI API (blocking Azure AD call → offload the
+            # synchronous SDK off the event loop)
+            token = await asyncio.to_thread(
+                credential.get_token, "https://analysis.windows.net/powerbi/api/.default"
+            )
             logger.info("Device Code authentication successful")
             return token.token
 
@@ -212,8 +216,11 @@ class PowerBIService:
                 client_secret=client_secret if client_secret else None,
             )
 
-            # Token generation for Power BI API
-            token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            # Token generation for Power BI API (blocking Azure AD call → offload
+            # the synchronous SDK off the event loop)
+            token = await asyncio.to_thread(
+                credential.get_token, "https://analysis.windows.net/powerbi/api/.default"
+            )
             logger.info("Username/Password authentication successful")
             return token.token
 

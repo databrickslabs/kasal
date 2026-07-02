@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -52,8 +52,8 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         Returns:
             Total count of matching logs
         """
-        # Start with a base query
-        query = select(self.model)
+        # Count in SQL instead of materializing every full row just to len() it
+        query = select(func.count()).select_from(self.model)
 
         # Apply endpoint filter if provided
         if endpoint and endpoint != 'all':
@@ -61,8 +61,8 @@ class LLMLogRepository(BaseRepository[LLMLog]):
 
         # Execute query
         result = await self.session.execute(query)
-        return len(list(result.scalars().all()))
-    
+        return result.scalar() or 0
+
     async def get_unique_endpoints(self) -> List[str]:
         """
         Get list of unique endpoints in the logs.
@@ -154,8 +154,8 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         if not tenant_ids:
             return 0
         
-        # Start with a base query filtered by tenant
-        query = select(self.model).where(
+        # Count in SQL instead of materializing every full row just to len() it
+        query = select(func.count()).select_from(self.model).where(
             self.model.tenant_id.in_(tenant_ids)
         )
 
@@ -165,7 +165,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
 
         # Execute query
         result = await self.session.execute(query)
-        return len(list(result.scalars().all()))
+        return result.scalar() or 0
 
     async def get_unique_endpoints_by_tenant(self, tenant_ids: List[str] = None) -> List[str]:
         """
@@ -243,8 +243,8 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         if not group_ids:
             return 0
         
-        # Start with a base query filtered by group
-        query = select(self.model).where(
+        # Count in SQL instead of materializing every full row just to len() it
+        query = select(func.count()).select_from(self.model).where(
             self.model.group_id.in_(group_ids)
         )
 
@@ -254,7 +254,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
 
         # Execute query
         result = await self.session.execute(query)
-        return len(list(result.scalars().all()))
+        return result.scalar() or 0
 
     async def get_unique_endpoints_by_group(self, group_ids: List[str] = None) -> List[str]:
         """
