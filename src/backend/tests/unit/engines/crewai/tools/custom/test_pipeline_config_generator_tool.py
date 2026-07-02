@@ -633,3 +633,135 @@ class TestMeasureDaxSpFallback:
 
         # Only the SA attempt — no SP retry without a secret
         assert calls["measures"] == 1
+
+
+class TestConfigGenConversionHistoryPersistence:
+    """Config-gen persists extracted measures (with DAX) to conversion_history."""
+
+    def _run_async_sync(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_persists_measures_with_dax_diagnostic(self):
+        tool = PipelineConfigGeneratorTool()
+        measures = [
+            {"measure_name": "M1", "table_name": "T", "expression": "SWITCH(TRUE(), SELECTEDVALUE(x), 1)"},
+            {"measure_name": "M2", "table_name": "T", "expression": "SUM(a)"},
+            {"measure_name": "M3", "table_name": "T", "expression": ""},  # no DAX
+        ]
+        captured = {}
+        mock_repo = MagicMock()
+        from types import SimpleNamespace
+        mock_repo.create = AsyncMock(side_effect=lambda d: captured.update({"data": d}) or SimpleNamespace(id=1, group_id=None))
+        mock_repo.session = MagicMock()
+        mock_repo.session.commit = AsyncMock()
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _ctx():
+            yield mock_repo
+
+        with patch("src.engines.crewai.tools.tool_session_provider.ToolSessionProvider.conversion_repo", _ctx):
+            self._run_async_sync(tool._save_to_conversion_history(
+                measures=measures, config={"switch_decompositions": {"T": [1]}, "measure_resolutions": {}},
+                relationships=[], admin_tables={}, workspace_id="ws", dataset_id="ds",
+            ))
+
+        d = captured["data"]
+        assert d["source_format"] == "powerbi_config"
+        assert d["input_data"]["measures"] == measures
+        assert d["measure_count"] == 3
+        # diagnostic: 2 with DAX, 1 SELECTEDVALUE+SWITCH
+        assert "2 with DAX" in d["input_summary"]
+        assert "1 SELECTEDVALUE+SWITCH" in d["input_summary"]
+
+    def test_fail_open_on_repo_error(self):
+        tool = PipelineConfigGeneratorTool()
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _boom():
+            raise RuntimeError("db down")
+            yield  # pragma: no cover
+
+        with patch("src.engines.crewai.tools.tool_session_provider.ToolSessionProvider.conversion_repo", _boom):
+            r = self._run_async_sync(tool._save_to_conversion_history(
+                measures=[], config={}, relationships=[], admin_tables={},
+                workspace_id="ws", dataset_id="ds",
+            ))
+        assert r is None
+
+
+class TestExtractMeasuresKeyTolerance:
+    """extract_measures must read DMV columns whether keys are bracketed or not.
+
+    Regression: the Power BI executeQueries API returns column keys either
+    bracketed ('[Expression]') or unbracketed ('Expression'). Reading only the
+    bracketed form yielded 471 measures with 0 DAX (empty switch_decompositions).
+    """
+
+    def _gen(self):
+        return PipelineConfigGeneratorTool()._import_generate_config()
+
+    def _mock_resp(self, rows):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
+        return r
+
+    def test_unbracketed_keys_are_read(self):
+        gen = self._gen()
+        rows = [{"Measure Name": "Rev", "Expression": "SUM(x)", "Table": "Fact", "Description": ""}]
+        with patch("requests.post", return_value=self._mock_resp(rows)):
+            measures = gen.extract_measures("tok", "ws", "ds")
+        assert len(measures) == 1
+        assert measures[0]["measure_name"] == "Rev"
+        assert measures[0]["expression"] == "SUM(x)"  # <-- was '' before the fix
+
+    def test_bracketed_keys_still_work(self):
+        gen = self._gen()
+        rows = [{"[Measure Name]": "Margin", "[Expression]": "DIVIDE(a,b)", "[Table]": "Fact", "[Description]": ""}]
+        with patch("requests.post", return_value=self._mock_resp(rows)):
+            measures = gen.extract_measures("tok", "ws", "ds")
+        assert measures[0]["measure_name"] == "Margin"
+        assert measures[0]["expression"] == "DIVIDE(a,b)"
+
+    def test_row_get_helper(self):
+        gen = self._gen()
+        assert gen._row_get({"Expression": "X"}, "Expression") == "X"
+        assert gen._row_get({"[Expression]": "Y"}, "Expression") == "Y"
+        assert gen._row_get({}, "Expression", "def") == "def"
+
+
+class TestEnrichSwitchDecompNoListCollision:
+    """Regression: _enrich_config_from_dax must not index a list with a str.
+
+    build_config's derive_switch_decompositions writes a LIST per table; the
+    enrichment writes a DICT. When both target the same table the old code did
+    list[measure_name] = ... → 'list indices must be integers or slices, not str'.
+    """
+
+    # DAX shaped for the enrich regex: SWITCH(TRUE(), <cond>, <expr>, ...) at end,
+    # with SELECTEDVALUE(table[col]) = "value" conditions so branch names extract.
+    SWITCH_DAX = ('SWITCH(TRUE(), '
+                  'SELECTEDVALUE(Sel[Name]) = "Absolute", [M1], '
+                  'SELECTEDVALUE(Sel[Name]) = "Variance", [M2])')
+
+    def test_no_crash_when_table_already_a_list(self):
+        config = {
+            "filter_sets": {},
+            "switch_decompositions": {"T": [{"name": "m1", "raw_expr": "TODO"}]},  # list from build_config
+            "measure_resolutions": {},
+        }
+        measures = [{"measure_name": "m1", "table_name": "T", "expression": self.SWITCH_DAX}]
+        # Must not raise
+        PipelineConfigGeneratorTool._enrich_config_from_dax(config, measures)
+        assert isinstance(config["switch_decompositions"]["T"], list)  # list preserved
+
+    def test_dict_form_still_populated_for_new_table(self):
+        config = {"filter_sets": {}, "switch_decompositions": {}, "measure_resolutions": {}}
+        measures = [{"measure_name": "m1", "table_name": "NewT", "expression": self.SWITCH_DAX}]
+        PipelineConfigGeneratorTool._enrich_config_from_dax(config, measures)
+        entry = config["switch_decompositions"].get("NewT")
+        assert isinstance(entry, dict) and "m1" in entry

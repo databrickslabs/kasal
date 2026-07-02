@@ -14,6 +14,8 @@ from typing import Any, Optional, Type
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.engines.crewai.tools.custom.metric_view_utils.utils import run_async as _run_async
+
 logger = logging.getLogger(__name__)
 
 
@@ -370,11 +372,100 @@ class PipelineConfigGeneratorTool(BaseTool):
                 f"[PipelineConfigGen] Done: {auto_count} auto-filled, "
                 f"{todo_count} need review, {config_json.count('TODO')} TODO markers"
             )
+
+            # ── Durable persistence (conversion_history / Lakebase) ─────────────
+            # Store the extracted measures WITH their DAX so it is queryable after
+            # the fact — this is the observability that answers "did we actually
+            # get the DAX, and were there SWITCH measures?" for every run.
+            try:
+                _run_async(self._save_to_conversion_history(
+                    measures=measures,
+                    config=config,
+                    relationships=relationships,
+                    admin_tables=admin_tables,
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                ))
+            except Exception as _hist_err:
+                logger.warning(f"[PipelineConfigGen] conversion_history persistence skipped: {_hist_err}")
+
             return json.dumps(output, indent=2, default=str)
 
         except Exception as e:
             logger.exception("[PipelineConfigGen] Failed")
             return json.dumps({"error": str(e)})
+
+    async def _save_to_conversion_history(
+        self, measures, config, relationships, admin_tables, workspace_id, dataset_id,
+    ) -> None:
+        """Persist the config-gen result to conversion_history (fail-open).
+
+        Records the extracted measures with DAX (input_data.measures), the
+        proposed config (output_data.proposed_config), and a DAX diagnostic so
+        it is obvious per-run whether measure DAX was captured and how many
+        SELECTEDVALUE+SWITCH measures were seen. Retrievable via
+        GET /conversion-history (filter source_format=powerbi_config).
+        """
+        try:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            from src.schemas.conversion import ConversionHistoryCreate
+            from src.utils.user_context import UserContext
+
+            measures = measures or []
+            with_dax = sum(
+                1 for m in measures
+                if (m.get("expression") or m.get("dax_expression") or "").strip()
+            )
+            switch_cnt = sum(
+                1 for m in measures
+                if "SWITCH" in (m.get("expression") or m.get("dax_expression") or "").upper()
+                and "SELECTEDVALUE" in (m.get("expression") or m.get("dax_expression") or "").upper()
+            )
+
+            history_data = ConversionHistoryCreate(
+                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                source_format="powerbi_config",
+                target_format="pipeline_config",
+                input_data={
+                    "workspace_id": workspace_id or "",
+                    "dataset_id": dataset_id or "",
+                    "measures": measures,
+                    "relationships_count": len(relationships or []),
+                    "admin_tables_count": len(admin_tables or {}),
+                },
+                input_summary=(
+                    f"{len(measures)} measures ({with_dax} with DAX, "
+                    f"{switch_cnt} SELECTEDVALUE+SWITCH)"
+                )[:500],
+                output_data={"proposed_config": config},
+                output_summary=(
+                    f"config: {len(config.get('switch_decompositions', {}))} switch tables, "
+                    f"{len(config.get('measure_resolutions', {}))} measure resolutions"
+                )[:500],
+                configuration={"workspace_id": workspace_id, "dataset_id": dataset_id},
+                status="success",
+                measure_count=len(measures),
+            )
+
+            group_id = None
+            try:
+                gc = UserContext.get_group_context()
+                if gc:
+                    group_id = getattr(gc, "primary_group_id", None)
+            except Exception:
+                pass
+
+            async with ToolSessionProvider.conversion_repo() as repo:
+                record = await repo.create(history_data.model_dump())
+                if group_id:
+                    record.group_id = group_id
+                await repo.session.commit()
+                logger.info(
+                    f"[PipelineConfigGen] Saved conversion_history id={record.id} "
+                    f"(measures={len(measures)}, with_dax={with_dax}, switch={switch_cnt})"
+                )
+        except Exception as e:
+            logger.warning(f"[PipelineConfigGen] Failed to save conversion_history (non-fatal): {e}")
 
     @staticmethod
     def _enrich_config_from_dax(config: dict, measures: list[dict]) -> bool:
@@ -471,9 +562,20 @@ class PipelineConfigGeneratorTool(BaseTool):
                     }
 
             if branches:
-                if table_name not in switch_decompositions:
-                    switch_decompositions[table_name] = {}
-                switch_decompositions[table_name][measure_name] = branches
+                existing = switch_decompositions.get(table_name)
+                # `derive_switch_decompositions` (in build_config) may already have
+                # produced a LIST of skeleton entries for this table. The two
+                # writers use incompatible shapes (list vs dict), so only apply
+                # the dict enrichment when the table is absent or already a dict —
+                # never index into a list with a measure name (that crashes).
+                if existing is None:
+                    switch_decompositions[table_name] = {measure_name: branches}
+                    changed = True
+                elif isinstance(existing, dict):
+                    existing[measure_name] = branches
+                    changed = True
+                # else: existing is a list skeleton from build_config — leave it;
+                # UCMV already handles the list form and it flags human review.
                 changed = True
 
         # ── 3. Detect SELECTEDVALUE dimensions for measure_resolutions ──

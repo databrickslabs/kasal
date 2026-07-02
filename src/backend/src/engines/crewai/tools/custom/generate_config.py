@@ -188,6 +188,22 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+def _row_get(row: dict, col: str, default: str = "") -> str:
+    """Read a Power BI executeQueries result column, tolerant of key format.
+
+    The API returns column keys either bracketed (``[Measure Name]``) or
+    unbracketed (``Measure Name``) depending on the query/permission path.
+    Reading only the bracketed form silently yields empty strings when the API
+    returns the unbracketed form — which is exactly how measure DAX went missing
+    (471 measures, 0 with DAX). Try both.
+    """
+    bare = col.strip("[]")
+    val = row.get(f"[{bare}]")
+    if val is None:
+        val = row.get(bare)
+    return val if val is not None else default
+
+
 def _check_response(resp, context: str = "") -> None:
     """Check HTTP response, raise with PBI error body on failure."""
     if resp.status_code >= 400:
@@ -448,14 +464,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
         measures = []
         for row in rows:
-            name = row.get("[Measure Name]", "")
+            name = _row_get(row, "Measure Name")
             if name.startswith("__"):
                 continue
             measures.append({
                 "measure_name": name,
-                "table_name": row.get("[Table]", ""),
-                "expression": row.get("[Expression]", ""),
-                "description": row.get("[Description]", ""),
+                "table_name": _row_get(row, "Table"),
+                "expression": _row_get(row, "Expression"),
+                "description": _row_get(row, "Description"),
             })
         return measures
 
@@ -481,14 +497,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
     rows2 = data2.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
     measures = []
     for row in rows2:
-        name = row.get("[Measure Name]", "")
+        name = _row_get(row, "Measure Name")
         if name.startswith("__"):
             continue
         measures.append({
             "measure_name": name,
-            "table_name": row.get("[Table]", ""),
-            "expression": row.get("[Expression]", ""),
-            "description": row.get("[Description]", ""),
+            "table_name": _row_get(row, "Table"),
+            "expression": _row_get(row, "Expression"),
+            "description": _row_get(row, "Description"),
         })
     return measures
 
