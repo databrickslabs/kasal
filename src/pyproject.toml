@@ -1,0 +1,151 @@
+[project]
+name = "kasal-backend"
+version = "0.1.0"
+description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    # Web framework
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "starlette>=0.49.1,<0.50.0", # >=0.49.1 fixes CVE-2025-54121 / CVE-2025-62727 (DoS); minimal bump from 0.40
+    "limits>=3.6", # API rate-limiting engine. NOTE: we use limits directly in a
+    # pure-ASGI middleware (core/rate_limit.py) rather than slowapi, because
+    # slowapi's SlowAPIMiddleware is BaseHTTPMiddleware and buffers streaming
+    # responses — which would break the app's SSE streaming.
+    # Database
+    "sqlalchemy>=2.0.27",
+    "alembic>=1.13.1",
+    "asyncpg>=0.29.0",
+    "pg8000",
+    "aiosqlite",
+    "greenlet>=3.0.3",
+    # Pydantic
+    "pydantic>=2.6.1",
+    "pydantic-settings>=2.1.0",
+    "pydantic[email]",
+    "email-validator",
+    # HTTP clients
+    "httpx>=0.26.0",
+    "aiohttp>=3.9.0",
+    "httpx-sse==0.4.0",
+    "urllib3>=1.26.6",
+    # Auth
+    # NOTE: python-jose + passlib removed — they were unused (0 imports) and
+    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt is
+    # used directly; auth is via the Databricks OAuth proxy (no homegrown JWT).
+    "bcrypt==4.0.1",
+    "cryptography",
+    "python-multipart>=0.0.9",
+    # Document parsing
+    "pdfminer.six", # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
+    # Databricks
+    "databricks",
+    "databricks-sdk>=0.102.0",
+    "databricks-vectorsearch",
+    "databricks-agents>=1.4.0",
+    # Azure
+    "azure-identity>=1.15.0",
+    # AI/ML
+    "litellm[caching]==1.74.9",
+    "crewai[tools]>=1.14.5", # Unified cognitive memory system
+    "langchain",
+    "langchain-text-splitters", # langchain 1.x moved text splitters out of core
+    "mcp>=1.26.0,<1.27.0", # Required by crewai 1.14.5
+    "mcpadapt",
+    # Observability
+    "mlflow>=3.11,<4",  # >=3.11 required for Unity Catalog trace storage (OTel tables)
+    "opentelemetry-sdk>=1.27.0,<2.0.0",
+    "opentelemetry-api>=1.27.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0,<2.0.0",
+    "openinference-instrumentation-crewai>=1.1.9,<2.0.0",
+    # Utils
+    "tenacity>=8.2.3",
+    "croniter",
+    "psutil",
+    "rich>=14.2.0",
+    "redis>=5.0.0",
+    "aiofiles>=23.0.0",
+    "rapidfuzz>=3.0.0", # Power BI metadata fuzzy matching (optional; falls back to difflib)
+    # Protobuf (version pinned for compatibility)
+    "protobuf>=5.29.0,<6.0.0",
+    "grpcio-status>=1.62.0,<1.71.0",
+    # Tools
+    "google-api-python-client",
+    "pysendpulse",
+    "nixtla",
+    "selenium",
+    "python-pptx",
+    "wheel",
+    "ollama>=0.6.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.5",
+    "pytest-xdist>=3.5.0",
+    "pytest-mock>=3.12.0",
+    "black>=24.1.1",
+    "isort>=5.13.2",
+    "mypy>=1.8.0",
+    "ruff>=0.2.1",
+]
+
+[tool.uv]
+# Databricks App: install dependencies ONLY — never build/install this project as
+# a wheel. The app runs from source via PYTHONPATH (see app.yaml), and the deployed
+# bundle root has no matching package layout, so `uv sync` must not try to build it.
+package = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+# NOTE: src/engines/crewai/exporters/templates/ holds a bundled Databricks
+# agent-app TEMPLATE shipped verbatim to exported projects. Its *.py files
+# contain {{TOKEN}} placeholders (invalid Python until rendered) and import
+# packages (crewai, mlflow.genai) not in this backend's env, so every linter
+# below must skip that tree.
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = "src/engines/crewai/exporters/templates/"
+
+[tool.isort]
+profile = "black"
+line_length = 88
+extend_skip_glob = ["*/exporters/templates/*"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+exclude = ["src/engines/crewai/exporters/templates/"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+select = ["E", "F", "I001"]
+ignore = []
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "alembic",
+    "src/engines/crewai/exporters/templates",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+asyncio_mode = "auto"
