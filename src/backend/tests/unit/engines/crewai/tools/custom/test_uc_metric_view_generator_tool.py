@@ -163,3 +163,82 @@ class TestSaveDaxToConversionHistory:
                 workspace_id=None, dataset_id=None, catalog="main", schema="default",
             ))
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Measure DAX fallback (TMDL → SP) for API-mode extraction under a Service Account
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch, MagicMock
+
+
+class TestTmdlTablesToMeasures:
+    def test_maps_shape_with_dax(self):
+        tables = {"Fact_Sales": {"columns": [], "mquery_expression": "", "measures": [
+            {"name": "Total Revenue", "expression": "SUM(x)"},
+            {"name": "Margin", "expression": "DIVIDE(a,b)"},
+        ]}}
+        out = UCMetricViewGeneratorTool._tmdl_tables_to_measures(tables)
+        assert len(out) == 2
+        assert out[0]["measure_name"] == "Total Revenue"
+        assert out[0]["dax_expression"] == "SUM(x)"
+        assert out[0]["proposed_allocation"] == "Fact_Sales"
+
+    def test_skips_nameless_and_empty(self):
+        assert UCMetricViewGeneratorTool._tmdl_tables_to_measures({}) == []
+        tables = {"T": {"measures": [{"name": "", "expression": "X"}]}}
+        assert UCMetricViewGeneratorTool._tmdl_tables_to_measures(tables) == []
+
+
+class TestExtractMeasuresFallback:
+    """_extract_measures_fallback recovers DAX via TMDL (SA first, then SP)."""
+
+    def _fake_gen(self, tmdl_parts_ok=True):
+        gen = MagicMock()
+        gen.get_fabric_token.return_value = "fab-token"
+        gen.fetch_tmdl_parts.return_value = (
+            [{"path": "definition/tables/T.tmdl", "payload": "x"}] if tmdl_parts_ok else None
+        )
+        gen.parse_tmdl_to_admin_tables.return_value = {
+            "Fact": {"columns": [], "mquery_expression": "", "measures": [
+                {"name": "Rev", "expression": "SUM(a)"}]}
+        }
+        return gen
+
+    def test_sa_tmdl_recovers_measures(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen()
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_measures_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret=None, username="sa@x.com", password="pw",
+            )
+        assert len(out) == 1
+        assert out[0]["measure_name"] == "Rev"
+        assert out[0]["dax_expression"] == "SUM(a)"
+        # SA branch used username/password
+        _, kw = gen.get_fabric_token.call_args
+        assert kw["username"] == "sa@x.com"
+
+    def test_falls_through_to_sp_when_no_sa(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen()
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_measures_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret="sp-secret", username=None, password=None,
+            )
+        assert len(out) == 1
+        # SP branch passes the secret positionally (3rd arg)
+        args, _ = gen.get_fabric_token.call_args
+        assert "sp-secret" in args
+
+    def test_returns_empty_when_tmdl_unavailable_and_no_creds(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen(tmdl_parts_ok=False)
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_measures_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret=None, username=None, password=None,
+            )
+        assert out == []

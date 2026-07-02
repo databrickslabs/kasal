@@ -575,3 +575,61 @@ class TestServicePrincipalLastResortFallback:
             tool._run(**_make_sa_kwargs())  # no admin_client_secret
 
         assert sp_attempted["v"] is False
+
+
+class TestMeasureDaxSpFallback:
+    """API 2 (measures/DAX) retries with a Service Principal when the SA fails."""
+
+    def test_api2_sp_fallback_recovers_measures(self):
+        tool = PipelineConfigGeneratorTool()
+        gen = tool._import_generate_config()
+        calls = {"measures": 0}
+
+        def _measures(token, ws, ds):
+            calls["measures"] += 1
+            if token == "sp-data-token":
+                return [{"measure_name": "M", "table_name": "T", "expression": "SUM(x)"}]
+            raise RuntimeError("XMLA 401 for service account")
+
+        def _resolve(self, **kw):
+            return "sp-data-token" if kw.get("label") == "data-SP-fallback" else "sa-token"
+
+        # SA creds + a non-admin client_secret present → SP data fallback eligible
+        kwargs = dict(_make_sa_kwargs())
+        kwargs["client_secret"] = "sp-secret"
+
+        with patch.object(PipelineConfigGeneratorTool, "_resolve_token", _resolve), \
+             patch.object(gen, "extract_relationships", return_value=[]), \
+             patch.object(gen, "extract_measures", side_effect=_measures), \
+             patch.object(gen, "trigger_admin_scan", return_value={"workspaces": []}), \
+             patch.object(gen, "parse_admin_tables", return_value={}), \
+             patch.object(gen, "get_fabric_token", return_value="fab"), \
+             patch.object(gen, "fetch_tmdl_parts", return_value=None):
+            tool._run(**kwargs)
+
+        # extract_measures called twice: SA (fail) then SP (success)
+        assert calls["measures"] == 2
+
+    def test_api2_no_sp_fallback_without_secret(self):
+        tool = PipelineConfigGeneratorTool()
+        gen = tool._import_generate_config()
+        calls = {"measures": 0}
+
+        def _measures(token, ws, ds):
+            calls["measures"] += 1
+            raise RuntimeError("XMLA 401")
+
+        def _resolve(self, **kw):
+            return "sa-token"
+
+        with patch.object(PipelineConfigGeneratorTool, "_resolve_token", _resolve), \
+             patch.object(gen, "extract_relationships", return_value=[]), \
+             patch.object(gen, "extract_measures", side_effect=_measures), \
+             patch.object(gen, "trigger_admin_scan", return_value={"workspaces": []}), \
+             patch.object(gen, "parse_admin_tables", return_value={}), \
+             patch.object(gen, "get_fabric_token", return_value="fab"), \
+             patch.object(gen, "fetch_tmdl_parts", return_value=None):
+            tool._run(**_make_sa_kwargs())  # no client_secret
+
+        # Only the SA attempt — no SP retry without a secret
+        assert calls["measures"] == 1

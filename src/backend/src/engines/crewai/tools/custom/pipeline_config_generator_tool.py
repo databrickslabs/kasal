@@ -175,27 +175,72 @@ class PipelineConfigGeneratorTool(BaseTool):
             )
             warnings: list[str] = []
 
-            # API 1: Relationships (graceful — XMLA may be disabled)
+            # The Execute Queries / XMLA endpoints (relationships + measure DAX)
+            # are frequently rejected for Service-Account (ROPC) tokens. When
+            # that happens we lazily mint a Service-Principal token from the
+            # non-admin client_secret (if provided) and retry — this is what
+            # recovers the measure DAX needed for switch_decompositions etc.
+            _sp_data_token_cache: dict = {}
+
+            def _sp_data_token() -> Optional[str]:
+                if not client_secret:
+                    return None
+                if "tok" not in _sp_data_token_cache:
+                    try:
+                        _sp_data_token_cache["tok"] = self._resolve_token(
+                            tenant_id=tenant_id, client_id=client_id,
+                            client_secret=client_secret,
+                            username=None, password=None, access_token=None,
+                            auth_method="service_principal", label="data-SP-fallback",
+                        )
+                    except Exception as _e:
+                        logger.warning(f"[PipelineConfigGen] SP data-token fallback failed: {_e}")
+                        _sp_data_token_cache["tok"] = None
+                return _sp_data_token_cache["tok"]
+
+            # API 1: Relationships (XMLA — may fail for a Service Account)
             relationships: list[dict] = []
             try:
                 logger.info("[PipelineConfigGen] API 1: INFO.VIEW.RELATIONSHIPS()...")
                 relationships = gen.extract_relationships(token, workspace_id, dataset_id)
                 logger.info(f"[PipelineConfigGen]   → {len(relationships)} relationships")
             except Exception as e:
-                msg = f"API 1 (Relationships) failed: {e}"
-                logger.warning(f"[PipelineConfigGen] {msg}")
-                warnings.append(msg)
+                logger.warning(f"[PipelineConfigGen] API 1 (Relationships) failed: {e}")
+                sp_tok = _sp_data_token()
+                if sp_tok:
+                    try:
+                        logger.info("[PipelineConfigGen] API 1: retrying with Service Principal...")
+                        relationships = gen.extract_relationships(sp_tok, workspace_id, dataset_id)
+                        logger.info(f"[PipelineConfigGen]   → {len(relationships)} relationships (SP fallback)")
+                    except Exception as e2:
+                        msg = f"API 1 (Relationships) failed (SA + SP): {e2}"
+                        logger.warning(f"[PipelineConfigGen] {msg}")
+                        warnings.append(msg)
+                else:
+                    warnings.append(f"API 1 (Relationships) failed: {e}")
 
-            # API 2: Measures (graceful — XMLA may be disabled)
+            # API 2: Measures + DAX (XMLA — may fail for a Service Account).
+            # Measure DAX is the source for switch_decompositions / filter_sets /
+            # measure_resolutions, so the SP fallback matters most here.
             measures: list[dict] = []
             try:
                 logger.info("[PipelineConfigGen] API 2: $SYSTEM.MDSCHEMA_MEASURES...")
                 measures = gen.extract_measures(token, workspace_id, dataset_id)
                 logger.info(f"[PipelineConfigGen]   → {len(measures)} measures")
             except Exception as e:
-                msg = f"API 2 (Measures) failed: {e}"
-                logger.warning(f"[PipelineConfigGen] {msg}")
-                warnings.append(msg)
+                logger.warning(f"[PipelineConfigGen] API 2 (Measures) failed: {e}")
+                sp_tok = _sp_data_token()
+                if sp_tok:
+                    try:
+                        logger.info("[PipelineConfigGen] API 2: retrying with Service Principal...")
+                        measures = gen.extract_measures(sp_tok, workspace_id, dataset_id)
+                        logger.info(f"[PipelineConfigGen]   → {len(measures)} measures (SP fallback)")
+                    except Exception as e2:
+                        msg = f"API 2 (Measures) failed (SA + SP): {e2}"
+                        logger.warning(f"[PipelineConfigGen] {msg}")
+                        warnings.append(msg)
+                else:
+                    warnings.append(f"API 2 (Measures) failed: {e}")
 
             # API 3: Admin Scanner (uses admin token). Graceful — the Power BI
             # Admin Scanner rejects Service-Account tokens (401/403), so this is

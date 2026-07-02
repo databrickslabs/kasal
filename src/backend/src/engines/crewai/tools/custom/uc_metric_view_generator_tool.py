@@ -442,6 +442,89 @@ class UCMetricViewGeneratorTool(BaseTool):
     # PBI API extraction helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _import_generate_config():
+        """Import the standalone generate_config module (bundled alongside this tool)."""
+        import sys as _sys
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [this_dir]
+        project_root = os.path.abspath(
+            os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
+        )
+        candidates.append(os.path.join(project_root, "examples", "uc_metric_view_migration"))
+        gen_config_dir = next(
+            (c for c in candidates if os.path.isfile(os.path.join(c, "generate_config.py"))),
+            None,
+        )
+        if gen_config_dir is None:
+            raise ImportError(
+                f"generate_config.py not found in any of: [{', '.join(candidates)}]"
+            )
+        if gen_config_dir not in _sys.path:
+            _sys.path.insert(0, gen_config_dir)
+        import generate_config  # noqa: E402
+        return generate_config
+
+    @staticmethod
+    def _tmdl_tables_to_measures(admin_tables: dict) -> list:
+        """Convert generate_config TMDL/admin table dict → UCMV measure shape."""
+        measures = []
+        for tbl_name, tbl_info in (admin_tables or {}).items():
+            for m in tbl_info.get('measures', []):
+                name = m.get('name', '')
+                if not name:
+                    continue
+                measures.append({
+                    'measure_name': name,
+                    'original_name': name,
+                    'dax_expression': m.get('expression', '') or '',
+                    'proposed_allocation': tbl_name or '__unassigned__',
+                    'table_refs': [],
+                })
+        return measures
+
+    def _extract_measures_fallback(
+        self, workspace_id, dataset_id, tenant_id, client_id,
+        client_secret, username, password,
+    ) -> list:
+        """Recover measure DAX when Execute Queries/XMLA fails for a Service Account.
+
+        Tier 1: Fabric TMDL with the SA (works if the workspace is Fabric-enabled).
+        Tier 2: Fabric TMDL with a Service Principal (if client_secret provided).
+        Both reuse the standalone helpers in generate_config so the logic is
+        shared with the Pipeline Config Generator.
+        """
+        try:
+            gen = self._import_generate_config()
+        except Exception as e:
+            logger.warning(f"[UCMV] Could not load generate_config for fallback: {e}")
+            return []
+
+        # Tier 1: TMDL with whatever creds are present (SA preferred, else SP).
+        for label, sa_user, sa_pw, sp_secret in (
+            ("SA", username, password, None),
+            ("SP", None, None, client_secret),
+        ):
+            if label == "SA" and not (sa_user and sa_pw):
+                continue
+            if label == "SP" and not sp_secret:
+                continue
+            try:
+                fabric_token = gen.get_fabric_token(
+                    tenant_id, client_id, sp_secret,
+                    username=sa_user, password=sa_pw,
+                )
+                tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                if tmdl_parts:
+                    tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
+                    measures = self._tmdl_tables_to_measures(tables)
+                    if measures:
+                        logger.info(f"[UCMV] TMDL fallback ({label}) recovered {len(measures)} measures")
+                        return measures
+            except Exception as e:
+                logger.warning(f"[UCMV] TMDL fallback ({label}) failed: {e}")
+        return []
+
     def _extract_from_pbi_api(
         self,
         workspace_id: str,
@@ -507,6 +590,21 @@ class UCMetricViewGeneratorTool(BaseTool):
             logger.info(f"[UCMV] Extracted {len(measures)} measures from PBI API")
         except Exception as e:
             logger.warning(f"[UCMV] Measure extraction failed: {e}")
+
+        # 1b. Measure DAX fallback — the Execute Queries / XMLA path above is
+        # frequently rejected for Service-Account (ROPC) tokens, yielding zero
+        # measures. Recover via (a) Fabric TMDL (which an SA CAN read) and, if a
+        # client_secret is available, (b) a Service-Principal retry. Mirrors the
+        # Semantic Model Fetcher's TMDL→SP DAX strategy.
+        if not result.get('measures'):
+            recovered = self._extract_measures_fallback(
+                workspace_id=workspace_id, dataset_id=dataset_id,
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                username=username, password=password,
+            )
+            if recovered:
+                result['measures'] = recovered
+                logger.info(f"[UCMV] Recovered {len(recovered)} measures via TMDL/SP fallback")
 
         # 2. Extract MQuery via Admin API scan
         try:
