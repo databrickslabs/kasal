@@ -98,18 +98,26 @@ class TestRegisterMCPAdapter:
 # get_or_create_mcp_adapter
 # ===========================================================================
 
+def _healthy_adapter():
+    """A mock adapter that passed discovery (reusable from the pool)."""
+    adapter = MagicMock()
+    adapter._initialized = True
+    adapter.initialization_error = None
+    adapter.tools = [{"name": "some_tool"}]
+    adapter.initialize = AsyncMock()
+    return adapter
+
+
 class TestGetOrCreateMCPAdapter:
 
     @pytest.mark.asyncio
     async def test_creates_new_adapter_when_pool_empty(self):
-        mock_adapter = MagicMock()
-        mock_adapter._initialized = True
+        mock_adapter = _healthy_adapter()
 
         with patch(
             "src.engines.common.mcp_adapter.MCPAdapter",
             return_value=mock_adapter,
         ) as mock_cls:
-            mock_adapter.initialize = AsyncMock()
             result = await get_or_create_mcp_adapter(
                 {"url": "http://example.com", "auth_type": "pat"},
                 adapter_id="a1",
@@ -121,8 +129,7 @@ class TestGetOrCreateMCPAdapter:
 
     @pytest.mark.asyncio
     async def test_reuses_adapter_from_pool(self):
-        existing = MagicMock()
-        existing._initialized = True
+        existing = _healthy_adapter()
         # No auth material in server_params → identity fingerprint is 'noauth'.
         mcp_handler._mcp_connection_pool["http://example.com_pat_noauth"] = existing
 
@@ -139,9 +146,7 @@ class TestGetOrCreateMCPAdapter:
         stale._initialized = False
         mcp_handler._mcp_connection_pool["http://example.com_pat_noauth"] = stale
 
-        fresh = MagicMock()
-        fresh._initialized = True
-        fresh.initialize = AsyncMock()
+        fresh = _healthy_adapter()
 
         with patch(
             "src.engines.common.mcp_adapter.MCPAdapter",
@@ -159,7 +164,7 @@ class TestGetOrCreateMCPAdapter:
         made = []
 
         def _make(_params):
-            a = MagicMock(); a._initialized = True; a.initialize = AsyncMock()
+            a = _healthy_adapter()
             made.append(a)
             return a
 
@@ -181,7 +186,7 @@ class TestGetOrCreateMCPAdapter:
     @pytest.mark.asyncio
     async def test_same_token_reuses_pooled_adapter(self):
         """The same caller (identical credential) reuses one pooled connection."""
-        existing = MagicMock(); existing._initialized = True
+        existing = _healthy_adapter()
         params = {
             "url": "https://w/api/2.0/mcp/genie/s1",
             "auth_type": "databricks_obo",
@@ -189,7 +194,6 @@ class TestGetOrCreateMCPAdapter:
         }
         # Prime the pool via a first create, then assert the second call reuses it.
         with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=existing):
-            existing.initialize = AsyncMock()
             first = await get_or_create_mcp_adapter(params)
         second = await get_or_create_mcp_adapter(params)
         assert first is existing and second is existing
@@ -197,9 +201,7 @@ class TestGetOrCreateMCPAdapter:
 
     @pytest.mark.asyncio
     async def test_stdio_transport_pool_key(self):
-        adapter = MagicMock()
-        adapter._initialized = True
-        adapter.initialize = AsyncMock()
+        adapter = _healthy_adapter()
 
         with patch(
             "src.engines.common.mcp_adapter.MCPAdapter",
@@ -209,6 +211,66 @@ class TestGetOrCreateMCPAdapter:
                 {"transport": "stdio", "command": ["python", "-m", "server"]}
             )
             assert "stdio_python -m server" in mcp_handler._mcp_connection_pool
+
+    @pytest.mark.asyncio
+    async def test_failed_adapter_is_returned_but_not_pooled(self):
+        """A discovery failure (initialization_error set, 0 tools) must surface
+        to the caller but must NOT be cached — the next run retries fresh."""
+        failed = MagicMock()
+        failed._initialized = True  # initialize() sets this even on failure
+        failed.initialization_error = Exception("Session terminated")
+        failed.tools = []
+        failed.initialize = AsyncMock()
+
+        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=failed):
+            result = await get_or_create_mcp_adapter(
+                {"url": "http://example.com", "auth_type": "api_key"}
+            )
+        assert result is failed
+        assert len(mcp_handler._mcp_connection_pool) == 0
+
+    @pytest.mark.asyncio
+    async def test_pooled_adapter_with_no_tools_is_evicted(self):
+        """An adapter that discovered zero tools (even without a recorded
+        error) is useless to agents — retry the connection instead of reusing."""
+        empty = MagicMock()
+        empty._initialized = True
+        empty.initialization_error = None
+        empty.tools = []
+        mcp_handler._mcp_connection_pool["http://example.com_api_key_noauth"] = empty
+
+        fresh = _healthy_adapter()
+        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=fresh):
+            result = await get_or_create_mcp_adapter(
+                {"url": "http://example.com", "auth_type": "api_key"}
+            )
+        assert result is fresh
+        fresh.initialize.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failed_pooled_adapter_is_evicted_and_reconnected(self):
+        """Regression: a pooled adapter whose discovery failed (e.g. a
+        404/'Session terminated' handshake) was reused forever because only
+        _initialized was checked, so the server gave 0 tools until restart.
+        It must be evicted and the connection retried."""
+        poisoned = MagicMock()
+        poisoned._initialized = True
+        poisoned.initialization_error = Exception("Session terminated")
+        poisoned.tools = []
+        mcp_handler._mcp_connection_pool["http://example.com_api_key_noauth"] = poisoned
+
+        fresh = _healthy_adapter()
+        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=fresh):
+            result = await get_or_create_mcp_adapter(
+                {"url": "http://example.com", "auth_type": "api_key"}
+            )
+        assert result is fresh
+        fresh.initialize.assert_awaited_once()
+        # The recovered (healthy) adapter replaces the poisoned one in the pool.
+        assert (
+            mcp_handler._mcp_connection_pool["http://example.com_api_key_noauth"]
+            is fresh
+        )
 
 
 # ===========================================================================

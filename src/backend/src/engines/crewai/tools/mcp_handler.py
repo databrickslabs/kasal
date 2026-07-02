@@ -259,6 +259,24 @@ _active_mcp_adapters = {}
 # Connection pool for MCP adapters to reuse connections
 _mcp_connection_pool = {}
 
+
+def _adapter_is_healthy(adapter) -> bool:
+    """Whether a pooled adapter can be reused for tool discovery.
+
+    ``MCPAdapter.initialize()`` sets ``_initialized = True`` even when
+    discovery FAILS (it records ``initialization_error`` and leaves an empty
+    tool list), so ``_initialized`` alone cannot distinguish a working
+    connection from a dead one. A failed adapter must never be reused —
+    otherwise one transient failure (e.g. a 404/"Session terminated"
+    handshake) pins 0 tools for that server until the process restarts.
+    """
+    return bool(
+        getattr(adapter, '_initialized', False)
+        and not getattr(adapter, 'initialization_error', None)
+        and getattr(adapter, 'tools', None)
+    )
+
+
 async def get_or_create_mcp_adapter(server_params, adapter_id=None):
     """
     Get an existing MCP adapter from the connection pool or create a new one.
@@ -307,14 +325,14 @@ async def get_or_create_mcp_adapter(server_params, adapter_id=None):
     if pool_key in _mcp_connection_pool:
         adapter = _mcp_connection_pool[pool_key]
         # Verify the adapter is still initialized and functional
-        if hasattr(adapter, '_initialized') and adapter._initialized:
+        if _adapter_is_healthy(adapter):
             logger.info(f"Reusing MCP adapter from pool for key: {pool_key}")
             # Still register it with the specific adapter_id if provided
             if adapter_id:
                 register_mcp_adapter(adapter_id, adapter)
             return adapter
         else:
-            # Remove stale adapter from pool
+            # Remove stale/failed adapter from pool and reconnect
             logger.warning(f"Removing stale adapter from pool for key: {pool_key}")
             del _mcp_connection_pool[pool_key]
     
@@ -324,9 +342,12 @@ async def get_or_create_mcp_adapter(server_params, adapter_id=None):
     
     adapter = MCPAdapter(server_params)
     await adapter.initialize()
-    
-    # Add to connection pool for reuse
-    _mcp_connection_pool[pool_key] = adapter
+
+    # Pool only healthy adapters for reuse. A failed discovery is still
+    # returned to the caller (so its initialization_error surfaces as a
+    # warning), but must not poison the pool — the next run retries fresh.
+    if _adapter_is_healthy(adapter):
+        _mcp_connection_pool[pool_key] = adapter
     
     # Also register it for tracking if adapter_id provided
     if adapter_id:
