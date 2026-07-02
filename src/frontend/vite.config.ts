@@ -1,29 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
-import viteCompression from 'vite-plugin-compression';
 import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const isProduction = mode === 'production';
   const analyze = process.env.ANALYZE === 'true';
 
   return {
     plugins: [
       react(),
-      // Gzip compression
-      isProduction && viteCompression({
-        algorithm: 'gzip',
-        ext: '.gz',
-        threshold: 8192,
-      }),
-      // Brotli compression
-      isProduction && viteCompression({
-        algorithm: 'brotliCompress',
-        ext: '.br',
-        threshold: 10240,
-      }),
+      // NOTE: precompression (gzip/brotli) plugins removed — the app server
+      // (entrypoint.py) does not serve .gz/.br, so those artifacts were unused
+      // dead weight and brotli compression alone exhausted the Databricks Apps
+      // build container's ~2GB Node heap. Compression is handled at the edge.
       // Bundle analyzer
       analyze && visualizer({
         filename: 'bundle-report.html',
@@ -72,6 +62,10 @@ export default defineConfig(({ mode }) => {
         },
       },
       chunkSizeWarningLimit: 512,
+      // Skip the post-build "computing gzip size..." pass: it gzips every
+      // chunk in memory just to print a size summary and OOMs the Apps build
+      // container's V8 heap on this bundle. Purely cosmetic; safe to disable.
+      reportCompressedSize: false,
     },
 
     // Strip console.*/debugger from production bundles (previously handled by
