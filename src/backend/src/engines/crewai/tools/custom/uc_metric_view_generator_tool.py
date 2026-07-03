@@ -309,6 +309,15 @@ class UCMetricViewGeneratorTool(BaseTool):
             if rows:
                 resolved_measures_by_table[table_key] = rows
 
+        # ── Worst-case fallback: per-table tabular extract ─────────────────
+        # Even when NO views generate (e.g. an all-raw-Power-Query-M model where
+        # neither fact detection nor the M→SQL fallback could produce a UCMV),
+        # the customer should still get the raw material they can act on: for
+        # each PBI table, its M-Query source expression plus the measures/DAX
+        # associated with it. Built from the tool's inputs, so it is populated
+        # regardless of whether the transpilation pipeline succeeded.
+        fallback_extract = self._build_fallback_extract(measures, mquery_entries)
+
         output = {
             'yaml': yaml_output,
             'sql': sql_output,
@@ -319,6 +328,10 @@ class UCMetricViewGeneratorTool(BaseTool):
             'measures_with_dax': _measures_for_validation,
             'resolved_measures_by_table': resolved_measures_by_table,
             'mquery_raw': mquery_entries if isinstance(mquery_entries, list) else [],
+            # Always present; the UI shows it as a tabular reference and falls back
+            # to it as the primary artifact when `yaml` is empty (0 views).
+            'fallback_extract': fallback_extract,
+            'views_generated': len(yaml_output) if isinstance(yaml_output, dict) else 0,
             'specs_summary': {
                 k: {
                     'view_name': v.get('view_name'),
@@ -389,6 +402,66 @@ class UCMetricViewGeneratorTool(BaseTool):
                 'proposed_allocation': m.get('proposed_allocation') or '',
             })
         return extract
+
+    @staticmethod
+    def _build_fallback_extract(measures: Any, mquery_entries: Any) -> list:
+        """Per-table tabular extract of M-Query source + associated measures/DAX.
+
+        The worst-case safety net: when no UC Metric View can be generated (e.g.
+        an all-raw-Power-Query-M model), the customer still gets the raw material
+        organised per table — the M-Query source expression and every measure
+        (with its DAX) allocated to that table. Rendered as a table in the UI.
+
+        Groups by the table each measure is allocated to (proposed_allocation /
+        table_name) and each M-Query entry's table_name. Tables that appear in
+        either source are included, so a table with M-Query but no measures (and
+        vice-versa) is still listed.
+        """
+        by_table: dict[str, dict] = {}
+
+        def _slot(name: str) -> dict:
+            key = name or '__unassigned__'
+            if key not in by_table:
+                by_table[key] = {'table_name': key, 'mquery': '', 'measures': []}
+            return by_table[key]
+
+        # M-Query source per table
+        if isinstance(mquery_entries, list):
+            for e in mquery_entries:
+                if not isinstance(e, dict):
+                    continue
+                tname = e.get('table_name') or ''
+                if not tname:
+                    continue
+                slot = _slot(tname)
+                # Prefer a non-empty source; keep the first seen otherwise.
+                src = e.get('transpiled_sql') or e.get('mquery_expression') or ''
+                if src and not slot['mquery']:
+                    slot['mquery'] = src
+
+        # Measures + DAX per table
+        if isinstance(measures, list):
+            for m in measures:
+                if not isinstance(m, dict):
+                    continue
+                alloc = (
+                    m.get('proposed_allocation')
+                    or m.get('table_name')
+                    or m.get('table')
+                    or '__unassigned__'
+                )
+                _slot(alloc)['measures'].append({
+                    'measure_name': m.get('measure_name') or m.get('original_name') or '',
+                    'dax_expression': m.get('dax_expression') or m.get('expression') or '',
+                })
+
+        # Stable, readable ordering: tables with measures first, then by name.
+        rows = list(by_table.values())
+        rows.sort(key=lambda r: (-len(r['measures']), r['table_name']))
+        for r in rows:
+            r['measure_count'] = len(r['measures'])
+            r['has_mquery'] = bool(r['mquery'])
+        return rows
 
     async def _save_dax_to_conversion_history(
         self,

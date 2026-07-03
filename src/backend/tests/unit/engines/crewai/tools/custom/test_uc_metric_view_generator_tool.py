@@ -340,3 +340,51 @@ class TestExtractMqueryFallback:
                 client_secret=None, username=None, password=None,
             )
         assert out == []
+
+
+class TestBuildFallbackExtract:
+    """Worst-case fallback: per-table M-Query + measures/DAX table.
+
+    When no views generate (all-raw-M model), the run still yields the extracted
+    source material grouped per table so the customer has something usable.
+    """
+
+    def test_groups_mquery_and_measures_per_table(self):
+        measures = [
+            {"measure_name": "Total", "dax_expression": "SUM(DCC[Amt])", "proposed_allocation": "DCC_Sales"},
+            {"measure_name": "Cnt", "expression": "COUNTROWS(DCC)", "table_name": "DCC_Sales"},
+        ]
+        mquery = [{"table_name": "DCC_Sales", "transpiled_sql": "let S in S"}]
+        rows = UCMetricViewGeneratorTool._build_fallback_extract(measures, mquery)
+        dcc = next(r for r in rows if r["table_name"] == "DCC_Sales")
+        assert dcc["measure_count"] == 2
+        assert dcc["has_mquery"] is True
+        # alt keys (expression) are read
+        assert any(m["dax_expression"] == "COUNTROWS(DCC)" for m in dcc["measures"])
+
+    def test_table_with_mquery_but_no_measures_included(self):
+        rows = UCMetricViewGeneratorTool._build_fallback_extract(
+            [], [{"table_name": "dim_Country", "transpiled_sql": "let S in S"}]
+        )
+        dim = next(r for r in rows if r["table_name"] == "dim_Country")
+        assert dim["measure_count"] == 0 and dim["has_mquery"] is True
+
+    def test_measure_without_allocation_goes_unassigned(self):
+        rows = UCMetricViewGeneratorTool._build_fallback_extract(
+            [{"measure_name": "X", "dax_expression": "BLANK()"}], []
+        )
+        assert rows[0]["table_name"] == "__unassigned__"
+        assert rows[0]["measure_count"] == 1
+
+    def test_empty_inputs(self):
+        assert UCMetricViewGeneratorTool._build_fallback_extract([], []) == []
+        assert UCMetricViewGeneratorTool._build_fallback_extract(None, None) == []
+
+    def test_sorted_measures_first(self):
+        rows = UCMetricViewGeneratorTool._build_fallback_extract(
+            [{"measure_name": "M", "dax_expression": "d", "proposed_allocation": "HasMeasures"}],
+            [{"table_name": "NoMeasures", "transpiled_sql": "let S in S"},
+             {"table_name": "HasMeasures", "transpiled_sql": "let S in S"}],
+        )
+        # table with measures sorts before the one without
+        assert rows[0]["table_name"] == "HasMeasures"
