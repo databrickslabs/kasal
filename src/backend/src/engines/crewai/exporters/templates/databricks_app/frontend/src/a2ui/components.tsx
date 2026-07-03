@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Separator } from './ui/separator'
 import { Button } from './ui/button'
 import { downloadCsv, downloadPptx } from './lib/download'
-import { DeckThemeContext, deckProseVars } from './lib/deckThemes'
+import { DeckThemeContext, deckProseVars, seriesFromAccent, readableTextOn } from './lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from './lib/surfaceContext'
 import { mdComponents, linkifyCitations } from './lib/markdown'
 import { cn } from './lib/utils'
@@ -40,7 +40,6 @@ const asStr = (v: unknown): string => {
   return String(v)
 }
 const asArr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
-const CHART_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7']
 
 export function Markdown({ node, resolve }: NodeProps) {
   // Inside a slide deck, drive the `prose` text colors from the deck theme so
@@ -317,6 +316,12 @@ export function Chart({ node, resolve }: NodeProps) {
   const xKey = asStr(node.xKey) || 'name'
   const yKeys = asArr(node.yKeys).map(asStr)
   const keys = yKeys.length ? yKeys : ['value']
+  // Series colors follow the workspace accent (UIConfigurator is the source of
+  // truth) instead of a fixed rainbow: first color IS the accent, the rest are
+  // evenly-spaced hues derived from it. Pie needs one per slice, bar/line one
+  // per series.
+  const theme = useContext(DeckThemeContext)
+  const series = seriesFromAccent(theme.accent, Math.max(data.length, keys.length, 1))
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
       {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
@@ -328,7 +333,7 @@ export function Chart({ node, resolve }: NodeProps) {
             {/* Radius RELATIVE to the box and cy lifted to 46% so the bottom legend
                 has room — a fixed 90px radius overflowed small cells. */}
             <Pie data={data} dataKey={keys[0]} nameKey={xKey} cx="50%" cy="46%" outerRadius="70%" label>
-              {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+              {data.map((_, i) => <Cell key={i} fill={series[i % series.length]} />)}
             </Pie>
             <Tooltip /><Legend />
           </PieChart>
@@ -336,13 +341,13 @@ export function Chart({ node, resolve }: NodeProps) {
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
-            {keys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            {keys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={series[i % series.length]} />)}
           </LineChart>
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
-            {keys.map((k, i) => <Bar key={k} dataKey={k} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            {keys.map((k, i) => <Bar key={k} dataKey={k} fill={series[i % series.length]} />)}
           </BarChart>
         )}
       </ResponsiveContainer>
@@ -1133,7 +1138,9 @@ export function GeoMap({ node, resolve }: NodeProps) {
 
   const hasValues = pts.some((p) => Number.isFinite(p.value) && p.value > 0)
   const maxVal = Math.max(...pts.map((p) => (Number.isFinite(p.value) ? p.value : 0)), 1)
-  const color = (i: number) => CHART_COLORS[i % CHART_COLORS.length]
+  // Point/legend swatch colors follow the workspace accent (see Chart).
+  const palette = seriesFromAccent(theme.accent, Math.max(pts.length, 1))
+  const color = (i: number) => palette[i % palette.length]
 
   return (
     <div className="flex flex-col gap-3">
@@ -1197,7 +1204,6 @@ const MM_COL = 260
 const MM_ROW = 76
 const MM_MIN_ZOOM = 0.3
 const MM_MAX_ZOOM = 2.5
-const MM_ACCENT = '#2563eb' // root branch seed color (nodes derive their own)
 
 function mindmapChildren(node: MindmapData): MindmapData[] {
   return Array.isArray(node.children)
@@ -1205,8 +1211,12 @@ function mindmapChildren(node: MindmapData): MindmapData[] {
     : []
 }
 
-function buildMindmap(root: MindmapData): { nodes: Record<string, MMNode>; rootId: string } {
+// `accent` is the workspace accent (UIConfigurator source of truth): it seeds the
+// root and the per-branch colors that descendants inherit, so the mindmap follows
+// the brand instead of a fixed rainbow.
+function buildMindmap(root: MindmapData, accent: string): { nodes: Record<string, MMNode>; rootId: string } {
   const nodes: Record<string, MMNode> = {}
+  const branchColors = seriesFromAccent(accent, Math.max(mindmapChildren(root).length, 1))
   const walk = (node: MindmapData, id: string, depth: number, parentId: string | null, color: string) => {
     const kids = mindmapChildren(node)
     const childIds = kids.map((_, i) => `${id}.${i}`)
@@ -1216,11 +1226,11 @@ function buildMindmap(root: MindmapData): { nodes: Record<string, MMNode>; rootI
     const detail = explicit != null ? String(explicit) : textVal && textVal !== label ? textVal : ''
     nodes[id] = { id, label, detail, depth, parentId, childIds, color }
     kids.forEach((k, i) => {
-      const childColor = depth === 0 ? CHART_COLORS[i % CHART_COLORS.length] : color
+      const childColor = depth === 0 ? branchColors[i % branchColors.length] : color
       walk(k, childIds[i], depth + 1, id, childColor)
     })
   }
-  walk(root, 'r', 0, null, MM_ACCENT)
+  walk(root, 'r', 0, null, accent)
   return { nodes, rootId: 'r' }
 }
 
@@ -1303,7 +1313,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
   // `theme.bg` is the solid palette background (stage is a gradient); nodes mirror
   // the slide stat-tile treatment (panel + panelBorder + fg).
   const theme = useContext(DeckThemeContext)
-  const { nodes, rootId } = useMemo(() => buildMindmap(root), [root])
+  const { nodes, rootId } = useMemo(() => buildMindmap(root, theme.accent), [root, theme.accent])
   const initial = useMemo(() => layoutMindmap(nodes, rootId), [nodes, rootId])
   const [positions, setPositions] = useState<Record<string, XY>>(() => initial)
   const [collapsed, setCollapsed] = useState<Set<string>>(
@@ -1505,7 +1515,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
                 // `theme.panel` alone is semi-transparent on the built-in themes.
                 backgroundColor: isRoot ? theme.accent : theme.bg,
                 backgroundImage: isRoot ? 'none' : `linear-gradient(0deg, ${theme.panel}, ${theme.panel})`,
-                color: isRoot ? '#ffffff' : theme.fg,
+                color: isRoot ? readableTextOn(theme.accent) : theme.fg,
                 border: `1px solid ${isRoot ? theme.accent : theme.panelBorder}`,
                 ...(isRoot
                   ? {}
@@ -1562,7 +1572,7 @@ function MindmapCanvas({ root }: { root: MindmapData }) {
                     lineHeight: 1,
                     fontVariantNumeric: 'tabular-nums',
                     background: isRoot ? 'rgba(255,255,255,0.22)' : 'rgba(127,127,127,0.18)',
-                    color: isRoot ? '#ffffff' : node.color,
+                    color: isRoot ? readableTextOn(theme.accent) : node.color,
                     border: `1px solid ${isRoot ? 'transparent' : theme.panelBorder}`,
                   }}
                 >

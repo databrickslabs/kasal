@@ -183,6 +183,76 @@ function isDarkHex(hex: string): boolean {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5
 }
 
+// Seed used only when an accent is missing/unparseable, so series/contrast helpers
+// always return usable colors. Matches the Default palette accent (uiConfigShared).
+const DEFAULT_ACCENT = '#2272B4'
+
+/** hex (#RRGGBB / #RGB) → {h:0-360, s:0-1, l:0-1}, or null when unparseable. */
+function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
+  const rgb = _ch(hex)
+  if (!rgb) return null
+  const [r, g, b] = rgb.map((v) => v / 255) as [number, number, number]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  const d = max - min
+  let h = 0
+  let s = 0
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+  }
+  return { h, s, l }
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  const [r, g, b] = (
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+      : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
+  ) as [number, number, number]
+  const to = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`
+}
+
+/**
+ * A categorical color series seeded from the workspace accent, so multi-series
+ * charts, map points and mindmap branches follow the brand instead of a fixed
+ * rainbow. The FIRST color is the accent itself (single-series charts stay on
+ * brand); the rest are evenly-spaced hues at the accent's saturation/lightness
+ * (clamped for chart legibility). Falls back to {@link DEFAULT_ACCENT} when the
+ * accent is missing/unparseable, so callers always get `count` usable colors.
+ */
+export function seriesFromAccent(accent: string, count: number): string[] {
+  if (count <= 0) return []
+  const seed = hexToHsl(accent) ? accent : DEFAULT_ACCENT
+  const base = hexToHsl(seed) as { h: number; s: number; l: number }
+  const s = Math.min(0.72, Math.max(0.45, base.s))
+  const l = Math.min(0.62, Math.max(0.42, base.l))
+  const span = Math.max(count, 6)
+  const step = 360 / span
+  const out: string[] = []
+  for (let i = 0; i < count; i++) {
+    out.push(i === 0 ? seed : hslToHex((base.h + i * step) % 360, s, l))
+  }
+  return out
+}
+
+/** Black or white — whichever reads on top of `hex` (perceived luminance). Used
+ *  for text/icons painted directly on an accent fill, so contrast follows the
+ *  configured palette instead of assuming a dark accent. */
+export function readableTextOn(hex: string): string {
+  const rgb = _ch(hex)
+  if (!rgb) return '#ffffff'
+  const [r, g, b] = rgb
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? '#0f172a' : '#ffffff'
+}
+
 /** Map a workspace branding palette → a DeckTheme (drives the on-screen deck AND
  *  the PowerPoint export, which both read DeckThemeContext). */
 export function themeToDeck(p: Palette): DeckTheme {

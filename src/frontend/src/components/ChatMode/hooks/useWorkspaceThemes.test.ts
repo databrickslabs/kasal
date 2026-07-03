@@ -3,9 +3,13 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useWorkspaceThemes } from './useWorkspaceThemes';
 
 const mockGetConfig = vi.fn();
+// useWorkspaceThemes now delegates to useA2uiThemes, which reads the shared
+// UIConfigService cache (peek) and its change subscription in addition to getConfig.
 vi.mock('../../../api/UIConfigService', () => ({
   UIConfigService: {
     getConfig: (...args: unknown[]) => mockGetConfig(...args),
+    peek: () => undefined,
+    subscribe: () => () => {},
   },
 }));
 

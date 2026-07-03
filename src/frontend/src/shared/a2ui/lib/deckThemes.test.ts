@@ -4,9 +4,13 @@ import {
   themeToDeck,
   themeToTokens,
   getDeckTheme,
+  seriesFromAccent,
+  readableTextOn,
   DEFAULT_DECK_THEME_ID,
   type Palette,
 } from './deckThemes';
+
+const HEX = /^#[0-9a-f]{6}$/i;
 
 const LIGHT: Palette = {
   accent: '#2272B4',
@@ -81,5 +85,39 @@ describe('getDeckTheme', () => {
   it('returns the default theme for unknown ids', () => {
     expect(getDeckTheme('nope').id).toBe(DEFAULT_DECK_THEME_ID);
     expect(getDeckTheme(undefined).id).toBe(DEFAULT_DECK_THEME_ID);
+  });
+});
+
+describe('seriesFromAccent', () => {
+  it('leads with the accent itself, so single-series charts stay on brand', () => {
+    expect(seriesFromAccent('#2272B4', 4)[0]).toBe('#2272B4');
+  });
+  it('returns exactly `count` valid hex colors', () => {
+    const s = seriesFromAccent('#2272B4', 5);
+    expect(s).toHaveLength(5);
+    for (const c of s) expect(c).toMatch(HEX);
+  });
+  it('produces distinct hues beyond the accent (not a single flat color)', () => {
+    const s = seriesFromAccent('#2272B4', 4);
+    expect(new Set(s).size).toBe(4);
+  });
+  it('handles empty and non-positive counts', () => {
+    expect(seriesFromAccent('#2272B4', 0)).toEqual([]);
+    expect(seriesFromAccent('#2272B4', -3)).toEqual([]);
+  });
+  it('falls back to a usable palette when the accent is unparseable', () => {
+    const s = seriesFromAccent('not-a-color', 3);
+    expect(s).toHaveLength(3);
+    for (const c of s) expect(c).toMatch(HEX);
+  });
+});
+
+describe('readableTextOn', () => {
+  it('returns white on a dark accent and dark ink on a light accent', () => {
+    expect(readableTextOn('#0F172A')).toBe('#ffffff');
+    expect(readableTextOn('#FDE68A')).toBe('#0f172a');
+  });
+  it('falls back to white on invalid input (no throw)', () => {
+    expect(readableTextOn('nope')).toBe('#ffffff');
   });
 });

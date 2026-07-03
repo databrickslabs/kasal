@@ -419,6 +419,19 @@
   color: var(--text-primary);
 }
 
+/* A2UI surfaces own their text colors (deck-theme inline colors, the deck theme's
+   --tw-prose-* vars, and the --a2-* tokens). The chat-TRANSCRIPT prose overrides
+   above are scoped to #kasal-chat-root and therefore leak into any A2UI surface
+   rendered inside chat — forcing its themed body/heading text to the chat page's
+   --text-primary. On a dark deck theme with a light chat page that paints the
+   slide's text dark-on-dark (invisible). Reset prose text to `inherit` inside any
+   .kasal-a2ui surface so the renderer's own theme wins. Links keep their themed
+   color via --tw-prose-links, so `a` is intentionally excluded. */
+#kasal-chat-root .kasal-a2ui .prose,
+#kasal-chat-root .kasal-a2ui .prose :where(p, li, ul, ol, strong, em, blockquote, h1, h2, h3, h4, h5, h6, th, td) {
+  color: inherit;
+}
+
 /* --- Presentation deck entrance (UiRenderer Slides) --------------------- */
 /* Each slide change remounts .ui-slide-enter, replaying a staggered rise-in
    on the slide's content rows — same motion language as hand-built decks. */
