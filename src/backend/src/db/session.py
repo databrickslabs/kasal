@@ -831,6 +831,39 @@ async def _ensure_crew_columns(conn) -> None:
         logger.warning(f"Could not ensure crews.reasoning_config column: {e}")
 
 
+async def _disable_bi_specialist_crew_memory(conn) -> None:
+    """Idempotently disable crew/agent memory for the pre-seeded 'bi-specialist'
+    workspace. These are deterministic ETL crews (PBI config extraction → UCMV
+    generation → validation → deploy) that pass all data via the flow handoff and
+    tool configs, NOT via cross-run semantic recall. With memory on, CrewAI
+    auto-saves each task's output (incl. the ~174K-char pipeline-config JSON) and
+    recalls it workspace-wide into every later agent prompt — overflowing the
+    model's context window (200K), which forces a fallback to a larger model and
+    stalls the HITL approval gate. The seed now ships memory=False, but the seeder
+    is insert-only (it skips a group that already exists), so DBs seeded before
+    this change keep memory on. This self-heals them. Safe to run every startup —
+    it only flips rows that are still True, scoped to the bi-specialist group."""
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    # SQLite stores booleans as 0/1; Postgres uses true/false. exec_driver_sql
+    # with a literal keeps this dialect-agnostic enough for both.
+    true_val = "1" if is_sqlite else "true"
+    false_val = "0" if is_sqlite else "false"
+    try:
+        for table in ("crews", "agents"):
+            if is_sqlite:
+                res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+                cols = {row[1] for row in res.fetchall()}
+                if "memory" not in cols or "group_id" not in cols:
+                    continue  # table/columns not present yet (fresh DB handled by seed)
+            await conn.exec_driver_sql(
+                f"UPDATE {table} SET memory = {false_val} "
+                f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
+            )
+        logger.info("Ensured bi-specialist crews/agents have memory disabled")
+    except Exception as e:
+        logger.warning(f"Could not disable bi-specialist crew memory: {e}")
+
+
 async def _ensure_ui_config_columns(conn) -> None:
     """Idempotently add the Predefined-UI columns to ui_config. The table itself is
     created via create_all, but create_all never ALTERs an existing table — so DBs
@@ -1105,6 +1138,7 @@ async def init_db() -> None:
                     await _ensure_crew_feedback_table(conn)
                     await _ensure_crew_columns(conn)
                     await _ensure_ui_config_columns(conn)
+                    await _disable_bi_specialist_crew_memory(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:
