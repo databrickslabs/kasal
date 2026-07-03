@@ -13,6 +13,7 @@ from typing import List, Optional, Set
 CONTEXT_WINDOW = "context_window"  # prompt exceeded the model's context window
 FATAL_4XX = "fatal_4xx"  # model-incompatibility 4xx (e.g. Gemini thought_signature)
 RATE_LIMIT = "rate_limit"  # sustained 429 after same-model backoff
+ENDPOINT_MISSING = "endpoint_missing"  # 404: the model's serving endpoint isn't deployed here
 
 _CONTEXT_MARKERS = (
     "context length",
@@ -26,6 +27,14 @@ _CONTEXT_MARKERS = (
     "input is too long",
 )
 _RATE_LIMIT_MARKERS = ("rate limit", "too many requests", "quota exceeded")
+# Markers that identify a missing serving endpoint (the model isn't deployed in
+# THIS workspace) — a different, deployed model may work. Distinct from a generic
+# 404 so we can route it to "try another model" instead of dying.
+_ENDPOINT_MISSING_MARKERS = (
+    "endpoint_not_found",
+    "does not exist, please retry after checking",
+    "model and version deployment",
+)
 # Markers that identify a model-incompatibility 4xx (a different model may work),
 # as opposed to a generic bad request from malformed user input.
 _FATAL_4XX_MARKERS = (
@@ -109,6 +118,17 @@ def classify_llm_error(exc) -> Optional[str]:
     ):
         return CONTEXT_WINDOW
 
+    # A missing serving endpoint (404 ENDPOINT_NOT_FOUND) — the model isn't
+    # deployed in this workspace. Another enabled model might be, so try one.
+    # Checked before RATE_LIMIT/FATAL_4XX because it is unambiguous and terminal
+    # for THIS model (no amount of ret/backoff makes a nonexistent endpoint appear).
+    if (
+        "notfounderror" in text
+        or any(m in text for m in _ENDPOINT_MISSING_MARKERS)
+        or (status == 404 and "endpoint" in text)
+    ):
+        return ENDPOINT_MISSING
+
     if (
         status == 429
         or "ratelimiterror" in text
@@ -166,6 +186,18 @@ def select_fallback(
         return None  # nothing bigger — let the caller summarize instead
 
     if reason == FATAL_4XX:
+        cur_family = _model_family(current_model)
+        cross_family = [
+            c for c in avail if cur_family and _model_family(c.name) != cur_family
+        ]
+        pool = cross_family or avail
+        return max(pool, key=lambda c: c.context_window)
+
+    if reason == ENDPOINT_MISSING:
+        # The current model's endpoint isn't deployed here. Any OTHER untried
+        # model might be — prefer a different family (the missing one may be a
+        # whole family that's not provisioned, e.g. no gemini-* endpoints),
+        # roomiest first, else any untried model.
         cur_family = _model_family(current_model)
         cross_family = [
             c for c in avail if cur_family and _model_family(c.name) != cur_family
