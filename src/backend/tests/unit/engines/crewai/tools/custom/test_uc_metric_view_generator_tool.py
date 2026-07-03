@@ -242,3 +242,67 @@ class TestExtractMeasuresFallback:
                 client_secret=None, username=None, password=None,
             )
         assert out == []
+
+
+# ---------------------------------------------------------------------------
+# MQuery TMDL fallback (Admin Scanner blocked for Service Accounts)
+# ---------------------------------------------------------------------------
+
+class TestTmdlTablesToMquery:
+    def test_maps_source_and_skips_empty(self):
+        tables = {
+            "Fact_Sales": {"columns": [], "mquery_expression": "let S = X in S", "measures": []},
+            "Empty": {"columns": [], "mquery_expression": "", "measures": []},
+        }
+        out = UCMetricViewGeneratorTool._tmdl_tables_to_mquery(tables)
+        assert len(out) == 1
+        assert out[0]["table_name"] == "Fact_Sales"
+        assert out[0]["transpiled_sql"] == "let S = X in S"
+        assert out[0]["validation_passed"] == "No"
+
+
+class TestExtractMqueryFallback:
+    def _fake_gen(self, tmdl_ok=True):
+        gen = MagicMock()
+        gen.get_fabric_token.return_value = "fab"
+        gen.fetch_tmdl_parts.return_value = (
+            [{"path": "definition/tables/T.tmdl", "payload": "x"}] if tmdl_ok else None
+        )
+        gen.parse_tmdl_to_admin_tables.return_value = {
+            "Fact": {"columns": [], "mquery_expression": "let S=X in S", "measures": []}
+        }
+        return gen
+
+    def test_sa_recovers_mquery(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen()
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_mquery_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret=None, username="sa@x.com", password="pw",
+            )
+        assert len(out) == 1 and out[0]["table_name"] == "Fact"
+        _, kw = gen.get_fabric_token.call_args
+        assert kw["username"] == "sa@x.com"
+
+    def test_sp_fallback_when_no_sa(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen()
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_mquery_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret="sp-secret", username=None, password=None,
+            )
+        assert len(out) == 1
+        args, _ = gen.get_fabric_token.call_args
+        assert "sp-secret" in args
+
+    def test_empty_when_no_creds_and_no_tmdl(self):
+        tool = UCMetricViewGeneratorTool()
+        gen = self._fake_gen(tmdl_ok=False)
+        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+            out = tool._extract_mquery_fallback(
+                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
+                client_secret=None, username=None, password=None,
+            )
+        assert out == []

@@ -483,6 +483,68 @@ class UCMetricViewGeneratorTool(BaseTool):
                 })
         return measures
 
+    @staticmethod
+    def _tmdl_tables_to_mquery(admin_tables: dict) -> list:
+        """Convert generate_config TMDL table dict → UCMV mquery entry shape.
+
+        UCMV expects [{table_name, transpiled_sql, validation_passed}]. TMDL
+        gives the raw M-Query source per table (not transpiled SQL), so mark
+        validation_passed='No' — the downstream MQuery pipeline/parser handles
+        the raw expression and the generator only needs the source to detect
+        fact tables.
+        """
+        entries = []
+        for tbl_name, tbl_info in (admin_tables or {}).items():
+            src = (tbl_info.get('mquery_expression') or '').strip()
+            if not src:
+                continue
+            entries.append({
+                'table_name': tbl_name,
+                'transpiled_sql': src,
+                'validation_passed': 'No',
+            })
+        return entries
+
+    def _extract_mquery_fallback(
+        self, workspace_id, dataset_id, tenant_id, client_id,
+        client_secret, username, password,
+    ) -> list:
+        """Recover MQuery/table-source when the Admin Scanner fails for a Service Account.
+
+        Tier 1: Fabric TMDL with the SA (works if the workspace is Fabric-enabled).
+        Tier 2: Fabric TMDL with a Service Principal (if client_secret provided).
+        Reuses generate_config so the logic is shared with the config generator.
+        """
+        try:
+            gen = self._import_generate_config()
+        except Exception as e:
+            logger.warning(f"[UCMV] Could not load generate_config for MQuery fallback: {e}")
+            return []
+
+        for label, sa_user, sa_pw, sp_secret in (
+            ("SA", username, password, None),
+            ("SP", None, None, client_secret),
+        ):
+            if label == "SA" and not (sa_user and sa_pw):
+                continue
+            if label == "SP" and not sp_secret:
+                continue
+            try:
+                fabric_token = gen.get_fabric_token(
+                    tenant_id, client_id, sp_secret,
+                    username=sa_user, password=sa_pw,
+                )
+                tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                if tmdl_parts:
+                    tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
+                    entries = self._tmdl_tables_to_mquery(tables)
+                    if entries:
+                        logger.info(f"[UCMV] MQuery TMDL fallback ({label}) recovered {len(entries)} tables")
+                        return entries
+            except Exception as e:
+                logger.warning(f"[UCMV] MQuery TMDL fallback ({label}) failed: {e}")
+        return []
+
     def _extract_measures_fallback(
         self, workspace_id, dataset_id, tenant_id, client_id,
         client_secret, username, password,
@@ -632,6 +694,22 @@ class UCMetricViewGeneratorTool(BaseTool):
             logger.info(f"[UCMV] Extracted {len(mquery_entries)} MQuery tables from PBI Admin API")
         except Exception as e:
             logger.warning(f"[UCMV] MQuery extraction failed: {e}")
+
+        # 2b. MQuery fallback — the Admin Scanner (used above) rejects
+        # Service-Account tokens (401/403), leaving mquery empty. Without MQuery
+        # no fact table is detected and the generator emits 0 views even when
+        # measures were extracted. Recover the table source expressions via
+        # Fabric TMDL (SA-readable) or a Service-Principal retry, mirroring the
+        # measure fallback and the Semantic Model Fetcher.
+        if not result.get('mquery'):
+            recovered_mq = self._extract_mquery_fallback(
+                workspace_id=workspace_id, dataset_id=dataset_id,
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                username=username, password=password,
+            )
+            if recovered_mq:
+                result['mquery'] = recovered_mq
+                logger.info(f"[UCMV] Recovered {len(recovered_mq)} MQuery tables via TMDL/SP fallback")
 
         # 3. Extract relationships via Execute Queries API
         try:
