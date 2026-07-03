@@ -115,7 +115,9 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
         updatedConfig.password = undefined;
       } else if (newMethod === 'service_account') {
         updatedConfig.access_token = undefined;
-        updatedConfig.client_secret = undefined;
+        // Keep client_secret: in SA mode it is an OPTIONAL Service-Principal
+        // fallback for model-metadata extraction (Admin Scanner / M-Query) when
+        // the SA is blocked and the workspace is not Fabric-enabled.
       }
 
       onChange(updatedConfig);
@@ -382,6 +384,16 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
                   type="password"
                   fullWidth
                   helperText="Service account password"
+                  size="small"
+                />
+                <TextField
+                  label="Client Secret (optional)"
+                  value={value.client_secret || ''}
+                  onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+                  disabled={disabled}
+                  type="password"
+                  fullWidth
+                  helperText="Optional — Service Principal secret used as a fallback if the Service Account can't read model metadata (Admin Scanner / M-Query). Needed when the workspace is not Fabric-enabled. Leave blank for SA-only."
                   size="small"
                 />
               </Box>
