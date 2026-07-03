@@ -163,6 +163,34 @@ class UCMetricViewGeneratorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # ── Raw Power Query M → SQL source recovery (opt-in) ────────────────
+        # When a table's source is raw M (`let ... in ...`) with no embedded
+        # native SQL, MQueryParser cannot extract a FROM clause → the table is
+        # neither a fact nor has a source → 0 views. If LLM fallback is enabled,
+        # rewrite those entries' transpiled_sql to a Spark SQL SELECT the parser
+        # CAN read. Fail-open: entries the LLM can't translate are left as-is.
+        if use_llm and isinstance(mquery_entries, list) and mquery_entries:
+            try:
+                from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import (
+                    looks_like_raw_mquery,
+                )
+                raw_m_count = sum(
+                    1 for e in mquery_entries
+                    if isinstance(e, dict) and looks_like_raw_mquery(e.get('transpiled_sql') or '')
+                )
+                if raw_m_count:
+                    from src.engines.crewai.tools.custom.metric_view_utils.mquery_llm_fallback import (
+                        recover_sources_with_llm,
+                    )
+                    logger.info(f"[UCMV] {raw_m_count} raw M-Query table(s) detected; attempting M→SQL LLM recovery")
+                    mquery_entries, _recovered = _run_async(recover_sources_with_llm(
+                        mquery_entries,
+                        model=(_get('llm_model') or 'databricks-claude-sonnet-4'),
+                    ))
+                    logger.info(f"[UCMV] M→SQL recovery: {_recovered}/{raw_m_count} table(s) recovered")
+            except Exception as _m_err:
+                logger.warning(f"[UCMV] M→SQL LLM recovery skipped (non-fatal): {_m_err}")
+
         # Parse MQuery
         parser = MQueryParser()
         mquery_tables = parser.parse_json(mquery_entries)
