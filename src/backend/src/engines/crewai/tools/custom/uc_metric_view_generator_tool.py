@@ -260,6 +260,27 @@ class UCMetricViewGeneratorTool(BaseTool):
         if isinstance(measures, list):
             _measures_for_validation = measures
 
+        # Resolved measure→DAX map, keyed by FACT TABLE (the YAML table key).
+        # This is what the Quality Validator needs: each translated measure paired
+        # with its ORIGINAL DAX, allocated to the correct fact table. Unlike the
+        # raw `measures` list (keyed by PBI holder-table), this uses the pipeline's
+        # own allocation so the validator can pair YAML measures ↔ DAX and run the
+        # filter/aggregation comparison.
+        resolved_measures_by_table = {}
+        for table_key, spec in (results.get('specs', {}) or {}).items():
+            rows = []
+            for m in spec.get('measures', []):
+                rows.append({
+                    'measure_name': m.get('name', ''),
+                    'original_name': m.get('original_name', ''),
+                    'sql_expr': m.get('sql_expr', ''),
+                    'dax_expression': m.get('dax_expression', ''),
+                    'proposed_allocation': table_key,  # fact-table key, matches YAML
+                    'table_name': table_key,
+                })
+            if rows:
+                resolved_measures_by_table[table_key] = rows
+
         output = {
             'yaml': yaml_output,
             'sql': sql_output,
@@ -268,6 +289,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             'limitations': results.get('limitations', {}),
             'validation': validation_results,
             'measures_with_dax': _measures_for_validation,
+            'resolved_measures_by_table': resolved_measures_by_table,
             'mquery_raw': mquery_entries if isinstance(mquery_entries, list) else [],
             'specs_summary': {
                 k: {

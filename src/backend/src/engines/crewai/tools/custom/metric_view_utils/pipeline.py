@@ -646,6 +646,9 @@ class MetricViewPipeline:
                         'name': m.measure_name,
                         'original_name': m.original_name,
                         'sql_expr': m.sql_expr,
+                        # dax_expression is the ORIGINAL DAX — the validator needs
+                        # it to compare against the translated SQL (filter/agg check).
+                        'dax_expression': m.dax_expression,
                         'confidence': m.confidence,
                         'category': m.category,
                     }
