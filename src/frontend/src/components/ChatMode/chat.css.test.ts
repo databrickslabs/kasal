@@ -32,3 +32,25 @@ describe('chat.css — button font-size must be overridable by Tailwind text uti
     }
   });
 });
+
+// The chat-TRANSCRIPT markdown prose overrides (color: var(--text-primary), …) are
+// scoped to #kasal-chat-root and therefore leak into any A2UI surface rendered in
+// chat, pinning its themed body/heading text to the chat page color. On a dark deck
+// theme with a light chat page that paints the slide text dark-on-dark (invisible).
+// An isolation rule must reset prose color to `inherit` inside .kasal-a2ui so the
+// surface's own deck theme / --tw-prose-* / --a2-* colors win. Guards a CSS-cascade
+// bug that jsdom cannot exercise.
+describe('chat.css — A2UI surfaces must be isolated from transcript prose colors', () => {
+  const css = readFileSync(join(__dirname, 'chat.css'), 'utf8');
+  const normalized = css.replace(/\s+/g, ' ');
+
+  it('resets prose text to inherit inside .kasal-a2ui surfaces', () => {
+    expect(normalized).toMatch(/#kasal-chat-root \.kasal-a2ui \.prose/);
+    const block = normalized.match(/#kasal-chat-root \.kasal-a2ui \.prose[^{]*\{([^}]*)\}/);
+    expect(block?.[1] ?? '').toContain('color: inherit');
+  });
+
+  it('sanity: the leaking transcript prose color override still exists (what we isolate)', () => {
+    expect(normalized).toMatch(/#kasal-chat-root \.prose p \{[^}]*var\(--text-primary\)/);
+  });
+});

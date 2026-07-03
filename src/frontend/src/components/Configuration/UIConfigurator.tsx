@@ -164,7 +164,9 @@ const UIConfigurator: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    UIConfigService.getConfig()
+    // Force a fresh fetch: this editor is the writer, so it must open on the true
+    // server state rather than a palette cached by an earlier chat surface.
+    UIConfigService.getConfig(true)
       .then((cfg: UIConfig) => {
         if (!active) return;
         setEnabled(cfg.enabled);
