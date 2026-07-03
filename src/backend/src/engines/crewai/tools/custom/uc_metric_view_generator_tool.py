@@ -364,7 +364,14 @@ class UCMetricViewGeneratorTool(BaseTool):
             from src.schemas.conversion import ConversionHistoryCreate
             from src.utils.user_context import UserContext
 
-            measure_count = len(raw_dax)
+            raw_dax_count = len(raw_dax)
+            # In JSON/flow mode the tool does not re-extract, so raw_dax is empty
+            # even though views ARE generated (measures arrive via config_json /
+            # task context). Count the actual views produced so the diagnostic
+            # reflects success instead of a misleading "0 measures".
+            view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
+            # measure_count reflects extracted DAX when present, else views built.
+            measure_count = raw_dax_count or view_count
             history_data = ConversionHistoryCreate(
                 execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
                 source_format="powerbi_dax",
@@ -375,7 +382,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "dax_raw": raw_dax,
                 },
                 input_summary=(
-                    f"DAX extract: {measure_count} measure(s)"
+                    f"DAX extract: {raw_dax_count} measure(s)"
                     + (f" from workspace {workspace_id}" if workspace_id else "")
                 )[:500],
                 output_data={
@@ -385,7 +392,8 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "schema": schema,
                 },
                 output_summary=(
-                    f"Generated UC metric views for {measure_count} measure(s)"
+                    f"Generated {view_count} UC metric view(s)"
+                    + (f" from {raw_dax_count} extracted measure(s)" if raw_dax_count else " (JSON/flow mode)")
                 )[:500],
                 configuration={
                     "workspace_id": workspace_id,
@@ -412,7 +420,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 await repo.session.commit()
                 logger.info(
                     f"[UCMVGenerator] Saved conversion_history record id={record.id} "
-                    f"(source_format=powerbi_dax, measures={measure_count})"
+                    f"(source_format=powerbi_dax, views={view_count}, extracted_measures={raw_dax_count})"
                 )
         except Exception as e:
             logger.warning(f"[UCMVGenerator] Failed to save conversion_history (non-fatal): {e}")

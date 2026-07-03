@@ -146,6 +146,37 @@ class TestSaveDaxToConversionHistory:
         assert data["measure_count"] == 1
         mock_repo.session.commit.assert_awaited_once()
 
+    def test_json_mode_counts_views_not_zero(self):
+        """JSON/flow mode: raw_dax empty but views generated → count = views, not 0.
+
+        Regression: a successful JSON-mode run reported 'measure_count: 0' and
+        'Generated UC metric views for 0 measure(s)', which read as a failure.
+        """
+        tool = UCMetricViewGeneratorTool()
+        captured = {}
+        mock_repo = MagicMock()
+        mock_repo.create = AsyncMock(side_effect=lambda d: captured.update({"data": d}) or SimpleNamespace(id=9, group_id=None))
+        mock_repo.session = MagicMock()
+        mock_repo.session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _repo_ctx():
+            yield mock_repo
+
+        yaml_out = {"fact_a": "version: '1.1'", "fact_b": "...", "fact_c": "..."}
+        with patch(
+            "src.engines.crewai.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            _repo_ctx,
+        ):
+            self._run(tool._save_dax_to_conversion_history(
+                raw_dax=[], yaml_output=yaml_out, sql_output=yaml_out,
+                workspace_id="ws", dataset_id="ds", catalog="main", schema="default",
+            ))
+
+        data = captured["data"]
+        assert data["measure_count"] == 3  # views, not 0
+        assert "3 UC metric view(s)" in data["output_summary"]
+
     def test_fail_open_on_repo_error(self):
         tool = UCMetricViewGeneratorTool()
 
