@@ -517,11 +517,16 @@ class UCMetricViewGeneratorTool(BaseTool):
     def _tmdl_tables_to_mquery(admin_tables: dict) -> list:
         """Convert generate_config TMDL table dict → UCMV mquery entry shape.
 
-        UCMV expects [{table_name, transpiled_sql, validation_passed}]. TMDL
-        gives the raw M-Query source per table (not transpiled SQL), so mark
-        validation_passed='No' — the downstream MQuery pipeline/parser handles
-        the raw expression and the generator only needs the source to detect
-        fact tables.
+        UCMV expects [{table_name, transpiled_sql, validation_passed}].
+
+        IMPORTANT: validation_passed MUST start with 'Yes'. MQueryParser.parse_json
+        silently drops any entry whose validation_passed is not 'Yes...' unless the
+        SQL contains both SUM( and GROUP BY. The earlier 'No' value meant every
+        TMDL-recovered table was discarded → the fallback recovered rows but the
+        parser produced zero tables → 0 fact tables → 0 views. The source here is
+        the authoritative partition expression (embedded native SQL where the
+        datasource is a SQL DB, otherwise raw M), so mark it accepted and let the
+        parser extract what it can.
         """
         entries = []
         for tbl_name, tbl_info in (admin_tables or {}).items():
@@ -531,7 +536,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             entries.append({
                 'table_name': tbl_name,
                 'transpiled_sql': src,
-                'validation_passed': 'No',
+                'validation_passed': 'Yes',
             })
         return entries
 

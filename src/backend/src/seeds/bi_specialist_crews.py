@@ -301,7 +301,16 @@ UCMV_GEN_TASK = {
             "schema_name": "",
             "use_llm_fallback": True,
             "llm_model": "databricks-claude-sonnet-4",
+            # JSON mode: the flow injects the preceding Pipeline Config crew's
+            # output into these fields (config_json ← proposed_config,
+            # measures_json/mquery_json ← the handoff arrays it now emits). They
+            # start empty so the injection fills them; UCMV builds views from
+            # measures_json + mquery_json, so both MUST be present for the
+            # handoff to produce any views.
             "config_json": "{}",
+            "measures_json": "[]",
+            "mquery_json": "[]",
+            "relationships_json": "[]",
         }
     },
     "config": DEFAULT_TASK_CONFIG,

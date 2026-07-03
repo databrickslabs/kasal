@@ -289,7 +289,10 @@ class TestTmdlTablesToMquery:
         assert len(out) == 1
         assert out[0]["table_name"] == "Fact_Sales"
         assert out[0]["transpiled_sql"] == "let S = X in S"
-        assert out[0]["validation_passed"] == "No"
+        # MUST be "Yes": MQueryParser.parse_json drops entries whose
+        # validation_passed does not start with "Yes" (unless SUM+GROUP BY),
+        # so "No" here silently discarded every TMDL-recovered table → 0 views.
+        assert out[0]["validation_passed"] == "Yes"
 
 
 class TestExtractMqueryFallback:

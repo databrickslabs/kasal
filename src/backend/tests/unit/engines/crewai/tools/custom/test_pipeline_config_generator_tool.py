@@ -765,3 +765,66 @@ class TestEnrichSwitchDecompNoListCollision:
         PipelineConfigGeneratorTool._enrich_config_from_dax(config, measures)
         entry = config["switch_decompositions"].get("NewT")
         assert isinstance(entry, dict) and "m1" in entry
+
+
+class TestUCMVHandoffPayload:
+    """config-gen must emit measures_json + mquery_json in UCMV's shape.
+
+    Regression: the flow chained config-gen → UCMV (JSON mode), but config-gen
+    only emitted `proposed_config`. UCMV builds views from measures_json +
+    mquery_json (not config_json) → empty mapping → 0 views, even though config
+    extraction fully succeeded (customer log f2924007: 430 measures → 0 views).
+    """
+
+    def test_build_ucmv_measures_normalises_shape(self):
+        measures = [
+            {"measure_name": "Total Sales", "table_name": "Fact_Sales",
+             "expression": "SUM(Fact_Sales[Amount])", "description": "x"},
+            {"name": "Legacy", "table": "Fact_A", "dax_expression": "COUNT(1)"},
+        ]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(measures)
+        assert len(out) == 2
+        assert out[0] == {
+            "measure_name": "Total Sales", "original_name": "Total Sales",
+            "dax_expression": "SUM(Fact_Sales[Amount])",
+            "proposed_allocation": "Fact_Sales", "table_refs": [],
+        }
+        # alt keys (name/table/dax_expression) are honoured
+        assert out[1]["measure_name"] == "Legacy"
+        assert out[1]["proposed_allocation"] == "Fact_A"
+        assert out[1]["dax_expression"] == "COUNT(1)"
+
+    def test_build_ucmv_measures_drops_nameless(self):
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            [{"table_name": "X", "expression": ""}]
+        )
+        assert out == []
+
+    def test_build_ucmv_mquery_from_admin_tables(self):
+        admin_tables = {
+            "Fact_Sales": {"mquery_expression": "SELECT * FROM cat.sales", "measures": []},
+            "Dim_NoSource": {"measures": []},          # dropped: no source
+            "Fact_B": {"mquery": "SELECT 1"},          # alt key honoured
+        }
+        out = PipelineConfigGeneratorTool._build_ucmv_mquery(admin_tables)
+        names = {e["table_name"] for e in out}
+        assert names == {"Fact_Sales", "Fact_B"}
+        entry = next(e for e in out if e["table_name"] == "Fact_Sales")
+        assert entry["transpiled_sql"] == "SELECT * FROM cat.sales"
+        # MUST be "Yes" — UCMV's MQueryParser drops entries whose
+        # validation_passed does not start with "Yes" (unless SUM+GROUP BY).
+        assert entry["validation_passed"] == "Yes"
+
+    def test_build_ucmv_mquery_empty_when_no_sources(self):
+        out = PipelineConfigGeneratorTool._build_ucmv_mquery(
+            {"Dim_A": {"measures": []}, "Dim_B": {}}
+        )
+        assert out == []
+
+    def test_measures_shape_matches_ucmv_pipeline_contract(self):
+        """The emitted measures must carry the keys UCMV's pipeline reads."""
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            [{"measure_name": "m1", "table_name": "F", "expression": "SUM(x)"}]
+        )
+        # UCMV pipeline iterates mapping expecting these keys
+        assert set(out[0]) >= {"measure_name", "dax_expression", "proposed_allocation"}

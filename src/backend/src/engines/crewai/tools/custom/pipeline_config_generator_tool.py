@@ -354,8 +354,23 @@ class PipelineConfigGeneratorTool(BaseTool):
                 elif val:
                     auto_count += 1
 
+            # ── UCMV handoff payload ────────────────────────────────────────
+            # The downstream UC Metric View Generator runs in JSON mode and
+            # builds views from `measures_json` + `mquery_json`, NOT from the
+            # pipeline config. Emit both arrays here (in the exact shape UCMV's
+            # API-extraction path produces) so the flow can inject them into
+            # UCMV.measures_json / UCMV.mquery_json. Without this the UCMV crew
+            # receives only `proposed_config` → empty mapping → 0 views, even
+            # though config extraction (measures + DAX) fully succeeded.
+            ucmv_measures = self._build_ucmv_measures(measures)
+            ucmv_mquery = self._build_ucmv_mquery(admin_tables)
+
             output = {
                 "proposed_config": config,
+                # Consumed by the flow handoff → UCMV JSON mode.
+                "measures_json": ucmv_measures,
+                "mquery_json": ucmv_mquery,
+                "relationships_json": relationships,
                 "summary": {
                     "total_keys": len(config),
                     "auto_filled": auto_count,
@@ -364,6 +379,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "total_todo_markers": config_json.count("TODO"),
                     "relationships_extracted": len(relationships),
                     "measures_extracted": len(measures),
+                    "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
                 },
             }
@@ -394,6 +410,72 @@ class PipelineConfigGeneratorTool(BaseTool):
         except Exception as e:
             logger.exception("[PipelineConfigGen] Failed")
             return json.dumps({"error": str(e)})
+
+    @staticmethod
+    def _build_ucmv_measures(measures: list[dict]) -> list[dict]:
+        """Convert config-gen measures into the UCMV `measures_json` shape.
+
+        Config-gen stores measures as
+            {measure_name, table_name, expression, description}
+        (or, via API 1+2, they may already carry `dax_expression`). UCMV's
+        pipeline iterates `mapping` expecting
+            {measure_name, original_name, dax_expression, proposed_allocation}
+        — identical to what UCMV's own PBI-API path emits. Normalise here so the
+        handoff is a drop-in for JSON mode.
+        """
+        out: list[dict] = []
+        for m in measures or []:
+            if not isinstance(m, dict):
+                continue
+            name = (m.get("measure_name") or m.get("name") or "").strip()
+            if not name:
+                continue
+            dax = m.get("dax_expression") or m.get("expression") or ""
+            allocation = (
+                m.get("proposed_allocation")
+                or m.get("table_name")
+                or m.get("table")
+                or "__unassigned__"
+            )
+            out.append({
+                "measure_name": name,
+                "original_name": m.get("original_name") or name,
+                "dax_expression": dax,
+                "proposed_allocation": allocation,
+                "table_refs": m.get("table_refs") or [],
+            })
+        return out
+
+    @staticmethod
+    def _build_ucmv_mquery(admin_tables: dict) -> list[dict]:
+        """Convert admin_tables into the UCMV `mquery_json` shape.
+
+        Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
+        ``admin_tables[table]["mquery_expression"]`` with the partition source
+        (embedded SQL or raw M). UCMV's MQueryParser.parse_json expects
+            {table_name, transpiled_sql, validation_passed}
+        and skips any entry without both a table_name and sql — so tables with
+        no source expression are omitted (they carry no fact/source signal).
+        """
+        out: list[dict] = []
+        for tbl_name, tbl_info in (admin_tables or {}).items():
+            if not isinstance(tbl_info, dict):
+                continue
+            sql = (tbl_info.get("mquery_expression") or tbl_info.get("mquery") or "").strip()
+            if not tbl_name or not sql:
+                continue
+            out.append({
+                "table_name": tbl_name,
+                "transpiled_sql": sql,
+                # MUST be "Yes": UCMV's MQueryParser.parse_json drops any entry
+                # whose validation_passed does not start with "Yes" (unless the
+                # SQL happens to contain both SUM( and GROUP BY). The source here
+                # is the authoritative partition expression from the Admin
+                # Scanner / Fabric TMDL, so mark it accepted — otherwise every
+                # table is silently skipped and UCMV emits 0 views.
+                "validation_passed": "Yes",
+            })
+        return out
 
     async def _save_to_conversion_history(
         self, measures, config, relationships, admin_tables, workspace_id, dataset_id,
