@@ -168,11 +168,45 @@ def parse_tmdl_to_admin_tables(
                     clean.append(line)
                 measures.append({"name": mname, "expression": "\n".join(clean).strip()})
 
-            # M-Query (partition source) — best-effort
+            # M-Query (partition source) — best-effort.
+            #
+            # TMDL partitions look like:
+            #     partition <name> = m
+            #         mode: import
+            #         source =
+            #             let
+            #                 Source = Databricks.Catalogs(...),
+            #                 Filtered = Table.SelectRows(...)
+            #             in
+            #                 Filtered
+            #         annotation ...
+            #
+            # The M body itself contains lines like `Source = ...` / `Filtered = ...`,
+            # so a regex that stops at the first `\n<word> =` truncates the source to
+            # just "let" (its first token). Instead, capture the whole indented block
+            # after `source =`: keep every subsequent line that is blank or MORE
+            # indented than the `source` keyword, and stop at the next line indented
+            # at-or-below it (the next TMDL directive: annotation/partition/measure/etc.).
             source_expr = ""
-            smatch = re.search(r"source\s*=\s*([\s\S]*?)(?=\n\s*\w+\s*=|\Z)", content)
+            smatch = re.search(r"^([ \t]*)source\s*=[ \t]*(.*)$", content, re.MULTILINE)
             if smatch:
-                source_expr = smatch.group(1).strip()
+                base_indent = len(smatch.group(1).expandtabs(4))
+                inline = smatch.group(2).strip()  # rare: `source = <single-line M>`
+                body_lines: list[str] = []
+                if inline:
+                    body_lines.append(inline)
+                # Walk the lines AFTER the `source =` line.
+                after = content[smatch.end():].split("\n")
+                for line in after:
+                    if not line.strip():
+                        body_lines.append(line)
+                        continue
+                    indent = len(line[: len(line) - len(line.lstrip())].expandtabs(4))
+                    if indent > base_indent:
+                        body_lines.append(line)
+                    else:
+                        break  # dedented → next TMDL directive → end of source block
+                source_expr = "\n".join(body_lines).strip()
 
             tables[table_name] = {
                 "columns": columns,

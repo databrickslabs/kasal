@@ -434,6 +434,38 @@ class TestParseTmdlToAdminTables:
         assert "formatString" not in rev["expression"]
         assert "Value.NativeQuery" in t["mquery_expression"]
 
+    def test_multiline_let_in_mquery_not_truncated(self):
+        """Regression: a multi-line `let ... in` partition source must be captured
+        in full, not truncated to just 'let'.
+
+        The old regex stopped at the first `\\n<word> =`, but M-Query's own let-body
+        is full of `Source = ...` / `Filtered = ...` bindings, so the source was cut
+        to its first token ('let'). Customer symptom: mquery_expression == 'let'.
+        """
+        gen = _gen()
+        tmdl = (
+            "table DCC_Customer\n"
+            "\tcolumn CustomerID\n\t\tdataType: string\n"
+            "\tpartition DCC_Customer = m\n"
+            "\t\tmode: import\n"
+            "\t\tsource =\n"
+            "\t\t\tlet\n"
+            "\t\t\t    Source = Databricks.Catalogs(\"h\", \"p\", null),\n"
+            "\t\t\t    db = Source{[Name=\"sales\"]}[Data],\n"
+            "\t\t\t    Filtered = Table.SelectRows(db, each [Active] = true)\n"
+            "\t\t\tin\n"
+            "\t\t\t    Filtered\n"
+            "\t\tannotation PBI_ResultType = Table\n"
+        )
+        out = gen.parse_tmdl_to_admin_tables([self._part("DCC_Customer", tmdl)])
+        mq = out["DCC_Customer"]["mquery_expression"]
+        assert mq != "let", "M-Query truncated to just 'let'"
+        assert "Databricks.Catalogs" in mq
+        assert "Table.SelectRows" in mq
+        assert "Filtered" in mq
+        # the TMDL directive after the source block must NOT leak in
+        assert "annotation" not in mq
+
     def test_skips_local_date_tables(self):
         gen = _gen()
         parts = [self._part("LocalDateTable_abc", "table LocalDateTable_abc\n\tcolumn Date\n")]
