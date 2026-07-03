@@ -238,6 +238,14 @@ class DatabricksAppExporter(BaseExporter):
             if not path.is_file():
                 continue
             rel = path.relative_to(TEMPLATE_DIR).as_posix()
+            # A `*.template` file is emitted with its `.template` suffix stripped.
+            # In particular the app manifest ships as `app.yaml.template`, NOT a
+            # literal `app.yaml`: the Databricks Marketplace resolver recursively
+            # scans a listing's source tree for app manifests, and a nested
+            # placeholder `app.yaml` (full of {{TOKEN}}s) makes it stall for 30s
+            # (DEADLINE_EXCEEDED). Storing it as `.template` hides it from that
+            # scan while the exported project still gets a real `app.yaml`.
+            out_rel = rel[: -len(".template")] if rel.endswith(".template") else rel
             # Skip OS/editor junk, Python caches, and frontend deps/build artifacts
             # (node_modules/dist/...) so they're never templated or shipped — they'd
             # bloat the export and could crash the UTF-8 read.
@@ -262,7 +270,7 @@ class DatabricksAppExporter(BaseExporter):
                 continue
             for token, value in tokens.items():
                 content = content.replace(token, value)
-            files.append({"path": rel, "content": content, "type": self._ftype(rel)})
+            files.append({"path": out_rel, "content": content, "type": self._ftype(out_rel)})
 
         # 1b. Vendor the shared A2UI composer + bake this workspace's resolved UI
         #     config (catalog/directives/enabled) under agent_server/a2ui/ so the
