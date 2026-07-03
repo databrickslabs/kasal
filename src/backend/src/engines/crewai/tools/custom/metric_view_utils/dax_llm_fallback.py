@@ -220,6 +220,16 @@ async def translate_with_llm(
     return measure
 
 
+# Max concurrent LLM translations per chunk. Bounded so we get a large
+# wall-clock speedup vs. the old one-at-a-time loop without hammering the
+# serving endpoint into rate limits. Measures WITHIN a chunk run in parallel
+# (so they can't see each other's freshly-translated MEASURE() refs), but
+# base_names/original_to_snake are updated BETWEEN chunks so a later chunk still
+# resolves references to measures translated in an earlier chunk — preserving
+# most of the cross-measure reference benefit of the old sequential order.
+_DAX_LLM_CONCURRENCY = 6
+
+
 async def translate_batch_with_llm(
     measures: list[TranslationResult],
     table_key: str,
@@ -229,12 +239,16 @@ async def translate_batch_with_llm(
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
-    Processes sequentially (not parallel) to avoid rate limiting.
-    Only attempts measures that aren't PBI artifacts. Authentication is
-    handled internally by LLMManager (opt-in via use_llm_fallback upstream).
+    Processes in bounded-concurrency chunks (``_DAX_LLM_CONCURRENCY`` at a time)
+    to cut wall-clock time for large models — the old fully-sequential loop could
+    exceed the flow's 10-minute crew timeout on models with hundreds of measures.
+    Only attempts measures that aren't PBI artifacts. Authentication is handled
+    internally by LLMManager (opt-in via use_llm_fallback upstream).
 
     Returns the same list with updated measures where LLM succeeded.
     """
+    import asyncio
+
     # Skip PBI artifacts — don't waste LLM tokens on FORMAT/Color/ISBLANK
     _ARTIFACT_KEYWORDS = (
         'FORMAT', 'Color', 'ISBLANK+BLANK', 'SELECTEDVALUE+SWITCH',
@@ -251,22 +265,36 @@ async def translate_batch_with_llm(
     if not candidates:
         return measures
 
-    logger.info(f"[DAX_LLM] Attempting LLM fallback for {len(candidates)} measures in {table_key}")
+    logger.info(
+        f"[DAX_LLM] Attempting LLM fallback for {len(candidates)} measures in "
+        f"{table_key} (concurrency={_DAX_LLM_CONCURRENCY})"
+    )
 
-    # Run-scoped cache — prevents cross-tenant leakage between pipeline runs
+    # Run-scoped cache — prevents cross-tenant leakage between pipeline runs.
+    # Shared across chunks so identical DAX only hits the LLM once.
     run_cache: OrderedDict[str, dict] = OrderedDict()
 
     translated_count = 0
-    for m in candidates:
-        await translate_with_llm(
-            m, table_key, base_names, original_to_snake,
-            model=model, cache=run_cache,
-        )
-        if m.is_translatable:
-            translated_count += 1
-            # Update tracking for subsequent measures
-            base_names.add(m.measure_name)
-            original_to_snake[m.original_name] = m.measure_name
+    for start in range(0, len(candidates), _DAX_LLM_CONCURRENCY):
+        chunk = candidates[start:start + _DAX_LLM_CONCURRENCY]
+        # Snapshot the reference context so all measures in this chunk see the
+        # same (already-translated) refs — matches deterministic behaviour and
+        # avoids mutating shared dicts concurrently.
+        snap_names = set(base_names)
+        snap_map = dict(original_to_snake)
+        await asyncio.gather(*(
+            translate_with_llm(
+                m, table_key, snap_names, snap_map,
+                model=model, cache=run_cache,
+            )
+            for m in chunk
+        ))
+        # Merge this chunk's successes into the shared context for later chunks.
+        for m in chunk:
+            if m.is_translatable:
+                translated_count += 1
+                base_names.add(m.measure_name)
+                original_to_snake[m.original_name] = m.measure_name
 
     logger.info(f"[DAX_LLM] {translated_count}/{len(candidates)} measures translated via LLM for {table_key}")
     return measures

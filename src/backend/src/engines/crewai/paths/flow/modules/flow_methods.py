@@ -16,6 +16,12 @@ from .flow_state import FlowStateManager
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
+# Per-crew kickoff timeout for flow execution. Large Power BI models (hundreds of
+# measures, dozens of fact tables + opt-in LLM DAX translation) can legitimately
+# take longer than the original 10 min. Bumped to 20 min as headroom; the DAX LLM
+# fallback is also now bounded-concurrent so it finishes far faster than before.
+CREW_KICKOFF_TIMEOUT_SECONDS = 1200.0
+
 
 def extract_final_answer(results) -> str:
     """
@@ -520,9 +526,9 @@ class FlowMethodFactory:
                     logger.info(f"📊 LLM Configuration: {llm_info}")
 
                 logger.info(f"📝 Total tasks: {len(task_list)}")
-                logger.info("⏱️ Calling crew.kickoff_async() with 10 minute timeout...")
+                logger.info(f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
 
                 elapsed_time = time.time() - start_time
                 logger.info(f"⏱️ Crew '{crew_name}' execution took {elapsed_time:.2f} seconds")
@@ -601,8 +607,8 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: 600s)")
-                raise TimeoutError(f"Crew '{crew_name}' execution timed out after 10 minutes")
+                logger.error(f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
+                raise TimeoutError(f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minutes")
             except Exception as e:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
                 logger.error(f"❌ Error during crew '{crew_name}' kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
@@ -1112,9 +1118,9 @@ class FlowMethodFactory:
                 except Exception as inject_err:
                     logger.debug(f"Flow chain injection error (non-fatal): {inject_err}")
 
-                logger.info("⏱️ Calling listener crew.kickoff_async() with 10 minute timeout...")
+                logger.info(f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
 
                 elapsed_time = time.time() - start_time
                 logger.info(f"⏱️ Listener crew execution took {elapsed_time:.2f} seconds")
@@ -1156,7 +1162,7 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: 600s)")
+                logger.error(f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
                 raise TimeoutError("Listener crew execution timed out")
             except Exception as e:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
