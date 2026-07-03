@@ -136,6 +136,22 @@ function paletteForKind(kind: string): ThemePalette {
   return WORKSPACE_THEMES[deliverable] ?? WORKSPACE_THEMES.default ?? DEFAULT_PALETTE
 }
 
+// The ACTIVE deck theme → the frame's --a2-* palette, so a themed deck surface's
+// outer chrome (toolbar, padding, border) matches the slide inside. A deck with a
+// live theme picker (presentation/quiz) switches its DeckThemeContext but the frame
+// used to stay on the static workspace palette — a black frame around a Slate deck.
+// Deriving the frame from the picked theme keeps them one cohesive surface.
+function deckToPalette(t: DeckTheme): ThemePalette {
+  return {
+    accent: t.accent,
+    background: t.bg,
+    surface: t.bg,
+    text: t.fg,
+    heading: t.title,
+    muted: t.muted,
+  }
+}
+
 function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -168,14 +184,21 @@ function SurfaceShell({
   kind,
   controls,
   children,
+  frameTheme,
 }: {
   kind: string
   controls?: (contentRef: RefObject<HTMLDivElement | null>) => ReactNode
   children: ReactNode
+  // A deck surface (presentation/quiz) with a live theme picker passes its ACTIVE
+  // deck theme so the frame matches the slide inside when the user switches themes.
+  // Omitted for token surfaces (dashboard/document), which keep the workspace palette.
+  frameTheme?: DeckTheme
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const tokenStyle = themeToTokens(paletteForKind(kind)) as CSSProperties
+  const tokenStyle = themeToTokens(
+    frameTheme ? deckToPalette(frameTheme) : paletteForKind(kind),
+  ) as CSSProperties
   const toggleFullscreen = () => {
     const el = frameRef.current
     if (!el) return
@@ -238,22 +261,52 @@ function ThemePicker({
   )
 }
 
-// A presentation surface: ONE theme across all slides (default Midnight),
-// switchable via the Theme picker; the choice persists and drives the deck's
-// PowerPoint export (the download button lives inside the shared SlideDeck, so it
-// behaves identically here and in Kasal chat — one implementation).
+// Persist the user's deck/quiz theme pick, but NAMESPACED by the current workspace
+// default. A plain `localStorage.getItem(key) || defaultId` seed is buggy: an
+// earlier build auto-persists its default (e.g. 'midnight' when no workspace
+// palette existed), and that stale value then shadows a freshly-baked workspace
+// palette on the next export — so the deck opens on Midnight and the workspace
+// branding is ignored. Keying the stored pick by `base: defaultId` fixes it: when a
+// new export changes the baked default, the old pick is discarded and the workspace
+// theme surfaces; an explicit switch within the SAME config still persists. Legacy
+// plain-string values fail the JSON parse and fall through to the workspace default.
+function useDeckThemeChoice(
+  storageKey: string,
+  themes: DeckTheme[],
+  defaultId: string,
+): [string, (id: string) => void] {
+  const [themeId, setThemeId] = useState<string>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(storageKey) || 'null') as
+        | { base?: string; pick?: string }
+        | null
+      if (v && v.base === defaultId && v.pick && themes.some((t) => t.id === v.pick)) {
+        return v.pick
+      }
+    } catch {
+      /* legacy/plain value — ignore and use the workspace default */
+    }
+    return defaultId
+  })
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify({ base: defaultId, pick: themeId }))
+  }, [storageKey, defaultId, themeId])
+  return [themeId, setThemeId]
+}
+
+// A presentation surface: ONE theme across all slides (workspace palette when the
+// workspace branded presentations, else Midnight), switchable via the Theme picker;
+// the choice persists and drives the deck's PowerPoint export (the download button
+// lives inside the shared SlideDeck, so it behaves identically here and in Kasal
+// chat — one implementation).
 function PresentationSurface({ surface }: { surface: Surface }) {
   const { themes, defaultId } = themesFor('presentation')
-  const [themeId, setThemeId] = useState(
-    () => localStorage.getItem(DECK_THEME_KEY) || defaultId,
-  )
-  useEffect(() => {
-    localStorage.setItem(DECK_THEME_KEY, themeId)
-  }, [themeId])
+  const [themeId, setThemeId] = useDeckThemeChoice(DECK_THEME_KEY, themes, defaultId)
   const theme = resolveTheme(themes, themeId)
   return (
     <SurfaceShell
       kind="presentation"
+      frameTheme={theme}
       controls={() => (
         <ThemePicker themes={themes} themeId={themeId} setThemeId={setThemeId} activeName={theme.name} />
       )}
@@ -269,16 +322,12 @@ function PresentationSurface({ surface }: { surface: Surface }) {
 // quiz; the choice persists. Mirrors PresentationSurface, minus the PPTX export.
 function QuizSurface({ surface }: { surface: Surface }) {
   const { themes, defaultId } = themesFor('quiz')
-  const [themeId, setThemeId] = useState(
-    () => localStorage.getItem(QUIZ_THEME_KEY) || defaultId,
-  )
-  useEffect(() => {
-    localStorage.setItem(QUIZ_THEME_KEY, themeId)
-  }, [themeId])
+  const [themeId, setThemeId] = useDeckThemeChoice(QUIZ_THEME_KEY, themes, defaultId)
   const theme = resolveTheme(themes, themeId)
   return (
     <SurfaceShell
       kind="quiz"
+      frameTheme={theme}
       controls={() => (
         <ThemePicker themes={themes} themeId={themeId} setThemeId={setThemeId} activeName={theme.name} />
       )}
