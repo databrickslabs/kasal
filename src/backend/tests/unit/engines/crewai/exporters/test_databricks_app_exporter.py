@@ -864,6 +864,38 @@ class TestDatabricksAppA2UI:
         assert "themes" not in config
 
     @pytest.mark.asyncio
+    async def test_deck_theme_pick_namespaced_by_workspace_default(self, exporter, crew_data):
+        """A stale localStorage deck/quiz theme pick from an earlier build must not
+        shadow a freshly-baked workspace palette. A plain
+        `localStorage.getItem(KEY) || defaultId` seed auto-persists the built-in
+        default (e.g. 'midnight' when no workspace palette existed) and then overrides
+        the workspace theme on the next export — the deck opens on Midnight and the
+        workspace branding is silently ignored. The seed MUST be namespaced by the
+        current workspace default so a config change surfaces the new palette."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        # The buggy plain-seed pattern must be gone for BOTH deck and quiz.
+        assert "localStorage.getItem(DECK_THEME_KEY) || defaultId" not in app
+        assert "localStorage.getItem(QUIZ_THEME_KEY) || defaultId" not in app
+        # Pick is namespaced by the current workspace default (base), so a stale pick
+        # from an earlier baked default is discarded.
+        assert "useDeckThemeChoice" in app
+        assert "v.base === defaultId" in app
+
+    @pytest.mark.asyncio
+    async def test_deck_surface_frame_follows_picked_theme(self, exporter, crew_data):
+        """A deck surface's outer frame must follow the ACTIVE picked theme, not the
+        static workspace palette. Otherwise switching the deck theme recolors only the
+        slide inside while the frame stays on the workspace palette (e.g. a black frame
+        around a Slate deck). The deck surfaces pass their active theme to SurfaceShell,
+        which derives the frame's --a2-* tokens from it."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        assert "function deckToPalette(" in app
+        # SurfaceShell derives frame tokens from the picked deck theme when given one.
+        assert "frameTheme ? deckToPalette(frameTheme) : paletteForKind(kind)" in app
+        # Both deck surfaces (presentation + quiz) hand their active theme to the frame.
+        assert app.count("frameTheme={theme}") >= 2
+
+    @pytest.mark.asyncio
     async def test_a2ui_frontend_imports_are_declared_deps(self, exporter, crew_data):
         """Every npm package the vendored frontend/src/a2ui/ tree imports must be
         declared in the exported package.json (deps or devDeps). The exporter copies
