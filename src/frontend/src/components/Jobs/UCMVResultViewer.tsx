@@ -454,41 +454,42 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, [result.yaml]);
 
-  // Download all YAMLs as individual files (triggers multiple downloads)
-  // or as a combined file
+  // Download each metric view YAML as its OWN .yml file (one per fact table)
+  // so each can be deployed independently. Downloads are staggered (~150ms)
+  // because browsers throttle/deny rapid back-to-back programmatic downloads.
   const handleDownloadAllYamls = useCallback(() => {
-    const combined: string[] = [];
-    for (const name of viewNames) {
-      const yamlContent = result.yaml[name];
-      if (yamlContent && yamlContent.trim()) {
-        combined.push(`# === ${name} ===\n${yamlContent}`);
-      }
-    }
-    const blob = new Blob([combined.join('\n\n---\n\n')], { type: 'text/yaml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'uc_metric_views_all.yml';
-    a.click();
-    URL.revokeObjectURL(url);
+    const entries = viewNames
+      .map((name) => [name, result.yaml[name]] as const)
+      .filter(([, v]) => v && v.trim());
+    entries.forEach(([name, yamlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}_uc_metric_view.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   }, [result.yaml, viewNames]);
 
-  // Download all deploy SQL
+  // Download each deploy SQL as its OWN .sql file (one per fact table), staggered.
   const handleDownloadAllSql = useCallback(() => {
-    const combined: string[] = [];
-    for (const name of viewNames) {
-      const sqlContent = result.sql[name];
-      if (sqlContent && sqlContent.trim()) {
-        combined.push(`-- === ${name} ===\n${sqlContent}`);
-      }
-    }
-    const blob = new Blob([combined.join('\n\n')], { type: 'text/sql;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'deploy_metric_views_all.sql';
-    a.click();
-    URL.revokeObjectURL(url);
+    const entries = viewNames
+      .map((name) => [name, result.sql[name]] as const)
+      .filter(([, v]) => v && v.trim());
+    entries.forEach(([name, sqlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}_deploy_metric_view.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   }, [result.sql, viewNames]);
 
   // Download raw JSON (original DAX measures or original M-Query) as a file
