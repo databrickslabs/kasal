@@ -488,3 +488,49 @@ class TestCleanFilterPrefixes:
         expr = "SUM(source.val)"
         result = _clean_filter_prefixes(expr, fact_table_key='fact')
         assert result == expr
+
+
+class TestMultilineSwitchExprYamlValid:
+    """Regression: a multi-line SWITCH-TODO measure expr must emit as valid YAML.
+
+    C_Banner failed validation with 'while scanning a simple key' because the
+    multi-line DAX after 'expr: >-' had unindented continuation lines. The fix
+    routes such exprs through _yaml_scalar → indented block scalar (|-).
+    """
+
+    def test_multiline_switch_todo_expr_parses(self):
+        import yaml as _yaml
+        multiline_expr = (
+            "TODO: SQL expression for SWITCH measure 'F_Start_date' "
+            "(DAX: var a = SELECTEDVALUE(Selector_Time_Period[Index])\n"
+            "var b = SWITCH(TRUE(),\n"
+            "                a=1, CALCULATE(Min(C_Dim_calendar[Date])))"
+        )
+        spec = MetricViewSpec(
+            fact_table_key='C_Banner',
+            source_table='catalog.schema.banner',
+            view_name='c_banner_uc_metric_view',
+            comment='Test',
+            joins=[],
+            dimensions=[],
+            measures=[
+                TranslationResult(
+                    measure_name='f_start_date',
+                    original_name='F_Start_date',
+                    sql_expr=multiline_expr,
+                    is_translatable=True,
+                    skip_reason='',
+                    dax_expression='var a = SELECTEDVALUE(...)',
+                    confidence='low',
+                    category='switch_decomposition',
+                ),
+            ],
+            untranslatable=[],
+        )
+        out = emit_yaml(spec)
+        # The whole emitted document must be parseable (was raising a scanner error)
+        parsed = _yaml.safe_load(out)
+        assert parsed is not None
+        # The measure survived and its multi-line expr is preserved
+        names = [m['name'] for m in parsed.get('measures', [])]
+        assert 'f_start_date' in names
