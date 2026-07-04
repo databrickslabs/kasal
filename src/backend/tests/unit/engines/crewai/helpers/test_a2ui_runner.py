@@ -48,6 +48,17 @@ def test_infer_deliverable_first_keyword_wins():
     assert R._infer_deliverable("just answer in prose") is None
 
 
+def test_infer_deliverable_routes_new_component_deliverables():
+    # The new data-viz / diagram / gallery deliverables must route so their
+    # per-type directives + branding apply (and rule 5 emits the right component).
+    assert R._infer_deliverable("forecast the expected loss by region") == "forecast"
+    assert R._infer_deliverable("show a dependency graph of the services") == "graph"
+    assert R._infer_deliverable("a sequence diagram of the login flow") == "sequence"
+    assert R._infer_deliverable("build a ferrari photo album") == "album"
+    # A bare "bar graph" must NOT hijack the node-link Graph — it's a plain chart.
+    assert R._infer_deliverable("draw a bar graph of sales") != "graph"
+
+
 # --- _resolve_catalog ------------------------------------------------------
 def test_unconfigured_workspace_keeps_full_catalog():
     # No saved row (id is None) → schema's 'minimal' default must NOT restrict.
