@@ -61,10 +61,20 @@ describe('ChatEmptyState', () => {
     expect(setAppMode).toHaveBeenCalledWith('flow');
   });
 
-  it('links to the docs (new tab)', () => {
+  it('links to the docs (new tab) and opens an absolute URL imperatively', () => {
+    // The Databricks Apps iframe defeats bare target="_blank"; clicking must open
+    // an absolute /docs URL via window.open so it escapes into a real new tab.
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     render(<ChatEmptyState onPrefill={vi.fn()} />);
     const docs = screen.getByRole('link', { name: 'Check the docs' });
-    expect(docs).toHaveAttribute('href', '/docs');
+    expect(docs).toHaveAttribute('href', '/docs'); // middle-click / keyboard fallback
     expect(docs).toHaveAttribute('target', '_blank');
+    fireEvent.click(docs);
+    expect(openSpy).toHaveBeenCalledWith(
+      `${window.location.origin}/docs`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+    openSpy.mockRestore();
   });
 });
