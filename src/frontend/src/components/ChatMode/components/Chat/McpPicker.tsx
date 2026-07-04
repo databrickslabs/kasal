@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { KasalMcpServer, listKasalMcpServers } from '../../api/mcp';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
+import { usePermissionStore } from '../../../../store/permissions';
 import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBricksService';
 
 /**
@@ -19,8 +20,16 @@ import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBr
  * Selections live in the execution store and are injected into every generated
  * agent's tool_configs.MCP_SERVERS.
  */
-const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }> = ({ disabled, menuPlacement = 'up' }) => {
+const McpPicker: React.FC<{
+  disabled?: boolean;
+  menuPlacement?: 'up' | 'down';
+  /** Open the MCP configuration dialog — shown as a "Connect a tool" footer action
+   *  for workspace/system admins so first-run users can register/enable servers
+   *  right from the picker. Members (who can't configure MCP) don't see it. */
+  onOpenMcpConfig?: () => void;
+}> = ({ disabled, menuPlacement = 'up', onOpenMcpConfig }) => {
   const [open, setOpen] = useState(false);
+  const canConfigureMcp = usePermissionStore((s) => s.isWorkspaceAdmin());
   const [filter, setFilter] = useState('');
   const [kasalServers, setKasalServers] = useState<KasalMcpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +66,18 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
     setError(null);
     listKasalMcpServers()
       .then((servers) => {
-        if (!cancelled) setKasalServers(servers);
+        if (cancelled) return;
+        setKasalServers(servers);
+        // Reconcile the persisted selection against reality: servers removed or
+        // disabled in Configuration leave stale names in the store, which show as
+        // a phantom "+" count. Drop any selected name no longer available so the
+        // badge reflects what's actually equipped.
+        const store = useExecutionStore.getState();
+        const available = new Set(servers.map((s) => s.name));
+        const kept = store.selectedMcpServers.filter((n) => available.has(n));
+        if (kept.length !== store.selectedMcpServers.length) {
+          store.setSelectedMcpServers(kept);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -77,7 +97,16 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
     let cancelled = false;
     AgentBricksService.getEndpoints(true)
       .then((res) => {
-        if (!cancelled) setAgentBricks(res?.endpoints ?? []);
+        if (cancelled) return;
+        const endpoints = res?.endpoints ?? [];
+        setAgentBricks(endpoints);
+        // Same reconciliation as MCP: prune selected endpoints that no longer exist.
+        const store = useExecutionStore.getState();
+        const available = new Set(endpoints.map((e) => e.name));
+        const kept = store.selectedAgentBricksEndpoints.filter((n) => available.has(n));
+        if (kept.length !== store.selectedAgentBricksEndpoints.length) {
+          store.setSelectedAgentBricksEndpoints(kept);
+        }
       })
       .catch(() => {
         if (!cancelled) setAgentBricks([]);
@@ -273,6 +302,29 @@ const McpPicker: React.FC<{ disabled?: boolean; menuPlacement?: 'up' | 'down' }>
           {error && (
             <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--accent)', borderTop: '1px solid var(--border-color)' }}>
               {error}
+            </div>
+          )}
+
+          {/* Connect-a-tool action — registering/enabling MCP servers is admin-only,
+              so this footer appears for workspace/system admins. It opens the MCP
+              config dialog; on close the list refetches so a newly enabled server
+              shows up without reopening the picker. */}
+          {canConfigureMcp && onOpenMcpConfig && (
+            <div className="p-1.5" style={{ borderTop: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenMcpConfig();
+                }}
+                className="w-full flex items-center gap-2 !px-2.5 !py-1.5 rounded-lg text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)]"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Connect a tool…
+              </button>
             </div>
           )}
         </div>

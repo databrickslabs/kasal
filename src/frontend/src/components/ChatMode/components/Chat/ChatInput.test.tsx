@@ -766,3 +766,30 @@ describe('ChatInput — forwards menuPlacement to the MCP picker', () => {
     expect(menu.className).not.toContain('bottom-full');
   });
 });
+
+describe('ChatInput — prefill (empty-state suggestion chips)', () => {
+  it('drops prefill text into the composer without sending', () => {
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} prefill={{ text: 'Research [topic]', nonce: 1 }} />);
+    expect(ta().value).toBe('Research [topic]');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('re-applies when the nonce changes (re-picking a chip)', () => {
+    const { rerender } = render(<ChatInput {...baseProps} prefill={{ text: 'first', nonce: 1 }} />);
+    expect(ta().value).toBe('first');
+    // User clears it, then picks another chip → new nonce re-applies.
+    fireEvent.change(ta(), { target: { value: '' } });
+    rerender(<ChatInput {...baseProps} prefill={{ text: 'second', nonce: 2 }} />);
+    expect(ta().value).toBe('second');
+  });
+
+  it('does not re-apply the same nonce after the user edits', () => {
+    const { rerender } = render(<ChatInput {...baseProps} prefill={{ text: 'seed', nonce: 5 }} />);
+    expect(ta().value).toBe('seed');
+    fireEvent.change(ta(), { target: { value: 'my own text' } });
+    // A re-render with the SAME nonce must not clobber the user's edit.
+    rerender(<ChatInput {...baseProps} prefill={{ text: 'seed', nonce: 5 }} />);
+    expect(ta().value).toBe('my own text');
+  });
+});
