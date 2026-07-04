@@ -181,6 +181,15 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => {
+              // Kasal runs inside the Databricks Apps sandboxed iframe, where a bare
+              // <a target="_blank"> degrades to same-frame navigation (react-router
+              // then resolves /docs in place). Open an ABSOLUTE URL imperatively so
+              // it escapes the iframe into a real new tab. href/target are kept for
+              // middle-click and keyboard activation.
+              e.preventDefault();
+              window.open(`${window.location.origin}/docs`, '_blank', 'noopener,noreferrer');
+            }}
             className="font-medium underline underline-offset-2 hover:opacity-80"
             style={{ color: 'var(--text-secondary)' }}
           >
