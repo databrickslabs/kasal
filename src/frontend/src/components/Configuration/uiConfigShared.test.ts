@@ -7,6 +7,8 @@ import {
   THEME_PRESETS,
   DEFAULT_THEME,
   DELIVERABLE_LABELS,
+  DELIVERABLE_TYPES,
+  TYPE_OPTIONS,
 } from './uiConfigShared';
 
 describe('buildPartialDirective — only phrases changed keys', () => {
@@ -57,6 +59,28 @@ describe('shared specs sanity', () => {
 
   it('the first preset is the Default palette', () => {
     expect(THEME_PRESETS[0].theme).toBe(DEFAULT_THEME);
+  });
+});
+
+describe('component-based deliverables (Forecast/Graph/Sequence)', () => {
+  const keys = DELIVERABLE_TYPES.map((d) => d.key);
+
+  it('are listed in the branding/per-type settings list', () => {
+    for (const k of ['forecast', 'graph', 'sequence']) {
+      expect(keys, `${k} in DELIVERABLE_TYPES`).toContain(k);
+    }
+  });
+
+  it('each has per-type settings that build a non-empty directive', () => {
+    for (const k of ['forecast', 'graph', 'sequence', 'album']) {
+      expect(TYPE_OPTIONS[k], `${k} has TYPE_OPTIONS`).toBeDefined();
+      expect(TYPE_OPTIONS[k].length).toBeGreaterThan(0);
+      expect(buildDirective(k, undefined)).toMatch(/\.$/); // capitalized sentence
+    }
+  });
+
+  it('has no duplicate deliverable keys', () => {
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
 
