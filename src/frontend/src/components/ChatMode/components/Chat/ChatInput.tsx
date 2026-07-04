@@ -115,6 +115,17 @@ interface ChatInputProps {
    * 'up' for the bottom-pinned case.
    */
   menuPlacement?: 'up' | 'down';
+  /**
+   * Drop text into the composer without sending it — used by the empty-state
+   * suggestion chips. `nonce` changes on every request so re-picking the SAME
+   * suggestion (identical text) still re-applies; the value is set, the textarea
+   * focused/auto-grown, and the caret moved to the end so the user can edit or
+   * just hit Enter.
+   */
+  prefill?: { text: string; nonce: number };
+  /** Open the MCP config dialog — forwarded to the "+" picker's admin-only
+   *  "Connect a tool" action. */
+  onOpenMcpConfig?: () => void;
 }
 
 const attachmentsKey = (sessionId: string) => `kasal-chat-attachments-${sessionId}`;
@@ -178,6 +189,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   pendingRunLabel,
   onRunPending,
   menuPlacement = 'up',
+  prefill,
+  onOpenMcpConfig,
 }) => {
   // Entrance animation for the pop-up menus, matching the open direction. The
   // menus are positioned with `position: fixed` (see useAnchoredFixedStyle) so
@@ -328,6 +341,26 @@ const ChatInput: React.FC<ChatInputProps> = ({
       setShowCommands(false);
     }
   }, [value, filteredCommands.length]);
+
+  // Apply an empty-state suggestion chip's text: populate the composer, focus it,
+  // auto-grow to fit, and drop the caret at the end so the user can edit or send.
+  const lastPrefillNonce = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!prefill || prefill.nonce === lastPrefillNonce.current) return;
+    lastPrefillNonce.current = prefill.nonce;
+    setValue(prefill.text);
+    setHistoryIndex(-1);
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    // Grow + caret placement after the value paints (the textarea is controlled,
+    // so scrollHeight is only correct once React has committed the new value).
+    requestAnimationFrame(() => {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [prefill]);
 
   // Close the model picker on outside click
   useEffect(() => {
@@ -875,7 +908,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
             {/* MCP picker ("+") — select the MCP servers (Kasal-configured and
                 Databricks managed) the next crew gets equipped with. */}
-            <McpPicker disabled={disabled} menuPlacement={menuPlacement} />
+            <McpPicker disabled={disabled} menuPlacement={menuPlacement} onOpenMcpConfig={onOpenMcpConfig} />
 
             {/* Send — submit only. Stop lives in the run-activity container above.
                 When a catalog crew/flow is loaded and the input is empty, the

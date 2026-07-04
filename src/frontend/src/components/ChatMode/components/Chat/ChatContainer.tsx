@@ -6,6 +6,7 @@ import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import ChatMessageComponent, { TraceEntryData } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
+import ChatEmptyState from './ChatEmptyState';
 import ThinkingStream from '../Preview/ThinkingStream';
 import type { RunStep } from '../Preview/RunTimeline';
 import type { PreviewContent } from '../Preview/PreviewPanel';
@@ -316,6 +317,8 @@ interface ChatContainerProps {
    *  overlaps the input the way a fixed-offset floating button did). */
   showReopenPreview?: boolean;
   onReopenPreview?: () => void;
+  /** Open the MCP configuration dialog (from the composer's "+" picker). */
+  onOpenMcpConfig?: () => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -346,8 +349,13 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onRunPending,
   showReopenPreview,
   onReopenPreview,
+  onOpenMcpConfig,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Suggestion chips drop text into the empty-state composer without sending; the
+  // nonce lets re-picking the same chip re-apply (see ChatInput's prefill effect).
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
+  const prefillComposer = (text: string) => setPrefill({ text, nonce: Date.now() });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -407,28 +415,25 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     </div>
   ) : null;
 
-  // Empty state: everything centered vertically — greeting + input
+  // Empty state: greeting on top, the composer as the centered hero, and the
+  // first-run launchpad (mode chips + builder/docs bridge) BELOW it — the standard
+  // LLM-chat zero-state layout (input is primary; starter chips are the fallback
+  // the eye finds next).
   if (isEmpty && !isExecuting) {
     return (
       <div className="flex flex-col items-center justify-center h-full px-6">
         <div className="w-full max-w-3xl">
           {/* Greeting */}
-          <div className="text-center mb-8">
-            <h1
-              className="text-2xl font-semibold mb-2"
-              style={{ color: 'var(--text-primary)' }}
-            >
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
               What can I help you with?
             </h1>
-            <p
-              className="text-sm leading-relaxed"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              Create agents, build crews, and execute workflows through natural conversation.
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+              Describe what you want in plain language — Kasal builds and runs the agents for you.
             </p>
           </div>
 
-          {/* Input — centered */}
+          {/* Input — centered hero */}
           <div className="relative">
             {reopenPreviewPill}
             <ChatInput
@@ -440,8 +445,13 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               sessionId={sessionId}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={onMemoryEnabledChange}
+              prefill={prefill}
+              onOpenMcpConfig={onOpenMcpConfig}
             />
           </div>
+
+          {/* Starter chips + builder/docs bridge — below the composer */}
+          <ChatEmptyState onPrefill={prefillComposer} />
         </div>
       </div>
     );
@@ -589,6 +599,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onMemoryEnabledChange={onMemoryEnabledChange}
           pendingRunLabel={pendingRunLabel}
           onRunPending={onRunPending}
+          onOpenMcpConfig={onOpenMcpConfig}
         />
       </div>
     </div>

@@ -181,6 +181,16 @@
 }
 
 /*
+ * First-run launchpad suggestion cards. Border/bg are set inline (the padding:0
+ * reset above forces inline styling on these buttons), so the hover lift needs
+ * !important to beat those inline values.
+ */
+.kasal-suggest:hover {
+  border-color: var(--text-muted) !important;
+  background-color: var(--bg-rail-hover) !important;
+}
+
+/*
  * Strip native chrome from TEXT-like controls only. Checkbox/radio/color/range
  * are deliberately EXEMPT: `appearance: none` on them erases the control
  * entirely (e.g. the "Customize" panel's switches rendered as invisible boxes),

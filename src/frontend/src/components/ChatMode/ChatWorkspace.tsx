@@ -22,6 +22,7 @@ import { parseUiDocument, extractDocSummary } from './utils/surfaceAdapter';
 import type { Surface } from '../../shared/a2ui';
 import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
+import ChatMcpDialog from './components/Chat/ChatMcpDialog';
 import './chat.css';
 
 export interface TraceEntry {
@@ -685,6 +686,8 @@ const ChatWorkspace: React.FC = () => {
   const [pendingRun, setPendingRun] = useState<{ sessionId: string | null; label: string; run: () => void } | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // MCP config dialog opened from the composer's "+" picker ("Connect a tool").
+  const [mcpConfigOpen, setMcpConfigOpen] = useState(false);
 
   // Input variables dialog state
   const [pendingExecution, setPendingExecution] = useState<{
@@ -2283,6 +2286,7 @@ const ChatWorkspace: React.FC = () => {
                   run();
                 }
               }}
+              onOpenMcpConfig={() => setMcpConfigOpen(true)}
             />
           </div>
         </main>
@@ -2327,6 +2331,15 @@ const ChatWorkspace: React.FC = () => {
           }}
         />
       )}
+
+      {/* Chat-native MCP dialog — opened from the composer picker's "Connect a
+          tool" action. Styled with chat tokens (not the MUI config dialog, which
+          stays for the Agent Builder). The picker refetches its list on reopen,
+          so a server enabled here shows up next time without extra wiring. */}
+      <ChatMcpDialog
+        open={mcpConfigOpen}
+        onClose={() => setMcpConfigOpen(false)}
+      />
 
     </div>
   );

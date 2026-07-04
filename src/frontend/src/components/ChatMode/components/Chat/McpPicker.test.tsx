@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import McpPicker from './McpPicker';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
+import { usePermissionStore } from '../../../../store/permissions';
 
 // The picker now lists ONLY the workspace's configured MCP servers (the
 // group-scoped allow-list). Browsing/registering the Databricks catalog moved
@@ -41,7 +42,19 @@ beforeEach(() => {
   useAppStore.setState({ toolNameMap: {} });
   getAgentBricksEndpoints.mockResolvedValue({ endpoints: AGENT_BRICKS_ENDPOINTS, total_count: 2, filtered: false });
   listKasalMcpServers.mockResolvedValue(KASAL_SERVERS);
+  // Default: no admin privilege → the "Connect a tool" footer stays hidden.
+  usePermissionStore.setState({ userRole: null, isSystemAdmin: false, isPersonalWorkspaceManager: false });
 });
+
+/** Grant/deny the workspace-admin privilege the "Connect a tool" footer keys off. */
+const setAdmin = (admin: boolean) => {
+  localStorage.setItem('selectedGroupId', 'group_acme'); // non-personal workspace
+  usePermissionStore.setState({
+    userRole: admin ? 'admin' : 'operator',
+    isSystemAdmin: false,
+    isPersonalWorkspaceManager: false,
+  });
+};
 
 const openPicker = async () => {
   fireEvent.click(screen.getByLabelText('MCP servers'));
@@ -142,6 +155,23 @@ describe('McpPicker', () => {
     );
   });
 
+  it('prunes stale selected servers no longer in the configured list (phantom badge)', async () => {
+    // Selection persisted from before the servers were cleared in Configuration.
+    useExecutionStore.setState({ selectedMcpServers: ['Ghost MCP', 'My MCP'] });
+    listKasalMcpServers.mockResolvedValue([{ id: 1, name: 'My MCP', enabled: true }]);
+
+    render(<McpPicker />);
+    // Badge reflects the stale count until the list loads.
+    expect(screen.getByText('2')).toBeInTheDocument();
+
+    await openPicker();
+    // "Ghost MCP" is gone from the workspace → pruned; only the real one remains.
+    await waitFor(() =>
+      expect(useExecutionStore.getState().selectedMcpServers).toEqual(['My MCP']),
+    );
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
   it('shows an error when the configured server list cannot load', async () => {
     listKasalMcpServers.mockRejectedValue(new Error('boom'));
     render(<McpPicker />);
@@ -202,6 +232,31 @@ describe('McpPicker', () => {
   it('respects the disabled prop on the + button', () => {
     render(<McpPicker disabled />);
     expect(screen.getByLabelText('MCP servers')).toBeDisabled();
+  });
+
+  describe('"Connect a tool" footer (RBAC)', () => {
+    it('shows for a workspace admin and opens MCP config on click', async () => {
+      const onOpenMcpConfig = vi.fn();
+      setAdmin(true);
+      render(<McpPicker onOpenMcpConfig={onOpenMcpConfig} />);
+      await openPicker();
+      fireEvent.click(screen.getByText('Connect a tool…'));
+      expect(onOpenMcpConfig).toHaveBeenCalledTimes(1);
+    });
+
+    it('is hidden from non-admin operators', async () => {
+      setAdmin(false);
+      render(<McpPicker onOpenMcpConfig={vi.fn()} />);
+      await openPicker();
+      expect(screen.queryByText('Connect a tool…')).toBeNull();
+    });
+
+    it('is hidden when no onOpenMcpConfig handler is provided', async () => {
+      setAdmin(true);
+      render(<McpPicker />);
+      await openPicker();
+      expect(screen.queryByText('Connect a tool…')).toBeNull();
+    });
   });
 
   it('ignores configured-server results that land after unmount', async () => {
