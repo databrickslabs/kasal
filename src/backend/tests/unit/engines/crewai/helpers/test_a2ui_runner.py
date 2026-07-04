@@ -143,3 +143,122 @@ def test_compose_a2ui_threads_guidance_to_llm():
     )
     assert surf["surfaceKind"] == "presentation"
     assert "aim for about 8 slides" in seen["sys"]
+
+
+# --- _has_data_component ---------------------------------------------------
+def test_has_data_component_detects_data_bearing_nodes():
+    # Data-viz + diagram + gallery components all make a surface a real deliverable
+    # (else their prose-free surfaces would be dropped back to plain text).
+    for comp in (
+        "Chart",
+        "Table",
+        "Stat",
+        "KeyValue",
+        "Grid",
+        "Forecast",
+        "Graph",
+        "Sequence",
+        "Album",
+        "Map",
+    ):
+        surface = {"components": [{"id": "a", "component": comp}]}
+        assert R._has_data_component(surface), comp
+    # `type` is accepted as an alias for `component` (renderer parity).
+    assert R._has_data_component({"components": [{"id": "a", "type": "Chart"}]})
+
+
+def test_has_data_component_false_for_text_only_surface():
+    surface = {
+        "components": [
+            {"id": "root", "component": "Column", "children": ["t"]},
+            {"id": "t", "component": "Text", "text": "just prose"},
+        ]
+    }
+    assert not R._has_data_component(surface)
+    assert not R._has_data_component({"components": []})
+    assert not R._has_data_component({})
+
+
+# --- compose_surface: prose-only dashboard/document is dropped --------------
+def _run(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def _stub_compose_surface(monkeypatch, surface):
+    """Wire compose_surface's dependencies so it reaches the surface-worthiness
+    gate: A2UI enabled, a rich-intent turn, and a composer that returns `surface`."""
+
+    async def _resolve(group_id, query):
+        return True, CATALOG, ""
+
+    monkeypatch.setattr(R, "_resolve_config", _resolve)
+    monkeypatch.setattr(R, "wants_rich_surface", lambda text, intent: True)
+    monkeypatch.setattr(R, "compose_a2ui", lambda *a, **k: surface)
+
+    class _LLM:
+        def call(self, messages):
+            return ""
+
+    async def _get_llm(*a, **k):
+        return _LLM()
+
+    import src.core.llm_manager as llm_mod
+
+    monkeypatch.setattr(llm_mod.LLMManager, "get_llm", staticmethod(_get_llm))
+
+
+def test_compose_surface_drops_text_only_document(monkeypatch):
+    """A Genie/analytics turn fires the composer, but a prose-only document surface
+    would render the SAME text twice (chat bubble + surface). It must be dropped so
+    the result stays a plain string."""
+    text_only = {
+        "surfaceKind": "document",
+        "root": "root",
+        "components": [{"id": "root", "component": "Text", "text": "overview prose"}],
+    }
+    _stub_compose_surface(monkeypatch, text_only)
+    out = _run(R.compose_surface("overview prose", query="usage analytics"))
+    assert out is None
+
+
+def test_compose_surface_keeps_dashboard_with_chart(monkeypatch):
+    """A surface that actually materializes a graph is a real deliverable — keep it."""
+    with_chart = {
+        "surfaceKind": "dashboard",
+        "root": "root",
+        "components": [
+            {"id": "root", "component": "Grid", "children": ["c"]},
+            {"id": "c", "component": "Chart", "chartType": "bar"},
+        ],
+    }
+    _stub_compose_surface(monkeypatch, with_chart)
+    out = _run(R.compose_surface("here is a chart", query="usage analytics"))
+    assert out is with_chart
+
+
+def test_compose_surface_keeps_document_rooted_on_album(monkeypatch):
+    """A photo album is a real deliverable even though it has no Chart/Table — an
+    Album/Graph/Sequence/Forecast surface must NOT be dropped by the prose gate."""
+    album = {
+        "surfaceKind": "document",
+        "root": "al",
+        "components": [{"id": "al", "component": "Album", "items": {"path": "/pics"}}],
+    }
+    _stub_compose_surface(monkeypatch, album)
+    out = _run(R.compose_surface("here are 10 photos", query="ferrari photo album"))
+    assert out is album
+
+
+def test_compose_surface_keeps_text_only_presentation(monkeypatch):
+    """Explicitly-requested rich kinds (presentation/quiz/…) are legitimately
+    non-tabular, so they are NOT gated on data content."""
+    deck = {
+        "surfaceKind": "presentation",
+        "root": "d",
+        "components": [{"id": "d", "component": "SlideDeck", "children": []}],
+    }
+    _stub_compose_surface(monkeypatch, deck)
+    out = _run(R.compose_surface("slides", query="make a deck"))
+    assert out is deck

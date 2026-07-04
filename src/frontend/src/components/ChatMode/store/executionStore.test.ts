@@ -624,6 +624,26 @@ describe('executionStore - completeExecution', () => {
     expect(useExecutionStore.getState().previewContent).toBeNull();
   });
 
+  it('composed surface + NON-previewable markdown text: still drops the raw text (no double render)', () => {
+    // Regression: a Genie answer is plain markdown (a 100-row restaurant table),
+    // so parsePreviewContent returns null (it is A2UI-only). The composed surface
+    // renders that data as an interactive Table — the raw markdown must NOT also
+    // print in the bubble above it. Formerly `surface && preview` kept the text.
+    const surface = { surfaceKind: 'dashboard', root: 'r', components: [], dataModel: {} } as never;
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null); // plain markdown is not A2UI-previewable
+    useExecutionStore.getState().startExecution('job-T', 'sess-O');
+    useExecutionStore
+      .getState()
+      .completeExecution('| # | Restaurant |\n|---|---|\n| 1 | Kronenhalle |', 'job-T', surface);
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'assistant',
+      '',
+      { executionId: 'job-T', resultType: 'a2ui', resultData: surface },
+    );
+  });
+
   it('viewing owner with preview but no active execution -> activeExecution stays null', () => {
     setCurrentSessionId('sess-O');
     mockedParse.mockReturnValue(preview);

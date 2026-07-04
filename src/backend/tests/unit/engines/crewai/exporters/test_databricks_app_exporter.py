@@ -783,7 +783,9 @@ class TestDatabricksAppA2UI:
         assert config["directives"]["presentation"] == "aim for about 8 slides"
 
     @pytest.mark.asyncio
-    async def test_a2ui_rich_surface_kinds_cover_live_renderer(self, exporter, crew_data):
+    async def test_a2ui_rich_surface_kinds_cover_live_renderer(
+        self, exporter, crew_data
+    ):
         """App.tsx's RICH set gates which composed surfaces actually render — a kind
         the shared composer can emit but that's absent here is silently dropped. The
         shared renderer (live chat) supports flashcards + map (added in the a2ui
@@ -804,7 +806,9 @@ class TestDatabricksAppA2UI:
             "map",
         }
         missing = expected - rich
-        assert not missing, f"App.tsx RICH set is missing surface kinds: {sorted(missing)}"
+        assert (
+            not missing
+        ), f"App.tsx RICH set is missing surface kinds: {sorted(missing)}"
 
     @pytest.mark.asyncio
     async def test_a2ui_surfaces_inherit_workspace_palette(self, exporter, crew_data):
@@ -864,7 +868,9 @@ class TestDatabricksAppA2UI:
         assert "themes" not in config
 
     @pytest.mark.asyncio
-    async def test_deck_theme_pick_namespaced_by_workspace_default(self, exporter, crew_data):
+    async def test_deck_theme_pick_namespaced_by_workspace_default(
+        self, exporter, crew_data
+    ):
         """A stale localStorage deck/quiz theme pick from an earlier build must not
         shadow a freshly-baked workspace palette. A plain
         `localStorage.getItem(KEY) || defaultId` seed auto-persists the built-in
@@ -890,10 +896,43 @@ class TestDatabricksAppA2UI:
         which derives the frame's --a2-* tokens from it."""
         app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
         assert "function deckToPalette(" in app
-        # SurfaceShell derives frame tokens from the picked deck theme when given one.
-        assert "frameTheme ? deckToPalette(frameTheme) : paletteForKind(kind)" in app
+        # SurfaceShell derives frame tokens from the picked deck theme when given one
+        # (the frameTheme branch leads the palette resolution).
+        assert "frameTheme" in app and "? deckToPalette(frameTheme)" in app
         # Both deck surfaces (presentation + quiz) hand their active theme to the frame.
         assert app.count("frameTheme={theme}") >= 2
+
+    @pytest.mark.asyncio
+    async def test_a2ui_surface_dedupes_the_text_bubble(self, exporter, crew_data):
+        """Parity with Kasal chat: a composed surface IS the canonical answer render,
+        so the exported App must show the surface XOR the raw text bubble — never both
+        (otherwise a Genie table/dashboard prints twice)."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        # The render branch chooses one or the other (ternary), not Prose + surface.
+        assert "RICH.has(m.a2ui.surfaceKind) ? (" in app
+        assert "<RichSurface surface={m.a2ui} />" in app
+        assert "<Prose text={m.text} />" in app
+
+    @pytest.mark.asyncio
+    async def test_a2ui_prose_only_surface_gate(self, exporter, crew_data):
+        """agent.py must drop a prose-only dashboard/document surface (no real
+        deliverable component) so a plain answer keeps its text instead of being
+        wrapped in a Text-only surface that double-renders."""
+        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        assert "_a2ui_has_data_component" in agent
+        # The deliverable-bearing components that keep a surface (incl. the new ones).
+        for comp in ("Forecast", "Graph", "Sequence", "Album", "Chart", "Table"):
+            assert comp in agent, comp
+
+    @pytest.mark.asyncio
+    async def test_a2ui_palette_resolves_from_root_component(self, exporter, crew_data):
+        """A surface rooted on a component-based deliverable (Forecast/Graph/Sequence/
+        Album) must brand from that component, mirroring Kasal chat's A2uiSurface."""
+        app = _files(await exporter.export(crew_data, {}))["frontend/src/App.tsx"]
+        assert "ROOT_COMPONENT_TO_DELIVERABLE" in app
+        assert "function deliverableForSurface(" in app
+        for deliverable in ("forecast", "graph", "sequence", "album"):
+            assert deliverable in app, deliverable
 
     @pytest.mark.asyncio
     async def test_a2ui_frontend_imports_are_declared_deps(self, exporter, crew_data):
@@ -907,7 +946,9 @@ class TestDatabricksAppA2UI:
 
         files = _files(await exporter.export(crew_data, {}))
         pkg = json.loads(files["frontend/package.json"])
-        declared = set(pkg.get("dependencies", {})) | set(pkg.get("devDependencies", {}))
+        declared = set(pkg.get("dependencies", {})) | set(
+            pkg.get("devDependencies", {})
+        )
         # react-leaflet bundles its own types and re-exports leaflet; @types/* is a
         # dev concern only. Test runners/utilities never reach the build.
         test_only = {"@testing-library/react", "vitest", "@vitejs/plugin-react"}
@@ -929,12 +970,12 @@ class TestDatabricksAppA2UI:
                 imported.add(root)
 
         missing = {p for p in imported if p not in declared and p not in test_only}
-        assert "leaflet" in imported and "react-leaflet" in imported, (
-            "expected the vendored a2ui tree to include LeafletMap's imports"
-        )
-        assert not missing, (
-            f"a2ui frontend imports not declared in exported package.json: {sorted(missing)}"
-        )
+        assert (
+            "leaflet" in imported and "react-leaflet" in imported
+        ), "expected the vendored a2ui tree to include LeafletMap's imports"
+        assert (
+            not missing
+        ), f"a2ui frontend imports not declared in exported package.json: {sorted(missing)}"
 
     @pytest.mark.asyncio
     async def test_a2ui_composer_present(self, exporter, crew_data):
@@ -1511,7 +1552,9 @@ def _rel_text_files(base):
     for p in base.rglob("*"):
         if not p.is_file():
             continue
-        if ".test." in p.name or p.name in {".DS_Store", "Thumbs.db"}:
+        # CLAUDE.md is dev documentation, not vendored renderer code — it lives in
+        # the canonical shared/a2ui dir but is never shipped into the export.
+        if ".test." in p.name or p.name in {".DS_Store", "Thumbs.db", "CLAUDE.md"}:
             continue
         if "__pycache__" in p.parts:
             continue
@@ -1569,21 +1612,35 @@ class TestCodexHandlerVendor:
         wire _make_llm to use it — plain OpenAICompletion(api='responses') does NOT
         run the tool loop for gpt-5-3-codex (returns the raw tool-call)."""
         files = _files(await exporter.export(crew_data, {}))
-        assert "agent_server/databricks_codex_handler.py" in files, "handler not shipped"
+        assert (
+            "agent_server/databricks_codex_handler.py" in files
+        ), "handler not shipped"
         agent_py = files["agent_server/agent.py"]
-        assert "DatabricksCodexCompletion" in agent_py, "codex branch not wired to the handler"
+        assert (
+            "DatabricksCodexCompletion" in agent_py
+        ), "codex branch not wired to the handler"
         # The bare OpenAICompletion path must no longer be used for codex.
-        assert "from agent_server.databricks_codex_handler import DatabricksCodexCompletion" in agent_py
+        assert (
+            "from agent_server.databricks_codex_handler import DatabricksCodexCompletion"
+            in agent_py
+        )
 
     def test_codex_handler_in_sync_with_source(self):
         """The vendored handler must byte-match Kasal's canonical
         src/core/llm_handlers/databricks_codex_handler.py. On failure, re-copy it."""
-        canonical = TEMPLATE_DIR.parents[4] / "core" / "llm_handlers" / "databricks_codex_handler.py"
+        canonical = (
+            TEMPLATE_DIR.parents[4]
+            / "core"
+            / "llm_handlers"
+            / "databricks_codex_handler.py"
+        )
         vendored = TEMPLATE_DIR / "agent_server" / "databricks_codex_handler.py"
         assert vendored.is_file(), "vendored codex handler missing from the template"
         if not canonical.is_file():
             pytest.skip("canonical handler not present (backend-only checkout)")
-        assert vendored.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8"), (
+        assert vendored.read_text(encoding="utf-8") == canonical.read_text(
+            encoding="utf-8"
+        ), (
             "codex handler drift — re-copy src/core/llm_handlers/databricks_codex_handler.py "
             "into the template's agent_server/"
         )
@@ -1605,9 +1662,9 @@ class TestDurableConversationState:
         assert "CREATE SCHEMA IF NOT EXISTS" in store, "no dedicated-schema create"
         assert "agent_server" in store and "kasal_app_state" in store
         for module in ("cancel", "progress", "a2ui_store", "conversation"):
-            assert "state_store" in files[f"agent_server/{module}.py"], (
-                f"{module} not backed by state_store"
-            )
+            assert (
+                "state_store" in files[f"agent_server/{module}.py"]
+            ), f"{module} not backed by state_store"
 
     @pytest.mark.asyncio
     async def test_conversation_recovery_endpoint(self, exporter, crew_data):

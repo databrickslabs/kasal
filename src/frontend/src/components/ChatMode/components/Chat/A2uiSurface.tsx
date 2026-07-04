@@ -11,7 +11,7 @@ import {
   type Surface,
 } from '../../../../shared/a2ui';
 import { useA2uiThemes } from '../../hooks/useA2uiThemes';
-import { THEME_PRESETS, type Theme } from '../../../Configuration/uiConfigShared';
+import { THEME_PRESETS, DEFAULT_THEME, type Theme } from '../../../Configuration/uiConfigShared';
 
 /** A per-surface palette persisted by the preview's "Customize → Look" restyle.
  *  Stored on the surface (the composer never emits it) so it survives reload/PDF. */
@@ -28,6 +28,18 @@ const SURFACE_TO_DELIVERABLE: Record<string, string> = {
   map: 'map',
   document: 'report',
   conversation: 'default',
+};
+
+// Some deliverables are COMPONENTS (usable inside dashboard/document), not their
+// own surfaceKind — so a surface WHOSE ROOT is one of these resolves its branding
+// from the component, letting the UIConfigurator's per-type palette + directives
+// apply (e.g. a document rooted on a Forecast uses the 'forecast' palette). When
+// the component is only PART of a larger surface, the surfaceKind palette wins.
+const ROOT_COMPONENT_TO_DELIVERABLE: Record<string, string> = {
+  Forecast: 'forecast',
+  Graph: 'graph',
+  Sequence: 'sequence',
+  Album: 'album',
 };
 
 /**
@@ -75,12 +87,30 @@ export const A2uiSurface: React.FC<{
 }> = ({ surface, className, palette, onExpand, hideDownloads, onDownloadPdf, onRestyle, fit }) => {
   const a2uiThemes = useA2uiThemes();
   const [lookOpen, setLookOpen] = useState(false);
-  const deliverableKey = SURFACE_TO_DELIVERABLE[surface.surfaceKind] || 'default';
+  // Prefer a component-level deliverable when the surface's ROOT is a
+  // component-based deliverable (Forecast/Graph/Sequence/Album), else fall back
+  // to the surfaceKind mapping.
+  const rootComponent = surface.components.find((c) => c.id === surface.root)?.component;
+  const deliverableKey =
+    (rootComponent && ROOT_COMPONENT_TO_DELIVERABLE[rootComponent]) ||
+    SURFACE_TO_DELIVERABLE[surface.surfaceKind] ||
+    'default';
   // Precedence: explicit prop → per-surface "Look" override → workspace palette.
   const override = palette ?? (surface as ThemedSurface).theme;
   const deckPalette = override ?? a2uiThemes?.[deliverableKey];
+  // Token-themed kinds (dashboard/document — where graphs/tables live) must default
+  // to the LIGHT DEFAULT_THEME (white background) rather than inheriting the chat
+  // root's `--a2-*` tokens, which are DARK when the chat is in dark mode. An
+  // unconfigured/disabled workspace yields no palette (useA2uiThemes → null), so
+  // without this a graph surface would render dark-on-dark by default. Deck-themed
+  // and presentation kinds keep their existing (null → inherit / deck) behavior.
+  const isTokenThemed =
+    surface.surfaceKind === 'dashboard' || surface.surfaceKind === 'document';
   const tokenPalette =
-    override ?? a2uiThemes?.[deliverableKey] ?? a2uiThemes?.default ?? null;
+    override ??
+    a2uiThemes?.[deliverableKey] ??
+    a2uiThemes?.default ??
+    (isTokenThemed ? DEFAULT_THEME : null);
   const deckTheme = deckPalette
     ? themeToDeck(deckPalette)
     : getDeckTheme(DEFAULT_DECK_THEME_ID);

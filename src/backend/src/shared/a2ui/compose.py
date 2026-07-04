@@ -110,6 +110,19 @@ DELIVERABLE_KEYWORDS = [
     ("map", "map"),
     ("album", "album"),
     ("gallery", "album"),
+    ("forecast", "forecast"),
+    ("forecasting", "forecast"),
+    ("projection", "forecast"),
+    ("prediction", "forecast"),
+    ("sequence diagram", "sequence"),
+    ("interaction diagram", "sequence"),
+    # "network graph"/"node graph" must precede the bare "graph" so a plain chart
+    # request ("bar graph") doesn't route to the node-link Graph.
+    ("network graph", "graph"),
+    ("node graph", "graph"),
+    ("network diagram", "graph"),
+    ("dependency graph", "graph"),
+    ("relationship graph", "graph"),
     ("presentation", "presentation"),
     ("slide", "presentation"),
     ("deck", "presentation"),
@@ -549,7 +562,12 @@ def a2ui_system_prompt(
         "presentation/slides/deck use 'presentation' with a SlideDeck of Slides; for a "
         "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
         "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
-        "component; otherwise use 'document' with Markdown.\n"
+        "component. For these SPECIAL deliverables, use a 'dashboard' or 'document' "
+        "surface whose ROOT is the matching component (see rule 11): a photo "
+        "album/image gallery -> ONE Album; a forecast/projection/prediction over time "
+        "-> ONE Forecast; a relationship/network/dependency graph -> ONE Graph; a "
+        "sequence/interaction diagram -> ONE Sequence. Only when NONE of the above fit, "
+        "use 'document' with Markdown.\n"
         "6. For presentations build a REAL deck of Slides, each with a 'variant'. Start "
         "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'), "
         "then several variant='content' slides, and end with a closing slide. "
@@ -593,7 +611,13 @@ def a2ui_system_prompt(
         "across the bottom, so it is the wide footer, never squeezed into one narrow column. "
         "Keep tiles in a row visually parallel (each a single value + a short label), keep "
         "spacing and structure uniform, and use ONE consistent theme — the app styles colors, "
-        "so do NOT specify them. Aim for a grid that reads as a tidy, aligned whole.\n"
+        "so do NOT specify them. Aim for a grid that reads as a tidy, aligned whole. "
+        "(d) if the answer's data carries REAL latitude/longitude coordinates (e.g. "
+        "per-site or per-region rows with lat/lng), ADD a Map component as a full-width "
+        "cell (placed LAST like a Table) plotting those points — {lat, lng, label?, "
+        'value?} in dataModel, bound with {"path":"/points"}; when the geography IS the '
+        "main story, prefer surfaceKind 'map' instead (rule 10). NEVER invent coordinates "
+        "— omit the map when the data only names places (e.g. 'US East') without lat/lng.\n"
         "9. For flashcards/anki build ONE Flashcards component whose 'cards' is a list of "
         "REAL study cards, each {front, back, hint?}: front is a concise prompt "
         "(question / term / cloze), back is the correct answer/definition, hint is an "
@@ -607,6 +631,20 @@ def a2ui_system_prompt(
         '(put the array in dataModel, bind with {"path":"/points"}). value is an optional '
         "magnitude that sizes the marker (e.g. count, population). If you do NOT have real "
         "coordinates, use a dashboard or table instead — never invent coordinates.\n"
+        "11. SPECIAL DATA/DIAGRAM COMPONENTS (use inside a 'dashboard' or 'document' surface "
+        "when the content fits — a single one may be the surface root):\n"
+        "  - Forecast: a time-series prediction with a confidence band. Use it (NOT a plain "
+        "Chart) whenever the data has a forecast/predicted value over time, especially with "
+        "lower/upper bounds. Pass the query rows AS-IS in data (the renderer auto-detects the "
+        "time, forecast, lower, upper, actual and category columns); set seriesKey to a "
+        "category column to draw one line+band per group (e.g. risk_category).\n"
+        "  - Graph: a node-link/network diagram for RELATIONSHIPS between entities — nodes "
+        "[{id,label,group?}] + edges [{from,to,label?}]. Use for dependencies, networks, "
+        "entity links; NOT for hierarchy (use Mindmap) or time series.\n"
+        "  - Sequence: a sequence diagram for INTERACTIONS/flows over time between participants "
+        "— actors [names] + messages [{from,to,text,dashed?}].\n"
+        "  - Album: a photo carousel for IMAGE galleries — items [{src,caption?,href?}] where "
+        "src is a DIRECT image URL. Never put non-image page links in an Album (use a Table).\n"
         f"Crew purpose: {purpose}\n"
         + (f"The user's request this turn: {query}\n" if query else "")
         + (
@@ -672,6 +710,17 @@ RICH_INTENT = (
     "map",
     "geographic",
     "geospatial",
+    "forecast",
+    "forecasting",
+    "projection",
+    "predict",
+    "prediction",
+    "graph",
+    "network",
+    "sequence diagram",
+    "diagram",
+    "album",
+    "gallery",
 )
 
 

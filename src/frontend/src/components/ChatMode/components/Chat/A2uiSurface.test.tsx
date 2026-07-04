@@ -25,11 +25,15 @@ vi.mock('../../../../shared/a2ui', async () => {
     getDeckTheme: () => ({ id: 'midnight' }),
     DEFAULT_DECK_THEME_ID: 'midnight',
     themeToDeck: (p: unknown) => p,
-    themeToTokens: () => ({}),
+    // Echo the palette's background as the --a2-background CSS var so a test can
+    // assert WHICH palette was resolved for the surface (white default vs dark).
+    themeToTokens: (p: { background?: string }) => ({ '--a2-background': p?.background }),
   };
 });
-// Isolate from the workspace-themes fetch (returns no palettes → built-in theme).
-vi.mock('../../hooks/useA2uiThemes', () => ({ useA2uiThemes: () => null }));
+// Isolate from the workspace-themes fetch. Default null (no palettes → built-in
+// theme); a test can set `h.themes` to exercise per-deliverable palette resolution.
+const h = vi.hoisted(() => ({ themes: null as Record<string, unknown> | null }));
+vi.mock('../../hooks/useA2uiThemes', () => ({ useA2uiThemes: () => h.themes }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const surface: any = {
@@ -67,6 +71,49 @@ describe('A2uiSurface', () => {
     render(<A2uiSurface surface={surface} onExpand={onExpand} />);
     fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults a document surface to the white DEFAULT_THEME when no workspace palette', () => {
+    // useA2uiThemes is mocked to null (unconfigured/disabled workspace). Without the
+    // fallback the surface would inherit the chat root's --a2-* tokens (dark in dark
+    // mode); with it a graph surface renders on the white DEFAULT_THEME background.
+    const { container } = render(<A2uiSurface surface={surface} />);
+    const wrapper = container.querySelector('[data-surface-kind="document"]') as HTMLElement;
+    // themeToTokens is mocked to echo the resolved palette's background as --a2-background.
+    expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#FFFFFF');
+  });
+
+  it('brands a surface from its ROOT component deliverable (Forecast → forecast palette)', () => {
+    // A dashboard surface ROOTED on a Forecast must use the workspace's 'forecast'
+    // palette (component-based deliverable), not the 'dashboard'/'default' one.
+    h.themes = {
+      forecast: { background: '#111111' },
+      dashboard: { background: '#222222' },
+      default: { background: '#333333' },
+    };
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s: any = {
+        surfaceKind: 'dashboard',
+        root: 'fc',
+        components: [{ id: 'fc', component: 'Forecast', data: { path: '/d' } }],
+        dataModel: {},
+      };
+      const { container } = render(<A2uiSurface surface={s} />);
+      const wrapper = container.querySelector('[data-surface-kind="dashboard"]') as HTMLElement;
+      expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#111111');
+    } finally {
+      h.themes = null;
+    }
+  });
+
+  it('does NOT force a palette on a deck-themed surface with no workspace palette', () => {
+    // Deck kinds keep their existing (deck-theme) behavior — not gated to white.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mindmap: any = { ...surface, surfaceKind: 'mindmap' };
+    const { container } = render(<A2uiSurface surface={mindmap} />);
+    const wrapper = container.querySelector('[data-surface-kind="mindmap"]') as HTMLElement;
+    expect(wrapper.style.getPropertyValue('--a2-background')).toBe('');
   });
 
   it('stops click propagation so a clickable host row is not also triggered', () => {

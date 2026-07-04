@@ -272,6 +272,93 @@
           "shape": "[{ lat: number, lng: number, label, value }]"
         }
       }
+    },
+    "Forecast": {
+      "summary": "A time-series FORECAST chart: a forecast line plus an optional shaded confidence band and optional historical actuals. data is a list of row objects. The renderer AUTO-DETECTS the columns, so pass the query rows as-is; optionally set xKey (time/date column), forecastKey (the predicted value), lowerKey/upperKey (confidence band), actualKey (historical actuals), and seriesKey (a category column to split into one line per group, e.g. risk_category). Use for any prediction/forecast/projection over time with or without a confidence interval.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "data": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ <time>, <forecast>, <lower?>, <upper?>, <actual?>, <category?> }]"
+        },
+        "xKey": {
+          "type": "string"
+        },
+        "forecastKey": {
+          "type": "string"
+        },
+        "lowerKey": {
+          "type": "string"
+        },
+        "upperKey": {
+          "type": "string"
+        },
+        "actualKey": {
+          "type": "string"
+        },
+        "seriesKey": {
+          "type": "string"
+        }
+      }
+    },
+    "Graph": {
+      "summary": "A node-link GRAPH / network / relationship diagram. nodes is a list of {id, label?, group?}; edges a list of {from, to, label?} referencing node ids. Nodes are auto-laid-out on a circle and colored by 'group'. Set directed:false for undirected edges (default is directed with arrowheads). Use for dependencies, relationships, networks, entity links, org/flow structure — NOT for time series (use Chart/Forecast) or hierarchical trees (use Mindmap).",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "nodes": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ id, label, group }]"
+        },
+        "edges": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ from, to, label }]"
+        },
+        "directed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Sequence": {
+      "summary": "A UML-style SEQUENCE diagram. actors is an ordered list of participant names (or {id, label}); messages a list of {from, to, text?, dashed?} drawn top-to-bottom as arrows between actor lifelines (dashed:true for a return/async message). Use for interactions, request/response flows, protocols, call sequences over time between participants.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "actors": {
+          "type": "array",
+          "binding": true,
+          "shape": "[string | { id, label }]"
+        },
+        "messages": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ from, to, text, dashed }]"
+        }
+      }
+    },
+    "Album": {
+      "summary": "An image ALBUM shown as a one-image-at-a-time CAROUSEL with prev/next. items is a list of image URLs or {src, caption?, href?}. Use ONLY for real image URLs (src must be a direct image link). The caption links to href (or the source URL). Use for photo galleries / image collections — never for a list of non-image links (use a Table or List for those).",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "items": {
+          "type": "array",
+          "binding": true,
+          "shape": "[string | { src, caption, href }]"
+        }
+      }
     }
   }
 }
