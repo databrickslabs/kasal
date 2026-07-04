@@ -423,15 +423,12 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     return (
       <div className="flex flex-col items-center justify-center h-full px-6">
         <div className="w-full max-w-3xl">
-          {/* Greeting */}
+          {/* Greeting — the rotating composer placeholder advertises what Kasal can
+              build (dashboards, presentations, quizzes, …), so no subtitle needed. */}
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="text-2xl font-semibold" style={{ color: 'var(--text-primary)' }}>
               What can I help you with?
             </h1>
-            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              Describe what you want and Kasal builds and runs the agents for you. It can create
-              dashboards, presentations, quizzes, flashcards, albums, mindmaps, and maps.
-            </p>
           </div>
 
           {/* Input — centered hero */}
