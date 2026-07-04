@@ -801,6 +801,27 @@ def _compose_a2ui(
     )
 
 
+# Components that make a surface a genuine DELIVERABLE (chart/table/number,
+# diagram, map, image gallery). A dashboard/document surface with none of these is
+# just prose wrapped in Text/Markdown and would render the answer TWICE — once as
+# the text bubble, once inside the surface. Mirrors Kasal's a2ui_runner gate.
+_A2UI_DATA_COMPONENTS = frozenset(
+    {
+        "Chart", "Table", "Stat", "KeyValue", "Grid",
+        "Forecast", "Graph", "Sequence", "Album", "Map",
+    }
+)
+_A2UI_DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
+
+
+def _a2ui_has_data_component(surface: Dict[str, Any]) -> bool:
+    """True if the surface carries at least one deliverable-bearing component."""
+    for comp in surface.get("components") or []:
+        if isinstance(comp, dict) and (comp.get("component") or comp.get("type")) in _A2UI_DATA_COMPONENTS:
+            return True
+    return False
+
+
 def _schedule_a2ui(message: str, output_text: str, session_id: Optional[str]) -> None:
     """Compose the A2UI surface OFF the answer's critical path.
 
@@ -819,7 +840,16 @@ def _schedule_a2ui(message: str, output_text: str, session_id: Optional[str]) ->
         except Exception as exc:  # noqa: BLE001 — UI compose must never break a turn
             print(f"A2UI background compose failed ({exc}); no surface.")
             surface = None
-        if surface and surface.get("surfaceKind") in (None, "conversation"):
+        # Drop non-rich surfaces so the UI keeps the plain text: the markdown
+        # 'conversation' fallback, AND a prose-only dashboard/document (no real
+        # deliverable component) that would otherwise double-render the answer.
+        if surface and (
+            surface.get("surfaceKind") in (None, "conversation")
+            or (
+                surface.get("surfaceKind") in _A2UI_DATA_SURFACE_KINDS
+                and not _a2ui_has_data_component(surface)
+            )
+        ):
             surface = None
         a2ui_store.put(session_id, surface)
 

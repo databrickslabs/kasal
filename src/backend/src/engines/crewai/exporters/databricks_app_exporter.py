@@ -112,7 +112,7 @@ _TOOL_ALIASES = {"DallETool": "Dall-E Tool", "GmailTool": "Gmail"}
 
 # OS/editor junk that must never be emitted into the exported project (and which
 # would crash the UTF-8 template read if walked).
-_SKIP_FILES = {".DS_Store", "Thumbs.db", ".pyc"}
+_SKIP_FILES = {".DS_Store", "Thumbs.db", ".pyc", "CLAUDE.md"}
 
 _EXT_TYPE = {
     ".py": "python",
@@ -270,7 +270,9 @@ class DatabricksAppExporter(BaseExporter):
                 continue
             for token, value in tokens.items():
                 content = content.replace(token, value)
-            files.append({"path": out_rel, "content": content, "type": self._ftype(out_rel)})
+            files.append(
+                {"path": out_rel, "content": content, "type": self._ftype(out_rel)}
+            )
 
         # 1b. Vendor the shared A2UI composer + bake this workspace's resolved UI
         #     config (catalog/directives/enabled) under agent_server/a2ui/ so the

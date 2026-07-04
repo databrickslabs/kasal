@@ -18,6 +18,10 @@ you are editing wins on specifics:
   - `src/backend/src/engines/crewai/tools/CLAUDE.md` — custom tools
   - `src/frontend/src/api/CLAUDE.md` — frontend service layer
   - `src/frontend/src/components/CLAUDE.md` — React components
+  - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
+    (renderer + composer + catalog + UIConfigurator + exported-app vendoring).
+    **Read before adding/editing an A2UI component** — the touchpoints span
+    frontend, backend and the export template.
 
 ## Important Project Rules
 

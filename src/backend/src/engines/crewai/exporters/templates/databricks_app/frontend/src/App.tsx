@@ -116,6 +116,27 @@ const SURFACE_TO_DELIVERABLE: Record<string, string> = {
   document: 'report',
 }
 
+// Some deliverables are COMPONENTS (usable inside dashboard/document), not their
+// own surfaceKind — so a surface WHOSE ROOT is one of these resolves its branding
+// from the component, matching Kasal chat's A2uiSurface.
+const ROOT_COMPONENT_TO_DELIVERABLE: Record<string, string> = {
+  Forecast: 'forecast',
+  Graph: 'graph',
+  Sequence: 'sequence',
+  Album: 'album',
+}
+
+// The UIConfigurator deliverable that brands a surface: its ROOT component when
+// that is a component-based deliverable, else the surfaceKind mapping.
+function deliverableForSurface(surface: Surface): string {
+  const rootComponent = surface.components.find((c) => c.id === surface.root)?.component
+  return (
+    (rootComponent && ROOT_COMPONENT_TO_DELIVERABLE[rootComponent]) ||
+    SURFACE_TO_DELIVERABLE[surface.surfaceKind] ||
+    'default'
+  )
+}
+
 // Built-in default palette (UIConfigurator "Default") so a surface always has a
 // full --a2-* token set even when this workspace shipped no branding — surfaces
 // are never unstyled.
@@ -131,9 +152,11 @@ const DEFAULT_PALETTE: ThemePalette = {
 // The workspace palette for a surface kind, with sensible fallbacks. Fed to
 // themeToTokens so cards/tables/dashboards/decks inherit the workspace colors —
 // the SAME --a2-* token mechanism the inline chat surface uses.
-function paletteForKind(kind: string): ThemePalette {
-  const deliverable = SURFACE_TO_DELIVERABLE[kind] ?? 'default'
+function paletteForDeliverable(deliverable: string): ThemePalette {
   return WORKSPACE_THEMES[deliverable] ?? WORKSPACE_THEMES.default ?? DEFAULT_PALETTE
+}
+function paletteForKind(kind: string): ThemePalette {
+  return paletteForDeliverable(SURFACE_TO_DELIVERABLE[kind] ?? 'default')
 }
 
 // The ACTIVE deck theme → the frame's --a2-* palette, so a themed deck surface's
@@ -182,11 +205,15 @@ const Prose = ({ text }: { text: string }) => (
 // snapshot just the content, not the toolbar.
 function SurfaceShell({
   kind,
+  deliverable,
   controls,
   children,
   frameTheme,
 }: {
   kind: string
+  // The UIConfigurator deliverable to brand from (resolved via the root component
+  // for Forecast/Graph/Sequence/Album). Falls back to the surfaceKind palette.
+  deliverable?: string
   controls?: (contentRef: RefObject<HTMLDivElement | null>) => ReactNode
   children: ReactNode
   // A deck surface (presentation/quiz) with a live theme picker passes its ACTIVE
@@ -197,7 +224,11 @@ function SurfaceShell({
   const frameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const tokenStyle = themeToTokens(
-    frameTheme ? deckToPalette(frameTheme) : paletteForKind(kind),
+    frameTheme
+      ? deckToPalette(frameTheme)
+      : deliverable
+        ? paletteForDeliverable(deliverable)
+        : paletteForKind(kind),
   ) as CSSProperties
   const toggleFullscreen = () => {
     const el = frameRef.current
@@ -348,15 +379,20 @@ function RichSurface({ surface }: { surface: Surface }) {
   if (kind === 'presentation') return <PresentationSurface surface={surface} />
   if (kind === 'quiz') return <QuizSurface surface={surface} />
   const png = kind === 'dashboard' || kind === 'mindmap' || kind === 'map'
-  // Provide the kind's palette via DeckThemeContext so theme-aware visual surfaces
-  // (the mindmap canvas + nodes, the map legend) follow the workspace colors —
-  // parity with Kasal chat. (Dashboards read --a2-* tokens from SurfaceShell, so
-  // the context is a harmless no-op there.)
-  const { themes, defaultId } = themesFor(kind)
+  // Brand from the root-component deliverable (Forecast/Graph/Sequence/Album) when
+  // applicable, else the surfaceKind — so a document rooted on one of those uses
+  // its own configured palette.
+  const deliverable = deliverableForSurface(surface)
+  // Provide the palette via DeckThemeContext so theme-aware visual surfaces (the
+  // mindmap canvas + nodes, the map legend, the Forecast/Graph/Sequence series
+  // colors) follow the workspace colors — parity with Kasal chat. (Dashboards read
+  // --a2-* tokens from SurfaceShell, so the context is a harmless no-op there.)
+  const { themes, defaultId } = themesFor(deliverable)
   const theme = resolveTheme(themes, defaultId)
   return (
     <SurfaceShell
       kind={kind}
+      deliverable={deliverable}
       controls={
         png
           ? (contentRef) => (
@@ -899,8 +935,16 @@ export default function App() {
                 ) : (
                   // The assistant: left-aligned, full width, no avatar.
                   <div key={i} className="mx-auto max-w-3xl px-6 py-2.5">
-                    <Prose text={m.text} />
-                    {m.a2ui && RICH.has(m.a2ui.surfaceKind) && <RichSurface surface={m.a2ui} />}
+                    {/* A composed surface IS the canonical rendering of the answer,
+                        so show ONLY it (not the raw text bubble too) — otherwise the
+                        same content prints twice. The backend attaches a surface only
+                        for genuine data answers (prose-only surfaces are dropped in
+                        _schedule_a2ui), so plain replies still show their text. */}
+                    {m.a2ui && RICH.has(m.a2ui.surfaceKind) ? (
+                      <RichSurface surface={m.a2ui} />
+                    ) : (
+                      <Prose text={m.text} />
+                    )}
                   </div>
                 ),
               )}

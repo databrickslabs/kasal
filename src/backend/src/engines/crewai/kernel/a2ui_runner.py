@@ -124,6 +124,45 @@ async def _resolve_config(
     return enabled, catalog, guidance
 
 
+# Surface kinds a plain-prose answer degrades into (as opposed to explicitly
+# requested rich kinds like presentation/quiz/mindmap). These are only worth an
+# envelope when they carry real data — see `compose_surface`.
+_DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
+
+# Components that make a surface a genuine DELIVERABLE (a real graph/table/number,
+# a diagram, a map, an image gallery). A dashboard/document surface with none of
+# these is just prose wrapped in Text/Markdown and would render the answer twice
+# (see the double-render fix). The data-viz + diagram + gallery components must be
+# listed here or their surfaces get dropped back to plain text.
+_DATA_COMPONENTS = frozenset(
+    {
+        "Chart",
+        "Table",
+        "Stat",
+        "KeyValue",
+        "Grid",
+        "Forecast",
+        "Graph",
+        "Sequence",
+        "Album",
+        "Map",
+    }
+)
+
+
+def _has_data_component(surface: Dict[str, Any]) -> bool:
+    """True if the surface contains at least one deliverable-bearing component.
+
+    The composer emits a flat ``components`` array; each node's type is on
+    ``component`` (with ``type`` accepted as an alias, mirroring the renderer)."""
+    for comp in surface.get("components") or []:
+        if not isinstance(comp, dict):
+            continue
+        if (comp.get("component") or comp.get("type")) in _DATA_COMPONENTS:
+            return True
+    return False
+
+
 async def compose_surface(
     text: str,
     *,
@@ -208,6 +247,20 @@ async def compose_surface(
     # build a rich one; treat that as "no rich surface" so the result stays a plain
     # string rather than a redundant envelope around the same prose.
     if not surface or surface.get("surfaceKind") in (None, "conversation"):
+        return None
+    # A rich-intent keyword in the request (e.g. an "analytics"/"billing" Genie
+    # crew) fires the composer even when THIS answer is just prose — a greeting,
+    # a clarification, a Genie space overview. For the data-oriented kinds a prose
+    # answer degrades into (dashboard/document), a Text-only surface renders the
+    # SAME words twice: once as the chat bubble (the `text` field) and once inside
+    # the surface. Require an actual data component — Chart/Table/Stat/KeyValue/Grid
+    # — for those kinds so plain prose stays in the chat transcript and only genuine
+    # graphs/tables become a deliverable. Explicitly-requested rich kinds
+    # (presentation/quiz/mindmap/flashcards/map) are legitimately non-tabular, so
+    # they are never gated on data content.
+    if surface.get("surfaceKind") in _DATA_SURFACE_KINDS and not _has_data_component(
+        surface
+    ):
         return None
     return surface
 

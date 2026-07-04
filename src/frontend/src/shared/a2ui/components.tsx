@@ -1,10 +1,10 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, Fragment, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   ResponsiveContainer,
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, ComposedChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import type { ComponentNode, NodeProps } from './types'
@@ -174,22 +174,89 @@ export function List({ node, resolve }: NodeProps) {
   )
 }
 
+// Parse a cell for numeric-aware sorting: strips the decorations models emit on
+// figures (~ approx, thousands commas, currency, %, whitespace). Returns a number
+// when the cleaned value is numeric, else null so the caller falls back to a
+// locale string compare. Lets a "Total DBUs" column of "~905,930" sort as numbers.
+const numericValue = (s: string): number | null => {
+  const cleaned = s.replace(/[~,$%\s]/g, '')
+  if (!/^-?\d*\.?\d+$/.test(cleaned)) return null
+  const n = Number(cleaned)
+  return Number.isFinite(n) ? n : null
+}
+
 export function Table({ node, resolve }: NodeProps) {
-  const columns = asArr(node.columns)
-  const rows = asArr(resolve(node.rows))
+  // Resolve columns through the dataModel too — the composer may bind it
+  // (`columns: {"path":"/cols"}`), not just pass a literal array; without resolve
+  // a bound header came back empty (no <thead>).
+  const columns = asArr(resolve(node.columns))
+  const rawRows = asArr(resolve(node.rows))
   const { downloads: showDownloads } = useContext(SurfaceChromeContext)
+
+  // Click a header to cycle asc → desc → original order. Numeric-aware so figure
+  // columns sort by magnitude, not lexically. null = document order.
+  const [sort, setSort] = useState<{ col: number; dir: 'asc' | 'desc' } | null>(null)
+  // A substring filter across all cells — shown only for tables large enough to
+  // benefit (small ones read fine as-is; sorting stays available on every table).
+  const [query, setQuery] = useState('')
+  const searchable = rawRows.length > 8
+
+  const cell = useCallback((row: unknown, ci: number) => asStr(asArr(row)[ci]), [])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rawRows
+    return rawRows.filter((row) => asArr(row).some((c) => asStr(c).toLowerCase().includes(q)))
+  }, [rawRows, query])
+
+  const sorted = useMemo(() => {
+    if (!sort) return filtered
+    const { col, dir } = sort
+    const factor = dir === 'asc' ? 1 : -1
+    // Copy before sorting (never mutate the resolved dataModel array).
+    return [...filtered].sort((a, b) => {
+      const sa = cell(a, col)
+      const sb = cell(b, col)
+      const na = numericValue(sa)
+      const nb = numericValue(sb)
+      if (na != null && nb != null) return (na - nb) * factor
+      return sa.localeCompare(sb, undefined, { numeric: true }) * factor
+    })
+  }, [filtered, sort, cell])
+
+  const cycleSort = (col: number) =>
+    setSort((prev) => {
+      if (!prev || prev.col !== col) return { col, dir: 'asc' }
+      return prev.dir === 'asc' ? { col, dir: 'desc' } : null
+    })
+
   return (
     <div>
-      {showDownloads && (
-        <div className="mb-1 flex justify-start">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-            onClick={() => downloadCsv(columns.map(asStr), rows.map((r) => asArr(r).map(asStr)), 'table.csv')}
-          >
-            <Download className="size-3.5" /> CSV
-          </Button>
+      {(showDownloads || searchable) && (
+        <div className="mb-1 flex items-center justify-between gap-2">
+          {showDownloads ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+              // Export the current VIEW (sorted + filtered) — what the user sees.
+              onClick={() => downloadCsv(columns.map(asStr), sorted.map((r) => asArr(r).map(asStr)), 'table.csv')}
+            >
+              <Download className="size-3.5" /> CSV
+            </Button>
+          ) : (
+            <span />
+          )}
+          {searchable && (
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter rows…"
+              aria-label="Filter table rows"
+              className="h-7 w-40 rounded-md border bg-transparent px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+            />
+          )}
         </div>
       )}
       <div className="overflow-x-auto rounded-lg border">
@@ -200,24 +267,49 @@ export function Table({ node, resolve }: NodeProps) {
               {/* Inverted header (foreground bg / background text) — a guaranteed
                   contrasting pair from the palette. `bg-muted` (= surface) could
                   collide with the foreground text on palettes whose surface is
-                  dark, leaving the header unreadable. */}
-              {columns.map((c, i) => (
-                <th key={i} className="bg-foreground px-3 py-2 text-left font-semibold text-background">{asStr(c)}</th>
-              ))}
+                  dark, leaving the header unreadable. Each header is a sort toggle. */}
+              {columns.map((c, i) => {
+                const active = sort?.col === i
+                return (
+                  <th key={i} className="bg-foreground px-3 py-2 text-left font-semibold text-background">
+                    <button
+                      type="button"
+                      onClick={() => cycleSort(i)}
+                      aria-label={`Sort by ${asStr(c)}`}
+                      className="flex cursor-pointer select-none items-center gap-1 hover:opacity-80"
+                    >
+                      {asStr(c)}
+                      <span className="text-[10px] opacity-70">{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                    </button>
+                  </th>
+                )
+              })}
             </tr>
           </thead>
         )}
         <tbody>
-          {rows.map((row, ri) => (
+          {sorted.map((row, ri) => (
             <tr key={ri} className={cn('border-t', ri % 2 === 1 && 'bg-muted/30')}>
               {asArr(row).map((cell, ci) => (
                 <td key={ci} className="px-3 py-2">{asStr(cell)}</td>
               ))}
             </tr>
           ))}
+          {sorted.length === 0 && (
+            <tr>
+              <td colSpan={Math.max(1, columns.length)} className="px-3 py-6 text-center text-muted-foreground">
+                No matching rows
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
       </div>
+      {searchable && query.trim() !== '' && (
+        <div className="mt-1 text-xs text-muted-foreground">
+          {sorted.length} of {rawRows.length} rows
+        </div>
+      )}
     </div>
   )
 }
@@ -351,6 +443,493 @@ export function Chart({ node, resolve }: NodeProps) {
           </BarChart>
         )}
       </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+// Coerce a value to a finite number, or null. Tolerates numeric strings with
+// thousands separators / units (e.g. "1,234", "12%") that models often emit.
+const asNum = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v.replace(/[,\s%$]/g, ''))
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+// ---- Forecast -------------------------------------------------------------
+// A time-series forecast: a forecast line + an optional shaded confidence band
+// (lower/upper) + optional historical actuals, split into one series per
+// category when the data is long-format.
+//
+// Deliberately SCHEMA-AGNOSTIC: a forecasting query returns wildly different
+// column names per use case (ds/date/period; yhat/forecast/prediction/mean;
+// *_lower/*_upper/ci_*; an optional category column to split series). We INFER
+// each role from the first row's columns (name patterns + numeric detection);
+// any explicit `xKey/forecastKey/lowerKey/upperKey/actualKey/seriesKey` prop on
+// the node overrides the guess. So it renders the same whether the data is
+// {ds, risk_category, default_rate_forecast, ...} or {month, yhat, yhat_lo, ...}.
+interface ForecastSpec {
+  xKey: string
+  seriesKey?: string
+  forecastKey: string
+  lowerKey?: string
+  upperKey?: string
+  actualKey?: string
+}
+
+function inferForecastSpec(rows: Record<string, unknown>[], node: ComponentNode): ForecastSpec {
+  const first = rows.find((r) => r && typeof r === 'object') || {}
+  const keys = Object.keys(first)
+  const lc = (k: string) => k.toLowerCase()
+  const isNumericCol = (k: string) => {
+    let num = 0
+    let tot = 0
+    for (const r of rows.slice(0, 20)) {
+      if (r && typeof r === 'object' && k in r) {
+        tot++
+        if (asNum((r as Record<string, unknown>)[k]) != null) num++
+      }
+    }
+    return tot > 0 && num / tot >= 0.7
+  }
+  const numeric = keys.filter(isNumericCol)
+  const nonNumeric = keys.filter((k) => !numeric.includes(k))
+  const pick = (pool: string[], pats: string[]) => pool.find((k) => pats.some((p) => lc(k).includes(p)))
+  const distinct = (k: string) => new Set(rows.map((r) => asStr((r as Record<string, unknown>)[k]))).size
+
+  const xKey =
+    asStr(node.xKey) ||
+    pick(nonNumeric, ['date', 'time', 'period', 'month', 'week', 'day', 'timestamp', 'quarter', 'year', 'ds']) ||
+    (nonNumeric.length ? [...nonNumeric].sort((a, b) => distinct(b) - distinct(a))[0] : keys[0]) ||
+    'x'
+  const lowerKey = asStr(node.lowerKey) || pick(numeric, ['lower', '_lo', '_min', 'ci_low', 'low', 'p05', 'q05', 'floor'])
+  const upperKey = asStr(node.upperKey) || pick(numeric, ['upper', '_hi', '_max', 'ci_high', 'high', 'p95', 'q95', 'cap'])
+  const actualKey =
+    asStr(node.actualKey) ||
+    pick(numeric.filter((k) => k !== lowerKey && k !== upperKey), ['actual', 'observed', 'history', 'y_true', 'truth'])
+  const usedNum = new Set([lowerKey, upperKey, actualKey].filter(Boolean) as string[])
+  const forecastKey =
+    asStr(node.forecastKey) ||
+    asStr(node.yKey) ||
+    pick(numeric, ['forecast', 'predict', 'yhat', 'mean', 'expected', 'estimate']) ||
+    numeric.find((k) => !usedNum.has(k)) ||
+    numeric[0] ||
+    'value'
+  const seriesKey =
+    asStr(node.seriesKey) || nonNumeric.find((k) => k !== xKey && distinct(k) > 1 && distinct(k) < rows.length)
+  return {
+    xKey,
+    seriesKey: seriesKey || undefined,
+    forecastKey,
+    lowerKey: lowerKey || undefined,
+    upperKey: upperKey || undefined,
+    actualKey: actualKey || undefined,
+  }
+}
+
+export function Forecast({ node, resolve }: NodeProps) {
+  const rows = asArr(resolve(node.data)).filter((r) => r && typeof r === 'object') as Record<string, unknown>[]
+  const theme = useContext(DeckThemeContext)
+  const spec = useMemo(() => inferForecastSpec(rows, node), [rows, node])
+
+  const { data, seriesList, hasBand } = useMemo(() => {
+    const { xKey, seriesKey, forecastKey, lowerKey, upperKey, actualKey } = spec
+    const hasBand = Boolean(lowerKey && upperKey)
+    const band = (r: Record<string, unknown>): [number, number] | undefined => {
+      if (!hasBand) return undefined
+      const lo = asNum(r[lowerKey as string])
+      const up = asNum(r[upperKey as string])
+      return lo != null && up != null ? [lo, up] : undefined
+    }
+    if (seriesKey) {
+      const byX = new Map<string, Record<string, unknown>>()
+      const seen: string[] = []
+      for (const r of rows) {
+        const x = asStr(r[xKey])
+        const s = asStr(r[seriesKey]) || 'series'
+        if (!seen.includes(s)) seen.push(s)
+        const row = byX.get(x) ?? { [xKey]: x }
+        const f = asNum(r[forecastKey])
+        if (f != null) row[s] = f
+        const b = band(r)
+        if (b) row[`${s}__band`] = b
+        if (actualKey) {
+          const a = asNum(r[actualKey])
+          if (a != null) row[`${s}__actual`] = a
+        }
+        byX.set(x, row)
+      }
+      return { data: Array.from(byX.values()), seriesList: seen, hasBand }
+    }
+    const data = rows.map((r) => {
+      const row: Record<string, unknown> = { [xKey]: asStr(r[xKey]) }
+      const f = asNum(r[forecastKey])
+      if (f != null) row.forecast = f
+      const b = band(r)
+      if (b) row.forecast__band = b
+      if (actualKey) {
+        const a = asNum(r[actualKey])
+        if (a != null) row.actual = a
+      }
+      return row
+    })
+    return { data, seriesList: ['forecast'], hasBand }
+  }, [rows, spec])
+
+  if (!data.length) return null
+  const colors = seriesFromAccent(theme.accent, Math.max(seriesList.length, 1))
+  const hasActual = Boolean(spec.actualKey)
+  const single = seriesList.length === 1 && seriesList[0] === 'forecast'
+  return (
+    <div className="flex h-full w-full min-w-0 flex-col">
+      {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
+      <div style={{ width: '100%', height: CHART_HEIGHT }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <XAxis dataKey={spec.xKey} />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {seriesList.map((s, i) => {
+              const c = colors[i % colors.length]
+              const actualKey = single ? 'actual' : `${s}__actual`
+              const bandKey = single ? 'forecast__band' : `${s}__band`
+              return (
+                <Fragment key={s}>
+                  {hasBand && (
+                    <Area
+                      dataKey={bandKey}
+                      stroke="none"
+                      fill={c}
+                      fillOpacity={0.14}
+                      legendType="none"
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  )}
+                  {hasActual && (
+                    <Line
+                      dataKey={actualKey}
+                      name={single ? 'Actual' : `${s} (actual)`}
+                      stroke={c}
+                      dot={false}
+                      strokeWidth={2}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  )}
+                  <Line
+                    dataKey={s}
+                    name={hasActual ? (single ? 'Forecast' : `${s} (forecast)`) : s === 'forecast' ? 'Forecast' : s}
+                    stroke={c}
+                    dot={false}
+                    strokeWidth={2}
+                    strokeDasharray={hasActual ? '5 4' : undefined}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                </Fragment>
+              )
+            })}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+// ---- Graph (node-link diagram) -------------------------------------------
+// A network / relationship graph drawn as dependency-free SVG. nodes is a list
+// of {id, label?, group?, x?, y?}; edges a list of {from, to, label?}. Nodes are
+// laid out on a circle (deterministic) unless a node carries explicit x/y. Group
+// colors follow the workspace accent; directed edges get an arrowhead.
+interface GNode {
+  id: string
+  label: string
+  group?: string
+  x?: number
+  y?: number
+}
+export function Graph({ node, resolve }: NodeProps) {
+  const theme = useContext(DeckThemeContext)
+  const rawNodes = asArr(resolve(node.nodes))
+  const rawEdges = asArr(resolve(node.edges))
+  const directed = node.directed !== false
+  const { nodes, edges } = useMemo(() => {
+    const nodes: GNode[] = rawNodes
+      .filter((n) => n && typeof n === 'object')
+      .map((n) => n as Record<string, unknown>)
+      .map((n) => ({
+        id: asStr(n.id ?? n.label),
+        label: asStr(n.label ?? n.id),
+        group: asStr(n.group) || undefined,
+        x: asNum(n.x) ?? undefined,
+        y: asNum(n.y) ?? undefined,
+      }))
+      .filter((n) => n.id)
+    const ids = new Set(nodes.map((n) => n.id))
+    const edges = rawEdges
+      .filter((e) => e && typeof e === 'object')
+      .map((e) => e as Record<string, unknown>)
+      .map((e) => ({ from: asStr(e.from ?? e.source), to: asStr(e.to ?? e.target), label: asStr(e.label) || undefined }))
+      .filter((e) => ids.has(e.from) && ids.has(e.to))
+    return { nodes, edges }
+  }, [rawNodes, rawEdges])
+
+  if (!nodes.length) return null
+  const W = 640
+  const H = 400
+  const cx = W / 2
+  const cy = H / 2
+  const R = Math.min(W, H) / 2 - 64
+  const NR = 20
+  const pos = new Map<string, { x: number; y: number }>()
+  nodes.forEach((n, i) => {
+    if (n.x != null && n.y != null) pos.set(n.id, { x: n.x, y: n.y })
+    else {
+      const a = (2 * Math.PI * i) / nodes.length - Math.PI / 2
+      pos.set(n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) })
+    }
+  })
+  const groups = Array.from(new Set(nodes.map((n) => n.group || '')))
+  const colors = seriesFromAccent(theme.accent, Math.max(groups.length, 1))
+  const colorOf = (n: GNode) => colors[Math.max(0, groups.indexOf(n.group || '')) % colors.length]
+  // Trim an endpoint back to the node's rim so an arrowhead isn't hidden under it.
+  const trim = (a: { x: number; y: number }, b: { x: number; y: number }, r: number) => {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: b.x - (dx / len) * r, y: b.y - (dy / len) * r }
+  }
+  return (
+    <div className="flex w-full min-w-0 flex-col">
+      {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
+      <div className="w-full overflow-x-auto rounded-lg border">
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={asStr(node.title) || 'graph'}>
+          <defs>
+            <marker id="a2-graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill={theme.muted} />
+            </marker>
+          </defs>
+          {edges.map((e, i) => {
+            const a = pos.get(e.from) as { x: number; y: number }
+            const b = pos.get(e.to) as { x: number; y: number }
+            const end = trim(a, b, NR + 3)
+            return (
+              <g key={i}>
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={end.x}
+                  y2={end.y}
+                  stroke={theme.muted}
+                  strokeWidth={1.5}
+                  markerEnd={directed ? 'url(#a2-graph-arrow)' : undefined}
+                />
+                {e.label && (
+                  <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} textAnchor="middle" fontSize={10} fill={theme.muted}>
+                    {e.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+          {nodes.map((n) => {
+            const p = pos.get(n.id) as { x: number; y: number }
+            return (
+              <g key={n.id}>
+                <circle cx={p.x} cy={p.y} r={NR} fill={colorOf(n)} stroke={theme.bg} strokeWidth={2} />
+                <text x={p.x} y={p.y + NR + 14} textAnchor="middle" fontSize={12} fill={theme.fg}>
+                  {n.label}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ---- Sequence diagram -----------------------------------------------------
+// A UML-style sequence diagram in dependency-free SVG. actors is a list of
+// names (or {id, label}); messages a list of {from, to, text?, dashed?} drawn
+// top-to-bottom as arrows between actor lifelines. Actors referenced only in
+// messages are backfilled in first-seen order.
+export function Sequence({ node, resolve }: NodeProps) {
+  const theme = useContext(DeckThemeContext)
+  const rawActors = asArr(resolve(node.actors))
+  const rawMsgs = asArr(resolve(node.messages))
+  const { actors, messages } = useMemo(() => {
+    const norm = (a: unknown): { id: string; label: string } => {
+      if (a && typeof a === 'object') {
+        const o = a as Record<string, unknown>
+        return { id: asStr(o.id ?? o.label ?? o.name), label: asStr(o.label ?? o.name ?? o.id) }
+      }
+      return { id: asStr(a), label: asStr(a) }
+    }
+    const actors = rawActors.map(norm).filter((a) => a.id)
+    const messages = rawMsgs
+      .filter((m) => m && typeof m === 'object')
+      .map((m) => m as Record<string, unknown>)
+      .map((m) => ({
+        from: asStr(m.from ?? m.source),
+        to: asStr(m.to ?? m.target),
+        text: asStr(m.text ?? m.label ?? m.message),
+        dashed: Boolean(m.dashed ?? m.return ?? m.async),
+      }))
+      .filter((m) => m.from && m.to)
+    const known = new Set(actors.map((a) => a.id))
+    for (const m of messages) {
+      for (const id of [m.from, m.to]) {
+        if (id && !known.has(id)) {
+          known.add(id)
+          actors.push({ id, label: id })
+        }
+      }
+    }
+    return { actors, messages }
+  }, [rawActors, rawMsgs])
+
+  if (!actors.length || !messages.length) return null
+  const colW = 160
+  const topH = 44
+  const rowH = 48
+  const padY = 26
+  const W = Math.max(colW * actors.length, colW)
+  const H = topH + padY + messages.length * rowH + padY
+  const xOf = (id: string) => colW * (actors.findIndex((a) => a.id === id) + 0.5)
+  const colors = seriesFromAccent(theme.accent, Math.max(actors.length, 1))
+  return (
+    <div className="flex w-full min-w-0 flex-col">
+      {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
+      <div className="w-full overflow-x-auto rounded-lg border">
+        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label={asStr(node.title) || 'sequence diagram'}>
+          <defs>
+            <marker id="a2-seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill={theme.fg} />
+            </marker>
+          </defs>
+          {actors.map((a, i) => (
+            <g key={a.id}>
+              <line x1={xOf(a.id)} y1={topH} x2={xOf(a.id)} y2={H - padY} stroke={theme.muted} strokeDasharray="4 4" strokeWidth={1} />
+              <rect x={xOf(a.id) - colW / 2 + 10} y={8} width={colW - 20} height={topH - 14} rx={6} fill={colors[i % colors.length]} />
+              <text x={xOf(a.id)} y={8 + (topH - 14) / 2 + 4} textAnchor="middle" fontSize={12} fill={theme.bg}>
+                {a.label}
+              </text>
+            </g>
+          ))}
+          {messages.map((m, i) => {
+            const y = topH + padY + i * rowH
+            const x1 = xOf(m.from)
+            const x2 = xOf(m.to)
+            if (m.from === m.to) {
+              return (
+                <g key={i}>
+                  <path
+                    d={`M${x1},${y} h44 v20 h-44`}
+                    fill="none"
+                    stroke={theme.fg}
+                    strokeWidth={1.4}
+                    markerEnd="url(#a2-seq-arrow)"
+                    strokeDasharray={m.dashed ? '5 4' : undefined}
+                  />
+                  {m.text && (
+                    <text x={x1 + 52} y={y + 6} fontSize={11} fill={theme.fg}>
+                      {m.text}
+                    </text>
+                  )}
+                </g>
+              )
+            }
+            return (
+              <g key={i}>
+                <line
+                  x1={x1}
+                  y1={y}
+                  x2={x2}
+                  y2={y}
+                  stroke={theme.fg}
+                  strokeWidth={1.4}
+                  markerEnd="url(#a2-seq-arrow)"
+                  strokeDasharray={m.dashed ? '5 4' : undefined}
+                />
+                {m.text && (
+                  <text x={(x1 + x2) / 2} y={y - 6} textAnchor="middle" fontSize={11} fill={theme.fg}>
+                    {m.text}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ---- Album (image carousel) ----------------------------------------------
+// A one-image-at-a-time carousel with prev/next. items is a list of image URLs
+// or {src|url, caption?, href?}. The caption links to `href` (or the source URL)
+// so a gallery built from search results stays clickable.
+interface AlbumItem {
+  src: string
+  caption?: string
+  href?: string
+}
+export function Album({ node, resolve }: NodeProps) {
+  const theme = useContext(DeckThemeContext)
+  const items = useMemo<AlbumItem[]>(
+    () =>
+      asArr(resolve(node.items ?? node.images ?? node.photos))
+        .map((it) => {
+          if (it && typeof it === 'object') {
+            const o = it as Record<string, unknown>
+            const src = asStr(o.src ?? o.url ?? o.image ?? o.link)
+            return { src, caption: asStr(o.caption ?? o.label ?? o.title) || undefined, href: asStr(o.href ?? o.link ?? o.url) || undefined }
+          }
+          return { src: asStr(it) }
+        })
+        .filter((it) => it.src),
+    [resolve, node.items, node.images, node.photos],
+  )
+  const [idx, setIdx] = useState(0)
+  if (!items.length) return null
+  const at = Math.min(idx, items.length - 1)
+  const cur = items[at]
+  const go = (d: number) => setIdx((i) => (((i + d) % items.length) + items.length) % items.length)
+  const navBtn =
+    'absolute top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border bg-background/80 text-foreground shadow hover:bg-background'
+  return (
+    <div className="flex w-full min-w-0 flex-col">
+      {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
+      <div className="relative flex items-center justify-center overflow-hidden rounded-lg border" style={{ minHeight: 240, background: theme.panel }}>
+        <img src={cur.src} alt={cur.caption || ''} className="max-h-[440px] max-w-full object-contain" />
+        {items.length > 1 && (
+          <>
+            <button type="button" aria-label="Previous image" onClick={() => go(-1)} className={`${navBtn} left-2`}>
+              <ChevronLeft className="size-5" />
+            </button>
+            <button type="button" aria-label="Next image" onClick={() => go(1)} className={`${navBtn} right-2`}>
+              <ChevronRight className="size-5" />
+            </button>
+          </>
+        )}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+        <span className="shrink-0 text-muted-foreground">{at + 1} / {items.length}</span>
+        {cur.caption &&
+          (cur.href ? (
+            <a href={cur.href} target="_blank" rel="noreferrer" className="truncate underline">
+              {cur.caption}
+            </a>
+          ) : (
+            <span className="truncate">{cur.caption}</span>
+          ))}
       </div>
     </div>
   )

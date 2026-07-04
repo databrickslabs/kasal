@@ -40,6 +40,9 @@ export const DELIVERABLE_TYPES = [
   { key: 'quiz', label: 'Quiz' },
   { key: 'flashcards', label: 'Flashcards' },
   { key: 'map', label: 'Map' },
+  { key: 'forecast', label: 'Forecast' },
+  { key: 'graph', label: 'Graph' },
+  { key: 'sequence', label: 'Sequence diagram' },
   { key: 'report', label: 'Report' },
   // The run-activity "context" / logs view (per-step retrieved context shown in
   // the preview pane). Styled distinctly from deliverables — see the Logs preset
@@ -187,6 +190,20 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
   map: [
     { kind: 'switch', key: 'labels', label: 'Show point labels', default: true, phrase: (v) => (v ? 'label each plotted point on the map' : 'plot points without text labels') },
     { kind: 'switch', key: 'sizeByValue', label: 'Size points by value', default: true, phrase: (v) => (v ? 'scale each map point\'s marker by its value' : 'use uniform-sized map markers') },
+  ],
+  forecast: [
+    { kind: 'switch', key: 'band', label: 'Show confidence band', default: true, phrase: (v) => (v ? 'shade the confidence band (lower/upper bounds) when the data has them' : 'draw the forecast line only, without a confidence band') },
+    { kind: 'switch', key: 'perSeries', label: 'One line per category', default: true, phrase: (v) => (v ? 'draw one forecast line per category when the data has a category column (set the Forecast seriesKey)' : 'combine into a single forecast line') },
+    { kind: 'switch', key: 'showActual', label: 'Overlay historical actuals', default: true, phrase: (v) => (v ? 'overlay the historical actuals when present (set the Forecast actualKey)' : 'plot the forecast only') },
+  ],
+  graph: [
+    { kind: 'switch', key: 'directed', label: 'Directed edges (arrows)', default: true, phrase: (v) => (v ? 'draw directed edges with arrowheads (Graph "directed":true)' : 'draw undirected edges (Graph "directed":false)') },
+    { kind: 'switch', key: 'groups', label: 'Color nodes by group', default: true, phrase: (v) => (v ? 'assign each node a "group" so related nodes share a color' : 'leave nodes ungrouped (single color)') },
+    { kind: 'switch', key: 'edgeLabels', label: 'Label edges', default: false, phrase: (v) => (v ? 'give each edge a short "label" describing the relationship' : 'leave edges unlabelled') },
+  ],
+  sequence: [
+    { kind: 'switch', key: 'numbered', label: 'Number the messages', default: false, phrase: (v) => (v ? 'prefix each message text with its step number' : 'do not number messages') },
+    { kind: 'switch', key: 'returns', label: 'Show return messages', default: true, phrase: (v) => (v ? 'include return/response messages (set dashed:true on them)' : 'show only forward call messages') },
   ],
   report: [
     { kind: 'select', key: 'length', label: 'Length', default: 'standard', choices: [{ value: 'brief', label: 'Brief' }, { value: 'standard', label: 'Standard' }, { value: 'detailed', label: 'Detailed' }], phrase: (v) => `keep the report ${v} in length` },

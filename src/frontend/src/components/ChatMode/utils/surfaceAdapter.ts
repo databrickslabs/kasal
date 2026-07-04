@@ -73,7 +73,10 @@ export type UiComponentType =
   | 'Album'
   | 'Mindmap'
   | 'Flashcards'
-  | 'Map';
+  | 'Map'
+  | 'Forecast'
+  | 'Graph'
+  | 'Sequence';
 
 export interface UiComponent {
   id: string;
@@ -105,6 +108,7 @@ const VALID_TYPES: ReadonlySet<string> = new Set<UiComponentType>([
   'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
   'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
   'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap', 'Flashcards', 'Map',
+  'Forecast', 'Graph', 'Sequence',
 ]);
 
 /** Scan from the first `open` char to its balanced `close` (string-aware) and
@@ -395,6 +399,9 @@ const DELIVERABLE_BY_COMPONENT: [UiComponentType, string][] = [
   ['Map', 'map'],
   ['Album', 'album'],
   ['Mindmap', 'mindmap'],
+  ['Forecast', 'forecast'],
+  ['Graph', 'graph'],
+  ['Sequence', 'sequence'],
   ['Dashboard', 'dashboard'],
   ['Table', 'genie'],
 ];
@@ -423,6 +430,9 @@ const DELIVERABLE_TO_SURFACE_KIND: Record<string, string> = {
   album: 'document',
   flashcards: 'flashcards',
   map: 'map',
+  forecast: 'document',
+  graph: 'document',
+  sequence: 'document',
   genie: 'document',
   default: 'document',
 };

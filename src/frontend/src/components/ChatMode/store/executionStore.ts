@@ -584,12 +584,17 @@ export const useExecutionStore = create<ExecutionStore>()(
           saveSessionPreview(ownerSession, preview);
         }
       } else {
-        // Route text message to the correct session. When a composed surface
-        // renders the SAME previewable artifact (e.g. a presentation deck whose
-        // markdown `text` IS the deck), drop the bulky raw text so only the
-        // inline surface shows — otherwise the deck would print twice (raw
-        // markdown above the rendered deck). Plain-prose answers keep their text.
-        const body = surface && preview ? '' : resultText;
+        // Route text message to the correct session. A composed surface IS the
+        // canonical rendering of the answer (a Genie table, a dashboard, a deck…),
+        // so drop the raw text whenever one exists — otherwise the SAME content
+        // prints twice: the full markdown answer in the bubble AND the rendered
+        // surface below it (e.g. a 100-row restaurant list shown as prose above
+        // the interactive Table). This is safe because the backend only composes a
+        // surface for genuine data answers (a2ui_runner drops prose-only surfaces);
+        // pure-prose replies (greetings, clarifications) get no surface and keep
+        // their text. Formerly gated on `surface && preview`, which missed plain
+        // markdown answers (parsePreviewContent is A2UI-only → null → text kept).
+        const body = surface ? '' : resultText;
         if (ownerSession) {
           sessionStore.addMessageToTargetSession(
             ownerSession,
