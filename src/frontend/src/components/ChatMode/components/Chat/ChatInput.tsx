@@ -126,9 +126,35 @@ interface ChatInputProps {
   /** Open the MCP config dialog — forwarded to the "+" picker's admin-only
    *  "Connect a tool" action. */
   onOpenMcpConfig?: () => void;
+  /** True for the empty/landing composer — enables the rotating placeholder that
+   *  advertises deliverable types (dashboard, presentation, quiz, …). The
+   *  conversation composer keeps the stable base placeholder. */
+  isLanding?: boolean;
 }
 
 const attachmentsKey = (sessionId: string) => `kasal-chat-attachments-${sessionId}`;
+
+// The stable placeholder shown while typing/focused and in the conversation composer.
+const BASE_PLACEHOLDER = 'Ask a question...';
+
+// Landing-only rotating hints that advertise what Kasal can build WITHOUT adding a
+// format picker (the deliverable is inferred from the request text by the backend).
+// Dashboard leads; each hint uses the keyword the inference matches on, so adopting
+// the phrasing yields the intended deliverable.
+const LANDING_HINTS = [
+  'Create a dashboard of last quarter’s sales…',
+  'Make a presentation on the product roadmap…',
+  'Write a quiz to test the team on onboarding…',
+  'Turn these notes into flashcards…',
+  'Build a photo album from the launch event…',
+  'Map out a mindmap of the strategy…',
+];
+const HINT_INTERVAL_MS = 3200;
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Width of the composer pop-up menus (matches Tailwind `w-72` = 18rem).
 const MENU_WIDTH = 288;
@@ -191,6 +217,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   menuPlacement = 'up',
   prefill,
   onOpenMcpConfig,
+  isLanding = false,
 }) => {
   // Entrance animation for the pop-up menus, matching the open direction. The
   // menus are positioned with `position: fixed` (see useAnchoredFixedStyle) so
@@ -199,6 +226,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const menuAnimClass =
     menuPlacement === 'down' ? 'animate-slide-down' : 'animate-slide-up';
   const [value, setValue] = useState('');
+  // Rotating landing placeholder: advance a hint index while idle (empty + blurred)
+  // on the landing composer; freeze on focus/typing; honor reduced-motion.
+  const [focused, setFocused] = useState(false);
+  const [hintIndex, setHintIndex] = useState(0);
+  const [reducedMotion] = useState(prefersReducedMotion);
   const [showCommands, setShowCommands] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showModePicker, setShowModePicker] = useState(false);
@@ -361,6 +393,26 @@ const ChatInput: React.FC<ChatInputProps> = ({
       el.setSelectionRange(el.value.length, el.value.length);
     });
   }, [prefill]);
+
+  // Rotate the landing placeholder through the deliverable hints while the composer
+  // is idle (empty + blurred). Frozen on focus/typing and when reduced-motion is on.
+  const rotating = isLanding && !value && !focused && !reducedMotion;
+  useEffect(() => {
+    if (!rotating) return;
+    const id = setInterval(
+      () => setHintIndex((i) => (i + 1) % LANDING_HINTS.length),
+      HINT_INTERVAL_MS,
+    );
+    return () => clearInterval(id);
+  }, [rotating]);
+
+  // The visible placeholder: rotating hint while idle on the landing composer (or a
+  // static dashboard-first hint under reduced-motion); the stable base otherwise.
+  const placeholderText = !isLanding
+    ? BASE_PLACEHOLDER
+    : focused || value
+      ? BASE_PLACEHOLDER
+      : LANDING_HINTS[hintIndex % LANDING_HINTS.length];
 
   // Close the model picker on outside click
   useEffect(() => {
@@ -634,7 +686,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
               setHistoryIndex(-1);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Ask a question..."
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={placeholderText}
             disabled={disabled}
             rows={2}
             className="w-full resize-none bg-transparent text-[15px] outline-none disabled:opacity-50 max-h-40 overflow-y-auto leading-relaxed"

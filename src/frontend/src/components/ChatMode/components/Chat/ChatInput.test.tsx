@@ -793,3 +793,52 @@ describe('ChatInput — prefill (empty-state suggestion chips)', () => {
     expect(ta().value).toBe('my own text');
   });
 });
+
+describe('ChatInput — rotating landing placeholder (advertises deliverables)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const box = () => screen.getByRole('textbox') as HTMLTextAreaElement;
+  const ph = () => box().getAttribute('placeholder') || '';
+
+  it('rotates deliverable hints on the landing composer, dashboard first', () => {
+    vi.useFakeTimers();
+    render(<ChatInput {...baseProps} isLanding />);
+    expect(ph()).toMatch(/dashboard/i);
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(ph()).toMatch(/presentation/i);
+  });
+
+  it('freezes to the base placeholder on focus and does not rotate', () => {
+    vi.useFakeTimers();
+    render(<ChatInput {...baseProps} isLanding />);
+    act(() => { fireEvent.focus(box()); });
+    expect(ph()).toBe('Ask a question...');
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(ph()).toBe('Ask a question...');
+  });
+
+  it('does not rotate in the conversation composer (no isLanding)', () => {
+    vi.useFakeTimers();
+    render(<ChatInput {...baseProps} />);
+    expect(ph()).toBe('Ask a question...');
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(ph()).toBe('Ask a question...');
+  });
+
+  it('stays on a single static hint when reduced motion is preferred', () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }) as unknown as typeof window.matchMedia;
+    vi.useFakeTimers();
+    render(<ChatInput {...baseProps} isLanding />);
+    expect(ph()).toMatch(/dashboard/i);
+    act(() => { vi.advanceTimersByTime(3300); });
+    expect(ph()).toMatch(/dashboard/i); // unchanged — no rotation
+    window.matchMedia = original;
+  });
+});

@@ -429,7 +429,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               What can I help you with?
             </h1>
             <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              Describe what you want in plain language — Kasal builds and runs the agents for you.
+              Describe what you want and Kasal builds and runs the agents for you. It can create
+              dashboards, presentations, quizzes, flashcards, albums, mindmaps, and maps.
             </p>
           </div>
 
@@ -447,6 +448,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               onMemoryEnabledChange={onMemoryEnabledChange}
               prefill={prefill}
               onOpenMcpConfig={onOpenMcpConfig}
+              isLanding
             />
           </div>
 
