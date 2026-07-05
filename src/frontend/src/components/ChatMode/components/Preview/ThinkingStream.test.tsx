@@ -20,6 +20,13 @@ describe('narrate — first-person, plain-English, no jargon', () => {
   it('never leaks the raw cryptic sublabel into a search narrative when absent', () => {
     expect(narrate({ id: '5', label: 'SerperTool' })).not.toMatch(/“”/);
   });
+
+  it('does not claim a non-web catalog search is a web search', () => {
+    // Regression: an ontos data-product search must not narrate as "the web".
+    const text = narrate({ id: '6', label: 'ontos_search_data_products', sublabel: 'risk' });
+    expect(text).not.toMatch(/web/i);
+    expect(text).toBe('I’m searching for “risk” to find the most relevant information.');
+  });
 });
 
 describe('extractSources — tidy source chips, not a URL dump', () => {
