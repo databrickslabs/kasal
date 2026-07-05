@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { friendlyStep, type RunStep } from './RunTimeline';
+import { friendlyStep, isWebSearch, type RunStep } from './RunTimeline';
 import { contextSummary, humanizeToolJson } from './runActivitySurface';
 
 /** Kasal brand mark — the hexagon-K logo (transparent), shown in the live "getting started" state. */
@@ -17,7 +17,7 @@ export function narrate(step: RunStep): string {
   if (l.includes('genie') || l.includes('sql') || l.includes('warehouse') || l.includes('query')) {
     return sub ? `I’m looking up your data for ${sub}, then I’ll read through the results.` : 'I’m looking up your data, then I’ll read through the results.';
   }
-  if (l.includes('perplex') || l.includes('serper') || l.includes('search') || l.includes('tavily')) {
+  if (isWebSearch(l)) {
     return sub ? `I’m searching the web for “${sub}” to gather the most relevant, up-to-date information.` : 'I’m searching the web to gather the most relevant, up-to-date information.';
   }
   if (l.includes('scrape') || l.includes('crawl') || l.includes('website') || l.includes('content') || l.includes('url')) {
@@ -27,6 +27,11 @@ export function narrate(step: RunStep): string {
     return 'I’m consulting a specialist agent for an expert take on this.';
   }
   if (l.includes('file') || l.includes('read')) return 'I’m reading the documents I need for this.';
+  // Any other search/lookup (catalog, data products, knowledge, …) — don't claim
+  // it's the web; just say we're looking it up.
+  if (l.includes('search') || l.includes('lookup') || l.includes('find') || l.includes('retriev')) {
+    return sub ? `I’m searching for “${sub}” to find the most relevant information.` : 'I’m searching for the most relevant information.';
+  }
   return sub ? `I’m working on ${sub}.` : 'I’m working through this step.';
 }
 
