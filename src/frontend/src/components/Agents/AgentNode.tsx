@@ -532,7 +532,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         WebkitBoxOrient: 'vertical',
         wordBreak: 'break-word',
       }}>
-        {data.role || 'Agent'}
+        {data.label || data.role || 'Agent'}
       </Typography>
 
       <Box
