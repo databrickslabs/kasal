@@ -199,14 +199,20 @@ describe('AgentNode', () => {
   /* ---------- Basic Rendering ---------- */
 
   describe('Basic Rendering', () => {
-    it('renders agent role', async () => {
+    it('renders agent name', async () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalledWith('agent-123'));
+      expect(screen.getByText('Test Agent')).toBeInTheDocument();
+    });
+
+    it('falls back to role when name/label is missing', async () => {
+      renderNode({ label: undefined });
+      await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
       expect(screen.getByText('Researcher')).toBeInTheDocument();
     });
 
-    it('renders default role "Agent" when role is missing', async () => {
-      renderNode({ role: undefined });
+    it('renders default "Agent" when name and role are both missing', async () => {
+      renderNode({ label: undefined, role: undefined });
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
       expect(screen.getByText('Agent')).toBeInTheDocument();
     });
@@ -305,16 +311,16 @@ describe('AgentNode', () => {
   /* ---------- Node Dimensions ---------- */
 
   describe('Node Dimensions', () => {
-    // Agent nodes are a fixed size so they stay uniform regardless of role length.
+    // Agent nodes are a fixed size so they stay uniform regardless of name length.
     it('renders a fixed 200x172 node', () => {
       renderNode();
-      const box = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const box = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       expect(box).toHaveStyle({ width: '200px', height: '172px' });
     });
 
-    it('lets the role label wrap (wider maxWidth, no single-line clamp)', () => {
+    it('lets the name label wrap (wider maxWidth, no single-line clamp)', () => {
       renderNode();
-      const label = screen.getByText('Researcher');
+      const label = screen.getByText('Test Agent');
       expect(label).toHaveStyle({ maxWidth: '184px' });
     });
   });
@@ -362,7 +368,7 @@ describe('AgentNode', () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -398,7 +404,7 @@ describe('AgentNode', () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
 
       // Create a fake event where target is NOT inside currentTarget (simulates portal)
       const externalDiv = document.createElement('div');
@@ -419,7 +425,7 @@ describe('AgentNode', () => {
 
     it('prevents default on context menu', () => {
       renderNode();
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       const event = new MouseEvent('contextmenu', { bubbles: true });
       const preventDefaultSpy = vi.spyOn(event, 'preventDefault');
       fireEvent(nodeEl, event);
@@ -434,7 +440,7 @@ describe('AgentNode', () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -448,7 +454,7 @@ describe('AgentNode', () => {
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       renderNode({ agentId: '', id: undefined, agent_id: undefined });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -489,7 +495,7 @@ describe('AgentNode', () => {
         knowledge_sources: [{ type: 'file', path: '/test' }],
       });
 
-      const nodeEl = screen.getByText('Dev').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('My Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -504,7 +510,7 @@ describe('AgentNode', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       renderNode({ agentId: '', code_execution_mode: 'safe' });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -520,7 +526,7 @@ describe('AgentNode', () => {
       renderNode();
       await act(async () => { await new Promise(r => setTimeout(r, 50)); });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -539,7 +545,7 @@ describe('AgentNode', () => {
 
       await act(async () => { await new Promise(r => setTimeout(r, 50)); });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -554,7 +560,7 @@ describe('AgentNode', () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -577,7 +583,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -599,7 +605,7 @@ describe('AgentNode', () => {
       renderNode();
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -629,7 +635,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -914,7 +920,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open the editor first
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -976,7 +982,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form (sets isEditing = true, triggers the effect)
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1001,7 +1007,7 @@ describe('AgentNode', () => {
 
       renderNode({ agentId: '', id: 'id-from-data' });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1017,7 +1023,7 @@ describe('AgentNode', () => {
 
       renderNode({ agentId: '', agent_id: 'agent-id-fallback' });
 
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1036,7 +1042,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Focus an element to ensure activeElement is set
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       (nodeEl as HTMLElement).focus();
 
       const blurSpy = vi.spyOn(document.activeElement as HTMLElement, 'blur');
@@ -1058,7 +1064,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1086,7 +1092,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1115,7 +1121,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1167,7 +1173,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
@@ -1188,7 +1194,7 @@ describe('AgentNode', () => {
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
 
       // Open form
-      const nodeEl = screen.getByText('Researcher').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });
