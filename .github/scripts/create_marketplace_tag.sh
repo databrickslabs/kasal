@@ -161,11 +161,12 @@ echo ""
 echo "📦 Exporting repository from $SOURCE_REF..."
 git archive --format=tar "$SOURCE_COMMIT" | tar -x -C "$TEMP_DIR"
 
-# Initialize a new git repo in temp directory for creating the tag
+# Initialize a new git repo in temp directory for creating the tag.
+# The first commit happens AFTER cleanup below, so the secret-scan
+# pre-commit hook only ever sees files that actually ship in the tag
+# (test fixtures contain fake DSNs that false-positive the scanner).
 cd "$TEMP_DIR"
 git init -q
-git add .
-git commit -q -m "Initial commit from $SOURCE_BRANCH"
 
 # Count files before cleanup
 FILES_BEFORE=$(find . -type f | wc -l)
