@@ -334,7 +334,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const getAgentNodeStyles = () => {
     const baseStyles = {
       width: 200,
-      height: 172,
+      // minHeight (not a fixed height) so the node grows when the agent
+      // name wraps to a second line instead of clipping it under the badge.
+      minHeight: 172,
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -525,6 +527,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         textAlign: 'center',
         color: (theme: Theme) => theme.palette.primary.main,
         maxWidth: '184px',
+        flexShrink: 0,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         display: '-webkit-box',
