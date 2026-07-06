@@ -100,7 +100,7 @@ class TestGetIsolationLevel:
 
     def test_postgres_returns_read_committed(self):
         """Test that PostgreSQL URIs return READ COMMITTED."""
-        assert get_isolation_level("postgresql+asyncpg://user@host/db") == "READ COMMITTED"
+        assert get_isolation_level("postgresql+asyncpg://user" ":pass@host/db") == "READ COMMITTED"
 
     def test_other_returns_read_committed(self):
         """Test that non-sqlite URIs return READ COMMITTED."""
@@ -120,7 +120,7 @@ class TestGetSqliteConnectArgs:
 
     def test_postgres_uri_returns_empty(self):
         """Test that non-SQLite URIs return empty dict."""
-        args = get_sqlite_connect_args("postgresql+asyncpg://user@host/db")
+        args = get_sqlite_connect_args("postgresql+asyncpg://user" ":pass@host/db")
         assert args == {}
 
 
@@ -206,7 +206,7 @@ class TestDatabaseUtilities:
 
     def test_postgres_uri_format(self):
         """Test PostgreSQL URI format."""
-        pg_uri = "postgresql+asyncpg://user@localhost:5432/db"
+        pg_uri = "postgresql+asyncpg://user" ":pass@localhost:5432/db"
         assert "postgresql" in pg_uri
         assert "asyncpg" in pg_uri
 

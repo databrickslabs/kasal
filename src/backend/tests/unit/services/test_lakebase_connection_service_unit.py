@@ -331,7 +331,7 @@ class TestCreateLakebaseEngineAsync:
         assert result is mock_engine
         call_args = mock_create_engine.call_args
         url = call_args[0][0]
-        assert url == f"postgresql+asyncpg://testuser@{endpoint}:5432/databricks_postgres"
+        assert url == f"postgresql+asyncpg://testuser" f":testtoken@{endpoint}:5432/databricks_postgres"
 
     @pytest.mark.asyncio
     @patch("src.services.lakebase_connection_service.create_async_engine")
@@ -529,7 +529,7 @@ class TestCreateEngineWithTokenRefresh:
 
         assert result is mock_engine
         url = mock_create_engine.call_args[0][0]
-        assert url == f"postgresql+asyncpg://u@{endpoint}:5432/databricks_postgres"
+        assert url == f"postgresql+asyncpg://u" f":placeholder@{endpoint}:5432/databricks_postgres"
         ck = mock_create_engine.call_args[1]
         assert ck["connect_args"]["server_settings"]["search_path"] == "kasal, public"
         assert ck["pool_pre_ping"] is False

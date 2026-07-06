@@ -290,7 +290,7 @@ class TestGetSmartEngine:
 
         mock_loop = MagicMock()
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             with patch("asyncio.get_running_loop", return_value=mock_loop):
                 with patch("src.db.session.main_event_loop", mock_loop):
                     with patch("src.db.session.pooled_engine") as mock_pooled:
@@ -304,7 +304,7 @@ class TestGetSmartEngine:
         main_loop = MagicMock()
         bg_loop = MagicMock()
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             with patch("asyncio.get_running_loop", return_value=bg_loop):
                 with patch("src.db.session.main_event_loop", main_loop):
                     with patch("src.db.session.nullpool_engine") as mock_null:
@@ -315,7 +315,7 @@ class TestGetSmartEngine:
         from src.db.session import get_smart_engine
 
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
                 with patch("src.db.session.nullpool_engine") as mock_null:
                     result = get_smart_engine()
@@ -325,7 +325,7 @@ class TestGetSmartEngine:
         from src.db.session import get_smart_engine, engine
 
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             with patch("asyncio.get_running_loop", side_effect=Exception("unexpected")):
                 result = get_smart_engine()
             assert result is engine

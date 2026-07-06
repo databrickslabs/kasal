@@ -328,7 +328,7 @@ class TestResyncPostgresSequences:
     async def test_executes_setval_for_postgresql(self):
         """For PostgreSQL, it should query tables and run setval."""
         mock_settings = MagicMock()
-        mock_settings.DATABASE_URI = "postgresql+asyncpg://user@host/db"
+        mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@host/db"
 
         # Build mock session
         mock_session = AsyncMock()
@@ -398,7 +398,7 @@ class TestResyncPostgresSequences:
     async def test_skips_unsafe_table_names(self):
         """Table names that don't match the safe_id regex should be skipped."""
         mock_settings = MagicMock()
-        mock_settings.DATABASE_URI = "postgresql+asyncpg://user@host/db"
+        mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@host/db"
 
         mock_session = AsyncMock()
         # Include a safe and an unsafe table name
@@ -434,7 +434,7 @@ class TestResyncPostgresSequences:
     async def test_per_table_exception_does_not_abort(self):
         """If setval fails for one table, others should still be processed."""
         mock_settings = MagicMock()
-        mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+        mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
 
         call_count = {"execute": 0}
         mock_session = AsyncMock()

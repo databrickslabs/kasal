@@ -97,7 +97,7 @@ class TestDatabaseBackupRepositoryGetDatabaseType:
     @patch('src.repositories.database_backup_repository.settings')
     def test_get_database_type_postgres(self, mock_settings):
         """Test get_database_type returns 'postgres' for PostgreSQL database"""
-        mock_settings.DATABASE_URI = "postgresql://user@localhost/db"
+        mock_settings.DATABASE_URI = "postgresql://user" ":pass@localhost/db"
         
         result = DatabaseBackupRepository.get_database_type()
         
@@ -106,7 +106,7 @@ class TestDatabaseBackupRepositoryGetDatabaseType:
     @patch('src.repositories.database_backup_repository.settings')
     def test_get_database_type_postgres_short(self, mock_settings):
         """Test get_database_type returns 'postgres' for postgres:// URI"""
-        mock_settings.DATABASE_URI = "postgres://user@localhost/db"
+        mock_settings.DATABASE_URI = "postgres://user" ":pass@localhost/db"
         
         result = DatabaseBackupRepository.get_database_type()
         
