@@ -311,17 +311,19 @@ describe('AgentNode', () => {
   /* ---------- Node Dimensions ---------- */
 
   describe('Node Dimensions', () => {
-    // Agent nodes are a fixed size so they stay uniform regardless of name length.
-    it('renders a fixed 200x172 node', () => {
+    // Agent nodes have a fixed width but grow vertically so a two-line
+    // name is never clipped under the LLM badge.
+    it('renders a 200px-wide node that can grow past 172px', () => {
       renderNode();
       const box = screen.getByText('Test Agent').closest('[data-nodetype="agent"]')!;
-      expect(box).toHaveStyle({ width: '200px', height: '172px' });
+      expect(box).toHaveStyle({ width: '200px', minHeight: '172px' });
+      expect(box).not.toHaveStyle({ height: '172px' });
     });
 
-    it('lets the name label wrap (wider maxWidth, no single-line clamp)', () => {
+    it('lets the name label wrap without being flex-shrunk mid-line', () => {
       renderNode();
       const label = screen.getByText('Test Agent');
-      expect(label).toHaveStyle({ maxWidth: '184px' });
+      expect(label).toHaveStyle({ maxWidth: '184px', flexShrink: '0' });
     });
   });
 
