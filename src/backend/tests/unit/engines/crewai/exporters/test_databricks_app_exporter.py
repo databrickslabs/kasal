@@ -101,6 +101,30 @@ class TestDatabricksAppExporter:
         ]:
             assert required in files, f"missing {required}"
 
+    def test_template_tree_has_no_literal_manifests(self):
+        """The bundled template must not contain literal app/bundle manifests.
+
+        The Databricks Marketplace resolver recursively scans a listing's source
+        tree for app manifests; a nested placeholder app.yaml/databricks.yml/
+        pyproject.toml (full of {{TOKEN}}s) stalls it for 30s (DEADLINE_EXCEEDED).
+        Manifests must ship with a `.template` suffix — the exporter strips it.
+        """
+        offenders = [
+            p.relative_to(TEMPLATE_DIR).as_posix()
+            for p in TEMPLATE_DIR.rglob("*")
+            if p.is_file()
+            and p.name in ("app.yaml", "app.yml", "databricks.yml", "pyproject.toml")
+        ]
+        assert (
+            offenders == []
+        ), f"scanner-discoverable manifests in template tree: {offenders}"
+        for required in (
+            "app.yaml.template",
+            "databricks.yml.template",
+            "pyproject.toml.template",
+        ):
+            assert (TEMPLATE_DIR / required).is_file(), f"missing {required}"
+
     @pytest.mark.asyncio
     async def test_cruft_not_shipped(self, exporter, crew_data):
         """AI-assistant guides, gallery manifest, skills, and CI are dropped."""

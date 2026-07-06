@@ -239,12 +239,13 @@ class DatabricksAppExporter(BaseExporter):
                 continue
             rel = path.relative_to(TEMPLATE_DIR).as_posix()
             # A `*.template` file is emitted with its `.template` suffix stripped.
-            # In particular the app manifest ships as `app.yaml.template`, NOT a
-            # literal `app.yaml`: the Databricks Marketplace resolver recursively
-            # scans a listing's source tree for app manifests, and a nested
-            # placeholder `app.yaml` (full of {{TOKEN}}s) makes it stall for 30s
-            # (DEADLINE_EXCEEDED). Storing it as `.template` hides it from that
-            # scan while the exported project still gets a real `app.yaml`.
+            # In particular the project manifests ship as `app.yaml.template`,
+            # `databricks.yml.template` and `pyproject.toml.template`, NOT under
+            # their literal names: the Databricks Marketplace resolver recursively
+            # scans a listing's source tree for app/bundle manifests, and a nested
+            # placeholder manifest (full of {{TOKEN}}s) makes it stall for 30s
+            # (DEADLINE_EXCEEDED). Storing them as `.template` hides them from that
+            # scan while the exported project still gets the real filenames.
             out_rel = rel[: -len(".template")] if rel.endswith(".template") else rel
             # Skip OS/editor junk, Python caches, and frontend deps/build artifacts
             # (node_modules/dist/...) so they're never templated or shipped — they'd
