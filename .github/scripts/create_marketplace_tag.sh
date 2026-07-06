@@ -210,6 +210,15 @@ if [ -f "src/backend/run_tests.py" ]; then
     echo "  ✓ Removed run_tests.py"
 fi
 
+# Remove uv lockfiles from the marketplace payload. The Databricks Apps
+# builder runs `uv sync --locked` whenever uv.lock is present, and its uv
+# is older than ours: our uv writes lockfile revision 3, which the builder
+# rejects with "The lockfile at uv.lock needs to be updated" and the app
+# never starts. Known-good installs (marketplace-v1.3.0 and earlier)
+# shipped NO lockfiles and resolved fresh from pyproject.toml.
+rm -f src/uv.lock src/backend/uv.lock
+echo "  ✓ Removed uv lockfiles (Apps builder uv can't parse lock revision 3)"
+
 # Count files after cleanup
 FILES_AFTER=$(find . -type f | wc -l)
 FILES_REMOVED=$((FILES_BEFORE - FILES_AFTER))
