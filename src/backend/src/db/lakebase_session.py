@@ -370,7 +370,10 @@ class LakebaseSessionFactory:
 
             # Cancel old refresh task if exists
             if self._refresh_task and not self._refresh_task.done():
-                self._refresh_task.cancel()
+                try:
+                    self._refresh_task.cancel()
+                except RuntimeError:
+                    pass  # Task belongs to a closed event loop (crew thread recreate)
 
             # Reset cached workspace client to force re-authentication
             self._workspace_client = None
@@ -433,11 +436,13 @@ class LakebaseSessionFactory:
             except RuntimeError:
                 self._engine_loop_id = None
 
-            # Start background token refresh task (only for long-lived pools)
-            if not use_nullpool:
-                self._refresh_task = asyncio.create_task(self._schedule_token_refresh())
-            else:
-                self._refresh_task = None
+            # Start background token refresh task — in NullPool mode too:
+            # do_connect injects the holder's token on EVERY new connection,
+            # and sessions handed out via the raw _session_factory (the
+            # activate_lakebase swap) never pass through get_session()'s lazy
+            # refresh, so without this task their token freezes at engine
+            # creation and every connection fails once it expires (~60 min).
+            self._refresh_task = asyncio.create_task(self._schedule_token_refresh())
 
             logger.info(f"Created Lakebase engine for instance: {self.instance_name} (nullpool={use_nullpool})")
 
@@ -477,10 +482,11 @@ class LakebaseSessionFactory:
             except Exception as e:
                 logger.error(f"Error creating Lakebase session: {e}")
                 raise
-        elif self._refresh_task is None and self._is_token_stale():
-            # NullPool mode has no background refresh task; with the engine now
-            # long-lived (PERF-013 stable bridge loop), refresh the credential
-            # lazily — do_connect injects the holder's token on each connect.
+        elif self._is_token_stale():
+            # Backstop for the background refresh task: if it stopped running
+            # (e.g. its event loop went away in a crew thread) the holder
+            # would freeze, so refresh lazily whenever the credential ages
+            # past the window — do_connect injects it on each connect.
             try:
                 await self._refresh_token()
             except Exception as e:
@@ -508,11 +514,11 @@ class LakebaseSessionFactory:
     async def dispose(self):
         """Dispose of the engine, cancel refresh task, and clean up resources."""
         if self._refresh_task and not self._refresh_task.done():
-            self._refresh_task.cancel()
             try:
+                self._refresh_task.cancel()
                 await self._refresh_task
-            except asyncio.CancelledError:
-                pass
+            except (asyncio.CancelledError, RuntimeError):
+                pass  # RuntimeError: task belongs to a closed/foreign event loop
             self._refresh_task = None
 
         if self._engine:
