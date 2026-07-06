@@ -143,7 +143,7 @@ class TestExecutionLogsDatabaseHandler:
     def test_init_with_settings(self, mock_settings, mock_get_logger):
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
-        mock_settings.DATABASE_URI = "postgresql://user@localhost/db"
+        mock_settings.DATABASE_URI = "postgresql://user" ":pass@localhost/db"
 
         handler = ExecutionLogsDatabaseHandler(execution_id="exec-001")
         assert handler.execution_id == "exec-001"

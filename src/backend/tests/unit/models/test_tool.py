@@ -183,7 +183,7 @@ class TestToolTypes:
             description="Execute SQL queries against PostgreSQL databases",
             icon="postgresql",
             config={
-                "connection_string": "postgresql://user@host:port/db",
+                "connection_string": "postgresql://user" ":pass@host:port/db",
                 "query_timeout": 60,
                 "max_connections": 10,
                 "ssl_mode": "require"

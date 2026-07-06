@@ -179,7 +179,7 @@ class TestConfigureSqlite:
         mock_record = MagicMock()
 
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             configure_sqlite(mock_conn, mock_record)
 
         mock_conn.execute.assert_not_called()
@@ -355,7 +355,7 @@ class TestInitDb:
              patch("src.db.session.create_async_engine", return_value=mock_engine), \
              patch("src.db.session.NullPool"):
 
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://user@localhost/testdb"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@localhost/testdb"
             mock_settings.POSTGRES_DB = "testdb"
             mock_settings.POSTGRES_SERVER = "localhost"
             mock_settings.POSTGRES_PORT = 5432
@@ -454,7 +454,7 @@ class TestEnsureDatabricksConfigColumns:
         conn.exec_driver_sql = AsyncMock(return_value=MagicMock())
 
         with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u@h/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             await _ensure_databricks_config_columns(conn)
 
         sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]

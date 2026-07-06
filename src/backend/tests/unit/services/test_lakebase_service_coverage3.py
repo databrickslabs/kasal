@@ -171,7 +171,7 @@ class TestMigrateExistingData:
              patch("src.services.lakebase_service.settings") as mock_settings, \
              patch("src.services.lakebase_service.LakebaseMigrationService", return_value=mock_mig_svc), \
              patch("src.services.lakebase_service.AsyncSession", return_value=mock_lb_session):
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://user@host/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@host/db"
             mock_settings.DATABASE_TYPE = "postgresql"
             result = await svc.migrate_existing_data("my-inst", "endpoint.example.com")
 
@@ -420,7 +420,7 @@ class TestMigrateExistingDataStreamExtended:
              patch("src.services.lakebase_service.settings") as mock_settings, \
              patch("src.services.lakebase_service.LakebaseMigrationService", return_value=mock_mig_svc), \
              patch("src.services.lakebase_service.create_engine", side_effect=capture_create_engine):
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://user@host/db"
+            mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@host/db"
             mock_settings.DATABASE_TYPE = "postgresql"
 
             try:

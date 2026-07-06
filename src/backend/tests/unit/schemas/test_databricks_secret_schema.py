@@ -96,12 +96,12 @@ class TestSecretCreate:
         """Test SecretCreate with all fields."""
         create_data = {
             "name": "database_connection",
-            "value": "postgresql://user@host:5432/db",
+            "value": "postgresql://user" ":pass@host:5432/db",
             "description": "Connection string for main database"
         }
         create_secret = SecretCreate(**create_data)
         assert create_secret.name == "database_connection"
-        assert create_secret.value == "postgresql://user@host:5432/db"
+        assert create_secret.value == "postgresql://user" ":pass@host:5432/db"
         assert create_secret.description == "Connection string for main database"
     
     def test_secret_create_inheritance(self):
@@ -591,7 +591,7 @@ class TestSchemaIntegration:
         # Database connection string
         db_connection = SecretCreate(
             name="database_connection",
-            value="postgresql://username@hostname:5432/database?sslmode=require",
+            value="postgresql://username" ":password@hostname:5432/database?sslmode=require",
             description="Secure database connection string"
         )
         

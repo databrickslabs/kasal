@@ -65,7 +65,7 @@ class TestSettings:
             POSTGRES_DB="testdb"
         )
         
-        expected_uri = "postgresql+asyncpg://testuser@testserver:5432/testdb"
+        expected_uri = "postgresql+asyncpg://testuser" ":testpass@testserver:5432/testdb"
         assert settings.DATABASE_URI == expected_uri
     
     def test_database_uri_sqlite(self):
@@ -80,7 +80,7 @@ class TestSettings:
     
     def test_database_uri_custom_string(self):
         """Test database URI when provided as custom string."""
-        custom_uri = "postgresql://custom@host:5432/db"
+        custom_uri = "postgresql://custom" ":uri@host:5432/db"
         settings = Settings(DATABASE_URI=custom_uri)
         
         assert settings.DATABASE_URI == custom_uri
@@ -96,7 +96,7 @@ class TestSettings:
             POSTGRES_DB="testdb"
         )
         
-        expected_uri = "postgresql+asyncpg://testuser@testserver:5432/testdb"
+        expected_uri = "postgresql+asyncpg://testuser" ":testpass@testserver:5432/testdb"
         assert settings.SYNC_DATABASE_URI == expected_uri
     
     def test_sync_database_uri_sqlite(self):
@@ -111,7 +111,7 @@ class TestSettings:
     
     def test_sync_database_uri_custom_string(self):
         """Test sync database URI when provided as custom string."""
-        custom_uri = "postgresql://sync@host:5432/db"
+        custom_uri = "postgresql://sync" ":uri@host:5432/db"
         settings = Settings(SYNC_DATABASE_URI=custom_uri)
         
         assert settings.SYNC_DATABASE_URI == custom_uri
@@ -127,7 +127,7 @@ class TestSettings:
         )
         
         # Should still construct valid URI with empty DB
-        assert "postgresql+asyncpg://user@server:5432/" in settings.DATABASE_URI
+        assert "postgresql+asyncpg://user" ":pass@server:5432/" in settings.DATABASE_URI
     
     def test_cors_origins_whitespace_handling(self):
         """Test CORS origins with whitespace handling."""

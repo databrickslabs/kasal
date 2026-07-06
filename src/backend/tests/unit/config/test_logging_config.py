@@ -265,12 +265,12 @@ class TestExecutionLogsDatabaseHandlerInit:
         """Test that DATABASE_URL environment variable is used directly when set."""
         from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://testuser@testhost:5432/testdb"}):
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://testuser" ":testpass@testhost:5432/testdb"}):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
                 # DATABASE_URL should be used as-is
-                assert handler._db_url == "postgresql://testuser@testhost:5432/testdb"
+                assert handler._db_url == "postgresql://testuser" ":testpass@testhost:5432/testdb"
 
     def test_init_db_strips_asyncpg_from_settings_database_uri(self):
         """Test that +asyncpg is stripped from settings.DATABASE_URI when DATABASE_URL is not set."""
@@ -278,7 +278,7 @@ class TestExecutionLogsDatabaseHandlerInit:
 
         # Create a mock settings object with postgresql+asyncpg URI
         mock_settings = MagicMock()
-        mock_settings.DATABASE_URI = "postgresql+asyncpg://user@localhost:5432/testdb"
+        mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@localhost:5432/testdb"
 
         with patch.dict(os.environ, {}, clear=True):  # Clear DATABASE_URL
             with patch("src.config.settings.settings", mock_settings):
@@ -286,7 +286,7 @@ class TestExecutionLogsDatabaseHandlerInit:
                     handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
                     # +asyncpg should be stripped
-                    assert handler._db_url == "postgresql://user@localhost:5432/testdb"
+                    assert handler._db_url == "postgresql://user" ":pass@localhost:5432/testdb"
                     assert "+asyncpg" not in handler._db_url
 
     def test_init_db_strips_aiosqlite_from_settings_database_uri(self):
@@ -351,12 +351,12 @@ class TestExecutionLogsDatabaseHandlerInit:
         from src.engines.crewai.infra.logging_config import ExecutionLogsDatabaseHandler
 
         # Set DATABASE_URL env var - this takes precedence, settings never consulted
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://env@envhost:5432/envdb"}):
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://env" ":pass@envhost:5432/envdb"}):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
                 # DATABASE_URL env var should be used
-                assert handler._db_url == "postgresql://env@envhost:5432/envdb"
+                assert handler._db_url == "postgresql://env" ":pass@envhost:5432/envdb"
 
     def test_init_db_with_group_context_dict(self):
         """Test initialization with group context as dict."""

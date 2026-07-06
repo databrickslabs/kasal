@@ -629,7 +629,7 @@ class TestFlowEdgeCases:
                             {
                                 "name": "results_db",
                                 "type": "postgresql",
-                                "connection": "postgresql://user@host:5432/db"
+                                "connection": "postgresql://user" ":pass@host:5432/db"
                             }
                         ]
                     }

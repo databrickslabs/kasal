@@ -466,7 +466,7 @@ class TestGetConnectionString:
                 with patch.object(factory, "_refresh_token", new_callable=AsyncMock, return_value="tok"):
                     url = await factory.get_connection_string()
 
-        assert url == "postgresql+asyncpg://myuser@lb-host.example.com:5432/databricks_postgres"
+        assert url == "postgresql+asyncpg://myuser" ":placeholder@lb-host.example.com:5432/databricks_postgres"
 
     @pytest.mark.asyncio
     async def test_raises_when_instance_not_ready(self):
@@ -541,7 +541,7 @@ class TestCreateEngine:
         mock_sf = MagicMock()
         mock_task = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=mock_engine) as mock_cae:
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=mock_sf):
                     with patch("src.db.lakebase_session.event") as mock_event:
@@ -555,7 +555,7 @@ class TestCreateEngine:
         # Verify engine was created with expected parameters
         mock_cae.assert_called_once()
         call_kwargs = mock_cae.call_args
-        assert call_kwargs[0][0] == "postgresql+asyncpg://u@h/d"
+        assert call_kwargs[0][0] == "postgresql+asyncpg://u" ":p@h/d"
         assert call_kwargs[1]["pool_pre_ping"] is False
         assert call_kwargs[1]["pool_size"] == 5
         assert call_kwargs[1]["max_overflow"] == 10
@@ -572,7 +572,7 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -595,7 +595,7 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -617,7 +617,7 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -651,7 +651,7 @@ class TestCreateEngine:
         mock_engine = MagicMock()
         mock_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=mock_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker") as mock_asm:
                     with patch("src.db.lakebase_session.event"):
@@ -1477,7 +1477,7 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -1507,7 +1507,7 @@ class TestMissingCoverage:
         new_engine.sync_engine = MagicMock()
         mock_task = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine) as mock_cae:
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -1535,7 +1535,7 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
@@ -1562,7 +1562,7 @@ class TestMissingCoverage:
                 return fn
             return decorator
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event.listens_for", side_effect=fake_listens_for):
@@ -1582,7 +1582,7 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):

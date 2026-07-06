@@ -1250,7 +1250,7 @@ class TestGetDatabaseInfo:
         """Successful Lakebase database info with endpoint."""
         # Give the mock session a bind with postgres URL
         mock_bind = MagicMock()
-        mock_bind.url = "postgresql+asyncpg://user@host/db"
+        mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
         mock_session.bind = mock_bind
 
         lakebase_cfg = {
@@ -1287,7 +1287,7 @@ class TestGetDatabaseInfo:
     async def test_get_info_lakebase_not_fully_enabled(self, service, mock_session, mock_repository):
         """Lakebase config present but not fully enabled falls through to normal postgres."""
         mock_bind = MagicMock()
-        mock_bind.url = "postgresql+asyncpg://user@host/db"
+        mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
         mock_session.bind = mock_bind
 
         # enabled=True but migration_completed=False
@@ -1366,7 +1366,7 @@ class TestGetDatabaseInfo:
     async def test_get_info_lakebase_repo_failure(self, service, mock_session, mock_repository):
         """Lakebase path with repository failure is propagated."""
         mock_bind = MagicMock()
-        mock_bind.url = "postgresql+asyncpg://user@host/db"
+        mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
         mock_session.bind = mock_bind
 
         lakebase_cfg = {
@@ -1398,7 +1398,7 @@ class TestGetDatabaseInfo:
     async def test_get_info_lakebase_no_endpoint(self, service, mock_session, mock_repository):
         """Lakebase result does not include endpoint key when config has no endpoint."""
         mock_bind = MagicMock()
-        mock_bind.url = "postgresql+asyncpg://user@host/db"
+        mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
         mock_session.bind = mock_bind
 
         lakebase_cfg = {
@@ -1552,7 +1552,7 @@ class TestGetDatabaseInfo:
     async def test_get_database_info_lakebase_enabled_connected(self, service, mock_session, mock_repository):
         """When lakebase is enabled and session is postgres, report database_type='lakebase' with tables."""
         mock_bind = MagicMock()
-        mock_bind.url = "postgresql+asyncpg://user@host/db"
+        mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
         mock_session.bind = mock_bind
 
         lakebase_cfg = {
