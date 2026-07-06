@@ -1488,8 +1488,16 @@ class TestMissingCoverage:
         assert factory._engine is new_engine
 
     @pytest.mark.asyncio
-    async def test_create_engine_uses_nullpool_and_no_refresh_task(self, monkeypatch):
-        """Lines 294-296, 347: NullPool branch and refresh_task set to None."""
+    async def test_create_engine_uses_nullpool_and_starts_refresh_task(self, monkeypatch):
+        """NullPool branch still starts the background refresh task.
+
+        Regression: deployed apps set USE_NULLPOOL=true and hand the raw
+        _session_factory to activate_lakebase, bypassing get_session()'s lazy
+        refresh — without the background task the do_connect token freezes at
+        engine creation and every connection fails once it expires (~60 min),
+        surfacing as "password authentication failed" / "Failed to create
+        execution record".
+        """
         from src.db.lakebase_session import LakebaseSessionFactory
         from sqlalchemy.pool import NullPool
 
@@ -1497,20 +1505,44 @@ class TestMissingCoverage:
         factory = LakebaseSessionFactory()
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
+        mock_task = MagicMock()
 
         with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
             with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine) as mock_cae:
                 with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task") as mock_task:
+                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=mock_task) as mock_create_task:
                             await factory.create_engine()
 
-        # NullPool path: poolclass=NullPool, no pool_size, refresh task not started
+        # NullPool path: poolclass=NullPool, no pool_size, refresh task STARTED
         call_kwargs = mock_cae.call_args[1]
         assert call_kwargs["poolclass"] is NullPool
         assert "pool_size" not in call_kwargs
-        mock_task.assert_not_called()
-        assert factory._refresh_task is None
+        mock_create_task.assert_called_once()
+        assert factory._refresh_task is mock_task
+
+    @pytest.mark.asyncio
+    async def test_create_engine_survives_cancel_on_closed_loop_task(self):
+        """An old refresh task whose loop is gone must not break engine recreation."""
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        old_task = MagicMock()
+        old_task.done.return_value = False
+        old_task.cancel.side_effect = RuntimeError("Event loop is closed")
+        factory._refresh_task = old_task
+
+        new_engine = MagicMock()
+        new_engine.sync_engine = MagicMock()
+
+        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u@h/d"):
+            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
+                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+                    with patch("src.db.lakebase_session.event"):
+                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                            await factory.create_engine()
+
+        assert factory._engine is new_engine
 
     @pytest.mark.asyncio
     async def test_do_connect_injects_token(self):
@@ -1805,11 +1837,25 @@ class TestLazyTokenRefresh:
         mock_refresh.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_background_task_mode_skips_lazy_refresh(self):
+    async def test_stale_token_refreshes_even_with_background_task(self):
+        """Backstop: a stale token means the background refresher stopped
+        running (e.g. its loop went away), so lazy refresh must still fire."""
         factory = self._factory_with_session()
         factory._engine_loop_id = id(asyncio.get_running_loop())
-        factory._refresh_task = MagicMock()  # pooled mode: background refresher owns it
+        factory._refresh_task = MagicMock()  # task exists but token aged out anyway
         factory._token_holder["refreshed_at"] = 0.0
+        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+            async with factory.get_session():
+                pass
+        mock_refresh.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fresh_token_with_background_task_skips_refresh(self):
+        import time as _time
+        factory = self._factory_with_session()
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+        factory._refresh_task = MagicMock()
+        factory._token_holder["refreshed_at"] = _time.time()
         with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
             async with factory.get_session():
                 pass
