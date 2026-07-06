@@ -115,7 +115,7 @@ class TestDatabaseBackupRepositoryGetDatabaseType:
     @patch('src.repositories.database_backup_repository.settings')
     def test_get_database_type_postgres_uppercase(self, mock_settings):
         """Test get_database_type returns 'postgres' for uppercase PostgreSQL"""
-        mock_settings.DATABASE_URI = "POSTGRESQL://user@localhost/db"
+        mock_settings.DATABASE_URI = "POSTGRESQL://user" ":pass@localhost/db"
         
         result = DatabaseBackupRepository.get_database_type()
         
