@@ -146,6 +146,7 @@ _DATA_COMPONENTS = frozenset(
         "Sequence",
         "Album",
         "Map",
+        "Diagram",
     }
 )
 

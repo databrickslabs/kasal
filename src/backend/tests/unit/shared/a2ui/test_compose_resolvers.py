@@ -16,6 +16,8 @@ from src.shared.a2ui.compose import (
     guidance_for,
     infer_deliverable,
     load_catalog,
+    plan_presentation_outline,
+    presentation_design_lint,
     presentation_needs_body,
     quiz_needs_work,
     resolve_catalog,
@@ -94,7 +96,8 @@ def _seq_llm(*replies):
     return lambda messages: next(it)
 
 
-def test_compose_retries_past_a_hollow_deck_to_a_filled_one():
+def test_compose_retries_past_a_hollow_deck_to_a_filled_one(monkeypatch):
+    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "0")
     hollow = json.dumps(
         _deck(
             {"id": "s1", "component": "Slide", "variant": "content", "title": "Empty"}
@@ -124,7 +127,8 @@ def test_compose_retries_past_a_hollow_deck_to_a_filled_one():
     assert any(c.get("component") == "Text" for c in out["components"])
 
 
-def test_compose_falls_back_to_markdown_when_deck_stays_hollow():
+def test_compose_falls_back_to_markdown_when_deck_stays_hollow(monkeypatch):
+    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "0")
     hollow = json.dumps(
         _deck(
             {"id": "s1", "component": "Slide", "variant": "content", "title": "Empty"}
@@ -140,6 +144,235 @@ def test_compose_falls_back_to_markdown_when_deck_stays_hollow():
     # Hollow after every retry → readable markdown document instead of empty slides.
     assert out["surfaceKind"] == "conversation"
     assert out["dataModel"]["md"] == "the full answer body"
+
+
+def test_presentation_needs_body_covers_new_body_variants():
+    # two-column / visual / agenda slides are body-bearing too: a deck whose
+    # two-column slides have no children is just as hollow as empty content ones.
+    hollow = _deck(
+        {"id": "s1", "component": "Slide", "variant": "two-column", "title": "A"},
+        {"id": "s2", "component": "Slide", "variant": "agenda", "title": "B"},
+    )
+    assert presentation_needs_body(hollow) is True
+
+
+# --- presentation_design_lint (deck visual-density critique) ----------------
+def _text_slide(i):
+    return {
+        "id": f"s{i}",
+        "component": "Slide",
+        "variant": "content",
+        "title": f"Slide {i}",
+        "children": [f"t{i}"],
+        "_children": [{"id": f"t{i}", "component": "Text", "text": "A real point."}],
+    }
+
+
+def _diagram_slide(i):
+    return {
+        "id": f"s{i}",
+        "component": "Slide",
+        "variant": "visual",
+        "title": f"Slide {i}",
+        "children": [f"d{i}"],
+        "_children": [
+            {
+                "id": f"d{i}",
+                "component": "Diagram",
+                "archetype": "process",
+                "items": [{"label": "One"}, {"label": "Two"}],
+            }
+        ],
+    }
+
+
+def test_design_lint_flags_a_text_only_deck():
+    flat = _deck(*[_text_slide(i) for i in range(1, 8)])
+    findings = presentation_design_lint(flat)
+    assert findings
+    assert any("no slide carries any visual" in f for f in findings)
+    assert any("consecutive text-only" in f for f in findings)
+
+
+def test_design_lint_passes_a_deck_with_enough_visuals():
+    slides = [
+        _text_slide(1),
+        _text_slide(2),
+        _diagram_slide(3),
+        _text_slide(4),
+        _text_slide(5),
+        _diagram_slide(6),
+    ]
+    assert presentation_design_lint(_deck(*slides)) == []
+
+
+def test_design_lint_ignores_short_decks_and_non_presentations():
+    short = _deck(*[_text_slide(i) for i in range(1, 4)])
+    assert presentation_design_lint(short) == []
+    assert presentation_design_lint({"surfaceKind": "document", "components": []}) == []
+    assert presentation_design_lint(None) == []
+
+
+def test_compose_design_retry_upgrades_a_flat_deck(monkeypatch):
+    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "0")
+    flat = json.dumps(_deck(*[_text_slide(i) for i in range(1, 8)]))
+    visual = json.dumps(
+        _deck(
+            *[
+                (_diagram_slide(i) if i % 3 == 0 else _text_slide(i))
+                for i in range(1, 8)
+            ]
+        )
+    )
+    out = compose_a2ui(
+        "answer",
+        query="make a slide deck about x",
+        llm_call=_seq_llm(flat, visual),
+        catalog=CATALOG,
+    )
+    assert any(c.get("component") == "Diagram" for c in out["components"])
+
+
+def test_compose_keeps_flat_deck_when_design_retry_fails(monkeypatch):
+    # A valid-but-flat deck is the floor: if the design retry returns garbage,
+    # ship the flat deck rather than falling back to markdown.
+    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "0")
+    flat = json.dumps(_deck(*[_text_slide(i) for i in range(1, 8)]))
+    out = compose_a2ui(
+        "answer",
+        query="make a slide deck about x",
+        llm_call=_seq_llm(flat, "not json at all"),
+        catalog=CATALOG,
+        retries=2,
+    )
+    assert out["surfaceKind"] == "presentation"
+
+
+# --- plan_presentation_outline (two-stage presentation compose) --------------
+def test_plan_outline_parses_clamps_and_rejects_weak_plans():
+    plan = {
+        "slides": [
+            {"title": f"S{i}", "variant": "content", "visual": "none", "focus": "x"}
+            for i in range(30)
+        ]
+    }
+    out = plan_presentation_outline(
+        "text", "make a deck", "", _seq_llm(json.dumps(plan))
+    )
+    assert out is not None and len(out) == 24  # clamped
+    assert out[0]["title"] == "S0"
+    # Under 3 slides → weaker than no plan.
+    assert (
+        plan_presentation_outline(
+            "text", "q", "", _seq_llm(json.dumps({"slides": [{"title": "only"}]}))
+        )
+        is None
+    )
+    # Garbage / raising llm_call → None, never raises.
+    assert plan_presentation_outline("text", "q", "", _seq_llm("not json")) is None
+    assert plan_presentation_outline("text", "q", "", _seq_llm()) is None
+
+
+def test_compose_feeds_slide_plan_to_the_composer():
+    plan = json.dumps(
+        {
+            "slides": [
+                {"title": "Intro", "variant": "title", "visual": "none"},
+                {"title": "Steps", "variant": "visual", "visual": "diagram:process"},
+                {"title": "Close", "variant": "quote", "visual": "none"},
+            ]
+        }
+    )
+    deck = json.dumps(
+        _deck(
+            {
+                "id": "s1",
+                "component": "Slide",
+                "variant": "content",
+                "title": "Full",
+                "children": ["t1"],
+                "_children": [
+                    {"id": "t1", "component": "Text", "text": "A genuine point."}
+                ],
+            }
+        )
+    )
+    seen = []
+
+    def llm(messages):
+        seen.append(messages)
+        return plan if len(seen) == 1 else deck
+
+    out = compose_a2ui(
+        "answer body",
+        query="make a slide deck about x",
+        llm_call=llm,
+        catalog=CATALOG,
+    )
+    assert out["surfaceKind"] == "presentation"
+    # First call plans the outline; the second (composer) call gets the plan
+    # appended to the user content.
+    assert len(seen) == 2
+    assert "OUTLINE" in seen[0][0]["content"]
+    assert "[SLIDE PLAN" in seen[1][1]["content"]
+    assert "diagram:process" in seen[1][1]["content"]
+
+
+def test_outline_skipped_for_non_presentations():
+    dash = json.dumps(
+        {
+            "surfaceKind": "dashboard",
+            "root": "g",
+            "components": [
+                {"id": "g", "component": "Grid", "columns": 2, "children": ["k"]},
+                {"id": "k", "component": "KeyValue", "label": "A", "value": "1"},
+            ],
+        }
+    )
+    calls = []
+
+    def llm(messages):
+        calls.append(messages)
+        return dash
+
+    out = compose_a2ui(
+        "answer", query="build a KPI dashboard", llm_call=llm, catalog=CATALOG
+    )
+    assert out["surfaceKind"] == "dashboard"
+    assert len(calls) == 1  # no outline pre-pass
+
+
+# --- catalog: new visual vocabulary ------------------------------------------
+def test_catalog_declares_diagram_and_new_chart_and_slide_variants():
+    comps = CATALOG["components"]
+    assert "Diagram" in comps
+    archetypes = set(comps["Diagram"]["props"]["archetype"]["values"])
+    assert {
+        "process",
+        "timeline",
+        "cycle",
+        "funnel",
+        "pyramid",
+        "comparison",
+        "matrix2x2",
+        "hierarchy",
+    } <= archetypes
+    chart_types = set(comps["Chart"]["props"]["chartType"]["values"])
+    assert {"bar", "line", "pie", "area", "scatter", "radar"} <= chart_types
+    variants = set(comps["Slide"]["props"]["variant"]["enum"])
+    assert {"two-column", "visual", "agenda"} <= variants
+    assert "icon" in comps["KeyValue"]["props"]
+
+
+def test_infer_deliverable_diagram_keywords():
+    assert infer_deliverable("draw a flowchart of onboarding") == "diagram"
+    assert infer_deliverable("show the conversion funnel") == "diagram"
+    assert infer_deliverable("an org chart for the team") == "diagram"
+    # Specific diagram kinds keep their own deliverables.
+    assert infer_deliverable("a sequence diagram of login") == "sequence"
+    assert infer_deliverable("a network diagram of services") == "graph"
+    # Presentations with diagram words stay presentations (keyword order).
+    assert infer_deliverable("a presentation with a timeline") == "presentation"
 
 
 # --- quiz_needs_work (quiz quality guard) ----------------------------------

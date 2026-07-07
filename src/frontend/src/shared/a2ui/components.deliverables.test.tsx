@@ -261,6 +261,133 @@ describe('Sequence', () => {
   });
 });
 
+// ---- Diagram (archetype-based business diagrams) ----
+describe('Diagram', () => {
+  const diagram = (archetype: string, items: unknown[], extra: Record<string, unknown> = {}): Surface => ({
+    surfaceKind: 'document',
+    root: 'dg',
+    dataModel: { items },
+    components: [{ id: 'dg', component: 'Diagram', archetype, title: 'The picture', items: { path: '/items' }, ...extra }],
+  });
+
+  it('renders a process as numbered steps with labels and details', () => {
+    render(
+      <A2UIRenderer
+        payload={diagram('process', [
+          { label: 'Ingest', detail: 'Land the raw data' },
+          { label: 'Transform' },
+          { label: 'Serve' },
+        ])}
+      />,
+    );
+    expect(screen.getByText('The picture')).toBeInTheDocument();
+    expect(screen.getByText('Step 1')).toBeInTheDocument();
+    expect(screen.getByText('Step 3')).toBeInTheDocument();
+    expect(screen.getByText('Ingest')).toBeInTheDocument();
+    expect(screen.getByText('Land the raw data')).toBeInTheDocument();
+    expect(screen.getByText('Serve')).toBeInTheDocument();
+  });
+
+  it('renders a comparison with a VS badge and per-side points', () => {
+    render(
+      <A2UIRenderer
+        payload={diagram('comparison', [
+          { label: 'Build', points: ['Full control', 'Slower to ship'] },
+          { label: 'Buy', points: ['Fast start'] },
+        ])}
+      />,
+    );
+    expect(screen.getByText('Build')).toBeInTheDocument();
+    expect(screen.getByText('Buy')).toBeInTheDocument();
+    expect(screen.getByText('vs')).toBeInTheDocument();
+    expect(screen.getByText('Full control')).toBeInTheDocument();
+    expect(screen.getByText('Fast start')).toBeInTheDocument();
+  });
+
+  it('renders a hierarchy with root, children and grandchildren', () => {
+    render(
+      <A2UIRenderer
+        payload={diagram('hierarchy', [
+          {
+            label: 'CEO',
+            children: [
+              { label: 'Engineering', children: [{ label: 'Platform' }] },
+              { label: 'Sales' },
+            ],
+          },
+        ])}
+      />,
+    );
+    expect(screen.getByText('CEO')).toBeInTheDocument();
+    expect(screen.getByText('Engineering')).toBeInTheDocument();
+    expect(screen.getByText('Platform')).toBeInTheDocument();
+  });
+
+  it('maps archetype synonyms instead of rendering Unsupported', () => {
+    render(<A2UIRenderer payload={diagram('orgchart', [{ label: 'Root' }])} />);
+    expect(screen.getByText('Root')).toBeInTheDocument();
+    expect(screen.queryByText(/Unsupported component/)).toBeNull();
+  });
+
+  it('renders a matrix2x2 with axis labels and nothing when items are empty', () => {
+    const { rerender } = render(
+      <A2UIRenderer
+        payload={diagram(
+          'matrix2x2',
+          [{ label: 'Quick win' }, { label: 'Big bet' }, { label: 'Fill-in' }, { label: 'Money pit' }],
+          { xLabel: 'Effort', yLabel: 'Impact' },
+        )}
+      />,
+    );
+    expect(screen.getByText('Quick win')).toBeInTheDocument();
+    expect(screen.getByText(/Effort/)).toBeInTheDocument();
+    expect(screen.getByText(/Impact/)).toBeInTheDocument();
+    rerender(<A2UIRenderer payload={diagram('matrix2x2', [])} />);
+    expect(screen.queryByText('The picture')).toBeNull();
+  });
+});
+
+// ---- Chart (new chartTypes render without crashing; recharts internals not
+// assertable in jsdom — assert the title + no Unsupported) ----
+describe('Chart — area/scatter/radar', () => {
+  const chart = (chartType: string): Surface => ({
+    surfaceKind: 'dashboard',
+    root: 'c',
+    dataModel: { rows: [{ month: 'Jan', a: 1, b: 2 }, { month: 'Feb', a: 3, b: 4 }] },
+    components: [
+      { id: 'c', component: 'Chart', chartType, title: `${chartType} chart`, xKey: 'month', yKeys: ['a', 'b'], data: { path: '/rows' } },
+    ],
+  });
+
+  it.each(['area', 'scatter', 'radar'])('mounts a %s chart', (t) => {
+    render(<A2UIRenderer payload={chart(t)} />);
+    expect(screen.getByText(`${t} chart`)).toBeInTheDocument();
+    expect(screen.queryByText(/Unsupported component/)).toBeNull();
+  });
+});
+
+// ---- KeyValue icon (curated allowlist) ----
+describe('KeyValue icon', () => {
+  const kv = (icon?: string): Surface => ({
+    surfaceKind: 'dashboard',
+    root: 'k',
+    dataModel: {},
+    components: [{ id: 'k', component: 'KeyValue', label: 'Revenue', value: '$1.2M', ...(icon ? { icon } : {}) }],
+  });
+
+  it('renders a lucide icon for an allowlisted name', () => {
+    const { container } = render(<A2UIRenderer payload={kv('trending-up')} />);
+    expect(container.querySelector('svg.lucide-trending-up')).toBeTruthy();
+    expect(screen.getByText('$1.2M')).toBeInTheDocument();
+  });
+
+  it('renders no icon for unknown names (never a broken glyph)', () => {
+    const { container } = render(<A2UIRenderer payload={kv('made-up-icon')} />);
+    expect(container.querySelector('svg')).toBeNull();
+    expect(screen.getByText('Revenue')).toBeInTheDocument();
+  });
+});
+
 // ---- Album (image carousel) ----
 describe('Album', () => {
   const album: Surface = {
