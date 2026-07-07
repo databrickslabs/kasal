@@ -59,6 +59,58 @@ describe('SlideDeck — empty content slides degrade gracefully', () => {
     expect(screen.getByText('Why the Swiss Data & AI scene matters')).toBeInTheDocument();
   });
 
+  it('renders a two-column slide with text left and the visual right', () => {
+    const twoCol: Surface = {
+      surfaceKind: 'presentation',
+      root: 'deck',
+      dataModel: { items: [{ label: 'Plan' }, { label: 'Build' }] },
+      components: [
+        { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+        { id: 's1', component: 'Slide', variant: 'two-column', title: 'Split', children: ['t1', 'd1'] },
+        { id: 't1', component: 'Text', text: 'A supporting bullet' },
+        { id: 'd1', component: 'Diagram', archetype: 'process', items: { path: '/items' } },
+      ],
+    };
+    render(<A2UIRenderer payload={twoCol} />);
+    const slide = screen.getByText('Split').closest('.a2-slide') as HTMLElement;
+    expect(slide.querySelector('.grid-cols-2')).toBeTruthy();
+    expect(screen.getByText('A supporting bullet')).toBeInTheDocument();
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+  });
+
+  it('renders an agenda slide with numbered rows', () => {
+    const agenda: Surface = {
+      surfaceKind: 'presentation',
+      root: 'deck',
+      components: [
+        { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+        { id: 's1', component: 'Slide', variant: 'agenda', title: 'Agenda', children: ['t1', 't2'] },
+        { id: 't1', component: 'Text', text: 'Where we are' },
+        { id: 't2', component: 'Text', text: 'Where we go' },
+      ],
+    };
+    render(<A2UIRenderer payload={agenda} />);
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('Where we are')).toBeInTheDocument();
+    expect(screen.getByText('Where we go')).toBeInTheDocument();
+  });
+
+  it('treats a bodyless two-column slide as title-only (section layout)', () => {
+    const empty: Surface = {
+      surfaceKind: 'presentation',
+      root: 'deck',
+      components: [
+        { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+        { id: 's1', component: 'Slide', variant: 'two-column', title: 'Nothing Here' },
+      ],
+    };
+    render(<A2UIRenderer payload={empty} />);
+    const slide = screen.getByText('Nothing Here').closest('.a2-slide') as HTMLElement;
+    expect(slide.className).toContain('justify-center');
+    expect(slide.className).toContain('text-center');
+  });
+
   it('treats a content slide with only BLANK children as title-only (section layout)', () => {
     // children exist but render to nothing (empty Text + whitespace Markdown) —
     // the naive children.length check would miss this; nodeHasContent catches it.

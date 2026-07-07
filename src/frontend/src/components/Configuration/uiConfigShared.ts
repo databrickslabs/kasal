@@ -43,6 +43,7 @@ export const DELIVERABLE_TYPES = [
   { key: 'forecast', label: 'Forecast' },
   { key: 'graph', label: 'Graph' },
   { key: 'sequence', label: 'Sequence diagram' },
+  { key: 'diagram', label: 'Diagram' },
   { key: 'report', label: 'Report' },
   // The run-activity "context" / logs view (per-step retrieved context shown in
   // the preview pane). Styled distinctly from deliverables — see the Logs preset
@@ -133,6 +134,7 @@ export const DELIVERABLE_LABELS: Record<string, string> = {
   quiz: 'Quiz',
   flashcards: 'Flashcard deck',
   map: 'Map',
+  diagram: 'Diagram',
   report: 'Report',
   default: 'Document',
 };
@@ -158,6 +160,7 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
   presentation: [
     { kind: 'number', key: 'slides', label: 'Target slide count', min: 3, max: 20, default: 20, phrase: (v) => `aim for about ${v} slides` },
     { kind: 'number', key: 'bullets', label: 'Max bullets per slide', min: 2, max: 6, default: 4, phrase: (v) => `at most ${v} bullet points per slide` },
+    { kind: 'select', key: 'visuals', label: 'Visual density', default: 'balanced', choices: [{ value: 'light', label: 'Mostly text' }, { value: 'balanced', label: 'Balanced' }, { value: 'rich', label: 'Visual-first' }], phrase: (v) => (v === 'light' ? 'keep slides mostly text; add a visual only where essential' : v === 'rich' ? 'give MOST slides a visual (Diagram, Chart, Table or stats) — text-only slides should be the exception' : 'give at least one in three slides a visual (Diagram, Chart, Table or stats)') },
     { kind: 'switch', key: 'titleSlide', label: 'Open with a title slide', default: true, phrase: (v) => (v ? 'open with a dedicated title slide' : 'skip the title slide') },
     { kind: 'switch', key: 'summarySlide', label: 'End with a summary slide', default: true, phrase: (v) => (v ? 'end with a summary / takeaways slide' : 'do not add a summary slide') },
   ],
@@ -204,6 +207,10 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
   sequence: [
     { kind: 'switch', key: 'numbered', label: 'Number the messages', default: false, phrase: (v) => (v ? 'prefix each message text with its step number' : 'do not number messages') },
     { kind: 'switch', key: 'returns', label: 'Show return messages', default: true, phrase: (v) => (v ? 'include return/response messages (set dashed:true on them)' : 'show only forward call messages') },
+  ],
+  diagram: [
+    { kind: 'number', key: 'items', label: 'Max items / steps', min: 3, max: 8, default: 6, phrase: (v) => `keep the Diagram to at most ${v} items/steps` },
+    { kind: 'switch', key: 'details', label: 'One-line detail per item', default: true, phrase: (v) => (v ? "give each Diagram item a one-sentence 'detail'" : "keep Diagram items label-only (no 'detail')") },
   ],
   report: [
     { kind: 'select', key: 'length', label: 'Length', default: 'standard', choices: [{ value: 'brief', label: 'Brief' }, { value: 'standard', label: 'Standard' }, { value: 'detailed', label: 'Detailed' }], phrase: (v) => `keep the report ${v} in length` },

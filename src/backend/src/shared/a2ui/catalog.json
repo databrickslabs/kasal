@@ -69,11 +69,14 @@
       }
     },
     "Card": {
-      "summary": "A titled container that groups child components.",
+      "summary": "A titled container that groups child components. Optionally set 'icon' to a supported icon name (see the icon list in the rules).",
       "props": {
         "title": {
           "type": "string",
           "binding": true
+        },
+        "icon": {
+          "type": "string"
         },
         "children": {
           "type": "componentIds"
@@ -81,7 +84,7 @@
       }
     },
     "KeyValue": {
-      "summary": "A single label/value pair; good for KPIs and metrics.",
+      "summary": "A single label/value pair; good for KPIs and metrics. Optionally set 'icon' to a supported icon name (see the icon list in the rules) for a pictographic accent.",
       "props": {
         "label": {
           "type": "string",
@@ -90,6 +93,9 @@
         "value": {
           "type": "string",
           "binding": true
+        },
+        "icon": {
+          "type": "string"
         }
       }
     },
@@ -155,14 +161,17 @@
       }
     },
     "Chart": {
-      "summary": "A chart. data is a list of row objects; xKey names the category field; yKeys names the numeric series field(s).",
+      "summary": "A chart. data is a list of row objects; xKey names the category field; yKeys names the numeric series field(s). chartType: 'bar' (comparisons), 'line' (trends over time), 'pie' (parts of a whole), 'area' (cumulative/volume trends), 'scatter' (correlation between two numeric fields), 'radar' (multi-dimension profile comparison).",
       "props": {
         "chartType": {
           "type": "enum",
           "values": [
             "bar",
             "line",
-            "pie"
+            "pie",
+            "area",
+            "scatter",
+            "radar"
           ]
         },
         "data": {
@@ -189,7 +198,7 @@
       }
     },
     "Slide": {
-      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic.",
+      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), 'two-column' (bullets on the left, a visual — Chart/Diagram/Table/Image — on the right; children are the text nodes THEN the visual node), 'visual' (a slide whose body is ONE dominant Chart/Diagram/Table with an optional caption Text), 'agenda' (numbered overview rows; children are short Text nodes), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic.",
       "props": {
         "variant": {
           "type": "string",
@@ -198,6 +207,9 @@
             "stats",
             "quote",
             "content",
+            "two-column",
+            "visual",
+            "agenda",
             "section"
           ]
         },
@@ -343,6 +355,39 @@
           "type": "array",
           "binding": true,
           "shape": "[{ from, to, text, dashed }]"
+        }
+      }
+    },
+    "Diagram": {
+      "summary": "A business diagram built from a curated visual ARCHETYPE — the layout is automatic and professionally styled, you supply ONLY the labels. archetype: 'process' (3-6 sequential steps/stages), 'timeline' (dated milestones in order), 'cycle' (a repeating loop of 3-6 phases), 'funnel' (narrowing stages, e.g. conversion), 'pyramid' (layered levels, apex first), 'comparison' (EXACTLY 2 items compared side-by-side, each with 'points'), 'matrix2x2' (EXACTLY 4 items in reading order top-left/top-right/bottom-left/bottom-right, with optional xLabel/yLabel axis names), 'hierarchy' (org/tree structure: items[0] is the root with nested 'children'). Each item is {label, detail?, value?, points?, children?} — label SHORT (2-5 words), detail ONE short sentence. Use whenever the content describes steps, phases, structure or a comparison — NOT for numeric series (use Chart) or entity networks (use Graph).",
+      "props": {
+        "archetype": {
+          "type": "enum",
+          "values": [
+            "process",
+            "timeline",
+            "cycle",
+            "funnel",
+            "pyramid",
+            "comparison",
+            "matrix2x2",
+            "hierarchy"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "items": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ label, detail, value, points: [string], children: [item...] }]"
+        },
+        "xLabel": {
+          "type": "string"
+        },
+        "yLabel": {
+          "type": "string"
         }
       }
     },

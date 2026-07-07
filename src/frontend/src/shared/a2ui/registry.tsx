@@ -3,7 +3,7 @@ import type { NodeProps } from './types'
 import {
   Markdown, Text, Heading, Image, Card, KeyValue, List, Table, Divider,
   Row, Column, Grid, Chart, SlideDeck, Slide, Mindmap, Quiz, Flashcards, GeoMap,
-  Forecast, Graph, Sequence, Album, Unsupported,
+  Forecast, Graph, Sequence, Album, Diagram, Unsupported,
 } from './components'
 
 // The extensibility seam: component name -> React renderer. To add a new A2UI
@@ -16,7 +16,7 @@ export const registry: Record<string, FC<NodeProps>> = {
   // 'GeoMap' is the renderer; the catalog/composer name is 'Map'.
   Map: GeoMap,
   // Data-viz + diagram components (usable inside dashboard/document surfaces).
-  Forecast, Graph, Sequence, Album,
+  Forecast, Graph, Sequence, Album, Diagram,
 }
 
 export { Unsupported }

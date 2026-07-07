@@ -171,6 +171,7 @@ def test_has_data_component_detects_data_bearing_nodes():
         "Sequence",
         "Album",
         "Map",
+        "Diagram",
     ):
         surface = {"components": [{"id": "a", "component": comp}]}
         assert R._has_data_component(surface), comp

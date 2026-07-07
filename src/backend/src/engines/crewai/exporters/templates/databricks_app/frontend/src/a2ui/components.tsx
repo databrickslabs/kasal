@@ -5,15 +5,23 @@ import remarkGfm from 'remark-gfm'
 import {
   ResponsiveContainer,
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, ComposedChart, Area,
+  AreaChart, ScatterChart, Scatter, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import type { ComponentNode, NodeProps } from './types'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Lightbulb, Presentation, RotateCcw, RotateCw, Shuffle, Trophy, X } from 'lucide-react'
+import {
+  AlertTriangle, Award, BarChart3, Brain, Briefcase, Building2, Calendar, CheckCircle2, Clock, Cloud,
+  Cpu, Database, DollarSign, Gauge, Globe, Layers, Link2, Lock, Package, Rocket,
+  Search, Server, Settings, Shield, Star, Target, TrendingDown, TrendingUp, Users, Wrench, Zap,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Separator } from './ui/separator'
 import { Button } from './ui/button'
 import { downloadCsv, downloadPptx } from './lib/download'
 import { DeckThemeContext, deckProseVars, seriesFromAccent, readableTextOn } from './lib/deckThemes'
+import type { DeckTheme } from './lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from './lib/surfaceContext'
 import { mdComponents, linkifyCitations } from './lib/markdown'
 import { cn } from './lib/utils'
@@ -40,6 +48,47 @@ const asStr = (v: unknown): string => {
   return String(v)
 }
 const asArr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
+
+// Curated icon allowlist the composer may reference by name (KeyValue/Card
+// `icon` prop). Friendly, stable names → lucide components; unknown names render
+// nothing (never a broken glyph). Keep in sync with the icon list advertised in
+// the composer prompt (compose.py) — the model only knows the names listed there.
+const ICON_MAP: Record<string, LucideIcon> = {
+  'trending-up': TrendingUp,
+  'trending-down': TrendingDown,
+  users: Users,
+  dollar: DollarSign,
+  clock: Clock,
+  check: CheckCircle2,
+  alert: AlertTriangle,
+  target: Target,
+  zap: Zap,
+  globe: Globe,
+  database: Database,
+  server: Server,
+  shield: Shield,
+  rocket: Rocket,
+  lightbulb: Lightbulb,
+  chart: BarChart3,
+  calendar: Calendar,
+  settings: Settings,
+  search: Search,
+  link: Link2,
+  cloud: Cloud,
+  cpu: Cpu,
+  layers: Layers,
+  gauge: Gauge,
+  award: Award,
+  briefcase: Briefcase,
+  building: Building2,
+  star: Star,
+  package: Package,
+  wrench: Wrench,
+  brain: Brain,
+  lock: Lock,
+}
+export const iconByName = (name: unknown): LucideIcon | null =>
+  ICON_MAP[asStr(name).toLowerCase().trim()] ?? null
 
 export function Markdown({ node, resolve }: NodeProps) {
   // Inside a slide deck, drive the `prose` text colors from the deck theme so
@@ -104,11 +153,16 @@ export function Image({ node, resolve }: NodeProps) {
 }
 
 export function Card_({ node, render }: NodeProps) {
+  const theme = useContext(DeckThemeContext)
+  const Icon = iconByName(node.icon)
   return (
     <Card className="bg-secondary/40">
       {node.title != null && (
         <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-base">{asStr(node.title)}</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base">
+            {Icon && <Icon className="size-4 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}
+            {asStr(node.title)}
+          </CardTitle>
         </CardHeader>
       )}
       <CardContent className={cn('p-4', node.title != null && 'pt-0')}>
@@ -121,12 +175,14 @@ export function Card_({ node, render }: NodeProps) {
 export function KeyValue({ node, resolve }: NodeProps) {
   const { inDeck } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
+  const Icon = iconByName(node.icon)
   if (inDeck) {
     // Big-number stat tile, themed to the active deck. `h-full` + flex column so a
     // row of tiles is always equal height (a longer label wrapping to two lines no
     // longer makes its tile taller than its neighbours).
     return (
       <div className="flex h-full flex-col rounded-xl border p-5" style={{ background: theme.panel, borderColor: theme.panelBorder }}>
+        {Icon && <Icon className="mb-3 size-7 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}
         <div className="text-[2.2rem] font-extrabold leading-none" style={{ color: theme.accent }}>
           {asStr(resolve(node.value))}
         </div>
@@ -139,6 +195,7 @@ export function KeyValue({ node, resolve }: NodeProps) {
   }
   return (
     <div className="flex h-full flex-col rounded-xl border bg-secondary/40 p-4">
+      {Icon && <Icon className="mb-2 size-5 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}
       <div className="text-2xl font-bold">{asStr(resolve(node.value))}</div>
       <div className="mt-1 text-sm font-medium text-foreground/80">{asStr(resolve(node.label))}</div>
     </div>
@@ -435,6 +492,46 @@ export function Chart({ node, resolve }: NodeProps) {
             <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
             {keys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={series[i % series.length]} />)}
           </LineChart>
+        ) : type === 'area' ? (
+          <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
+            {keys.map((k, i) => (
+              <Area key={k} type="monotone" dataKey={k} stroke={series[i % series.length]} fill={series[i % series.length]} fillOpacity={0.25} />
+            ))}
+          </AreaChart>
+        ) : type === 'scatter' ? (
+          // Each series becomes {x, y} pairs so multiple yKeys plot as separate
+          // clouds; a numeric x column gets a true numeric axis (correlations),
+          // a categorical one falls back to a category axis.
+          <ScatterChart margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <XAxis
+              dataKey="x"
+              name={xKey}
+              type={data.every((r) => asNum((r as Record<string, unknown>)?.[xKey]) != null) ? 'number' : 'category'}
+            />
+            <YAxis dataKey="y" type="number" />
+            <Tooltip cursor={{ strokeDasharray: '3 3' }} /><Legend />
+            {keys.map((k, i) => (
+              <Scatter
+                key={k}
+                name={k}
+                data={data.map((r) => ({ x: (r as Record<string, unknown>)?.[xKey], y: asNum((r as Record<string, unknown>)?.[k]) }))}
+                fill={series[i % series.length]}
+              />
+            ))}
+          </ScatterChart>
+        ) : type === 'radar' ? (
+          <RadarChart data={data} cx="50%" cy="50%" outerRadius="70%">
+            <PolarGrid stroke="var(--color-border)" />
+            <PolarAngleAxis dataKey={xKey} />
+            <PolarRadiusAxis />
+            <Tooltip /><Legend />
+            {keys.map((k, i) => (
+              <Radar key={k} name={k} dataKey={k} stroke={series[i % series.length]} fill={series[i % series.length]} fillOpacity={0.25} />
+            ))}
+          </RadarChart>
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
@@ -872,6 +969,305 @@ export function Sequence({ node, resolve }: NodeProps) {
   )
 }
 
+// ---- Diagram (archetype-based business diagrams) ---------------------------
+// Napkin-style: the composer CLASSIFIES the content into a curated visual
+// archetype (process / timeline / cycle / funnel / pyramid / comparison /
+// matrix2x2 / hierarchy) and supplies ONLY labels — the layout is deterministic,
+// themed and dependency-free (HTML/CSS + inline SVG), so a weak model can never
+// produce a broken drawing. Mirrored by a native-shape branch in the PPTX export.
+export interface DiagramItem {
+  label: string
+  detail?: string
+  value?: string
+  points: string[]
+  children: DiagramItem[]
+}
+
+export function normDiagramItems(v: unknown): DiagramItem[] {
+  return asArr(v)
+    .map((it): DiagramItem => {
+      if (it && typeof it === 'object') {
+        const o = it as Record<string, any>
+        return {
+          label: asStr(o.label ?? o.title ?? o.name ?? o.step ?? o.text),
+          detail: asStr(o.detail ?? o.description ?? o.subtitle ?? o.date) || undefined,
+          value: asStr(o.value) || undefined,
+          points: asArr(o.points ?? o.bullets ?? o.items).map(asStr).filter(Boolean),
+          children: normDiagramItems(o.children),
+        }
+      }
+      return { label: asStr(it), points: [], children: [] }
+    })
+    .filter((it) => it.label)
+}
+
+// Model synonyms → the eight canonical archetypes (never render Unsupported for
+// a near-miss like 'flow' or 'orgchart').
+const ARCHETYPE_ALIASES: Record<string, string> = {
+  process: 'process', flow: 'process', flowchart: 'process', steps: 'process', roadmap: 'timeline',
+  timeline: 'timeline', milestones: 'timeline',
+  cycle: 'cycle', loop: 'cycle',
+  funnel: 'funnel', pipeline: 'funnel',
+  pyramid: 'pyramid',
+  comparison: 'comparison', versus: 'comparison', vs: 'comparison',
+  matrix2x2: 'matrix2x2', matrix: 'matrix2x2', quadrant: 'matrix2x2',
+  hierarchy: 'hierarchy', org: 'hierarchy', orgchart: 'hierarchy', tree: 'hierarchy',
+}
+
+function DiagramProcess({ items, colors }: { items: DiagramItem[]; colors: string[] }) {
+  const notch = 16
+  return (
+    <div className="flex w-full items-stretch gap-1.5" role="list">
+      {items.map((it, i) => {
+        const c = colors[i % colors.length]
+        const clip = i === 0
+          ? `polygon(0 0, calc(100% - ${notch}px) 0, 100% 50%, calc(100% - ${notch}px) 100%, 0 100%)`
+          : `polygon(0 0, calc(100% - ${notch}px) 0, 100% 50%, calc(100% - ${notch}px) 100%, 0 100%, ${notch}px 50%)`
+        return (
+          <div key={i} role="listitem" className="min-w-0 flex-1">
+            <div
+              className="flex h-full flex-col items-center justify-center px-5 py-3 text-center"
+              style={{ background: c, color: readableTextOn(c), clipPath: clip }}
+            >
+              <div className="text-[0.65rem] font-bold uppercase tracking-wider opacity-80">Step {i + 1}</div>
+              <div className="text-sm font-semibold leading-snug">{it.label}</div>
+              {it.detail && <div className="mt-1 text-xs leading-snug opacity-85">{it.detail}</div>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DiagramTimeline({ items, theme, colors }: { items: DiagramItem[]; theme: DeckTheme; colors: string[] }) {
+  const n = items.length
+  return (
+    <div className="grid w-full" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} role="list">
+      {items.map((it, i) => (
+        <div key={i} role="listitem" className="flex min-w-0 flex-col items-center px-1 text-center">
+          <div className="relative flex w-full items-center justify-center py-2">
+            {/* Rail segment — trimmed to start/end at the first/last dot. */}
+            <div
+              className="absolute top-1/2 h-0.5 -translate-y-1/2"
+              style={{ background: theme.panelBorder, left: i === 0 ? '50%' : 0, right: i === n - 1 ? '50%' : 0 }}
+            />
+            <div className="relative z-[1] size-3.5 rounded-full border-2" style={{ background: colors[i % colors.length], borderColor: theme.bg }} />
+          </div>
+          <div className="text-sm font-semibold leading-snug" style={{ color: theme.fg }}>{it.label}</div>
+          {it.detail && <div className="mt-0.5 text-xs leading-snug" style={{ color: theme.muted }}>{it.detail}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DiagramCycle({ items, theme, colors }: { items: DiagramItem[]; theme: DeckTheme; colors: string[] }) {
+  // Numbered pills on a circle around a central loop glyph; the numbering (plus
+  // the glyph) carries the direction, so no distortion-prone SVG arc arrows.
+  const n = items.length
+  return (
+    <div className="relative mx-auto w-full max-w-xl" style={{ height: 300 }}>
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <RotateCw className="size-10" style={{ color: theme.muted, opacity: 0.5 }} aria-hidden="true" />
+      </div>
+      {items.map((it, i) => {
+        const a = (2 * Math.PI * i) / n - Math.PI / 2
+        const c = colors[i % colors.length]
+        return (
+          <div
+            key={i}
+            className="absolute flex max-w-[180px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border px-3 py-1.5"
+            style={{
+              left: `${50 + 40 * Math.cos(a)}%`,
+              top: `${50 + 40 * Math.sin(a)}%`,
+              background: theme.bg,
+              backgroundImage: `linear-gradient(0deg, ${theme.panel}, ${theme.panel})`,
+              borderColor: c,
+              color: theme.fg,
+            }}
+            title={it.detail}
+          >
+            <span
+              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-bold"
+              style={{ background: c, color: readableTextOn(c) }}
+            >
+              {i + 1}
+            </span>
+            <span className="truncate text-sm font-semibold">{it.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DiagramFunnel({ items, colors, invert = false }: { items: DiagramItem[]; colors: string[]; invert?: boolean }) {
+  // invert=false → funnel (wide → narrow); invert=true → pyramid (apex → base).
+  const n = Math.max(items.length - 1, 1)
+  return (
+    <div className="flex w-full flex-col items-center gap-1.5" role="list">
+      {items.map((it, i) => {
+        const pct = invert ? 42 + (i * 58) / n : 100 - (i * 55) / n
+        const c = colors[i % colors.length]
+        return (
+          <div
+            key={i}
+            role="listitem"
+            className="flex items-center justify-between gap-3 rounded-md px-5 py-2.5"
+            style={{ width: `${pct}%`, background: c, color: readableTextOn(c) }}
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold leading-snug">{it.label}</span>
+              {it.detail && <span className="block text-xs leading-snug opacity-85">{it.detail}</span>}
+            </span>
+            {it.value && <span className="shrink-0 text-sm font-bold">{it.value}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DiagramComparison({ items, theme, colors }: { items: DiagramItem[]; theme: DeckTheme; colors: string[] }) {
+  const cols = items.slice(0, 3)
+  return (
+    <div className="relative grid w-full gap-6" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
+      {cols.map((it, i) => {
+        const c = colors[i % colors.length]
+        return (
+          <div key={i} className="overflow-hidden rounded-xl border" style={{ borderColor: theme.panelBorder, background: theme.panel }}>
+            <div className="px-4 py-2.5" style={{ background: c, color: readableTextOn(c) }}>
+              <div className="text-sm font-bold leading-snug">{it.label}</div>
+              {it.detail && <div className="text-xs leading-snug opacity-85">{it.detail}</div>}
+            </div>
+            <ul className="space-y-1.5 p-4 text-sm" style={{ color: theme.fg }}>
+              {it.points.map((p, pi) => (
+                <li key={pi} className="flex gap-2 leading-snug">
+                  <span aria-hidden="true" className="mt-[7px] size-1.5 shrink-0 rounded-full" style={{ background: c }} />
+                  {p}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+      {cols.length === 2 && (
+        <div
+          className="absolute left-1/2 top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-extrabold uppercase"
+          style={{ background: theme.bg, borderColor: theme.panelBorder, color: theme.muted }}
+          aria-hidden="true"
+        >
+          vs
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DiagramMatrix({ items, theme, colors, xLabel, yLabel }: { items: DiagramItem[]; theme: DeckTheme; colors: string[]; xLabel?: string; yLabel?: string }) {
+  const quads = items.slice(0, 4)
+  return (
+    <div className="flex w-full items-stretch gap-2">
+      {yLabel && (
+        <div className="flex shrink-0 items-center">
+          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: theme.muted, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+            {yLabel} →
+          </span>
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="grid grid-cols-2 gap-2">
+          {quads.map((it, i) => {
+            const c = colors[i % colors.length]
+            return (
+              <div key={i} className="rounded-lg border p-4" style={{ borderColor: theme.panelBorder, borderTop: `3px solid ${c}`, background: theme.panel }}>
+                <div className="text-sm font-bold leading-snug" style={{ color: theme.fg }}>{it.label}</div>
+                {it.detail && <div className="mt-1 text-xs leading-snug" style={{ color: theme.muted }}>{it.detail}</div>}
+              </div>
+            )
+          })}
+        </div>
+        {xLabel && (
+          <div className="mt-2 text-center text-xs font-semibold uppercase tracking-wider" style={{ color: theme.muted }}>
+            {xLabel} →
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DiagramHierarchy({ items, theme, colors }: { items: DiagramItem[]; theme: DeckTheme; colors: string[] }) {
+  // items[0] is the root; tolerate a flat list by treating the rest as children.
+  const root = items[0]
+  const children = root.children.length ? root.children : items.slice(1)
+  return (
+    <div className="flex w-full flex-col items-center">
+      <div className="max-w-xs rounded-lg px-5 py-2.5 text-center" style={{ background: theme.accent, color: readableTextOn(theme.accent) }}>
+        <div className="text-sm font-bold leading-snug">{root.label}</div>
+        {root.detail && <div className="text-xs leading-snug opacity-85">{root.detail}</div>}
+      </div>
+      {children.length > 0 && (
+        <>
+          <div className="h-4 w-px" style={{ background: theme.panelBorder }} aria-hidden="true" />
+          <div className="h-px w-4/5" style={{ background: theme.panelBorder }} aria-hidden="true" />
+          <div className="grid w-full gap-3 pt-0" style={{ gridTemplateColumns: `repeat(${Math.min(children.length, 4)}, minmax(0, 1fr))` }}>
+            {children.map((ch, i) => {
+              const c = colors[i % colors.length]
+              return (
+                <div key={i} className="flex min-w-0 flex-col items-center">
+                  <div className="h-3 w-px" style={{ background: theme.panelBorder }} aria-hidden="true" />
+                  <div className="w-full rounded-lg border p-3 text-center" style={{ borderColor: theme.panelBorder, borderTop: `3px solid ${c}`, background: theme.panel }}>
+                    <div className="text-sm font-semibold leading-snug" style={{ color: theme.fg }}>{ch.label}</div>
+                    {ch.detail && <div className="mt-0.5 text-xs leading-snug" style={{ color: theme.muted }}>{ch.detail}</div>}
+                    {ch.children.length > 0 && (
+                      <ul className="mt-2 space-y-1 text-left text-xs" style={{ color: theme.muted }}>
+                        {ch.children.map((g, gi) => (
+                          <li key={gi} className="flex gap-1.5 leading-snug">
+                            <span aria-hidden="true" className="mt-[5px] size-1 shrink-0 rounded-full" style={{ background: c }} />
+                            {g.label}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function Diagram({ node, resolve }: NodeProps) {
+  const theme = useContext(DeckThemeContext)
+  const raw = asStr(node.archetype).toLowerCase().replace(/[\s_-]/g, '')
+  const archetype = ARCHETYPE_ALIASES[raw] || 'process'
+  const items = useMemo(() => normDiagramItems(resolve(node.items)), [resolve, node.items])
+  if (!items.length) return null
+  const colors = seriesFromAccent(theme.accent, Math.max(items.length, 2))
+  const xLabel = asStr(node.xLabel) || undefined
+  const yLabel = asStr(node.yLabel) || undefined
+  const body =
+    archetype === 'timeline' ? <DiagramTimeline items={items} theme={theme} colors={colors} />
+    : archetype === 'cycle' ? <DiagramCycle items={items} theme={theme} colors={colors} />
+    : archetype === 'funnel' ? <DiagramFunnel items={items} colors={colors} />
+    : archetype === 'pyramid' ? <DiagramFunnel items={items} colors={colors} invert />
+    : archetype === 'comparison' ? <DiagramComparison items={items} theme={theme} colors={colors} />
+    : archetype === 'matrix2x2' ? <DiagramMatrix items={items} theme={theme} colors={colors} xLabel={xLabel} yLabel={yLabel} />
+    : archetype === 'hierarchy' ? <DiagramHierarchy items={items} theme={theme} colors={colors} />
+    : <DiagramProcess items={items} colors={colors} />
+  return (
+    <div className="flex w-full min-w-0 flex-col" aria-label={asStr(node.title) || `${archetype} diagram`}>
+      {node.title != null && <div className="mb-3 font-semibold">{asStr(node.title)}</div>}
+      {body}
+    </div>
+  )
+}
+
 // ---- Album (image carousel) ----------------------------------------------
 // A one-image-at-a-time carousel with prev/next. items is a list of image URLs
 // or {src|url, caption?, href?}. The caption links to `href` (or the source URL)
@@ -967,11 +1363,19 @@ function nodeHasContent(
   return true // a leaf visual component (KeyValue, image, chart, …) is content
 }
 
+// Components that read as a "visual" inside a slide — used by the two-column
+// layout to decide which children sit in the media column.
+const SLIDE_VISUAL_COMPONENTS = new Set([
+  'Chart', 'Diagram', 'Table', 'Graph', 'Sequence', 'Forecast', 'Image', 'Album', 'Map',
+])
+
 export function Slide({ node, render }: NodeProps) {
   const { idx, total } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
   const surface = useContext(SurfaceContext)
-  const variant = (asStr(node.variant) || 'content').toLowerCase()
+  // Normalize variant spellings ('two_column' / 'twocolumn' → 'two-column').
+  const rawVariant = (asStr(node.variant) || 'content').toLowerCase().replace(/[_\s]/g, '-')
+  const variant = rawVariant === 'twocolumn' ? 'two-column' : rawVariant
   const kicker = asStr(node.kicker)
   const subtitle = asStr(node.subtitle)
   const children = node.children || []
@@ -995,11 +1399,13 @@ export function Slide({ node, render }: NodeProps) {
     </div>
   ) : null
 
-  // A 'content' slide that ended up with a title but NO body would render as a
-  // title stranded over a big empty void — a broken-looking near-empty slide.
-  // Redirect it to the centered SECTION layout so the lone title reads as a
-  // deliberate divider regardless of what the generator emitted.
-  const titleOnlyContent = variant === 'content' && !slideHasBody && node.title != null
+  // A body-bearing slide (content / two-column / visual / agenda) that ended up
+  // with a title but NO body would render as a title stranded over a big empty
+  // void — a broken-looking near-empty slide. Redirect it to the centered SECTION
+  // layout so the lone title reads as a deliberate divider regardless of what the
+  // generator emitted.
+  const bodyVariant = variant === 'content' || variant === 'two-column' || variant === 'visual' || variant === 'agenda'
+  const titleOnlyContent = bodyVariant && !slideHasBody && node.title != null
   if (variant === 'title' || variant === 'section' || titleOnlyContent) {
     return (
       <div
@@ -1050,6 +1456,82 @@ export function Slide({ node, render }: NodeProps) {
         )}
         {subtitle && <p className="mt-6 text-pretty text-lg font-medium" style={{ color: theme.kicker }}>— {subtitle}</p>}
         {children.length > 0 && <div className="mt-6 max-w-3xl text-pretty text-base" style={{ color: theme.muted }}>{body}</div>}
+      </div>
+    )
+  }
+
+  // Shared top-left header band (kicker → accent rule → title → subtitle) for the
+  // two-column / visual / agenda layouts, mirroring the content layout's header.
+  const header = (
+    <>
+      {num}
+      {eyebrow}
+      <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
+      {node.title != null && (
+        <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+          {asStr(node.title)}
+        </h2>
+      )}
+      {subtitle && (
+        <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+      )}
+    </>
+  )
+
+  if (variant === 'two-column') {
+    // Text children in the left column, visual children (Chart/Diagram/Table/…)
+    // in the right; when the model didn't mark a visual, fall back to an even split.
+    const byId: Record<string, ComponentNode> = Object.fromEntries((surface?.components || []).map((c) => [c.id, c]))
+    const visualIds = children.filter((id) => byId[id] && SLIDE_VISUAL_COMPONENTS.has(byId[id].component))
+    const textIds = children.filter((id) => !visualIds.includes(id))
+    const mid = Math.ceil(children.length / 2)
+    const left = visualIds.length && textIds.length ? textIds : children.slice(0, mid)
+    const right = visualIds.length && textIds.length ? visualIds : children.slice(mid)
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+        {header}
+        <div className="mt-6 grid min-h-0 flex-1 grid-cols-2 items-center gap-10">
+          <div className="flex min-w-0 flex-col justify-center space-y-4 text-pretty text-[1.35rem] leading-relaxed [&_ul]:space-y-3 [&_ol]:space-y-3">
+            {left.map((id) => render(id))}
+          </div>
+          <div className="flex min-w-0 flex-col justify-center gap-4">
+            {right.map((id) => render(id))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'visual') {
+    // One dominant visual (Chart/Diagram/Table) with an optional caption — the
+    // body fills the stage below the title instead of using content text sizes.
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+        {header}
+        <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-4 text-base">{body}</div>
+      </div>
+    )
+  }
+
+  if (variant === 'agenda') {
+    // Numbered overview rows — each child (a short Text) gets an accent number
+    // badge, the staple "agenda / what we'll cover" layout.
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+        {header}
+        <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-5">
+          {children.map((id, i) => (
+            <div key={id} className="flex items-center gap-5">
+              <span
+                className="flex size-10 shrink-0 items-center justify-center rounded-full text-lg font-extrabold"
+                style={{ background: theme.panel, border: `1px solid ${theme.panelBorder}`, color: theme.accent }}
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1 text-pretty text-[1.45rem] leading-snug">{render(id)}</div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }

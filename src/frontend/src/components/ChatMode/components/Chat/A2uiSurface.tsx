@@ -40,6 +40,7 @@ const ROOT_COMPONENT_TO_DELIVERABLE: Record<string, string> = {
   Graph: 'graph',
   Sequence: 'sequence',
   Album: 'album',
+  Diagram: 'diagram',
 };
 
 /**
