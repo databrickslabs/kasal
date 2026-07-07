@@ -181,12 +181,41 @@ if [ -d "src/backend/tests" ]; then
     echo "  ✓ Removed src/backend/tests"
 fi
 
-# Frontend test files - be specific about extensions
-FRONTEND_TEST_COUNT=$(find src/frontend -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" 2>/dev/null | wc -l || echo "0")
+# Frontend test files - be specific about extensions.
+# NOTE: the -name alternatives MUST be parenthesized; without \( \) the
+# -delete only binds to the last -o branch and most test files ship anyway.
+FRONTEND_TEST_COUNT=$(find src/frontend \( -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" \) -type f 2>/dev/null | wc -l || echo "0")
 if [ "$FRONTEND_TEST_COUNT" -gt 0 ]; then
-    find src/frontend -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" -type f -delete 2>/dev/null || true
+    find src/frontend \( -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.test.js" -o -name "*.test.jsx" \) -type f -delete 2>/dev/null || true
     echo "  ✓ Removed $FRONTEND_TEST_COUNT frontend test files"
 fi
+
+# Alembic migrations: the deployed app never runs them (schema comes from
+# create_all + the _ensure_* self-heals in init_db; the only alembic
+# references in app code are SQL filters skipping alembic_% tables).
+rm -rf src/backend/migrations
+echo "  ✓ Removed src/backend/migrations (app builds schema via create_all)"
+
+# Repo-browsing docs content never served by the in-app viewer (the viewer's
+# docSections lists only top-level src/docs/*.md; subdirs are repo-only).
+for d in Blueprints archive examples powerbi images; do
+    if [ -d "src/docs/$d" ]; then
+        rm -rf "src/docs/$d"
+        echo "  ✓ Removed src/docs/$d (repo-only docs)"
+    fi
+done
+
+# Docs dedup (verified against src/package.json): its prebuild/postbuild
+# copy src/docs/*.md into frontend/public/docs and frontend_static/docs on
+# every build, so public/docs/*.md are regenerated duplicates — and the
+# examples/powerbi subdirs there are stale copies of the repo-only docs
+# removed above. Keep public/docs/images (NOT regenerated; vite ships it
+# via public/ and the doc pages reference it). The repo-root docs/ dir is
+# outside the app root (src/) and never served.
+rm -f src/frontend/public/docs/*.md
+rm -rf src/frontend/public/docs/examples src/frontend/public/docs/powerbi
+rm -rf docs
+echo "  ✓ Removed duplicated/stale public/docs markdown + repo-only top-level docs/"
 
 # Test configuration files - be careful with conftest.py as it might be needed
 find . -name "jest.config.*" -o -name ".coverage" -o -name "pytest.ini" -type f -delete 2>/dev/null || true
