@@ -430,3 +430,118 @@ def test_match_by_agent_identity_and_role():
 def test_no_match_when_nothing_identifies_the_run():
     """No source, no agent_id, no agent, no role → not ours (gets dropped+logged)."""
     assert _match(_evt(), source=None, agent_llm=MagicMock()) is False
+
+
+# ---------------------------------------------------------------------------
+# _RunTraceWriter — per-run batched trace persistence (perf W1.3)
+# ---------------------------------------------------------------------------
+from src.engines.crewai.paths.light_agent.light_agent_service import _RunTraceWriter
+
+
+def _fake_isolated_session(opens: list):
+    """Mimic get_isolated_db_session(): an async context manager that records
+    each open and yields a fresh AsyncMock session."""
+
+    class _Ctx:
+        def __init__(self):
+            self.session = AsyncMock(name=f"isolated-session-{len(opens)}")
+
+        async def __aenter__(self):
+            opens.append(self.session)
+            return self.session
+
+        async def __aexit__(self, *a):
+            return False
+
+    return _Ctx
+
+
+def _capture_trace_service(captured: list, fail_first: bool = False):
+    """Fake ExecutionTraceService class capturing (session, verify_flag, data)."""
+    calls = {"n": 0}
+
+    class _FakeService:
+        def __init__(self, session):
+            self._session = session
+
+        async def create_trace(self, trace_data, verify_execution_exists=True):
+            calls["n"] += 1
+            if fail_first and calls["n"] == 1:
+                raise RuntimeError("db hiccup")
+            captured.append((self._session, verify_execution_exists, dict(trace_data)))
+            return SimpleNamespace(run_id=42)
+
+    return _FakeService
+
+
+@pytest.mark.asyncio
+async def test_trace_writer_reuses_one_session_for_the_whole_run():
+    """Regression: a fresh isolated connection used to be opened for EVERY
+    tool/LLM event (~10-20 TCP+TLS+auth handshakes per chat answer on
+    Lakebase). All of a run's persists must share ONE session."""
+    opens: list = []
+    captured: list = []
+
+    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
+         patch("src.services.execution_trace_service.ExecutionTraceService",
+               _capture_trace_service(captured)):
+        writer = _RunTraceWriter()
+        await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
+        await writer.persist({"job_id": "j1", "event_type": "llm_call"})
+        await writer.persist({"job_id": "j1", "event_type": "response_run"})
+        await writer.close()
+
+    assert len(opens) == 1                      # one connection for the run
+    assert len({s for (s, _, _) in captured}) == 1  # all writes on that session
+    assert opens[0].commit.await_count == 3     # each event still committed
+
+
+@pytest.mark.asyncio
+async def test_trace_writer_verifies_parent_once_and_carries_run_id():
+    """The ExecutionHistory existence SELECT runs only for the first event;
+    later events skip it and inherit the resolved run_id."""
+    opens: list = []
+    captured: list = []
+
+    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
+         patch("src.services.execution_trace_service.ExecutionTraceService",
+               _capture_trace_service(captured)):
+        writer = _RunTraceWriter()
+        await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
+        await writer.persist({"job_id": "j1", "event_type": "llm_call"})
+        await writer.close()
+
+    verify_flags = [v for (_, v, _) in captured]
+    assert verify_flags == [True, False]
+    assert captured[1][2].get("run_id") == 42  # carried from the first write
+
+
+@pytest.mark.asyncio
+async def test_trace_writer_drops_poisoned_session_and_reopens():
+    """A failed write rolls back, drops the session, and the next persist
+    reopens a fresh connection and re-verifies the parent row."""
+    opens: list = []
+    captured: list = []
+
+    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
+         patch("src.services.execution_trace_service.ExecutionTraceService",
+               _capture_trace_service(captured, fail_first=True)):
+        writer = _RunTraceWriter()
+        # Must not raise — a lost trace never fails the run.
+        await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
+        await writer.persist({"job_id": "j1", "event_type": "llm_call"})
+        await writer.close()
+
+    assert len(opens) == 2                     # poisoned session was replaced
+    opens[0].rollback.assert_awaited()         # first write rolled back
+    assert [v for (_, v, _) in captured] == [True]  # re-verified after reopen
+
+
+@pytest.mark.asyncio
+async def test_trace_writer_close_is_idempotent():
+    opens: list = []
+    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)):
+        writer = _RunTraceWriter()
+        await writer.close()
+        await writer.close()  # no session ever opened; must not raise
+    assert opens == []

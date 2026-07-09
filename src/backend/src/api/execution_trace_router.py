@@ -109,6 +109,7 @@ async def get_traces_by_job_id(
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
+    since_id: int = Query(0, ge=0),
 ):
     """
     Get traces for an execution by job_id.
@@ -119,12 +120,16 @@ async def get_traces_by_job_id(
         group_context: Group context from headers for authorization
         limit: Maximum number of traces to return (1-15000)
         offset: Pagination offset
+        since_id: Incremental cursor — return only traces with id greater than
+            this. Pollers pass their last seen trace id so each 2s poll ships
+            only NEW rows instead of the run's entire trace history.
 
     Returns:
         ExecutionTraceResponseByJobId with traces for the execution
     """
     result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=limit, offset=offset
+        group_context=group_context, job_id=job_id, limit=limit, offset=offset,
+        since_id=since_id
     )
     if not result:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")

@@ -423,7 +423,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -433,7 +433,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -469,7 +469,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -479,7 +479,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         with (
             patch(
@@ -506,7 +506,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def queue_side_effect(block, timeout):
+        def queue_side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -516,7 +516,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = queue_side_effect
+        mock_queue.get_nowait.side_effect = queue_side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -554,7 +554,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = Empty()
+        mock_queue.get_nowait.side_effect = Empty()
 
         with (
             patch(
@@ -579,7 +579,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = Empty()
+        mock_queue.get_nowait.side_effect = Empty()
 
         with (
             patch(
@@ -613,7 +613,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -623,7 +623,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -650,6 +650,35 @@ class TestLogsWriterLoop:
         assert isinstance(create_kwargs["timestamp"], datetime)
 
     @pytest.mark.asyncio
+    async def test_never_blocks_the_event_loop_with_sync_queue_get(self):
+        """Regression: the writer must drain with get_nowait(), never the
+        blocking queue.get(block=True, timeout=...) — that synchronous wait on a
+        threading Queue stalled the whole event loop (~100ms/cycle) for every
+        concurrent request while a run was active."""
+        shutdown = asyncio.Event()
+
+        mock_queue = MagicMock()
+        mock_queue.qsize.return_value = 0
+
+        def side_effect():
+            shutdown.set()
+            raise Empty()
+
+        mock_queue.get_nowait.side_effect = side_effect
+
+        with (
+            patch(
+                "src.services.execution_logs_service.get_job_output_queue",
+                return_value=mock_queue,
+            ),
+            patch(_SLEEP_PATCH, new_callable=AsyncMock),
+        ):
+            await logs_writer_loop(shutdown)
+
+        mock_queue.get.assert_not_called()
+        mock_queue.get_nowait.assert_called()
+
+    @pytest.mark.asyncio
     async def test_batch_processing_error_calls_sleep_one_second(self):
         """When the outer batch try/except catches an error it should sleep 1s."""
         shutdown = asyncio.Event()
@@ -657,7 +686,7 @@ class TestLogsWriterLoop:
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
         # Raise an unexpected error during batch collection
-        mock_queue.get.side_effect = RuntimeError("unexpected batch error")
+        mock_queue.get_nowait.side_effect = RuntimeError("unexpected batch error")
 
         with (
             patch(
@@ -696,7 +725,7 @@ class TestLogsWriterLoop:
         ]
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count <= 3:
@@ -706,7 +735,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 3
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -741,7 +770,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -751,7 +780,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -798,7 +827,7 @@ class TestLogsWriterLoop:
 
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -808,7 +837,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         # Make get_smart_db_session raise before yielding
         async def _broken_session():
@@ -834,7 +863,7 @@ class TestLogsWriterLoop:
         log_data = {"job_id": "job-empty", "content": "", "timestamp": datetime.now()}
         call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -844,7 +873,7 @@ class TestLogsWriterLoop:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
@@ -989,7 +1018,7 @@ class TestStopLogsWriter:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = Empty()
+        mock_queue.get_nowait.side_effect = Empty()
 
         with (
             patch(
@@ -1158,14 +1187,14 @@ class TestEdgeCases:
         shutdown = asyncio.Event()
         empty_call_count = 0
 
-        def side_effect(block, timeout):
+        def side_effect():
             nonlocal empty_call_count
             empty_call_count += 1
             raise Empty()
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = side_effect
+        mock_queue.get_nowait.side_effect = side_effect
 
         with (
             patch(
@@ -1248,7 +1277,7 @@ class TestEdgeCases:
         log_data = {"job_id": "job-sess", "content": "data", "timestamp": datetime.now()}
         call_count = 0
 
-        def queue_side_effect(block, timeout):
+        def queue_side_effect():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1258,7 +1287,7 @@ class TestEdgeCases:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 1
-        mock_queue.get.side_effect = queue_side_effect
+        mock_queue.get_nowait.side_effect = queue_side_effect
 
         async def _broken_smart_session():
             raise RuntimeError("connection refused")
@@ -1287,7 +1316,7 @@ class TestEdgeCases:
 
         mock_queue = MagicMock()
         mock_queue.qsize.return_value = 0
-        mock_queue.get.side_effect = Empty()
+        mock_queue.get_nowait.side_effect = Empty()
 
         call_count = 0
 

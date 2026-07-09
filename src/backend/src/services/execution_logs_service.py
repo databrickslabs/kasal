@@ -222,9 +222,13 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
         empty_count = 0  # Count consecutive empty queue occurrences
 
         while not shutdown_event.is_set():
-            # Create a small batch of logs to process together
+            # Drain a batch of logs WITHOUT ever blocking the event loop. The
+            # previous queue.get(block=True, timeout=0.1) was a synchronous wait
+            # on a threading Queue inside this async task — it stalled every
+            # coroutine in the API process (all requests, all pollers) for up to
+            # 100ms per cycle whenever the writer was alive.
             batch = []
-            batch_target_size = 10  # Process up to this many at once
+            batch_target_size = 100  # Drain up to this many at once
 
             try:
                 # Try to collect a batch of logs
@@ -234,8 +238,9 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                         if _ == 0:
                             logger.debug(f"[logs_writer_loop] Waiting for logs... Queue size: ~{queue.qsize()}")
 
-                        # Non-blocking get with timeout
-                        log_data = queue.get(block=True, timeout=0.1)
+                        # Never block: chatty producers refill the queue between
+                        # cycles, and the empty-queue path sleeps asynchronously.
+                        log_data = queue.get_nowait()
 
                         # Check if this is the shutdown signal (None)
                         if log_data is None:

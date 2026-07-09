@@ -302,6 +302,68 @@ class ExecutionService:
             "group_email": group_email
         }
 
+    @staticmethod
+    def _derive_placeholder_run_name(agents_yaml: Dict[str, Any], tasks_yaml: Dict[str, Any]) -> str:
+        """Instant, deterministic run name used until the LLM rename lands.
+
+        Prefers the first task's name/description, then the first agent role,
+        then a timestamped fallback — no model call, no DB roundtrip.
+        """
+        for cfg in (tasks_yaml or {}).values():
+            if not isinstance(cfg, dict):
+                continue
+            candidate = str(cfg.get("name") or cfg.get("description") or "").strip()
+            if candidate:
+                return " ".join(candidate.split()[:4])
+        for cfg in (agents_yaml or {}).values():
+            if not isinstance(cfg, dict):
+                continue
+            candidate = str(cfg.get("role") or cfg.get("name") or "").strip()
+            if candidate:
+                return " ".join(candidate.split()[:4]) + " Run"
+        return f"Execution-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    @staticmethod
+    async def _generate_run_name_async(
+        execution_id: str,
+        agents_yaml: Dict[str, Any],
+        tasks_yaml: Dict[str, Any],
+        model: str,
+    ) -> None:
+        """Generate the descriptive run name OFF the critical path and apply it.
+
+        The naming completion used to be awaited inline in create_execution,
+        adding a full LLM roundtrip (1-10+s on reasoning models) before every
+        run could start. The run starts under a placeholder instead; this task
+        renames it in the DB and the in-memory registry when the LLM returns.
+        Failures are non-fatal — the placeholder simply remains.
+        """
+        try:
+            name_service = ExecutionNameService.create(None)
+            request = ExecutionNameGenerationRequest(
+                agents_yaml=agents_yaml,
+                tasks_yaml=tasks_yaml,
+                model=model
+            )
+            response = await name_service.generate_execution_name(request)
+            new_name = (response.name or "").strip()
+            if not new_name:
+                return
+
+            from src.services.execution_status_service import ExecutionStatusService
+            await ExecutionStatusService.update_run_name(execution_id, new_name)
+
+            # Keep the in-memory fallback (used when the DB row is missing)
+            # consistent with the renamed record.
+            mem_entry = ExecutionService.executions.get(execution_id)
+            if mem_entry is not None:
+                mem_entry["run_name"] = new_name
+        except Exception as e:
+            crew_logger.warning(
+                f"[ExecutionService] Deferred run-name generation failed for {execution_id} "
+                f"(placeholder name kept): {e}"
+            )
+
     @classmethod
     def clear_in_memory_cache(cls) -> int:
         """Drop the in-memory execution registry. Invoked when the underlying DB
@@ -930,14 +992,13 @@ class ExecutionService:
                     UserContext.set_user_token(group_context.access_token)
                     logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
 
-            request = ExecutionNameGenerationRequest(
-                agents_yaml=agents_yaml,
-                tasks_yaml=tasks_yaml,
-                model=model
-            )
-            response = await self.execution_name_service.generate_execution_name(request)
-            run_name = response.name
-            logger.debug(f"[ExecutionService.create_execution] Generated run_name: {run_name} for execution_id: {execution_id}")
+            # Start with an instant deterministic placeholder name. The LLM
+            # naming call (a full model roundtrip — seconds on reasoning models)
+            # used to be awaited here, delaying time-to-first-answer of EVERY
+            # run; it now happens off the critical path (see the rename task
+            # scheduled after the DB record exists) and simply renames the run.
+            run_name = ExecutionService._derive_placeholder_run_name(agents_yaml, tasks_yaml)
+            logger.debug(f"[ExecutionService.create_execution] Placeholder run_name: {run_name} for execution_id: {execution_id}")
 
             # Add run_name to config inputs for crew consistency
             if not config.inputs:
@@ -1091,6 +1152,16 @@ class ExecutionService:
                 group_email=group_context.group_email if group_context else None,
             )
             logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
+
+            # Fire-and-forget the LLM rename now that the record exists. The
+            # created asyncio task inherits this request's contextvars, so the
+            # group context / OBO token set above still applies inside it.
+            asyncio.create_task(ExecutionService._generate_run_name_async(
+                execution_id=execution_id,
+                agents_yaml=agents_yaml,
+                tasks_yaml=tasks_yaml,
+                model=model,
+            ))
 
             # Start execution in background
             logger.info(f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}...")

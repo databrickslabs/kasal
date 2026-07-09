@@ -1980,6 +1980,22 @@ describe('ChatWorkspace component', () => {
     expect(seen).toContain('job-1');
   });
 
+  it('jobCreated carries the selected workspace groupId (regression: runStatus drops groupless events)', async () => {
+    // Without groupId, runStatus's security gate ignores the event, so the run
+    // never enters activeRuns and the 10s reconciliation can't finalize it if
+    // the poller gets retargeted before the first status flip.
+    localStorage.setItem('selectedGroupId', 'group-ws-1');
+    const details: Array<{ jobId?: string; groupId?: string }> = [];
+    const onCreated = (e: Event) => details.push((e as CustomEvent).detail || {});
+    window.addEventListener('jobCreated', onCreated as EventListener);
+    render(<ChatWorkspace />);
+    await act(async () => { fireEvent.click(screen.getByTestId('cc-exec-crew')); });
+    window.removeEventListener('jobCreated', onCreated as EventListener);
+    localStorage.removeItem('selectedGroupId');
+    const evt = details.find((d) => d.jobId === 'job-1');
+    expect(evt?.groupId).toBe('group-ws-1');
+  });
+
   it('renders a polled trace (traceUpdate) for the active job through the same pipeline', () => {
     h.exec.activeExecution = { jobId: 'job-poll', status: 'running' };
     render(<ChatWorkspace />);

@@ -116,6 +116,56 @@ async def test_update_mlflow_trace_id_paths(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_run_name_paths(monkeypatch):
+    """update_run_name backs the deferred (off-critical-path) run naming:
+    a targeted single-field update by job_id, resilient to bad input."""
+    from src.services import execution_status_service as module
+
+    captured = {}
+
+    class FakeRepo:
+        def __init__(self, session):
+            self.session = session
+        async def get_execution_by_job_id(self, job_id: str):
+            return SimpleNamespace(id=11)
+        async def update_execution(self, execution_id: int, data: dict):
+            captured["args"] = (execution_id, data)
+            return True
+
+    class FakeSession(SimpleNamespace):
+        async def flush(self):
+            return None
+        async def commit(self):
+            return None
+        async def rollback(self):
+            return None
+
+    async def fake_exec(op):
+        return await op(FakeSession())
+
+    monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
+    monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
+
+    # Invalid args
+    assert await Svc.update_run_name(job_id=None, run_name="X") is False
+    assert await Svc.update_run_name(job_id="j1", run_name="") is False
+
+    # Success path — a targeted single-field update
+    assert await Svc.update_run_name(job_id="j1", run_name="Renamed Run") is True
+    eid, data = captured["args"]
+    assert eid == 11
+    assert data == {"run_name": "Renamed Run"}
+
+    # Missing record returns False without raising
+    class MissingRepo(FakeRepo):
+        async def get_execution_by_job_id(self, job_id: str):
+            return None
+
+    monkeypatch.setattr(module, "ExecutionRepository", MissingRepo, raising=True)
+    assert await Svc.update_run_name(job_id="j2", run_name="Name") is False
+
+
+@pytest.mark.asyncio
 async def test_update_mlflow_evaluation_run_id_paths(monkeypatch):
     from src.services import execution_status_service as module
 

@@ -1191,7 +1191,13 @@ const ChatWorkspace: React.FC = () => {
       // Databricks Apps HTTP/2 proxy kills SSE, the poller delivers traces +
       // completion via 'traceUpdate'/'jobCompleted' window events (see the
       // listener effect above), so memory/Genie/tool traces still render.
-      window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId } }));
+      // groupId is required: runStatus drops jobCreated events without it
+      // (workspace-isolation check), and a dropped run never enters activeRuns
+      // — so the 10s reconciliation loop can't finalize it if the poller is
+      // retargeted to a newer job before the first status flip is observed.
+      window.dispatchEvent(new CustomEvent('jobCreated', {
+        detail: { jobId, groupId: localStorage.getItem('selectedGroupId') || undefined },
+      }));
     },
     [executionStream],
   );

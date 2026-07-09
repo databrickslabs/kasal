@@ -5,6 +5,7 @@ import {
   getExecutionStatus,
   getExecution,
   stopExecution,
+  getJobTraces,
 } from './executions';
 import { getClient } from './client';
 import type { Execution, ExecutionConfig } from '../types/execution';
@@ -96,6 +97,51 @@ describe('ChatMode executions api', () => {
         preserve_partial_results: true,
       });
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('getJobTraces', () => {
+    const trace = (id: number) => ({ id, event_type: 'tool_usage' });
+
+    it('fetches a single short page with an explicit limit', async () => {
+      get.mockResolvedValue({ data: { traces: [trace(1), trace(2)] } });
+
+      const result = await getJobTraces('job-1');
+
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledWith('/traces/job/job-1', {
+        params: { limit: 500, offset: 0 },
+      });
+      expect(result).toHaveLength(2);
+    });
+
+    it('pages through long runs until a short page (regression: backend default limit=100 truncated restored activity)', async () => {
+      const fullPage = Array.from({ length: 500 }, (_, i) => trace(i));
+      const shortPage = [trace(500), trace(501)];
+      get
+        .mockResolvedValueOnce({ data: { traces: fullPage } })
+        .mockResolvedValueOnce({ data: { traces: shortPage } });
+
+      const result = await getJobTraces('job-long');
+
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(get).toHaveBeenNthCalledWith(1, '/traces/job/job-long', {
+        params: { limit: 500, offset: 0 },
+      });
+      expect(get).toHaveBeenNthCalledWith(2, '/traces/job/job-long', {
+        params: { limit: 500, offset: 500 },
+      });
+      expect(result).toHaveLength(502);
+    });
+
+    it('stops at the hard cap even if the server keeps returning full pages', async () => {
+      const fullPage = Array.from({ length: 500 }, (_, i) => trace(i));
+      get.mockResolvedValue({ data: { traces: fullPage } });
+
+      const result = await getJobTraces('job-runaway');
+
+      expect(get).toHaveBeenCalledTimes(30); // 15000 / 500
+      expect(result).toHaveLength(15000);
     });
   });
 });

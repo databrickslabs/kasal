@@ -137,6 +137,51 @@ describe('sessionApi - messages', () => {
     expect(messages[1].role).toBe('assistant');
   });
 
+  it('loads a short session with a single page request', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [{
+          id: 'm1', session_id: 's1', message_type: 'user',
+          content: 'hi', generation_result: null, timestamp: '2026-06-11T07:00:00',
+        }],
+      },
+    });
+
+    const messages = await api.getSessionMessages('s1');
+
+    expect(messages).toHaveLength(1);
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/s1/messages', {
+      params: { page: 0, per_page: 100 },
+    });
+  });
+
+  it('pages through sessions longer than 100 messages (regression: a single page-0 fetch dropped the newest turns)', async () => {
+    const wireMsg = (i: number) => ({
+      id: `m${i}`, session_id: 's1', message_type: 'user',
+      content: `msg ${i}`, generation_result: null,
+      timestamp: '2026-06-11T07:00:00',
+    });
+    const fullPage = Array.from({ length: 100 }, (_, i) => wireMsg(i));
+    const lastPage = [wireMsg(100), wireMsg(101)];
+    mockGet
+      .mockResolvedValueOnce({ data: { messages: fullPage } })
+      .mockResolvedValueOnce({ data: { messages: lastPage } });
+
+    const messages = await api.getSessionMessages('s1');
+
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    expect(mockGet).toHaveBeenNthCalledWith(1, '/chat-history/sessions/s1/messages', {
+      params: { page: 0, per_page: 100 },
+    });
+    expect(mockGet).toHaveBeenNthCalledWith(2, '/chat-history/sessions/s1/messages', {
+      params: { page: 1, per_page: 100 },
+    });
+    expect(messages).toHaveLength(102);
+    // The newest turn (beyond page 0) survives the reload.
+    expect(messages[101].content).toBe('msg 101');
+  });
+
   it('heals an envelope-clobbered a2ui card (surface-shaped resultData, no resultType)', async () => {
     // Regression (HAR-confirmed): an old partial PUT replaced generation_result
     // with {resultData} only, stripping resultType — the presentation then never

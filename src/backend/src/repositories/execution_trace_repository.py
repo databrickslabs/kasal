@@ -89,7 +89,8 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         self,
         run_id: int,
         limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        offset: Optional[int] = 0,
+        since_id: Optional[int] = None
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by run_id.
@@ -98,13 +99,24 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             run_id: Run ID to filter by
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+            since_id: Only return traces with id greater than this (incremental
+                cursor for pollers — avoids re-reading the whole trace set)
+
         Returns:
             List of ExecutionTrace records
         """
         try:
-            stmt = select(ExecutionTrace).where(ExecutionTrace.run_id == run_id)
-            
+            # Deterministic order is required: offset pagination without ORDER BY
+            # lets Postgres return rows in any order, so pollers can skip or
+            # duplicate traces between pages. PK order matches insertion order.
+            stmt = (
+                select(ExecutionTrace)
+                .where(ExecutionTrace.run_id == run_id)
+                .order_by(ExecutionTrace.id.asc())
+            )
+
+            if since_id:
+                stmt = stmt.where(ExecutionTrace.id > since_id)
             if offset is not None:
                 stmt = stmt.offset(offset)
             if limit is not None:
@@ -120,7 +132,8 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         self,
         job_id: str,
         limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        offset: Optional[int] = 0,
+        since_id: Optional[int] = None
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
@@ -129,13 +142,24 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             job_id: Job ID to filter by
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+            since_id: Only return traces with id greater than this (incremental
+                cursor for pollers — avoids re-reading the whole trace set)
+
         Returns:
             List of ExecutionTrace records
         """
         try:
-            stmt = select(ExecutionTrace).where(ExecutionTrace.job_id == job_id)
-            
+            # Deterministic order is required: offset pagination without ORDER BY
+            # lets Postgres return rows in any order, so pollers can skip or
+            # duplicate traces between pages. PK order matches insertion order.
+            stmt = (
+                select(ExecutionTrace)
+                .where(ExecutionTrace.job_id == job_id)
+                .order_by(ExecutionTrace.id.asc())
+            )
+
+            if since_id:
+                stmt = stmt.where(ExecutionTrace.id > since_id)
             if offset is not None:
                 stmt = stmt.offset(offset)
             if limit is not None:
@@ -305,12 +329,20 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
     
     # Public methods that manage their own session lifecycle
     
-    async def create(self, trace_data: Dict[str, Any]) -> ExecutionTrace:
+    async def create(
+        self,
+        trace_data: Dict[str, Any],
+        verify_execution_exists: bool = True,
+    ) -> ExecutionTrace:
         """
         Create a new execution trace record.
 
         Args:
             trace_data: Dictionary with trace data
+            verify_execution_exists: Whether to run the parent ExecutionHistory
+                existence SELECT before inserting. Per-run batch writers verify
+                the first event and skip the check (one fewer roundtrip per
+                event) for the rest of the run.
 
         Returns:
             Created ExecutionTrace record
@@ -325,7 +357,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         job_id = trace_data.get("job_id")
         is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
 
-        if job_id and not is_subprocess:
+        if job_id and not is_subprocess and verify_execution_exists:
             # Check if job exists in executionhistory (main process only).
             # In subprocess mode we skip this check because:
             # 1. The subprocess already validated the job_id at launch
@@ -367,39 +399,43 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         self, 
         run_id: int,
         limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        offset: Optional[int] = 0,
+        since_id: Optional[int] = None
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by run_id.
-        
+
         Args:
             run_id: Run ID to filter by
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+            since_id: Incremental cursor — only traces with id greater than this
+
         Returns:
             List of ExecutionTrace records
         """
-        return await self._get_by_run_id(run_id, limit, offset)
+        return await self._get_by_run_id(run_id, limit, offset, since_id)
     
     async def get_by_job_id(
-        self, 
+        self,
         job_id: str,
         limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        offset: Optional[int] = 0,
+        since_id: Optional[int] = None
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
-        
+
         Args:
             job_id: Job ID to filter by
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+            since_id: Incremental cursor — only traces with id greater than this
+
         Returns:
             List of ExecutionTrace records
         """
-        return await self._get_by_job_id(job_id, limit, offset)
+        return await self._get_by_job_id(job_id, limit, offset, since_id)
     
     async def get_all_traces(
         self,

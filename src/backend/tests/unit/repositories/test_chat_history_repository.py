@@ -331,13 +331,40 @@ class TestChatHistoryRepository:
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_delete_session_success(self, chat_history_repository, mock_session, sample_chat_messages):
-        """Test successful session deletion."""
+    async def test_delete_session_success(self, chat_history_repository, mock_session):
+        """Test successful session deletion via a single bulk DELETE."""
         # Arrange
-        messages_to_delete = sample_chat_messages[:2]  # Two messages in the session
-        
-        # Mock the get_by_session_and_group call within delete_session
-        with patch.object(chat_history_repository, 'get_by_session_and_group', return_value=messages_to_delete):
+        mock_result = MagicMock()
+        mock_result.rowcount = 2
+        mock_session.execute.return_value = mock_result
+
+        # Act
+        result = await chat_history_repository.delete_session(
+            session_id="session-123",
+            group_ids=["group-111"]
+        )
+
+        # Assert — one bulk DELETE statement, never per-row ORM deletes
+        assert result is True
+        mock_session.execute.assert_called_once()
+        mock_session.delete.assert_not_called()
+        mock_session.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_removes_all_pages(self, chat_history_repository, mock_session):
+        """Regression: sessions longer than one page (50) must be fully deleted.
+
+        The old implementation loaded get_by_session_and_group (per_page=50)
+        and deleted row-by-row, silently orphaning messages 51+. The bulk
+        DELETE must not page-limit: no get_by_session_and_group call, and the
+        emitted statement is a DELETE with no LIMIT.
+        """
+        # Arrange
+        mock_result = MagicMock()
+        mock_result.rowcount = 137  # more than one page of messages
+        mock_session.execute.return_value = mock_result
+
+        with patch.object(chat_history_repository, 'get_by_session_and_group') as mock_get:
             # Act
             result = await chat_history_repository.delete_session(
                 session_id="session-123",
@@ -346,25 +373,30 @@ class TestChatHistoryRepository:
 
         # Assert
         assert result is True
-        assert mock_session.delete.call_count == 2  # Two messages deleted
-        mock_session.flush.assert_called_once()
-        mock_session.flush.assert_called_once()
+        mock_get.assert_not_called()
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert sql.startswith("DELETE")
+        assert "LIMIT" not in sql
+        assert "SESSION_ID" in sql and "GROUP_ID" in sql
 
     @pytest.mark.asyncio
     async def test_delete_session_no_messages_found(self, chat_history_repository, mock_session):
         """Test session deletion when no messages found."""
         # Arrange
-        with patch.object(chat_history_repository, 'get_by_session_and_group', return_value=[]):
-            # Act
-            result = await chat_history_repository.delete_session(
-                session_id="nonexistent-session",
-                group_ids=["group-111"]
-            )
+        mock_result = MagicMock()
+        mock_result.rowcount = 0
+        mock_session.execute.return_value = mock_result
+
+        # Act
+        result = await chat_history_repository.delete_session(
+            session_id="nonexistent-session",
+            group_ids=["group-111"]
+        )
 
         # Assert
         assert result is False
         mock_session.delete.assert_not_called()
-        mock_session.flush.assert_not_called()
         mock_session.commit.assert_not_called()
 
     @pytest.mark.asyncio
@@ -380,30 +412,26 @@ class TestChatHistoryRepository:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_delete_session_database_exception(self, chat_history_repository, mock_session, sample_chat_messages):
+    async def test_delete_session_database_exception(self, chat_history_repository, mock_session):
         """Test handling of database exceptions during deletion."""
         # Arrange
-        messages_to_delete = sample_chat_messages[:1]
-        mock_session.delete.side_effect = Exception("Delete constraint violation")
-        
-        with patch.object(chat_history_repository, 'get_by_session_and_group', return_value=messages_to_delete):
-            # Act & Assert
-            with pytest.raises(Exception, match="Delete constraint violation"):
-                await chat_history_repository.delete_session(
-                    session_id="session-123",
-                    group_ids=["group-111"]
-                )
-        
+        mock_session.execute.side_effect = Exception("Delete constraint violation")
+
+        # Act & Assert
+        with pytest.raises(Exception, match="Delete constraint violation"):
+            await chat_history_repository.delete_session(
+                session_id="session-123",
+                group_ids=["group-111"]
+            )
+
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_count_messages_by_session_success(self, chat_history_repository, mock_session):
-        """Test successful message count."""
+        """Test successful message count via SQL COUNT (not row fetching)."""
         # Arrange
         mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = ["id1", "id2", "id3"]  # 3 message IDs
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.scalar.return_value = 3
         mock_session.execute.return_value = mock_result
 
         # Act
@@ -415,15 +443,16 @@ class TestChatHistoryRepository:
         # Assert
         assert result == 3
         mock_session.execute.assert_called_once()
+        # Regression: must be a scalar COUNT query, not a fetch of all row ids
+        stmt = mock_session.execute.call_args[0][0]
+        assert "COUNT" in str(stmt).upper()
 
     @pytest.mark.asyncio
     async def test_count_messages_by_session_no_messages(self, chat_history_repository, mock_session):
         """Test message count when no messages exist."""
         # Arrange
         mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = []  # No messages
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.scalar.return_value = 0
         mock_session.execute.return_value = mock_result
 
         # Act
@@ -553,16 +582,15 @@ class TestChatHistoryRepositoryIntegration:
         # Arrange - Setup mocks for different operations
         messages_in_session = sample_chat_messages[:2]  # Two messages in session-123
         
-        # Mock get_by_session_and_group for retrieve and delete operations
+        # Mock get_by_session_and_group for the retrieve operation
         with patch.object(chat_history_repository, 'get_by_session_and_group') as mock_get:
             mock_get.return_value = messages_in_session
-            
-            # Mock count operation
-            mock_count_result = MagicMock()
-            mock_count_scalars = MagicMock()
-            mock_count_scalars.all.return_value = ["id1", "id2"]
-            mock_count_result.scalars.return_value = mock_count_scalars
-            mock_session.execute.return_value = mock_count_result
+
+            # Count (scalar) and bulk delete (rowcount) both go through execute
+            mock_exec_result = MagicMock()
+            mock_exec_result.scalar.return_value = 2
+            mock_exec_result.rowcount = 2
+            mock_session.execute.return_value = mock_exec_result
 
             # Act & Assert - Get messages
             messages = await chat_history_repository.get_by_session_and_group(
@@ -578,13 +606,13 @@ class TestChatHistoryRepositoryIntegration:
             )
             assert count == 2
 
-            # Act & Assert - Delete session
+            # Act & Assert - Delete session (bulk DELETE, no per-row ORM deletes)
             deleted = await chat_history_repository.delete_session(
                 session_id="session-123",
                 group_ids=["group-111"]
             )
             assert deleted is True
-            assert mock_session.delete.call_count == 2
+            mock_session.delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_multi_user_group_isolation(self, chat_history_repository, mock_session):
@@ -664,6 +692,7 @@ class TestChatHistoryRepositoryIntegration:
         mock_scalars.all.return_value = []
         mock_result.scalars.return_value = mock_scalars
         mock_result.fetchall.return_value = []
+        mock_result.scalar.return_value = 0
         mock_session.execute.return_value = mock_result
 
         # Act & Assert - All methods should handle empty results gracefully

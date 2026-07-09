@@ -54,14 +54,28 @@ export interface ExecutionTrace {
   [key: string]: unknown;
 }
 
+const TRACE_PAGE_SIZE = 500;
+/** Runaway-loop guard; mirrors the backend's own hard cap on `limit`. */
+const TRACE_FETCH_MAX = 15000;
+
 /**
  * Fetch ALL persisted traces for a finished run by its job id. The run activity
  * (the "thinking" stream) can always be rebuilt from these — so a refresh
  * restores the full tool context even if the live per-message copy was lost.
+ *
+ * Pages through explicitly: a bare GET uses the backend default limit of 100,
+ * which silently truncated the restored activity timeline for long runs.
  */
 export async function getJobTraces(jobId: string): Promise<ExecutionTrace[]> {
-  const response = await getClient().get<{ traces: ExecutionTrace[] }>(
-    `/traces/job/${jobId}`,
-  );
-  return response.data?.traces || [];
+  const all: ExecutionTrace[] = [];
+  for (let offset = 0; offset < TRACE_FETCH_MAX; offset += TRACE_PAGE_SIZE) {
+    const response = await getClient().get<{ traces: ExecutionTrace[] }>(
+      `/traces/job/${jobId}`,
+      { params: { limit: TRACE_PAGE_SIZE, offset } },
+    );
+    const page = response.data?.traces || [];
+    all.push(...page);
+    if (page.length < TRACE_PAGE_SIZE) break;
+  }
+  return all;
 }

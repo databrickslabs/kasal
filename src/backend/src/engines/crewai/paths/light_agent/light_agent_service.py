@@ -25,6 +25,91 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
+class _RunTraceWriter:
+    """Persists one light-agent run's trace events on a single private session.
+
+    Perf: the previous per-event ``get_isolated_db_session()`` opened a fresh
+    connection (full TCP+TLS+auth on Lakebase NullPool) for EVERY tool/LLM
+    event — ~10-20 handshakes per chat answer, all on the critical path since
+    completion awaits the persists. This writer opens ONE private session
+    lazily on the first persist and reuses it until ``close()``.
+
+    Concurrency: handlers schedule persists onto the main loop via
+    ``run_coroutine_threadsafe``, so several (tool_usage, <tool>_run, llm_call,
+    llm_response, response_run) run as concurrent tasks. Interleaving their DB
+    work corrupts the async connection's greenlet state (the symptom is
+    ``MissingGreenlet`` mid-run), so the internal lock makes writes strictly
+    one-at-a-time — which is also what makes single-session reuse safe.
+
+    The parent ExecutionHistory row is verified once by the first successful
+    write; later writes skip that SELECT and carry the resolved ``run_id``
+    forward. A failed write rolls back and drops the session so the next
+    persist reopens a fresh connection.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._ctx: Any = None
+        self._session: Any = None
+        self._verified = False
+        self._run_id: Optional[int] = None
+
+    async def _get_session(self) -> Any:
+        if self._session is None:
+            from src.db.session import get_isolated_db_session
+            self._ctx = get_isolated_db_session()
+            self._session = await self._ctx.__aenter__()
+        return self._session
+
+    async def close(self) -> None:
+        """Release the private session. Idempotent; never raises."""
+        ctx = self._ctx
+        self._ctx = None
+        self._session = None
+        if ctx is not None:
+            try:
+                await ctx.__aexit__(None, None, None)
+            except Exception as close_err:  # noqa: BLE001
+                logger.debug(f"[light_agent] trace session close skipped: {close_err}")
+
+    async def persist(self, trace_data: Dict[str, Any]) -> None:
+        """Write one trace event. Never raises — a lost trace must not fail the run."""
+        try:
+            from src.services.execution_trace_service import ExecutionTraceService
+            async with self._lock:
+                session = await self._get_session()
+                try:
+                    if self._run_id is not None:
+                        trace_data.setdefault("run_id", self._run_id)
+                    item = await ExecutionTraceService(session).create_trace(
+                        trace_data,
+                        verify_execution_exists=not self._verified,
+                    )
+                    await session.commit()
+                    self._verified = True
+                    if self._run_id is None:
+                        self._run_id = getattr(item, "run_id", None)
+                except Exception:
+                    # The connection may be poisoned — roll back and drop it so
+                    # the next persist reopens a fresh one.
+                    try:
+                        await session.rollback()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await self.close()
+                    raise
+            logger.debug(
+                f"[light_agent] trace persisted: job_id={trace_data.get('job_id')} "
+                f"event_type={trace_data.get('event_type')}"
+            )
+        except Exception as persist_err:  # noqa: BLE001
+            logger.warning(
+                f"[light_agent] trace persist FAILED "
+                f"(event_type={trace_data.get('event_type')}): {persist_err}",
+                exc_info=True,
+            )
+
+
 class LightAgentService:
     """Engine-level service for the single-agent ("chat"/light) path."""
 
@@ -196,43 +281,40 @@ class LightAgentService:
             # crew/flow OTel exporter flushes before the subprocess exits — this
             # is the in-process equivalent).
             _pending_trace_futures: list = []
-            # Serialize trace writes. Each handler schedules its persist onto the
-            # main loop via run_coroutine_threadsafe, so several (tool_usage,
-            # <tool>_run, llm_call, llm_response, response_run) run as concurrent
-            # tasks. Interleaving their DB work corrupts the async connection's
-            # greenlet state — the symptom is create_trace's model_validate(trace)
-            # raising ``MissingGreenlet`` mid-run (intermittent: one trace lands,
-            # the next fails). A lock makes them strictly one-at-a-time.
-            _persist_lock = asyncio.Lock()
+            # Per-run trace writer: one private session for all of this run's
+            # trace writes, serialized internally (see _RunTraceWriter).
+            _trace_writer = _RunTraceWriter()
 
-            async def _persist_trace(trace_data: Dict[str, Any]) -> None:
-                try:
-                    from src.services.execution_trace_service import ExecutionTraceService
-                    from src.db.session import get_isolated_db_session
-                    # One writer at a time, on a PRIVATE connection (NullPool /
-                    # dedicated checkout) — never the shared request/StaticPool
-                    # connection another in-flight persist might be using.
-                    async with _persist_lock:
-                        async with get_isolated_db_session() as trace_session:
-                            await ExecutionTraceService(trace_session).create_trace(trace_data)
-                            await trace_session.commit()
+            async def _flush_and_close_traces(timeout: float) -> None:
+                """Await pending persists (bounded), then release the session."""
+                if _pending_trace_futures:
                     logger.info(
-                        f"[light_agent] trace persisted: job_id={trace_data.get('job_id')} "
-                        f"event_type={trace_data.get('event_type')}"
+                        f"[light_agent] flushing {len(_pending_trace_futures)} pending "
+                        f"trace write(s) for {execution_id}"
                     )
-                except Exception as persist_err:  # noqa: BLE001
-                    logger.warning(
-                        f"[light_agent] trace persist FAILED "
-                        f"(event_type={trace_data.get('event_type')}): {persist_err}",
-                        exc_info=True,
-                    )
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(
+                                *(asyncio.wrap_future(f) for f in _pending_trace_futures),
+                                return_exceptions=True,
+                            ),
+                            timeout=timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"[light_agent] trace flush timed out for {execution_id}; "
+                            "some traces may be written after completion"
+                        )
+                await _trace_writer.close()
 
             def _schedule_trace(trace_data: Dict[str, Any]) -> None:
                 if _main_loop is None:
                     logger.warning("[light_agent] no main loop — trace dropped")
                     return
                 try:
-                    fut = asyncio.run_coroutine_threadsafe(_persist_trace(trace_data), _main_loop)
+                    fut = asyncio.run_coroutine_threadsafe(
+                        _trace_writer.persist(trace_data), _main_loop
+                    )
                     _pending_trace_futures.append(fut)
                     fut.add_done_callback(lambda f: f.exception())  # drain, never raise
                 except Exception as sched_err:  # noqa: BLE001
@@ -788,26 +870,10 @@ class LightAgentService:
 
             # Flush trace writes before terminal status — guarantees the
             # fire-and-forget persists (response_run + every tool trace) actually
-            # land, instead of racing the request teardown. Bounded so a slow/hung
-            # write never wedges completion.
-            if _pending_trace_futures:
-                logger.info(
-                    f"[light_agent] flushing {len(_pending_trace_futures)} pending "
-                    f"trace write(s) for {execution_id}"
-                )
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(
-                            *(asyncio.wrap_future(f) for f in _pending_trace_futures),
-                            return_exceptions=True,
-                        ),
-                        timeout=10,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"[light_agent] trace flush timed out for {execution_id}; "
-                        "some traces may be written after completion"
-                    )
+            # land, instead of racing the request teardown — then release the
+            # run's private trace session. Bounded so a slow/hung write never
+            # wedges completion.
+            await _flush_and_close_traces(timeout=10)
 
             await ExecutionStatusService.update_status(
                 job_id=execution_id,
@@ -821,6 +887,14 @@ class LightAgentService:
         except Exception as e:  # noqa: BLE001
             logger.error(f"[light_agent] Error in light agent execution {execution_id}: {e}", exc_info=True)
             _log(f"Chat agent failed: {e}")
+            # Flush + release the run's private trace session. Guarded: the
+            # failure may predate the persister closures being defined.
+            try:
+                await _flush_and_close_traces(timeout=5)
+            except NameError:
+                pass
+            except Exception as flush_err:  # noqa: BLE001
+                logger.debug(f"[light_agent] trace flush on failure skipped: {flush_err}")
             try:
                 await ExecutionStatusService.update_status(
                     job_id=execution_id,
