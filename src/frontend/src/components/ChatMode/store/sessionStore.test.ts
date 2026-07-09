@@ -530,6 +530,67 @@ describe('updateMessage', () => {
   });
 });
 
+describe('updateMessage — persisted envelope stays complete (merge with existing)', () => {
+  const cardMsg = () => ({
+    ...makeMsg('m1', ''),
+    resultType: 'a2ui',
+    resultData: { surfaceKind: 'presentation', components: [] },
+    executionId: 'job-1',
+  } as ReturnType<typeof makeMsg>);
+
+  it('a resultData-only update (deck restyle) keeps resultType + executionId in the PUT', () => {
+    // Regression (HAR-confirmed): the backend PUT replaces generation_result
+    // wholesale, so persisting only {resultData} stripped the a2ui type and the
+    // run anchor — the presentation vanished from chat and the pane lost the
+    // restyled copy after a session switch.
+    useSessionStore.setState({ currentSessionId: 'sess', messages: [cardMsg()] });
+    const restyled = { surfaceKind: 'presentation', components: [], theme: { accent: '#FF3621' } };
+
+    useSessionStore.getState().updateMessage('m1', { resultData: restyled });
+
+    expect(db.updateMessageInSession).toHaveBeenCalledWith('sess', 'm1', {
+      resultData: restyled,
+      resultType: 'a2ui',
+      executionId: 'job-1',
+    });
+  });
+
+  it('updateMessageInTargetSession merges too when viewing the target session', () => {
+    useSessionStore.setState({ currentSessionId: 'sess', messages: [cardMsg()] });
+    const restyled = { surfaceKind: 'presentation', components: [], theme: { accent: '#000000' } };
+
+    useSessionStore.getState().updateMessageInTargetSession('sess', 'm1', { resultData: restyled });
+
+    expect(db.updateMessageInSession).toHaveBeenCalledWith('sess', 'm1', {
+      resultData: restyled,
+      resultType: 'a2ui',
+      executionId: 'job-1',
+    });
+  });
+
+  it('passes updates through unchanged when the message is not in memory', () => {
+    useSessionStore.setState({ currentSessionId: 'viewing', messages: [] });
+
+    useSessionStore
+      .getState()
+      .updateMessageInTargetSession('other', 'm1', { resultData: { x: 1 } });
+
+    expect(db.updateMessageInSession).toHaveBeenCalledWith('other', 'm1', { resultData: { x: 1 } });
+  });
+
+  it('explicit update values win over the existing message fields', () => {
+    useSessionStore.setState({ currentSessionId: 'sess', messages: [cardMsg()] });
+
+    useSessionStore.getState().updateMessage('m1', { resultType: 'trace', resultData: { kind: 'tool_result', label: 'T' } });
+
+    expect(db.updateMessageInSession).toHaveBeenCalledWith('sess', 'm1', {
+      resultType: 'trace',
+      resultData: { kind: 'tool_result', label: 'T' },
+      executionId: 'job-1',
+    });
+  });
+});
+
 describe('updateMessageInTargetSession', () => {
   it('updates in-memory when viewing the target and always persists', () => {
     useSessionStore.setState({

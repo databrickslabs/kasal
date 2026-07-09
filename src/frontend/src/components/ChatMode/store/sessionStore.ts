@@ -20,6 +20,44 @@ import {
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 
+/**
+ * Complete a partial message update with the persisted-envelope fields from the
+ * in-memory message before it is round-tripped to the server.
+ *
+ * The backend PUT REPLACES `generation_result` wholesale, so a partial update —
+ * e.g. a deck restyle sending only `resultData` — used to clobber the
+ * `__chatmode` envelope and strip `resultType`/`executionId`. The message then
+ * stopped rendering as an A2UI card on reload AND lost its run anchor, so the
+ * preview pane could no longer find the restyled copy (the "presentation
+ * vanishes after a session switch" bug, confirmed in a deployed-app HAR).
+ * When the message isn't in memory (updating a non-viewed session) there is
+ * nothing to merge from; the updates go through unchanged.
+ */
+export function mergePersistedExtras(
+  updates: Partial<ChatMessage>,
+  existing?: ChatMessage,
+): Partial<ChatMessage> {
+  if (!existing) return updates;
+  return {
+    ...updates,
+    ...(updates.resultType === undefined && existing.resultType !== undefined
+      ? { resultType: existing.resultType }
+      : {}),
+    ...(updates.resultData === undefined && existing.resultData !== undefined
+      ? { resultData: existing.resultData }
+      : {}),
+    ...(updates.attachments === undefined && existing.attachments !== undefined
+      ? { attachments: existing.attachments }
+      : {}),
+    ...(updates.executionId === undefined && existing.executionId !== undefined
+      ? { executionId: existing.executionId }
+      : {}),
+    ...(updates.usedWorkspaceMemory === undefined && existing.usedWorkspaceMemory !== undefined
+      ? { usedWorkspaceMemory: existing.usedWorkspaceMemory }
+      : {}),
+  };
+}
+
 // The selected workspace/group, mirrored to localStorage by the group store.
 // Chat sessions are scoped to it so switching workspace shows only that
 // workspace's chats.
@@ -300,6 +338,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   updateMessage: (id, updates) => {
+    const existing = get().messages.find((m) => m.id === id);
     set((state) => ({
       messages: state.messages.map((m) =>
         m.id === id ? { ...m, ...updates } : m,
@@ -307,12 +346,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }));
     const sessionId = get().currentSessionId;
     if (sessionId) {
-      updateMessageInSession(sessionId, id, updates);
+      updateMessageInSession(sessionId, id, mergePersistedExtras(updates, existing));
     }
   },
 
   updateMessageInTargetSession: (targetSessionId, id, updates) => {
     const state = get();
+    // Only the viewed session's messages are in memory — merge from them when
+    // available so the persisted envelope stays complete (see helper).
+    const existing =
+      state.currentSessionId === targetSessionId
+        ? state.messages.find((m) => m.id === id)
+        : undefined;
     if (state.currentSessionId === targetSessionId) {
       set((s) => ({
         messages: s.messages.map((m) =>
@@ -320,7 +365,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ),
       }));
     }
-    updateMessageInSession(targetSessionId, id, updates);
+    updateMessageInSession(targetSessionId, id, mergePersistedExtras(updates, existing));
   },
 
   appendToMessage: (id, additionalContent) => {

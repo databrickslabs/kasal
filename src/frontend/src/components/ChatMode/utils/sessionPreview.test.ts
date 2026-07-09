@@ -96,12 +96,38 @@ describe('deriveSessionPreviews', () => {
     mockedGet.mockResolvedValue({ id: 'job-t', result: { text: 'Hi', a2ui: doc } } as never);
 
     const { history } = await deriveSessionPreviews([
-      { ...msg('m1', 'job-t'), resultData: restyled },
+      { ...msg('m1', 'job-t'), resultType: 'a2ui', resultData: restyled },
     ]);
 
     expect(history).toHaveLength(1);
     expect(JSON.parse(history[0].data).theme).toEqual({ accent: '#ff0000', _pinned: true });
     expect(mockedGet).not.toHaveBeenCalled();
+  });
+
+  it('keeps an a2ui card with NO run anchor (envelope clobbered by an old partial update)', async () => {
+    // Regression (HAR-confirmed): a restyle PUT used to strip executionId from
+    // the message envelope — the restyled deck must still surface as a preview.
+    const restyled = { ...doc, theme: { accent: '#FF3621' } };
+    const { history } = await deriveSessionPreviews([
+      { ...msg('m1'), resultType: 'a2ui', resultData: restyled },
+    ]);
+    expect(history).toHaveLength(1);
+    expect(JSON.parse(history[0].data).theme).toEqual({ accent: '#FF3621' });
+    expect(history[0].sourceMessageId).toBe('m1');
+    expect(mockedGet).not.toHaveBeenCalled();
+  });
+
+  it('never mistakes non-a2ui resultData (crew cards, traces) for a deliverable', async () => {
+    mockedGet.mockResolvedValue({ id: 'job-c', result: doc } as never);
+    const { history } = await deriveSessionPreviews([
+      // crew card WITH a run anchor → derive from execution.result, not the card
+      { ...msg('m1', 'job-c'), resultType: 'crew_actions', resultData: { agents: [] } },
+      // trace payload with NO anchor → contributes nothing
+      { ...msg('m2'), resultType: 'trace', resultData: { kind: 'tool_result', label: 'Memory' } },
+    ]);
+    expect(history).toHaveLength(1);
+    expect(JSON.parse(history[0].data)).toEqual(doc);
+    expect(mockedGet).toHaveBeenCalledTimes(1);
   });
 
   it('stamps sourceMessageId so a pane restyle can round-trip to the message', async () => {

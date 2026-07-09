@@ -70,12 +70,26 @@ interface ChatModeExtras {
   usedWorkspaceMemory?: boolean;
 }
 
+/** True when a stored resultData is (or wraps) an A2UI surface — used to heal
+ *  messages whose `__chatmode` envelope was clobbered by an old partial update
+ *  (only `resultData` survived): they must still render as an a2ui card. */
+const looksLikeSurface = (v: unknown): boolean => {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.surfaceKind === 'string' && Array.isArray(o.components)) return true;
+  return Boolean(o.a2ui && typeof o.a2ui === 'object');
+};
+
 const toMessage = (w: MessageWire): ChatMessage => {
   const extras = (w.generation_result?.[EXTRA_KEY] || {}) as ChatModeExtras;
   const role: ChatMessage['role'] =
     w.message_type === 'user' || w.message_type === 'system'
       ? (w.message_type as ChatMessage['role'])
       : 'assistant';
+  // Heal envelope-clobbered rows: a surface-shaped resultData without a
+  // resultType is an a2ui card whose type was stripped by a partial PUT.
+  const resultType =
+    extras.resultType ?? (looksLikeSurface(extras.resultData) ? 'a2ui' : undefined);
   return {
     id: w.id,
     sessionId: w.session_id,
@@ -83,7 +97,7 @@ const toMessage = (w: MessageWire): ChatMessage => {
     content: w.content === '[ui-card]' ? '' : w.content,
     timestamp: parseUtc(w.timestamp),
     ...(w.intent ? { intent: w.intent as ChatMessage['intent'] } : {}),
-    ...(extras.resultType ? { resultType: extras.resultType } : {}),
+    ...(resultType ? { resultType } : {}),
     ...(extras.resultData !== undefined ? { resultData: extras.resultData } : {}),
     ...(extras.attachments ? { attachments: extras.attachments } : {}),
     ...(extras.executionId ? { executionId: extras.executionId } : {}),
