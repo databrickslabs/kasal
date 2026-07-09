@@ -20,6 +20,7 @@ import {
   ListItemText,
   Chip,
   Table,
+  TableContainer,
   TableHead,
   TableBody,
   TableRow,
@@ -84,6 +85,19 @@ export interface UCMVResult {
   measures_with_dax?: unknown[];
   /** Raw source M-Query entries (echoed from the generator). */
   mquery_raw?: unknown[];
+  /** Per-table tabular extract (M-Query source + associated measures/DAX). Always
+   *  present; the primary usable artifact when no views could be generated. */
+  fallback_extract?: FallbackExtractRow[];
+  /** Number of UC metric views actually generated (0 → show the fallback table). */
+  views_generated?: number;
+}
+
+export interface FallbackExtractRow {
+  table_name: string;
+  mquery: string;
+  measures: Array<{ measure_name: string; dax_expression: string }>;
+  measure_count: number;
+  has_mquery: boolean;
 }
 
 interface UCMVResultViewerProps {
@@ -284,6 +298,10 @@ const Section: React.FC<{
 
 const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = false, onResultChange, onSave }) => {
   const viewNames = useMemo(() => Object.keys(result.yaml).sort(), [result.yaml]);
+  const fallbackRows = useMemo<FallbackExtractRow[]>(
+    () => (Array.isArray(result.fallback_extract) ? result.fallback_extract : []),
+    [result.fallback_extract],
+  );
   const [selected, setSelected] = useState(viewNames[0] ?? '');
 
   // Track which views are in edit mode (key → draft YAML string)
@@ -454,41 +472,42 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, [result.yaml]);
 
-  // Download all YAMLs as individual files (triggers multiple downloads)
-  // or as a combined file
+  // Download each metric view YAML as its OWN .yml file (one per fact table)
+  // so each can be deployed independently. Downloads are staggered (~150ms)
+  // because browsers throttle/deny rapid back-to-back programmatic downloads.
   const handleDownloadAllYamls = useCallback(() => {
-    const combined: string[] = [];
-    for (const name of viewNames) {
-      const yamlContent = result.yaml[name];
-      if (yamlContent && yamlContent.trim()) {
-        combined.push(`# === ${name} ===\n${yamlContent}`);
-      }
-    }
-    const blob = new Blob([combined.join('\n\n---\n\n')], { type: 'text/yaml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'uc_metric_views_all.yml';
-    a.click();
-    URL.revokeObjectURL(url);
+    const entries = viewNames
+      .map((name) => [name, result.yaml[name]] as const)
+      .filter(([, v]) => v && v.trim());
+    entries.forEach(([name, yamlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}_uc_metric_view.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   }, [result.yaml, viewNames]);
 
-  // Download all deploy SQL
+  // Download each deploy SQL as its OWN .sql file (one per fact table), staggered.
   const handleDownloadAllSql = useCallback(() => {
-    const combined: string[] = [];
-    for (const name of viewNames) {
-      const sqlContent = result.sql[name];
-      if (sqlContent && sqlContent.trim()) {
-        combined.push(`-- === ${name} ===\n${sqlContent}`);
-      }
-    }
-    const blob = new Blob([combined.join('\n\n')], { type: 'text/sql;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'deploy_metric_views_all.sql';
-    a.click();
-    URL.revokeObjectURL(url);
+    const entries = viewNames
+      .map((name) => [name, result.sql[name]] as const)
+      .filter(([, v]) => v && v.trim());
+    entries.forEach(([name, sqlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}_deploy_metric_view.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   }, [result.sql, viewNames]);
 
   // Download raw JSON (original DAX measures or original M-Query) as a file
@@ -592,7 +611,77 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
 
       <Divider sx={{ my: 1 }} />
 
+      {/* Worst-case fallback: no views generated → show the per-table extract
+          (M-Query source + associated measures/DAX) so the run still yields
+          something usable. */}
+      {viewNames.length === 0 && fallbackRows.length > 0 && (
+        <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'auto' }}>
+          <Alert severity="warning" sx={{ mb: 1.5 }}>
+            No UC Metric Views could be generated for this model (its tables are
+            sourced from raw Power Query M without a resolvable SQL source). The
+            extracted source material is shown below so you can build the views
+            manually or feed it into the M-Query conversion step.
+          </Alert>
+          <Box sx={{ mb: 1, display: 'flex', gap: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={() => downloadJson(fallbackRows as unknown[], 'ucmv_fallback_extract.json')}
+            >
+              Download Extract (JSON)
+            </Button>
+          </Box>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600 }}>Table</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>M-Query source</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Measures (DAX)</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {fallbackRows.map((row) => (
+                  <TableRow key={row.table_name} hover>
+                    <TableCell sx={{ verticalAlign: 'top', fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                      {row.table_name}
+                    </TableCell>
+                    <TableCell sx={{ verticalAlign: 'top', maxWidth: 380 }}>
+                      {row.mquery ? (
+                        <Box component="pre" sx={{ m: 0, fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflow: 'auto' }}>
+                          {row.mquery}
+                        </Box>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ verticalAlign: 'top' }}>
+                      {row.measures.length === 0 ? (
+                        <Typography variant="caption" color="text.secondary">—</Typography>
+                      ) : (
+                        row.measures.map((m, i) => (
+                          <Box key={i} sx={{ mb: 0.75 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 600 }}>{m.measure_name}</Typography>
+                            {m.dax_expression && (
+                              <Box component="pre" sx={{ m: 0, fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.secondary' }}>
+                                {m.dax_expression}
+                              </Box>
+                            )}
+                          </Box>
+                        ))
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
+
       {/* Body: sidebar + detail */}
+      {viewNames.length > 0 && (
       <Box sx={{ display: 'flex', flexGrow: 1, minHeight: 0, gap: 1 }}>
         {/* Sidebar list */}
         <Paper
@@ -778,6 +867,7 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           )}
         </Box>
       </Box>
+      )}
 
       {/* Global stats footer */}
       {result.stats && 'coverage_pct' in (result.stats as Record<string, unknown>) && (

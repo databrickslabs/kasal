@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from src.core.llm_handlers.model_fallback import (
     CONTEXT_WINDOW,
+    ENDPOINT_MISSING,
     FATAL_4XX,
     RATE_LIMIT,
     ModelCandidate,
@@ -16,6 +17,45 @@ from src.core.llm_handlers.model_fallback import (
     classify_llm_error,
     select_fallback,
 )
+
+
+class NotFoundError(Exception):
+    """Class-name match, like litellm.NotFoundError."""
+    pass
+
+
+class TestEndpointMissing:
+    """ENDPOINT_NOT_FOUND (404): the model isn't deployed here → try another."""
+
+    _MSG = ('litellm.NotFoundError: databricksException - '
+            '{"error_code":"ENDPOINT_NOT_FOUND","message":"The given endpoint does '
+            'not exist, please retry after checking the specified model and version '
+            'deployment exists."}')
+
+    def test_classify_endpoint_not_found_message(self):
+        assert classify_llm_error(_Err(self._MSG, status=404)) == ENDPOINT_MISSING
+
+    def test_classify_notfounderror_class(self):
+        assert classify_llm_error(NotFoundError("nope")) == ENDPOINT_MISSING
+
+    def test_selects_untried_different_family(self):
+        cands = [
+            ModelCandidate("databricks-gemini-2-5-flash", 1_000_000),
+            ModelCandidate("databricks-claude-sonnet-4-5", 200_000),
+        ]
+        pick = select_fallback(
+            cands, current_window=200_000, reason=ENDPOINT_MISSING,
+            tried={"databricks-gemini-2-5-flash"},
+            current_model="databricks-gemini-2-5-flash",
+        )
+        assert pick is not None and pick.name == "databricks-claude-sonnet-4-5"
+
+    def test_returns_none_when_all_tried(self):
+        cands = [ModelCandidate("a", 100), ModelCandidate("b", 200)]
+        pick = select_fallback(
+            cands, 200, ENDPOINT_MISSING, tried={"a", "b"}, current_model="a",
+        )
+        assert pick is None
 
 
 class _Err(Exception):

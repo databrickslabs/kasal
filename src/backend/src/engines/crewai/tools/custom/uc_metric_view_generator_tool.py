@@ -163,6 +163,34 @@ class UCMetricViewGeneratorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # ── Raw Power Query M → SQL source recovery (opt-in) ────────────────
+        # When a table's source is raw M (`let ... in ...`) with no embedded
+        # native SQL, MQueryParser cannot extract a FROM clause → the table is
+        # neither a fact nor has a source → 0 views. If LLM fallback is enabled,
+        # rewrite those entries' transpiled_sql to a Spark SQL SELECT the parser
+        # CAN read. Fail-open: entries the LLM can't translate are left as-is.
+        if use_llm and isinstance(mquery_entries, list) and mquery_entries:
+            try:
+                from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import (
+                    looks_like_raw_mquery,
+                )
+                raw_m_count = sum(
+                    1 for e in mquery_entries
+                    if isinstance(e, dict) and looks_like_raw_mquery(e.get('transpiled_sql') or '')
+                )
+                if raw_m_count:
+                    from src.engines.crewai.tools.custom.metric_view_utils.mquery_llm_fallback import (
+                        recover_sources_with_llm,
+                    )
+                    logger.info(f"[UCMV] {raw_m_count} raw M-Query table(s) detected; attempting M→SQL LLM recovery")
+                    mquery_entries, _recovered = _run_async(recover_sources_with_llm(
+                        mquery_entries,
+                        model=(_get('llm_model') or 'databricks-claude-sonnet-4'),
+                    ))
+                    logger.info(f"[UCMV] M→SQL recovery: {_recovered}/{raw_m_count} table(s) recovered")
+            except Exception as _m_err:
+                logger.warning(f"[UCMV] M→SQL LLM recovery skipped (non-fatal): {_m_err}")
+
         # Parse MQuery
         parser = MQueryParser()
         mquery_tables = parser.parse_json(mquery_entries)
@@ -260,6 +288,36 @@ class UCMetricViewGeneratorTool(BaseTool):
         if isinstance(measures, list):
             _measures_for_validation = measures
 
+        # Resolved measure→DAX map, keyed by FACT TABLE (the YAML table key).
+        # This is what the Quality Validator needs: each translated measure paired
+        # with its ORIGINAL DAX, allocated to the correct fact table. Unlike the
+        # raw `measures` list (keyed by PBI holder-table), this uses the pipeline's
+        # own allocation so the validator can pair YAML measures ↔ DAX and run the
+        # filter/aggregation comparison.
+        resolved_measures_by_table = {}
+        for table_key, spec in (results.get('specs', {}) or {}).items():
+            rows = []
+            for m in spec.get('measures', []):
+                rows.append({
+                    'measure_name': m.get('name', ''),
+                    'original_name': m.get('original_name', ''),
+                    'sql_expr': m.get('sql_expr', ''),
+                    'dax_expression': m.get('dax_expression', ''),
+                    'proposed_allocation': table_key,  # fact-table key, matches YAML
+                    'table_name': table_key,
+                })
+            if rows:
+                resolved_measures_by_table[table_key] = rows
+
+        # ── Worst-case fallback: per-table tabular extract ─────────────────
+        # Even when NO views generate (e.g. an all-raw-Power-Query-M model where
+        # neither fact detection nor the M→SQL fallback could produce a UCMV),
+        # the customer should still get the raw material they can act on: for
+        # each PBI table, its M-Query source expression plus the measures/DAX
+        # associated with it. Built from the tool's inputs, so it is populated
+        # regardless of whether the transpilation pipeline succeeded.
+        fallback_extract = self._build_fallback_extract(measures, mquery_entries)
+
         output = {
             'yaml': yaml_output,
             'sql': sql_output,
@@ -268,7 +326,12 @@ class UCMetricViewGeneratorTool(BaseTool):
             'limitations': results.get('limitations', {}),
             'validation': validation_results,
             'measures_with_dax': _measures_for_validation,
+            'resolved_measures_by_table': resolved_measures_by_table,
             'mquery_raw': mquery_entries if isinstance(mquery_entries, list) else [],
+            # Always present; the UI shows it as a tabular reference and falls back
+            # to it as the primary artifact when `yaml` is empty (0 views).
+            'fallback_extract': fallback_extract,
+            'views_generated': len(yaml_output) if isinstance(yaml_output, dict) else 0,
             'specs_summary': {
                 k: {
                     'view_name': v.get('view_name'),
@@ -340,6 +403,66 @@ class UCMetricViewGeneratorTool(BaseTool):
             })
         return extract
 
+    @staticmethod
+    def _build_fallback_extract(measures: Any, mquery_entries: Any) -> list:
+        """Per-table tabular extract of M-Query source + associated measures/DAX.
+
+        The worst-case safety net: when no UC Metric View can be generated (e.g.
+        an all-raw-Power-Query-M model), the customer still gets the raw material
+        organised per table — the M-Query source expression and every measure
+        (with its DAX) allocated to that table. Rendered as a table in the UI.
+
+        Groups by the table each measure is allocated to (proposed_allocation /
+        table_name) and each M-Query entry's table_name. Tables that appear in
+        either source are included, so a table with M-Query but no measures (and
+        vice-versa) is still listed.
+        """
+        by_table: dict[str, dict] = {}
+
+        def _slot(name: str) -> dict:
+            key = name or '__unassigned__'
+            if key not in by_table:
+                by_table[key] = {'table_name': key, 'mquery': '', 'measures': []}
+            return by_table[key]
+
+        # M-Query source per table
+        if isinstance(mquery_entries, list):
+            for e in mquery_entries:
+                if not isinstance(e, dict):
+                    continue
+                tname = e.get('table_name') or ''
+                if not tname:
+                    continue
+                slot = _slot(tname)
+                # Prefer a non-empty source; keep the first seen otherwise.
+                src = e.get('transpiled_sql') or e.get('mquery_expression') or ''
+                if src and not slot['mquery']:
+                    slot['mquery'] = src
+
+        # Measures + DAX per table
+        if isinstance(measures, list):
+            for m in measures:
+                if not isinstance(m, dict):
+                    continue
+                alloc = (
+                    m.get('proposed_allocation')
+                    or m.get('table_name')
+                    or m.get('table')
+                    or '__unassigned__'
+                )
+                _slot(alloc)['measures'].append({
+                    'measure_name': m.get('measure_name') or m.get('original_name') or '',
+                    'dax_expression': m.get('dax_expression') or m.get('expression') or '',
+                })
+
+        # Stable, readable ordering: tables with measures first, then by name.
+        rows = list(by_table.values())
+        rows.sort(key=lambda r: (-len(r['measures']), r['table_name']))
+        for r in rows:
+            r['measure_count'] = len(r['measures'])
+            r['has_mquery'] = bool(r['mquery'])
+        return rows
+
     async def _save_dax_to_conversion_history(
         self,
         raw_dax: list,
@@ -364,7 +487,14 @@ class UCMetricViewGeneratorTool(BaseTool):
             from src.schemas.conversion import ConversionHistoryCreate
             from src.utils.user_context import UserContext
 
-            measure_count = len(raw_dax)
+            raw_dax_count = len(raw_dax)
+            # In JSON/flow mode the tool does not re-extract, so raw_dax is empty
+            # even though views ARE generated (measures arrive via config_json /
+            # task context). Count the actual views produced so the diagnostic
+            # reflects success instead of a misleading "0 measures".
+            view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
+            # measure_count reflects extracted DAX when present, else views built.
+            measure_count = raw_dax_count or view_count
             history_data = ConversionHistoryCreate(
                 execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
                 source_format="powerbi_dax",
@@ -375,7 +505,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "dax_raw": raw_dax,
                 },
                 input_summary=(
-                    f"DAX extract: {measure_count} measure(s)"
+                    f"DAX extract: {raw_dax_count} measure(s)"
                     + (f" from workspace {workspace_id}" if workspace_id else "")
                 )[:500],
                 output_data={
@@ -385,7 +515,8 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "schema": schema,
                 },
                 output_summary=(
-                    f"Generated UC metric views for {measure_count} measure(s)"
+                    f"Generated {view_count} UC metric view(s)"
+                    + (f" from {raw_dax_count} extracted measure(s)" if raw_dax_count else " (JSON/flow mode)")
                 )[:500],
                 configuration={
                     "workspace_id": workspace_id,
@@ -412,7 +543,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 await repo.session.commit()
                 logger.info(
                     f"[UCMVGenerator] Saved conversion_history record id={record.id} "
-                    f"(source_format=powerbi_dax, measures={measure_count})"
+                    f"(source_format=powerbi_dax, views={view_count}, extracted_measures={raw_dax_count})"
                 )
         except Exception as e:
             logger.warning(f"[UCMVGenerator] Failed to save conversion_history (non-fatal): {e}")
@@ -441,6 +572,156 @@ class UCMetricViewGeneratorTool(BaseTool):
     # ------------------------------------------------------------------
     # PBI API extraction helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _import_generate_config():
+        """Import the standalone generate_config module (bundled alongside this tool)."""
+        import sys as _sys
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [this_dir]
+        project_root = os.path.abspath(
+            os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
+        )
+        candidates.append(os.path.join(project_root, "examples", "uc_metric_view_migration"))
+        gen_config_dir = next(
+            (c for c in candidates if os.path.isfile(os.path.join(c, "generate_config.py"))),
+            None,
+        )
+        if gen_config_dir is None:
+            raise ImportError(
+                f"generate_config.py not found in any of: [{', '.join(candidates)}]"
+            )
+        if gen_config_dir not in _sys.path:
+            _sys.path.insert(0, gen_config_dir)
+        import generate_config  # noqa: E402
+        return generate_config
+
+    @staticmethod
+    def _tmdl_tables_to_measures(admin_tables: dict) -> list:
+        """Convert generate_config TMDL/admin table dict → UCMV measure shape."""
+        measures = []
+        for tbl_name, tbl_info in (admin_tables or {}).items():
+            for m in tbl_info.get('measures', []):
+                name = m.get('name', '')
+                if not name:
+                    continue
+                measures.append({
+                    'measure_name': name,
+                    'original_name': name,
+                    'dax_expression': m.get('expression', '') or '',
+                    'proposed_allocation': tbl_name or '__unassigned__',
+                    'table_refs': [],
+                })
+        return measures
+
+    @staticmethod
+    def _tmdl_tables_to_mquery(admin_tables: dict) -> list:
+        """Convert generate_config TMDL table dict → UCMV mquery entry shape.
+
+        UCMV expects [{table_name, transpiled_sql, validation_passed}].
+
+        IMPORTANT: validation_passed MUST start with 'Yes'. MQueryParser.parse_json
+        silently drops any entry whose validation_passed is not 'Yes...' unless the
+        SQL contains both SUM( and GROUP BY. The earlier 'No' value meant every
+        TMDL-recovered table was discarded → the fallback recovered rows but the
+        parser produced zero tables → 0 fact tables → 0 views. The source here is
+        the authoritative partition expression (embedded native SQL where the
+        datasource is a SQL DB, otherwise raw M), so mark it accepted and let the
+        parser extract what it can.
+        """
+        entries = []
+        for tbl_name, tbl_info in (admin_tables or {}).items():
+            src = (tbl_info.get('mquery_expression') or '').strip()
+            if not src:
+                continue
+            entries.append({
+                'table_name': tbl_name,
+                'transpiled_sql': src,
+                'validation_passed': 'Yes',
+            })
+        return entries
+
+    def _extract_mquery_fallback(
+        self, workspace_id, dataset_id, tenant_id, client_id,
+        client_secret, username, password,
+    ) -> list:
+        """Recover MQuery/table-source when the Admin Scanner fails for a Service Account.
+
+        Tier 1: Fabric TMDL with the SA (works if the workspace is Fabric-enabled).
+        Tier 2: Fabric TMDL with a Service Principal (if client_secret provided).
+        Reuses generate_config so the logic is shared with the config generator.
+        """
+        try:
+            gen = self._import_generate_config()
+        except Exception as e:
+            logger.warning(f"[UCMV] Could not load generate_config for MQuery fallback: {e}")
+            return []
+
+        for label, sa_user, sa_pw, sp_secret in (
+            ("SA", username, password, None),
+            ("SP", None, None, client_secret),
+        ):
+            if label == "SA" and not (sa_user and sa_pw):
+                continue
+            if label == "SP" and not sp_secret:
+                continue
+            try:
+                fabric_token = gen.get_fabric_token(
+                    tenant_id, client_id, sp_secret,
+                    username=sa_user, password=sa_pw,
+                )
+                tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                if tmdl_parts:
+                    tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
+                    entries = self._tmdl_tables_to_mquery(tables)
+                    if entries:
+                        logger.info(f"[UCMV] MQuery TMDL fallback ({label}) recovered {len(entries)} tables")
+                        return entries
+            except Exception as e:
+                logger.warning(f"[UCMV] MQuery TMDL fallback ({label}) failed: {e}")
+        return []
+
+    def _extract_measures_fallback(
+        self, workspace_id, dataset_id, tenant_id, client_id,
+        client_secret, username, password,
+    ) -> list:
+        """Recover measure DAX when Execute Queries/XMLA fails for a Service Account.
+
+        Tier 1: Fabric TMDL with the SA (works if the workspace is Fabric-enabled).
+        Tier 2: Fabric TMDL with a Service Principal (if client_secret provided).
+        Both reuse the standalone helpers in generate_config so the logic is
+        shared with the Pipeline Config Generator.
+        """
+        try:
+            gen = self._import_generate_config()
+        except Exception as e:
+            logger.warning(f"[UCMV] Could not load generate_config for fallback: {e}")
+            return []
+
+        # Tier 1: TMDL with whatever creds are present (SA preferred, else SP).
+        for label, sa_user, sa_pw, sp_secret in (
+            ("SA", username, password, None),
+            ("SP", None, None, client_secret),
+        ):
+            if label == "SA" and not (sa_user and sa_pw):
+                continue
+            if label == "SP" and not sp_secret:
+                continue
+            try:
+                fabric_token = gen.get_fabric_token(
+                    tenant_id, client_id, sp_secret,
+                    username=sa_user, password=sa_pw,
+                )
+                tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                if tmdl_parts:
+                    tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
+                    measures = self._tmdl_tables_to_measures(tables)
+                    if measures:
+                        logger.info(f"[UCMV] TMDL fallback ({label}) recovered {len(measures)} measures")
+                        return measures
+            except Exception as e:
+                logger.warning(f"[UCMV] TMDL fallback ({label}) failed: {e}")
+        return []
 
     def _extract_from_pbi_api(
         self,
@@ -508,6 +789,21 @@ class UCMetricViewGeneratorTool(BaseTool):
         except Exception as e:
             logger.warning(f"[UCMV] Measure extraction failed: {e}")
 
+        # 1b. Measure DAX fallback — the Execute Queries / XMLA path above is
+        # frequently rejected for Service-Account (ROPC) tokens, yielding zero
+        # measures. Recover via (a) Fabric TMDL (which an SA CAN read) and, if a
+        # client_secret is available, (b) a Service-Principal retry. Mirrors the
+        # Semantic Model Fetcher's TMDL→SP DAX strategy.
+        if not result.get('measures'):
+            recovered = self._extract_measures_fallback(
+                workspace_id=workspace_id, dataset_id=dataset_id,
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                username=username, password=password,
+            )
+            if recovered:
+                result['measures'] = recovered
+                logger.info(f"[UCMV] Recovered {len(recovered)} measures via TMDL/SP fallback")
+
         # 2. Extract MQuery via Admin API scan
         try:
             from src.converters.services.mquery.scanner import PowerBIAdminScanner
@@ -534,6 +830,22 @@ class UCMetricViewGeneratorTool(BaseTool):
             logger.info(f"[UCMV] Extracted {len(mquery_entries)} MQuery tables from PBI Admin API")
         except Exception as e:
             logger.warning(f"[UCMV] MQuery extraction failed: {e}")
+
+        # 2b. MQuery fallback — the Admin Scanner (used above) rejects
+        # Service-Account tokens (401/403), leaving mquery empty. Without MQuery
+        # no fact table is detected and the generator emits 0 views even when
+        # measures were extracted. Recover the table source expressions via
+        # Fabric TMDL (SA-readable) or a Service-Principal retry, mirroring the
+        # measure fallback and the Semantic Model Fetcher.
+        if not result.get('mquery'):
+            recovered_mq = self._extract_mquery_fallback(
+                workspace_id=workspace_id, dataset_id=dataset_id,
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                username=username, password=password,
+            )
+            if recovered_mq:
+                result['mquery'] = recovered_mq
+                logger.info(f"[UCMV] Recovered {len(recovered_mq)} MQuery tables via TMDL/SP fallback")
 
         # 3. Extract relationships via Execute Queries API
         try:
