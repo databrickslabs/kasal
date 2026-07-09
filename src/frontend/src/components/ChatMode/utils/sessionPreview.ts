@@ -43,6 +43,21 @@ async function fetchResult(jobId: string): Promise<unknown> {
 export async function deriveSessionPreviews(
   messages: ChatMessage[],
 ): Promise<{ history: PreviewContent[]; current: PreviewContent | null }> {
+  // Prefetch every result this session will need IN PARALLEL. The single
+  // sequential loop below used to await each run's full-result GET one at a
+  // time — switching to a 5-run session paid 5 serial round-trips before the
+  // preview appeared. Mirrors the loop's rules: only the FIRST message per
+  // run counts, and a message-local surface makes the fetch unnecessary.
+  const prefetchSeen = new Set<string>();
+  const toFetch: string[] = [];
+  for (const m of messages) {
+    if (!m.executionId || prefetchSeen.has(m.executionId)) continue;
+    prefetchSeen.add(m.executionId);
+    const hasLocal = m.resultType === 'a2ui' && m.resultData != null && toSurface(m.resultData) != null;
+    if (!hasLocal) toFetch.push(m.executionId);
+  }
+  await Promise.all(toFetch.map((jobId) => fetchResult(jobId)));
+
   const seen = new Set<string>();
   const history: PreviewContent[] = [];
   for (const m of messages) {

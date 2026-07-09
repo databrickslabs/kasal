@@ -146,3 +146,32 @@ describe('deriveSessionPreviews', () => {
     expect(mockedGet).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('deriveSessionPreviews — parallel result prefetch (perf W4.2)', () => {
+  it('fetches all runs concurrently instead of one serial round-trip per run', async () => {
+    // Regression: the derivation loop awaited each run's full-result GET one at
+    // a time, so a 5-run session paid 5 sequential round-trips on every switch.
+    const resolvers: Array<(v: unknown) => void> = [];
+    mockedGet.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve as (v: unknown) => void);
+        }) as never,
+    );
+
+    const derivation = deriveSessionPreviews([
+      msg('m1', 'job-parallel-1'),
+      msg('m2', 'job-parallel-2'),
+      msg('m3', 'job-parallel-3'),
+    ]);
+
+    // All three fetches must be IN FLIGHT before any of them resolves.
+    await vi.waitFor(() => expect(resolvers).toHaveLength(3));
+
+    resolvers.forEach((resolve, i) =>
+      resolve({ id: `job-parallel-${i + 1}`, result: doc }),
+    );
+    const { history } = await derivation;
+    expect(history).toHaveLength(3);
+  });
+});

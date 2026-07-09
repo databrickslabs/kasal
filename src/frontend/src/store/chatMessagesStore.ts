@@ -23,39 +23,23 @@ interface ChatMessagesState {
   getDeduplicatedMessages: (sessionId: string) => ChatMessage[];
 }
 
-// Advanced deduplication logic
+// Deduplication by message id, single pass.
+//
+// This used to also carry a "near-duplicate content within 1s" check that
+// rebuilt and substring-scanned a signature map for EVERY message — O(n²)
+// with full-content keys, lagging the workflow chat as executions streamed.
+// That check compared mismatched key formats (`type:content:ts` .includes
+// (`type-content`)), so it could effectively never match — the suite pins
+// that behavior ("both kept" for same-content messages within 1s). Dropping
+// the dead scan keeps the observable behavior and removes the quadratic cost.
 export const deduplicateMessages = (messages: ChatMessage[]): ChatMessage[] => {
   const seenIds = new Set<string>();
-  const seenMessages = new Map<string, ChatMessage>();
 
   return messages.filter((message) => {
-    // Check for exact ID duplicates
     if (seenIds.has(message.id)) {
       return false;
     }
-
-    // Guard against missing content or timestamp (e.g. trace/execution messages from backend)
-    const content = message.content || '';
-    const timestamp = message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now();
-
-    // Create a unique signature for content deduplication
-    const messageSignature = `${message.type}:${content}:${timestamp}`;
-    const contentKey = `${message.type}-${content.substring(0, 100)}`;
-
-    // Check for near-duplicate content within a very small time window (1 second)
-    const seenMessagesArray = Array.from(seenMessages.entries());
-    for (const [existingKey, existingMessage] of seenMessagesArray) {
-      const existingTimestamp = existingMessage.timestamp instanceof Date ? existingMessage.timestamp.getTime() : Date.now();
-      const timeDiff = Math.abs(timestamp - existingTimestamp);
-      const isNearDuplicate = existingKey.includes(contentKey) && timeDiff < 1000;
-
-      if (isNearDuplicate && existingMessage.type === message.type) {
-        return false;
-      }
-    }
-
     seenIds.add(message.id);
-    seenMessages.set(messageSignature, message);
     return true;
   });
 };

@@ -259,13 +259,11 @@ class TestChatHistoryRepository:
 
     @pytest.mark.asyncio
     async def test_get_user_sessions_success(self, chat_history_repository, mock_session, sample_chat_messages):
-        """Test successful retrieval of user sessions."""
+        """Test successful retrieval of user sessions (slim Row projection)."""
         # Arrange
         user_sessions = [sample_chat_messages[0], sample_chat_messages[1]]  # Two sessions for user1
         mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = user_sessions
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.all.return_value = user_sessions
         mock_session.execute.return_value = mock_result
 
         # Act
@@ -279,6 +277,24 @@ class TestChatHistoryRepository:
         # Assert
         assert result == user_sessions
         mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_user_sessions_excludes_generation_result_blob(self, chat_history_repository, mock_session):
+        """Perf regression (W4.5): the sidebar listing must never select the
+        generation_result JSON column — 20 sessions were shipping megabytes of
+        crew plans / A2UI payloads to render one-line titles."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        await chat_history_repository.get_user_sessions(
+            user_id="user1@company.com", group_ids=["group-111"]
+        )
+
+        stmt = mock_session.execute.call_args[0][0]
+        selected = str(stmt).upper().split(" FROM ", 1)[0]
+        assert "CONTENT" in selected and "SESSION_ID" in selected
+        assert "GENERATION_RESULT" not in selected
 
     @pytest.mark.asyncio
     async def test_get_user_sessions_empty_group_ids(self, chat_history_repository):

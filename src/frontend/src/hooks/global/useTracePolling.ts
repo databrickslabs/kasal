@@ -131,11 +131,12 @@ export const useTracePolling = () => {
               const finalTraces = finalResp.data?.traces;
               if (Array.isArray(finalTraces) && finalTraces.length > 0) {
                 console.log(`[TracePolling] Final fetch: ${finalTraces.length} traces`);
+                // ONE store update for the whole batch (was: a Map copy per trace).
+                useRunStatusStore.getState().addTraces(jobId, finalTraces);
                 for (const trace of finalTraces) {
                   window.dispatchEvent(new CustomEvent('traceUpdate', {
                     detail: { jobId, trace }
                   }));
-                  useRunStatusStore.getState().addTrace(jobId, trace);
                   if (typeof trace?.id === 'number' && trace.id > lastTraceIdRef.current) {
                     lastTraceIdRef.current = trace.id;
                   }
@@ -199,11 +200,12 @@ export const useTracePolling = () => {
         if (Array.isArray(traces) && traces.length > 0) {
           console.log(`[TracePolling] ${traces.length} new traces for job ${jobId}`);
 
+          // ONE store update for the whole tick (was: a Map copy per trace).
+          useRunStatusStore.getState().addTraces(jobId, traces);
           for (const trace of traces) {
             window.dispatchEvent(new CustomEvent('traceUpdate', {
               detail: { jobId, trace }
             }));
-            useRunStatusStore.getState().addTrace(jobId, trace);
             if (typeof trace?.id === 'number' && trace.id > lastTraceIdRef.current) {
               lastTraceIdRef.current = trace.id;
             }

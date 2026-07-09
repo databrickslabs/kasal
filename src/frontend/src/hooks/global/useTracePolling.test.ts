@@ -24,6 +24,7 @@ const runStatusState = {
   sseConnected: false,
   handleSSEUpdate: vi.fn(),
   addTrace: vi.fn(),
+  addTraces: vi.fn(),
 };
 vi.mock('../../store/runStatus', () => ({
   useRunStatusStore: { getState: () => runStatusState },
