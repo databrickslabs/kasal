@@ -237,8 +237,15 @@ def process_table(
     # Set fact joins on translator for cross-table resolution
     ctx.translator.set_fact_joins(fact_joins)
 
+    # llm_first (default when LLM enabled): regex runs only as a trivial fast-path;
+    # everything non-trivial routes to the skill-corpus LLM translator. Falls back
+    # to full regex-primary when the mode is 'regex_first' or the LLM is disabled.
+    _mode = (ctx.llm_config or {}).get('translation_mode', 'llm_first')
+    _llm_enabled = bool(ctx.llm_config and ctx.llm_config.get('use_llm_fallback'))
+    _trivial_only = _llm_enabled and _mode == 'llm_first'
+
     for m in dax_measures:
-        result = ctx.translator.translate(m, table_key)
+        result = ctx.translator.translate(m, table_key, trivial_only=_trivial_only)
         if result.is_translatable:
             result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
             if result.measure_name not in base_names:
@@ -459,6 +466,10 @@ def process_table(
                     base_names=base_names,
                     original_to_snake=original_to_snake,
                     model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                    # Feed the dependency-graph topo order so a dependent measure
+                    # lands in a later concurrency chunk than the measure it
+                    # references — its MEASURE() ref resolves (Step 3.9).
+                    topo_priority=_topo_priority,
                 )
             )
             llm_translated = []

@@ -1104,7 +1104,7 @@ class TestProcessTableCrossTableTranslated:
 
         # Create a mock translator that returns a cross_table_translated result
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'cross_measure':
                     result = TranslationResult(
                         measure_name='cross_measure', original_name='Cross',
@@ -1127,7 +1127,7 @@ class TestProcessTableCrossTableTranslated:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'cross':
                     return TranslationResult(
                         measure_name='cross', original_name='Cross',
@@ -1207,7 +1207,7 @@ class TestProcessTablePass2Specific:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class CustomTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'measure_y':
                     return TranslationResult(
                         measure_name='revenue',
@@ -1283,7 +1283,7 @@ class TestProcessTableWindowOrderOverride:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 return TranslationResult(
                     measure_name='py_revenue', original_name='PY Revenue',
                     sql_expr='SUM(source.revenue)', is_translatable=True,
@@ -1317,7 +1317,7 @@ class TestProcessTableSwitchIdentityRatio:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'identity':
                     return TranslationResult(
                         measure_name='identity', original_name='Identity',

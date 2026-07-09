@@ -16,6 +16,12 @@ class TranslationResult:
     confidence: str
     category: str           # "single_table" | "cross_table" | "unassigned" | "base"
     window_spec: dict | None = None  # UC Metric View window: {order, range, semiadditive}
+    # Translation provenance/quality label from the LLM-first translator's
+    # 7-category framework (translatable_direct | composed | filtered |
+    # architecture_change | display_layer | unsupported | out_of_scope).
+    # Distinct from `category`, which drives yaml_emitter output routing — never
+    # overload category with this. Reporting/telemetry only.
+    dax_class: str | None = None
 
 
 @dataclass

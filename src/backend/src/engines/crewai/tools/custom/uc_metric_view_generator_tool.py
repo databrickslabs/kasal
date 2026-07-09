@@ -32,6 +32,7 @@ class UCMetricViewGeneratorSchema(BaseModel):
     inner_dim_joins: bool = Field(False, description="Use INNER JOIN for dimensions")
     unflatten_tables: bool = Field(False, description="Unflatten __-separated table names")
     use_llm_fallback: bool = Field(False, description="Enable LLM fallback for unmatched DAX patterns (opt-in)")
+    translation_mode: Optional[str] = Field(None, description="'llm_first' (default when LLM enabled — skill-corpus-driven) or 'regex_first' (regex patterns primary)")
     llm_model: Optional[str] = Field(None, description="LLM model for fallback (default: databricks-claude-sonnet-4)")
     llm_workspace_url: Optional[str] = Field(None, description="Databricks workspace URL for LLM endpoint")
     llm_token: Optional[str] = Field(None, description="Databricks token for LLM endpoint")
@@ -78,7 +79,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         config_keys = ('measures_json', 'mquery_json', 'relationships_json',
                        'scan_data_json', 'config_json', 'catalog', 'schema_name',
                        'inner_dim_joins', 'unflatten_tables',
-                       'use_llm_fallback', 'llm_model', 'llm_workspace_url', 'llm_token',
+                       'use_llm_fallback', 'translation_mode', 'llm_model', 'llm_workspace_url', 'llm_token',
                        'workspace_id', 'dataset_id', 'tenant_id', 'client_id',
                        'client_secret', 'username', 'password', 'auth_method',
                        'access_token', 'pbi_api_base_url')
@@ -154,6 +155,10 @@ class UCMetricViewGeneratorTool(BaseTool):
                 'llm_model': _get('llm_model') or 'databricks-claude-sonnet-4',
                 'llm_workspace_url': _get('llm_workspace_url') or os.environ.get('DATABRICKS_HOST', ''),
                 'llm_token': _get('llm_token') or os.environ.get('DATABRICKS_TOKEN', ''),
+                # LLM-first translation (skill-corpus driven) is the default; the
+                # regex patterns become a trivial fast-path. 'regex_first' restores
+                # the prior regex-primary behaviour.
+                'translation_mode': _get('translation_mode') or 'llm_first',
             }
 
         try:
