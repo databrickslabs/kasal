@@ -7,7 +7,9 @@ interface MessageContentProps {
   content: string;
 }
 
-const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
+// Memoized on the content string: the markdown detection (10 regexes) + full
+// ReactMarkdown parse used to re-run for every message on every render tick.
+const MessageContent: React.FC<MessageContentProps> = React.memo(({ content }) => {
   if (containsMarkdown(content)) {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2">
@@ -17,6 +19,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
   }
 
   return <p className="whitespace-pre-wrap">{content}</p>;
-};
+});
+MessageContent.displayName = 'MessageContent';
 
 export default MessageContent;

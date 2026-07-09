@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Index, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from uuid import uuid4
@@ -69,16 +69,26 @@ class ExecutionHistory(Base):
     """
     
     __tablename__ = "executionhistory"
-    
+
+    __table_args__ = (
+        # Composite for the most-polled endpoint (executions list):
+        # WHERE group_id IN (...) ORDER BY created_at DESC.
+        Index("idx_executionhistory_group_created", "group_id", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, primary_key=False, unique=True, default=generate_job_id, index=True)
-    status = Column(String, nullable=False, default="pending")
+    # status/created_at are indexed: the trace broadcaster scans status IN
+    # ('RUNNING', ...) every second and the executions list orders by
+    # created_at DESC on the most-polled endpoint. (Existing deployed DBs get
+    # these via the _ensure_hot_polling_indexes self-heal.)
+    status = Column(String, nullable=False, default="pending", index=True)
     inputs = Column(JSON, default=dict)
     result = Column(JSON)
     error = Column(String)
     planning = Column(Boolean, default=False)
     trigger_type = Column(String, default="api")
-    created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)  # Use timezone-naive UTC time
     run_name = Column(String)
     completed_at = Column(DateTime)
     

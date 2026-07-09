@@ -106,3 +106,38 @@ describe('ThinkingStream rendering', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
   });
 });
+
+describe('parsedStepContent — per-step parse cache (perf W3.2)', () => {
+  it('returns the SAME cached entry for an unchanged step (no re-parse per render)', async () => {
+    const { parsedStepContent } = await import('./ThinkingStream');
+    const step: RunStep = {
+      id: 'step-cache-1',
+      label: 'PerplexityTool',
+      sublabel: 'query',
+      detail: 'Title: Doc\nhttps://example.com/a\nsome content',
+    };
+
+    const first = parsedStepContent(step);
+    const second = parsedStepContent({ ...step });
+
+    // Reference equality proves the cache hit — every incoming trace used to
+    // re-run extractSources/contextSummary (full JSON.parse of the payload)
+    // over ALL prior steps, making long runs quadratically slower.
+    expect(second).toBe(first);
+    expect(first.sources[0]?.domain).toBe('example.com');
+  });
+
+  it('re-parses when the step detail changes (tool-result promotion)', async () => {
+    const { parsedStepContent } = await import('./ThinkingStream');
+    const step: RunStep = { id: 'step-cache-2', label: 'Tool', detail: 'plain text summary' };
+
+    const first = parsedStepContent(step);
+    const promoted = parsedStepContent({
+      ...step,
+      detail: 'Title: New\nhttps://promoted.example.org/x',
+    });
+
+    expect(promoted).not.toBe(first);
+    expect(promoted.sources[0]?.domain).toBe('promoted.example.org');
+  });
+});

@@ -860,6 +860,35 @@ async def _ensure_ui_config_columns(conn) -> None:
         logger.warning(f"Could not ensure ui_config columns: {e}")
 
 
+async def _ensure_hot_polling_indexes(conn) -> None:
+    """Idempotently add the indexes the run-polling queries filter/sort on.
+
+    create_all only creates indexes for NEW tables, so existing deployed DBs
+    sequential-scan/sort the two biggest, fastest-growing tables on every 2s
+    poll: executionhistory (list: group_id + ORDER BY created_at DESC; trace
+    broadcaster: status IN ('RUNNING', ...) every second) and execution_trace
+    (run-scoped reads/deletes on run_id, ordered reads on created_at).
+    CREATE INDEX IF NOT EXISTS is valid on both SQLite and PostgreSQL."""
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_executionhistory_group_created "
+        "ON executionhistory (group_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_executionhistory_status "
+        "ON executionhistory (status)",
+        "CREATE INDEX IF NOT EXISTS ix_executionhistory_created_at "
+        "ON executionhistory (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_execution_trace_run_id "
+        "ON execution_trace (run_id)",
+        "CREATE INDEX IF NOT EXISTS ix_execution_trace_created_at "
+        "ON execution_trace (created_at)",
+    )
+    for stmt in statements:
+        try:
+            await conn.exec_driver_sql(stmt)
+        except Exception as e:
+            logger.warning(f"Could not ensure polling index ({stmt.split(' ON ', 1)[0]}): {e}")
+    logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -1105,6 +1134,7 @@ async def init_db() -> None:
                     await _ensure_crew_feedback_table(conn)
                     await _ensure_crew_columns(conn)
                     await _ensure_ui_config_columns(conn)
+                    await _ensure_hot_polling_indexes(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

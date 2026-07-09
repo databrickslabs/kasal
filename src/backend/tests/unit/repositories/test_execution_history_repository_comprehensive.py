@@ -247,6 +247,25 @@ class TestGetExecutionByJobId:
 
         assert result == mock_execution
 
+    @pytest.mark.asyncio
+    async def test_get_execution_summary_excludes_blob_columns(self, repository, mock_session):
+        """Perf regression (W2.2): the polling-path summary lookup must select
+        only scalar columns — never the result/inputs/partial_results/
+        checkpoint_data JSON blobs the full-row variant drags per poll."""
+        mock_row = MagicMock(id=1, job_id='job-123', group_id='group-1', status='RUNNING')
+        mock_result = MagicMock()
+        mock_result.first.return_value = mock_row
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.get_execution_summary_by_job_id('job-123', group_ids=['group-1'])
+
+        assert result == mock_row
+        stmt = mock_session.execute.call_args[0][0]
+        selected = str(stmt).upper().split(" FROM ", 1)[0]
+        assert "STATUS" in selected and "RUN_NAME" in selected
+        for blob in ("RESULT", "INPUTS", "PARTIAL_RESULTS", "CHECKPOINT_DATA"):
+            assert blob not in selected
+
 
 class TestFindById:
     """Tests for find_by_id method."""

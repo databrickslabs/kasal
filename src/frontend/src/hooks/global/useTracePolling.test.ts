@@ -228,6 +228,50 @@ describe('useTracePolling - since_id cursor', () => {
   });
 });
 
+describe('useTracePolling - task-states gating by run type', () => {
+  const taskStateCount = () =>
+    apiGet.mock.calls.filter(([url]) => url === `/traces/job/${JOB}/task-states`).length;
+
+  it('skips the per-tick task-states request for agent (ChatMode) runs', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) {
+        return Promise.resolve({ data: { status: 'running', execution_type: 'agent' } });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // The first tick may probe before execution_type is known; after that,
+    // agent runs must not generate task-states requests (nothing consumes
+    // taskExecutionStore for ChatMode).
+    expect(taskStateCount()).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps polling task-states for crew runs', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) {
+        return Promise.resolve({ data: { status: 'running', execution_type: 'crew' } });
+      }
+      if (url === `/traces/job/${JOB}/task-states`) {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(taskStateCount()).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('useTracePolling - hidden-tab pacing', () => {
   const setHidden = (hidden: boolean) => {
     Object.defineProperty(document, 'hidden', { value: hidden, configurable: true });

@@ -88,6 +88,31 @@ function excerptOf(detail?: string): string {
   return contextSummary(detail, 260);
 }
 
+/**
+ * Parsed-step cache. extractSources/contextSummary JSON.parse the step's FULL
+ * tool payload (100s of KB for Genie/search results); recomputing them on every
+ * render made long runs quadratically slower — each incoming trace re-parsed
+ * ALL prior steps. Keyed by step id and revalidated by detail identity (a
+ * tool-result promotion can replace a pill's detail). Insertion-ordered and
+ * bounded so memory stays flat across very long sessions.
+ */
+const parsedStepCache = new Map<string, { detail?: string; sources: Source[]; excerpt: string }>();
+const PARSED_STEP_CACHE_MAX = 500;
+
+export function parsedStepContent(step: RunStep): { sources: Source[]; excerpt: string } {
+  const cached = parsedStepCache.get(step.id);
+  if (cached && cached.detail === step.detail) return cached;
+  const sources = extractSources(step.detail);
+  const excerpt = sources.length === 0 ? excerptOf(step.detail) : '';
+  if (parsedStepCache.size >= PARSED_STEP_CACHE_MAX) {
+    const oldest = parsedStepCache.keys().next().value;
+    if (oldest !== undefined) parsedStepCache.delete(oldest);
+  }
+  const entry = { detail: step.detail, sources, excerpt };
+  parsedStepCache.set(step.id, entry);
+  return entry;
+}
+
 /** A four-point sparkle marker, à la a "thinking" stream. */
 const Sparkle: React.FC = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
@@ -120,9 +145,8 @@ const SourceGrid: React.FC<{ sources: Source[] }> = ({ sources }) => (
   </div>
 );
 
-const StepItem: React.FC<{ step: RunStep; isLast: boolean; onSelect?: (step: RunStep) => void }> = ({ step, isLast, onSelect }) => {
-  const sources = extractSources(step.detail);
-  const excerpt = sources.length === 0 ? excerptOf(step.detail) : '';
+const StepItem: React.FC<{ step: RunStep; isLast: boolean; onSelect?: (step: RunStep) => void }> = React.memo(({ step, isLast, onSelect }) => {
+  const { sources, excerpt } = parsedStepContent(step);
   // Context worth opening on its own page = detail beyond the short summary line.
   const clickable = Boolean(step.detail && step.detail !== step.sublabel && onSelect);
   const inner = (
@@ -182,7 +206,17 @@ const StepItem: React.FC<{ step: RunStep; isLast: boolean; onSelect?: (step: Run
       )}
     </li>
   );
-};
+}, (prev, next) =>
+  // Step objects are rebuilt fresh on every derivation, so compare by value:
+  // a step only needs re-rendering when its content or position changes.
+  prev.step.id === next.step.id &&
+  prev.step.detail === next.step.detail &&
+  prev.step.label === next.step.label &&
+  prev.step.sublabel === next.step.sublabel &&
+  prev.isLast === next.isLast &&
+  prev.onSelect === next.onSelect,
+);
+StepItem.displayName = 'StepItem';
 
 interface ThinkingStreamProps {
   /** The run's steps, oldest → newest (sourced from the persistent trace). */

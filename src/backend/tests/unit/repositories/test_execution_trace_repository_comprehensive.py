@@ -299,6 +299,27 @@ class TestGetTraceMethods:
         assert "ID >" not in sql
 
     @pytest.mark.asyncio
+    async def test_get_state_events_filters_event_types_in_sql(self, repository, mock_session, mock_traces):
+        """Perf regression (W2.4): the states endpoints must push the lifecycle
+        event filter into SQL — never fetch the run's whole trace set to derive
+        a tiny state dict in Python."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.get_state_events_by_job_id(
+            'test-job-123',
+            ["TASK_STARTED", "task_completed", "crew_completed"],
+        )
+
+        assert len(result) == 3
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "LOWER" in sql and " IN " in sql  # case-insensitive SQL filter
+        assert "JOB_ID" in sql
+        assert "ORDER BY" in sql
+
+    @pytest.mark.asyncio
     async def test_get_all_traces(self, repository, mock_session, mock_traces):
         """Test getting all traces with pagination."""
         mock_result = MagicMock()

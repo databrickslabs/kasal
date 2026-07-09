@@ -68,8 +68,12 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   const isSystem = message.role === 'system';
   // When THIS message's surface is open in the side pane, its inline copy hides
   // (it shows a compact "opened in panel" note instead) so it isn't visible twice.
-  const previewPaneOpen = useExecutionStore((s) => s.previewPaneOpen);
-  const previewSourceMessageId = useExecutionStore((s) => s.previewSourceMessageId);
+  // ONE boolean selector scoped to this message: subscribing every bubble to the
+  // raw previewPaneOpen/previewSourceMessageId values re-rendered the whole
+  // transcript on every pane toggle — only the affected bubble should flip.
+  const isOpenInPane = useExecutionStore(
+    (s) => s.previewPaneOpen && s.previewSourceMessageId === message.id,
+  );
 
   const renderRichContent = () => {
     if (!message.resultType || !message.resultData) return null;
@@ -240,7 +244,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         const a2uiSurface = message.resultData as Surface;
         // While it's open in the pane, hide the inline copy — a compact note with
         // a "Show here" action (which closes the pane) stands in for it.
-        if (previewPaneOpen && previewSourceMessageId === message.id) {
+        if (isOpenInPane) {
           return (
             <div
               className="mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
@@ -284,7 +288,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               // when this message is the one currently open in the pane.
               onRestyle={(restyled) => {
                 useSessionStore.getState().updateMessage(message.id, { resultData: restyled });
-                if (previewPaneOpen && previewSourceMessageId === message.id) {
+                if (isOpenInPane) {
                   useExecutionStore.getState().updatePreviewData(JSON.stringify(restyled));
                 }
               }}
@@ -1123,4 +1127,8 @@ const TaskRow: React.FC<{
   );
 };
 
-export default ChatMessageComponent;
+// Memoized: message objects keep their identity in the session store (appends
+// concat, edits replace only the touched message) and the container passes
+// stable callbacks — so a trace tick appending one message no longer re-renders
+// (and re-parses markdown / re-walks A2UI trees for) the whole transcript.
+export default React.memo(ChatMessageComponent);

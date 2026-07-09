@@ -168,10 +168,13 @@ class ExecutionTraceService:
 
             # Get group IDs from context for filtering
             group_ids = group_context.group_ids if group_context else None
-            logger.info(f"[get_traces_by_job_id] job_id={job_id}, group_context.group_ids={group_ids}")
+            # DEBUG: this runs per poll tick during live runs — INFO was log spam.
+            logger.debug(f"[get_traces_by_job_id] job_id={job_id}, group_context.group_ids={group_ids}")
 
-            # Check if the execution exists and the user has access to it
-            execution = await self.execution_history_repository.get_execution_by_job_id(
+            # Authorize with the SLIM summary lookup — the full-row variant
+            # dragged the result/inputs JSON blobs through the driver on every
+            # 2s poll just to check group access and resolve run_id.
+            execution = await self.execution_history_repository.get_execution_summary_by_job_id(
                 job_id,
                 group_ids=group_ids
             )
@@ -179,7 +182,7 @@ class ExecutionTraceService:
             if not execution:
                 # Either doesn't exist or user doesn't have access
                 # Try to get execution without group filter to diagnose
-                execution_no_filter = await self.execution_history_repository.get_execution_by_job_id(job_id, group_ids=None)
+                execution_no_filter = await self.execution_history_repository.get_execution_summary_by_job_id(job_id, group_ids=None)
                 if execution_no_filter:
                     logger.warning(f"[get_traces_by_job_id] Access denied: execution {job_id} has group_id={execution_no_filter.group_id}, but user group_ids={group_ids}")
                 else:
@@ -229,6 +232,46 @@ class ExecutionTraceService:
             logger.error(f"Error retrieving traces for execution with job_id {job_id}: {str(e)}")
             raise
     
+    async def get_state_events_by_job_id(
+        self,
+        group_context=None,
+        job_id: str = None,
+        event_types: List[str] = None,
+    ) -> Optional[List[ExecutionTraceItem]]:
+        """Authorized fetch of ONLY the state-transition events for a job.
+
+        Backs the crew-node-states / task-states endpoints: they reduce a few
+        lifecycle events (task_started/completed/failed, crew_completed) into a
+        small state dict, and previously fetched + validated + masked the run's
+        ENTIRE trace set (up to 15k rows with payload blobs) per poll to do it.
+
+        Returns None when the execution doesn't exist or the caller lacks
+        access; an empty list when authorized but no matching events yet.
+        """
+        try:
+            group_ids = group_context.group_ids if group_context else None
+
+            execution = await self.execution_history_repository.get_execution_summary_by_job_id(
+                job_id, group_ids=group_ids
+            )
+            if not execution:
+                logger.warning(f"[get_state_events_by_job_id] Execution {job_id} not found or access denied")
+                return None
+
+            traces = await self.repository.get_state_events_by_job_id(
+                job_id, event_types or []
+            )
+            return [
+                _mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving state events for job_id {job_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving state events for job_id {job_id}: {str(e)}")
+            raise
+
     async def get_all_traces(self,
         limit: int = 100,
         offset: int = 0

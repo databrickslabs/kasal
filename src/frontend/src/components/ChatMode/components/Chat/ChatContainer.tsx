@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { PanelRight } from 'lucide-react';
 import { ChatMessage as ChatMessageType } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
@@ -367,8 +367,15 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
   const prefillComposer = (text: string) => setPrefill({ text, nonce: Date.now() });
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Don't fight the user: while they've scrolled up to read something older,
+    // incoming trace ticks must not yank the view back down. Only follow when
+    // already near the bottom — and jump instantly ('auto') instead of
+    // restarting a smooth animation on every appended trace.
+    const el = scrollContainerRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 160) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   };
 
   // Only follow the conversation to the bottom when a NEW message arrives or the
@@ -387,13 +394,81 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     if (grew || latestChanged) scrollToBottom();
   }, [messages]);
 
-  const handleCommand = (command: string) => {
+  // Stable identity so memoized message bubbles aren't invalidated per render.
+  const handleCommand = useCallback((command: string) => {
     if (onCommand) {
       onCommand(command);
     } else {
       onSend(command);
     }
-  };
+  }, [onCommand, onSend]);
+
+  // Grouping + segmentation derive ONLY from messages; memoized so re-renders
+  // from unrelated state (poll ticks, pane toggles, input state) don't regroup
+  // the whole transcript. Deliverables stay UNSERIALIZED here — JSON.stringify
+  // of every A2UI surface (decks, 100-row tables) on every render was a
+  // main-thread tax; the string is built lazily when a pane icon is clicked.
+  const grouped = useMemo(() => {
+    // Generation/tool steps arrive as trace entries and fold into a
+    // run-activity container — ONE PER PROMPT: each user message starts a new
+    // run segment, so a follow-up prompt in the same session gets its own
+    // activity section instead of merging into the previous one. Legacy
+    // generation_complete messages render as normal bubbles.
+    const items = groupChatItems(messages);
+    let seg = 0;
+    const itemsWithSeg = items.map((item) => {
+      if (item.kind === 'msg' && item.msg.role === 'user') seg += 1;
+      return { item, seg };
+    });
+    const lastSeg = seg;
+    const segTraces = new Map<number, ChatMessageType[]>();
+    for (const { item, seg: s } of itemsWithSeg) {
+      if (item.kind === 'traceGroup') {
+        const arr = segTraces.get(s) ?? [];
+        arr.push(...item.msgs);
+        segTraces.set(s, arr);
+      }
+    }
+    // Each run's deliverable, so its pane icon opens the right artifact: an
+    // A2UI surface (research/deep) wins; otherwise the plain-text answer
+    // (chat mode). A later A2UI surface overrides an earlier text answer;
+    // a text answer never displaces an A2UI surface already found.
+    const segDeliverables = new Map<
+      number,
+      { type: 'ui'; raw: unknown } | { type: 'text'; data: string } | undefined
+    >();
+    for (const { item, seg: s } of itemsWithSeg) {
+      if (item.kind !== 'msg') continue;
+      const m = item.msg;
+      if (m.role !== 'assistant') continue;
+      if (m.resultType === 'a2ui' && m.resultData) {
+        segDeliverables.set(s, { type: 'ui', raw: m.resultData });
+      } else if (!m.resultType && m.content && m.content.trim()) {
+        if (segDeliverables.get(s)?.type !== 'ui') {
+          segDeliverables.set(s, { type: 'text', data: m.content });
+        }
+      }
+    }
+    // Historical segments' pane steps, derived once (the LATEST run is pinned
+    // to [] so the pane tracks the live/durable runActivitySteps instead).
+    const segSteps = new Map<number, RunStep[]>();
+    for (const [s, msgs] of segTraces) {
+      if (s !== lastSeg) {
+        segSteps.set(
+          s,
+          deriveStepsFromGroups([{ kind: 'traceGroup', key: `seg-${s}`, label: 'run', msgs }]),
+        );
+      }
+    }
+    return { itemsWithSeg, lastSeg, segTraces, segDeliverables, segSteps };
+  }, [messages]);
+
+  /** Serialize a deliverable only at click time (lazy JSON.stringify). */
+  const toPreviewContent = useCallback(
+    (d?: { type: 'ui'; raw: unknown } | { type: 'text'; data: string }): PreviewContent | undefined =>
+      d === undefined ? undefined : d.type === 'ui' ? { type: 'ui', data: JSON.stringify(d.raw) } : d,
+    [],
+  );
 
   // While a persisted session is being restored on load, don't treat the
   // (momentarily) empty message list as a new chat — otherwise the greeting
@@ -473,51 +548,11 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           control) rather than a top-of-screen banner — see ChatInput. */}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
         <div className="py-6 max-w-3xl mx-auto w-full">
           {(() => {
-            // Generation/tool steps arrive as trace entries and fold into a
-            // run-activity container — ONE PER PROMPT: each user message
-            // starts a new run segment, so a follow-up prompt in the same
-            // session gets its own activity section instead of merging into
-            // the previous one. Legacy generation_complete messages render
-            // as normal bubbles (ChatMessage decides what they show).
-            const items = groupChatItems(messages);
+            const { itemsWithSeg, lastSeg, segTraces, segDeliverables, segSteps } = grouped;
             const running = Boolean(isExecuting || isGenerating);
-
-            // Assign each item to the run segment opened by the latest user
-            // message, then merge that segment's trace groups into one timeline.
-            let seg = 0;
-            const itemsWithSeg = items.map((item) => {
-              if (item.kind === 'msg' && item.msg.role === 'user') seg += 1;
-              return { item, seg };
-            });
-            const lastSeg = seg;
-            const segTraces = new Map<number, ChatMessageType[]>();
-            for (const { item, seg: s } of itemsWithSeg) {
-              if (item.kind === 'traceGroup') {
-                const arr = segTraces.get(s) ?? [];
-                arr.push(...item.msgs);
-                segTraces.set(s, arr);
-              }
-            }
-            // Each run's deliverable, so its pane icon opens the right artifact: an
-            // A2UI surface (research/deep) wins; otherwise the plain-text answer
-            // (chat mode). A later A2UI surface overrides an earlier text answer;
-            // a text answer never displaces an A2UI surface already found.
-            const segDeliverables = new Map<number, PreviewContent | undefined>();
-            for (const { item, seg: s } of itemsWithSeg) {
-              if (item.kind !== 'msg') continue;
-              const m = item.msg;
-              if (m.role !== 'assistant') continue;
-              if (m.resultType === 'a2ui' && m.resultData) {
-                segDeliverables.set(s, { type: 'ui', data: JSON.stringify(m.resultData) });
-              } else if (!m.resultType && m.content && m.content.trim()) {
-                if (segDeliverables.get(s)?.type !== 'ui') {
-                  segDeliverables.set(s, { type: 'text', data: m.content });
-                }
-              }
-            }
             const placedSegs = new Set<number>();
             const renderRunProgress = (s: number) => {
               const live = running && s === lastSeg;
@@ -535,11 +570,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               // Steps for THIS run when opened in the pane. The LATEST run is left
               // empty so the pane tracks the live/durable `runActivitySteps` (which
               // keep updating as the run streams); a HISTORICAL run is pinned to its
-              // own trace steps so its pane shows the activity that belongs to it.
-              const traceMsgs = segTraces.get(s) ?? [];
-              const stepsForSeg: RunStep[] = s === lastSeg
-                ? []
-                : deriveStepsFromGroups([{ kind: 'traceGroup', key: `seg-${s}`, label: 'run', msgs: traceMsgs }]);
+              // own trace steps (pre-derived in the grouping memo).
+              const stepsForSeg: RunStep[] = s === lastSeg ? [] : (segSteps.get(s) ?? []);
               return (
                 <RunProgress
                   key={`run-progress-${s}`}
@@ -549,12 +581,13 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
                   streamSteps={useStream ? (runSteps ?? []) : undefined}
                   // Pane icon on every run card — opens THIS run's deliverable +
-                  // activity in the side pane. Opt-in: nothing opens until clicked.
-                  onShowInPane={onShowRunInPane ? () => onShowRunInPane(segDeliverables.get(s), stepsForSeg) : undefined}
+                  // activity in the side pane. Opt-in: nothing opens until clicked
+                  // (deliverable serialization also happens only at click time).
+                  onShowInPane={onShowRunInPane ? () => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), stepsForSeg) : undefined}
                   // A step ROW opens the pane focused on that step's content.
                   onSelectStep={
                     onShowRunInPane
-                      ? (step) => onShowRunInPane(segDeliverables.get(s), stepsForSeg, step)
+                      ? (step) => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), stepsForSeg, step)
                       : undefined
                   }
                 />

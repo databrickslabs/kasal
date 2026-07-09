@@ -121,7 +121,41 @@ class ExecutionHistoryRepository:
         stmt = select(ExecutionHistory).where(*filters)
         result = await session.execute(stmt)
         return result.scalars().first()
-    
+
+    async def get_execution_summary_by_job_id(self, job_id: str, group_ids: List[str] = None):
+        """Slim scalar-only lookup for hot polling paths.
+
+        The full-row variant drags the result/inputs/partial_results/checkpoint
+        JSON blobs through the driver on every poll just to authorize access or
+        report a RUNNING status; this selects every scalar column the polling
+        responses need and none of the blobs. Returns a Row (or None) with
+        ``.id``, ``.job_id``, ``.group_id``, ``.status``, ``.run_name``,
+        ``.error``, ``.created_at``, ``.completed_at`` and the mlflow fields.
+        """
+        if not self.session:
+            raise RuntimeError("ExecutionHistoryRepository requires a session")
+
+        filters = [ExecutionHistory.job_id == job_id]
+        if group_ids and len(group_ids) > 0:
+            filters.append(ExecutionHistory.group_id.in_(group_ids))
+
+        stmt = select(
+            ExecutionHistory.id,
+            ExecutionHistory.job_id,
+            ExecutionHistory.group_id,
+            ExecutionHistory.status,
+            ExecutionHistory.run_name,
+            ExecutionHistory.error,
+            ExecutionHistory.created_at,
+            ExecutionHistory.completed_at,
+            ExecutionHistory.execution_type,
+            ExecutionHistory.mlflow_trace_id,
+            ExecutionHistory.mlflow_experiment_name,
+            ExecutionHistory.mlflow_evaluation_run_id,
+        ).where(*filters)
+        result = await self.session.execute(stmt)
+        return result.first()
+
     async def find_by_id(self, execution_id: int) -> Optional[ExecutionHistory]:
         """
         Find execution by ID.
