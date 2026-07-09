@@ -164,17 +164,22 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
 
   const handleDownloadAllYamls = () => {
     if (!yamlData) return;
-    const combined = Object.entries(yamlData)
-      .filter(([, v]) => v && v.trim())
-      .map(([k, v]) => `# === ${k} ===\n${v}`)
-      .join('\n\n---\n\n');
-    const blob = new Blob([combined], { type: 'text/yaml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'uc_metric_views_all.yml';
-    a.click();
-    URL.revokeObjectURL(url);
+    // Download each metric view as its OWN .yml file (one per fact table) so
+    // each can be deployed independently — rather than one concatenated file.
+    // Downloads are staggered (~150ms apart) because browsers throttle/deny
+    // rapid back-to-back programmatic downloads.
+    const entries = Object.entries(yamlData).filter(([, v]) => v && v.trim());
+    entries.forEach(([tableName, content], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${tableName}_uc_metric_view.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   };
 
   // Calculate aggregate stats
@@ -216,6 +221,7 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
               variant="contained"
               startIcon={<DownloadIcon />}
               onClick={handleDownloadAllYamls}
+              title="Downloads each metric view as a separate .yml file"
             >
               Download All YAMLs
             </Button>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from .constants import (
@@ -14,6 +15,31 @@ from .constants import (
     RE_LEFT_JOIN,
 )
 from .data_classes import TableInfo
+
+logger = logging.getLogger(__name__)
+
+
+def looks_like_raw_mquery(sql: str) -> bool:
+    """Heuristic: does this string look like raw Power Query M rather than SQL?
+
+    Raw M (``let ... in ...``, ``Source = Sql.Database(...)``) has no SELECT/FROM
+    the parser can read, so it yields is_fact=False + empty source_table and the
+    table is silently dropped from view generation. Detecting it lets callers
+    route the expression to the M→SQL LLM fallback.
+    """
+    if not sql or not isinstance(sql, str):
+        return False
+    s = sql.strip()
+    upper = s.upper()
+    has_select = bool(re.search(r'\bSELECT\b', upper))
+    # M markers: `let`/`in` blocks or Power Query connector functions.
+    has_m_markers = bool(
+        re.search(r'^\s*let\b', s, re.IGNORECASE)
+        or re.search(r'\bin\b\s*$', s, re.IGNORECASE)
+        or re.search(r'\b(Sql\.Database|Value\.NativeQuery|Databricks\.\w+|'
+                     r'Source\s*\{|\[Schema\s*=|\[Item\s*=|Table\.|#"|Excel\.Workbook)\b', s)
+    )
+    return has_m_markers and not has_select
 
 
 class MQueryParser:
@@ -33,6 +59,9 @@ class MQueryParser:
         else:
             entries = json_path
         tables: dict[str, TableInfo] = {}
+        dropped_validation = 0
+        raw_m_tables: list[str] = []
+        non_fact_tables: list[str] = []
         for entry in entries:
             table_name = entry.get('table_name', '')
             sql = entry.get('transpiled_sql', '')
@@ -41,10 +70,36 @@ class MQueryParser:
                 continue
             if not isinstance(status, str) or not status.startswith('Yes'):
                 if not ('SUM(' in sql.upper() and 'GROUP BY' in sql.upper()):
+                    dropped_validation += 1
                     continue
             info = self._parse_sql(table_name, sql)
             info.raw_transpiled_sql = sql
             tables[table_name] = info
+            # ── Diagnostics: make silent fact/source failures visible ──
+            if not info.is_fact:
+                non_fact_tables.append(table_name)
+                if looks_like_raw_mquery(sql):
+                    raw_m_tables.append(table_name)
+
+        if dropped_validation:
+            logger.warning(
+                "[MQueryParser] Dropped %d entr(ies) with validation_passed != 'Yes' "
+                "(and no SUM+GROUP BY). These tables cannot become UC views.",
+                dropped_validation,
+            )
+        if non_fact_tables:
+            logger.info(
+                "[MQueryParser] %d/%d parsed table(s) are NOT facts (no aggregate columns) "
+                "and will be skipped for view generation: %s",
+                len(non_fact_tables), len(tables), ', '.join(non_fact_tables[:20]),
+            )
+        if raw_m_tables:
+            logger.warning(
+                "[MQueryParser] %d table(s) look like RAW Power Query M (no embedded SQL) — "
+                "the parser cannot extract a source table or detect facts from M syntax, so "
+                "these yield 0 views without the M→SQL LLM fallback: %s",
+                len(raw_m_tables), ', '.join(raw_m_tables[:20]),
+            )
         return tables
 
     def parse(self, xlsx_path: str) -> dict[str, TableInfo]:

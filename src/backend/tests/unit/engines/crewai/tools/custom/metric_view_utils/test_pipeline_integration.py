@@ -413,3 +413,73 @@ class TestFullPipelineEndToEnd:
         assert bc['business_pct'] > bc['overall_pct']
         assert bc['artifacts_excluded'] > 0
         assert bc['business_pct'] >= 80  # SC Reporting should be ~85%
+
+
+class TestMeasureDrivenFacts:
+    """Phase 1b: promote plain-source tables with allocated DAX measures to facts.
+
+    Regression: click-together Power Query facts resolve to a plain `SELECT * FROM t`
+    (no aggregate SQL) → is_fact=False → 0 views, even though DAX measures are
+    allocated to them (the aggregation lives in the measures). This pass promotes
+    such tables. Strictly additive — only affects tables that produce ZERO output
+    otherwise; never touches real SQL facts.
+    """
+
+    def _pipe(self, measures, mquery, config=None):
+        parser = MQueryParser()
+        tables = parser.parse_json(mquery)
+        return MetricViewPipeline(mapping=measures, mquery_tables=tables, config=config or {})
+
+    def test_plain_source_with_measures_promoted(self):
+        measures = [{'measure_name': 'Total', 'original_name': 'Total',
+                     'dax_expression': 'SUM(DCC_Sales[Amount])', 'proposed_allocation': 'DCC_Sales'}]
+        mquery = [{'table_name': 'DCC_Sales',
+                   'transpiled_sql': 'SELECT * FROM lakehouse.dcc_sales', 'validation_passed': 'Yes'}]
+        pipe = self._pipe(measures, mquery)
+        pipe.run()
+        y = pipe.emit_all_yaml(catalog='main', schema='m')
+        assert 'DCC_Sales' in y
+
+    def test_plain_source_without_measures_not_promoted(self):
+        # A dimension/param table (no measures) must NOT become a view.
+        mquery = [{'table_name': 'dim_Country',
+                   'transpiled_sql': 'SELECT * FROM lakehouse.dim_country', 'validation_passed': 'Yes'}]
+        pipe = self._pipe([], mquery)
+        pipe.run()
+        y = pipe.emit_all_yaml(catalog='main', schema='m')
+        assert 'dim_Country' not in y
+
+    def test_kill_switch_disables_promotion(self):
+        measures = [{'measure_name': 'Total', 'original_name': 'Total',
+                     'dax_expression': 'SUM(DCC_Sales[Amount])', 'proposed_allocation': 'DCC_Sales'}]
+        mquery = [{'table_name': 'DCC_Sales',
+                   'transpiled_sql': 'SELECT * FROM lakehouse.dcc_sales', 'validation_passed': 'Yes'}]
+        pipe = self._pipe(measures, mquery, config={'allow_measure_driven_facts': False})
+        pipe.run()
+        y = pipe.emit_all_yaml(catalog='main', schema='m')
+        assert 'DCC_Sales' not in y
+
+    def test_real_sql_fact_unaffected(self):
+        # The working aggregate-SQL path must behave exactly as before.
+        measures = [{'measure_name': 'M', 'original_name': 'M',
+                     'dax_expression': 'SUM(FT[amt])', 'proposed_allocation': 'FT'}]
+        mquery = [{'table_name': 'FT',
+                   'transpiled_sql': 'SELECT region, SUM(amt) AS amt FROM s.ft GROUP BY region',
+                   'validation_passed': 'Yes'}]
+        pipe = self._pipe(measures, mquery)
+        pipe.run()
+        y = pipe.emit_all_yaml(catalog='main', schema='m')
+        assert 'FT' in y
+
+    def test_no_source_table_not_promoted(self):
+        # A raw-M table the parser couldn't extract a source from stays skipped
+        # (measure-driven promotion needs a real source_table).
+        measures = [{'measure_name': 'X', 'original_name': 'X',
+                     'dax_expression': 'SUM(T[a])', 'proposed_allocation': 'T'}]
+        # 'let..in' raw M → parser yields source_table='' → not promotable here.
+        mquery = [{'table_name': 'T',
+                   'transpiled_sql': 'let Source = Foo in Source', 'validation_passed': 'Yes'}]
+        pipe = self._pipe(measures, mquery)
+        pipe.run()
+        y = pipe.emit_all_yaml(catalog='main', schema='m')
+        assert 'T' not in y

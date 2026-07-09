@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dax_translator import DaxTranslator
@@ -223,6 +224,42 @@ class MetricViewPipeline:
             )
             spec = self._process_table(table_key, stub_info, dax_measures)
             self.all_specs[table_key] = spec
+
+        # Phase 1b: Measure-driven facts ──────────────────────────────────────
+        # A table can parse WITH a source_table yet NOT be detected as a fact
+        # because its M-Query resolved to a plain table read (no aggregate SQL /
+        # GROUP BY) — typical of "click-together" Power Query sources. If such a
+        # table has DAX measures allocated to it, the aggregation lives in the
+        # MEASURES, not the source query, so it IS a fact. Promote it here.
+        #
+        # STRICTLY ADDITIVE + ISOLATED:
+        #   - only touches tables NOT already in all_specs (Phase 1 SQL facts and
+        #     mapping-only facts are never re-processed),
+        #   - only tables the parser gave a real source_table (nothing invented),
+        #   - only tables that actually have measures allocated,
+        #   - gated by allow_measure_driven_facts (default on; set False to get
+        #     the exact prior behaviour).
+        # The only tables it can affect are ones that produce ZERO output today.
+        if self.config.get('allow_measure_driven_facts', True):
+            promoted = 0
+            for table_key, table_info in self.mquery_tables.items():
+                if table_key in self.all_specs:
+                    continue                      # Phase 1 / mapping-only owns it
+                if table_info.is_fact:
+                    continue                      # real SQL fact — not ours
+                if not table_info.source_table:
+                    continue                      # no source to point a view at
+                dax_measures = measure_groups.get(table_key, [])
+                if not dax_measures:
+                    continue                      # no measures → correctly skipped
+                forced_info = replace(table_info, is_fact=True)
+                spec = self._process_table(table_key, forced_info, dax_measures)
+                self.all_specs[table_key] = spec
+                promoted += 1
+            if promoted:
+                logger.info(
+                    "[MetricViewPipeline] Promoted %d measure-driven fact table(s) "
+                    "(plain source + allocated DAX measures, no aggregate SQL)", promoted)
 
         # Handle scan-data-only tables (in PBI scan + have DAX measures, but no MQuery/mapping entry)
         if self.scan_data:

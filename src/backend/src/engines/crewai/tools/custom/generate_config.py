@@ -31,8 +31,9 @@ from collections import defaultdict
 from typing import Any
 
 __all__ = [
-    "get_token", "extract_relationships", "extract_measures",
+    "get_token", "get_fabric_token", "extract_relationships", "extract_measures",
     "trigger_admin_scan", "parse_admin_tables", "extract_report_definition",
+    "fetch_tmdl_parts", "parse_tmdl_to_admin_tables",
     "build_config", "to_snake_case",
     "derive_join_key_map", "derive_enrichment_joins", "derive_dim_alias_map",
     "derive_switch_decompositions", "derive_filter_sets",
@@ -55,7 +56,14 @@ except ImportError:
 # ═══════════════════════════════════════════════════════════════════════
 
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire OAuth2 token via client_credentials grant."""
+    """Acquire OAuth2 token via client_credentials grant (Service Principal).
+
+    Standalone helper used by this module's own CLI (``main()``). The
+    Pipeline Config Generator *tool* does not call this — it resolves tokens
+    through the shared ``AadService`` (which additionally supports Service
+    Account and User-OAuth), then passes the resulting token into the
+    ``extract_*`` functions below.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     resp = requests.post(url, data={
         "grant_type": "client_credentials",
@@ -67,8 +75,167 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     return resp.json()["access_token"]
 
 
+def fetch_tmdl_parts(
+    fabric_token: str, workspace_id: str, dataset_id: str
+) -> list[dict] | None:
+    """Fetch the semantic model's TMDL definition parts via the Fabric REST API.
+
+    Returns the list of ``{path, payload}`` parts, or ``None`` if the workspace
+    is not Fabric-enabled / the model is unavailable. Handles the async 202
+    long-running-operation poll.
+    """
+    url = (
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
+        f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+    )
+    headers = {"Authorization": f"Bearer {fabric_token}", "Content-Type": "application/json"}
+    try:
+        resp = requests.post(url, headers=headers, timeout=180)
+        if resp.status_code == 200:
+            return resp.json().get("definition", {}).get("parts", [])
+        if resp.status_code == 202:
+            location = resp.headers.get("Location")
+            if not location:
+                return None
+            for _ in range(60):
+                time.sleep(2)
+                poll = requests.get(location, headers=headers, timeout=60)
+                pdata = poll.json()
+                status = pdata.get("status")
+                if status == "Succeeded":
+                    result = requests.get(location + "/result", headers=headers, timeout=60)
+                    _check_response(result, "TMDL getDefinition result")
+                    return result.json().get("definition", {}).get("parts", [])
+                if status == "Failed":
+                    return None
+            return None
+        # 401/403/404 etc. — Fabric not available for these creds/workspace
+        return None
+    except Exception:
+        return None
+
+
+def parse_tmdl_to_admin_tables(
+    tmdl_parts: list[dict], dataset_id: str | None = None
+) -> dict[str, dict]:
+    """Parse TMDL parts into the SAME shape as :func:`parse_admin_tables`.
+
+    Returns ``{table_name: {columns: [...], mquery_expression: "...",
+    measures: [...]}}`` so ``build_config`` consumes it identically to admin-scan
+    output. ``dataset_id`` is accepted for signature parity; TMDL is already
+    scoped to one model so it is not used to filter.
+    """
+    import base64
+
+    tables: dict[str, dict] = {}
+    for part in tmdl_parts or []:
+        path = part.get("path", "")
+        payload = part.get("payload", "")
+        if not path.startswith("definition/tables/") or not path.endswith(".tmdl"):
+            continue
+        try:
+            content = base64.b64decode(payload).decode("utf-8")
+            tmatch = re.match(r"table\s+(?:'([^']+)'|(\w+))", content.strip())
+            if not tmatch:
+                continue
+            table_name = tmatch.group(1) or tmatch.group(2)
+            if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                continue
+
+            # Columns
+            columns = []
+            for cmatch in re.finditer(r"column\s+(?:'([^']+)'|(\w+))", content, re.MULTILINE):
+                columns.append({
+                    "name": cmatch.group(1) or cmatch.group(2),
+                    "dataType": "",
+                    "isHidden": False,
+                })
+
+            # Measures / calculationItems
+            measures = []
+            mpattern = re.compile(
+                r"(?:measure|calculationItem)\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)"
+                r"(?=\n\s*(?:measure|calculationItem)|\n\s*column|\n\t[^\t]|\Z)",
+                re.MULTILINE,
+            )
+            for mmatch in mpattern.finditer(content):
+                mname = mmatch.group(1) or mmatch.group(2)
+                expr = mmatch.group(3).strip()
+                clean = []
+                for line in expr.split("\n"):
+                    if line.strip().startswith(("lineageTag:", "formatString:", "annotation", "isHidden")):
+                        break
+                    clean.append(line)
+                measures.append({"name": mname, "expression": "\n".join(clean).strip()})
+
+            # M-Query (partition source) — best-effort.
+            #
+            # TMDL partitions look like:
+            #     partition <name> = m
+            #         mode: import
+            #         source =
+            #             let
+            #                 Source = Databricks.Catalogs(...),
+            #                 Filtered = Table.SelectRows(...)
+            #             in
+            #                 Filtered
+            #         annotation ...
+            #
+            # The M body itself contains lines like `Source = ...` / `Filtered = ...`,
+            # so a regex that stops at the first `\n<word> =` truncates the source to
+            # just "let" (its first token). Instead, capture the whole indented block
+            # after `source =`: keep every subsequent line that is blank or MORE
+            # indented than the `source` keyword, and stop at the next line indented
+            # at-or-below it (the next TMDL directive: annotation/partition/measure/etc.).
+            source_expr = ""
+            smatch = re.search(r"^([ \t]*)source\s*=[ \t]*(.*)$", content, re.MULTILINE)
+            if smatch:
+                base_indent = len(smatch.group(1).expandtabs(4))
+                inline = smatch.group(2).strip()  # rare: `source = <single-line M>`
+                body_lines: list[str] = []
+                if inline:
+                    body_lines.append(inline)
+                # Walk the lines AFTER the `source =` line.
+                after = content[smatch.end():].split("\n")
+                for line in after:
+                    if not line.strip():
+                        body_lines.append(line)
+                        continue
+                    indent = len(line[: len(line) - len(line.lstrip())].expandtabs(4))
+                    if indent > base_indent:
+                        body_lines.append(line)
+                    else:
+                        break  # dedented → next TMDL directive → end of source block
+                source_expr = "\n".join(body_lines).strip()
+
+            tables[table_name] = {
+                "columns": columns,
+                "mquery_expression": source_expr,
+                "measures": measures,
+            }
+        except Exception:
+            continue
+    return tables
+
+
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+def _row_get(row: dict, col: str, default: str = "") -> str:
+    """Read a Power BI executeQueries result column, tolerant of key format.
+
+    The API returns column keys either bracketed (``[Measure Name]``) or
+    unbracketed (``Measure Name``) depending on the query/permission path.
+    Reading only the bracketed form silently yields empty strings when the API
+    returns the unbracketed form — which is exactly how measure DAX went missing
+    (471 measures, 0 with DAX). Try both.
+    """
+    bare = col.strip("[]")
+    val = row.get(f"[{bare}]")
+    if val is None:
+        val = row.get(bare)
+    return val if val is not None else default
 
 
 def _check_response(resp, context: str = "") -> None:
@@ -331,14 +498,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
         measures = []
         for row in rows:
-            name = row.get("[Measure Name]", "")
+            name = _row_get(row, "Measure Name")
             if name.startswith("__"):
                 continue
             measures.append({
                 "measure_name": name,
-                "table_name": row.get("[Table]", ""),
-                "expression": row.get("[Expression]", ""),
-                "description": row.get("[Description]", ""),
+                "table_name": _row_get(row, "Table"),
+                "expression": _row_get(row, "Expression"),
+                "description": _row_get(row, "Description"),
             })
         return measures
 
@@ -364,14 +531,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
     rows2 = data2.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
     measures = []
     for row in rows2:
-        name = row.get("[Measure Name]", "")
+        name = _row_get(row, "Measure Name")
         if name.startswith("__"):
             continue
         measures.append({
             "measure_name": name,
-            "table_name": row.get("[Table]", ""),
-            "expression": row.get("[Expression]", ""),
-            "description": row.get("[Description]", ""),
+            "table_name": _row_get(row, "Table"),
+            "expression": _row_get(row, "Expression"),
+            "description": _row_get(row, "Description"),
         })
     return measures
 
@@ -871,16 +1038,45 @@ def derive_period_dims(
 # API 4: Report Definition (optional)
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_fabric_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire Fabric API token (different scope from PBI API)."""
+def get_fabric_token(
+    tenant_id: str,
+    client_id: str,
+    client_secret: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Acquire a Microsoft Fabric-scoped OAuth token (different scope from PBI API).
+
+    Supports both Service Principal (client_credentials) and Service Account
+    (ROPC password grant, when username + password are supplied). The SA grant
+    is what lets an SA-only caller read the model via TMDL when the Power BI
+    Admin Scanner rejects the service-account token.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    resp = requests.post(url, data={
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://api.fabric.microsoft.com/.default",
-    }, timeout=30)
-    _check_response(resp, "Auth (Fabric API)")
+    scope = "https://api.fabric.microsoft.com/.default"
+
+    if username and password:
+        data = {
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "scope": scope,
+        }
+        if client_secret:
+            data["client_secret"] = client_secret
+        context = "Auth (Fabric API, service account)"
+    else:
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": scope,
+        }
+        context = "Auth (Fabric API)"
+
+    resp = requests.post(url, data=data, timeout=30)
+    _check_response(resp, context)
     return resp.json()["access_token"]
 
 
