@@ -176,6 +176,53 @@ class TestTranslateBatchWithLLM:
             result = await translate_batch_with_llm(measures, "fact_test", set(), {})
         assert result[0].is_translatable is False
 
+    @pytest.mark.asyncio
+    async def test_selectedvalue_switch_reaches_the_llm(self):
+        """Regression: SELECTEDVALUE / SELECTEDVALUE+SWITCH measures must NOT be
+        artifact-filtered before the LLM.
+
+        The regex quick-reject correctly refuses to translate these (they aren't a
+        single regex pattern), landing them in `untranslatable` with a
+        SELECTEDVALUE+SWITCH skip_reason. Before the fix, `_ARTIFACT_KEYWORDS`
+        then dropped them so the skill-corpus LLM never saw them — they emitted as
+        TODO. They are real parameterized business measures the corpus was built
+        to handle, so they must reach the LLM.
+        """
+        measures = [
+            TranslationResult(
+                measure_name="f_start_date", original_name="F_Start_date",
+                sql_expr=None, is_translatable=False,
+                skip_reason="SELECTEDVALUE+SWITCH (parameterized)",
+                dax_expression=(
+                    "var a = SELECTEDVALUE(Selector_Time_Period[Index]) "
+                    "var b = SWITCH(TRUE(), a=1, CALCULATE(MIN(C_Dim_calendar[Date])))"
+                ),
+                confidence="none", category="unassigned",
+            ),
+            TranslationResult(
+                measure_name="guarded", original_name="Guarded",
+                sql_expr=None, is_translatable=False,
+                skip_reason="SELECTEDVALUE (requires slicer context)",
+                dax_expression="IF(ISBLANK(SELECTEDVALUE(dim[col])), BLANK(), [Revenue])",
+                confidence="none", category="unassigned",
+            ),
+        ]
+        seen = []
+
+        async def fake_call(prompt, sysp, model):
+            seen.append(prompt)
+            return {"content": json.dumps({"success": True, "sql_expr": "SUM(source.amount)",
+                                           "confidence": "medium"}), "usage": {}}
+
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback._call_llm",
+                   new=fake_call):
+            result = await translate_batch_with_llm(measures, "fact_test", set(), {})
+
+        # Both SELECTEDVALUE measures were sent to the LLM (not artifact-filtered)
+        # and got translated.
+        assert len(seen) == 2
+        assert all(m.is_translatable for m in result)
+
 
 class TestBatchConcurrency:
     """translate_batch_with_llm runs in bounded-concurrency chunks (not one-at-a-time).
