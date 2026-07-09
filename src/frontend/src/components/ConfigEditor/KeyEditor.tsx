@@ -34,9 +34,32 @@ interface KeyEditorProps {
   configKey: string;
   value: unknown;
   onChange: (key: string, newValue: unknown) => void;
+  /** measure_usage map ({measure_name: referenced_by_count}) so entries keyed by
+   *  a measure name can show how many other measures reference them — reviewers
+   *  prioritize high-usage TODOs. */
+  usage?: Record<string, number>;
 }
 
-const KeyEditor: React.FC<KeyEditorProps> = ({ configKey, value, onChange }) => {
+/** Collect referenced-by counts for any measure objects nested inside a config
+ *  entry value. Handles list-of-objects (switch_decompositions) and single
+ *  objects that carry a `name` field. Returns the counts found (only >0). */
+function collectNestedUsage(value: unknown, usage: Record<string, number>): number[] {
+  const out: number[] = [];
+  const visit = (v: unknown) => {
+    if (Array.isArray(v)) {
+      v.forEach(visit);
+    } else if (v && typeof v === 'object') {
+      const name = (v as Record<string, unknown>).name;
+      if (typeof name === 'string' && typeof usage[name] === 'number' && usage[name] > 0) {
+        out.push(usage[name]);
+      }
+    }
+  };
+  visit(value);
+  return out;
+}
+
+const KeyEditor: React.FC<KeyEditorProps> = ({ configKey, value, onChange, usage }) => {
   const theme = useTheme();
   const [rawMode, setRawMode] = useState(false);
   const [rawText, setRawText] = useState('');
@@ -239,6 +262,21 @@ const KeyEditor: React.FC<KeyEditorProps> = ({ configKey, value, onChange }) => 
         const dv = dictValue[dk];
         const entryStr = JSON.stringify(dv, null, 2);
         const entryTodo = typeof entryStr === 'string' && entryStr.includes('TODO');
+        // How many other measures reference this entry. Two shapes:
+        //  (a) the entry key IS a measure name (e.g. measure_resolutions:
+        //      "C_EPL") → direct lookup.
+        //  (b) the entry value is a list of measure objects (e.g.
+        //      switch_decompositions: "C_Banner" → [{name: "f_start_date"}, ...])
+        //      → collect the nested measures' counts and show the highest, so
+        //      the reviewer sees the most-referenced measure inside this entry.
+        const nestedUsages = usage ? collectNestedUsage(dv, usage) : [];
+        const directUsage = usage ? usage[dk] : undefined;
+        const entryUsage =
+          typeof directUsage === 'number'
+            ? directUsage
+            : nestedUsages.length
+              ? Math.max(...nestedUsages)
+              : undefined;
 
         return (
           <Paper
@@ -256,6 +294,27 @@ const KeyEditor: React.FC<KeyEditorProps> = ({ configKey, value, onChange }) => 
                 {dk}
               </Typography>
               {entryTodo && <Chip label="TODO" size="small" color="warning" sx={{ height: 18, fontSize: '0.6rem' }} />}
+              {typeof entryUsage === 'number' && entryUsage > 0 && (() => {
+                // When the count comes from nested measures (no direct key
+                // match), label it "max" so it's clear it's the highest among
+                // the measures inside this entry, not a single measure's count.
+                const isNested = typeof directUsage !== 'number';
+                return (
+                  <Tooltip title={
+                    isNested
+                      ? `Most-referenced measure in this entry is used by ${entryUsage} other measure${entryUsage === 1 ? '' : 's'} — higher = higher priority to fix`
+                      : `Referenced by ${entryUsage} other measure${entryUsage === 1 ? '' : 's'} — higher = higher priority to fix`
+                  }>
+                    <Chip
+                      label={isNested ? `used by ≤${entryUsage}` : `used by ${entryUsage}`}
+                      size="small"
+                      color={entryTodo ? 'error' : 'default'}
+                      variant="outlined"
+                      sx={{ height: 18, fontSize: '0.6rem' }}
+                    />
+                  </Tooltip>
+                );
+              })()}
               <Tooltip title="Delete entry">
                 <IconButton
                   size="small"

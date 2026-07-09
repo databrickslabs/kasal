@@ -170,37 +170,67 @@ const SQLBlock: React.FC<{ code: string; language?: string }> = ({ code, languag
 /*  Compact table for dimensions / measures                            */
 /* ------------------------------------------------------------------ */
 
+/** Extract the "referenced by N measures" count the backend appends to a
+ *  measure's comment. Returns null when the measure is referenced by nothing
+ *  (backend omits the suffix at 0). Lets reviewers see + sort by usage so they
+ *  prioritize high-impact measures/gaps. */
+const extractReferencedBy = (comment?: string): number | null => {
+  if (!comment) return null;
+  const m = comment.match(/referenced by (\d+) measures?/i);
+  return m ? parseInt(m[1], 10) : null;
+};
+
 const FieldTable: React.FC<{
   fields: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
   showFormat?: boolean;
-}> = ({ fields, showFormat }) => (
-  <Table size="small" sx={{ tableLayout: 'fixed' }}>
-    <TableHead>
-      <TableRow>
-        <TableCell sx={{ fontWeight: 600, width: '30%' }}>Name</TableCell>
-        <TableCell sx={{ fontWeight: 600, width: showFormat ? '40%' : '70%' }}>Expression</TableCell>
-        {showFormat && <TableCell sx={{ fontWeight: 600, width: '30%' }}>Comment / Format</TableCell>}
-      </TableRow>
-    </TableHead>
-    <TableBody>
-      {fields.map((f) => (
-        <TableRow key={f.name} hover>
-          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
-            {f.name}
-          </TableCell>
-          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
-            {f.expr || '—'}
-          </TableCell>
-          {showFormat && (
-            <TableCell sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
-              {f.comment || f.format || '—'}
-            </TableCell>
-          )}
+}> = ({ fields, showFormat }) => {
+  // Only show the "Used by" column for measures (showFormat) and only when at
+  // least one measure carries a usage count — keeps dimension tables unchanged.
+  const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
+  // Sort measures by usage desc so the highest-impact ones surface first.
+  const rows = showUsage
+    ? [...fields].sort(
+        (a, b) => (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1),
+      )
+    : fields;
+  return (
+    <Table size="small" sx={{ tableLayout: 'fixed' }}>
+      <TableHead>
+        <TableRow>
+          <TableCell sx={{ fontWeight: 600, width: showUsage ? '24%' : '30%' }}>Name</TableCell>
+          <TableCell sx={{ fontWeight: 600, width: showFormat ? (showUsage ? '34%' : '40%') : '70%' }}>Expression</TableCell>
+          {showFormat && <TableCell sx={{ fontWeight: 600, width: showUsage ? '30%' : '30%' }}>Comment / Format</TableCell>}
+          {showUsage && <TableCell sx={{ fontWeight: 600, width: '12%' }} align="right" title="How many other measures reference this measure">Used by</TableCell>}
         </TableRow>
-      ))}
-    </TableBody>
-  </Table>
-);
+      </TableHead>
+      <TableBody>
+        {rows.map((f) => {
+          const usage = extractReferencedBy(f.comment);
+          return (
+            <TableRow key={f.name} hover>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
+                {f.name}
+              </TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
+                {f.expr || '—'}
+              </TableCell>
+              {showFormat && (
+                <TableCell sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
+                  {f.comment || f.format || '—'}
+                </TableCell>
+              )}
+              {showUsage && (
+                <TableCell sx={{ fontSize: '0.8rem' }} align="right">
+                  {usage != null && usage > 0 ? usage : '—'}
+                </TableCell>
+              )}
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Joins table                                                        */

@@ -66,6 +66,9 @@ export interface PipelineConfig {
   // MEASURE & SWITCH LOGIC (keys 5-11)
   switch_decompositions: Record<string, SwitchDecompositionEntry[]>;
   measure_resolutions: Record<string, MeasureResolutionEntry>;
+  // How many other measures reference each measure (in-degree). Surfaced next to
+  // TODO entries so reviewers prioritize high-impact gaps. Measure refs only.
+  measure_usage?: Record<string, number>;
   filter_sets: Record<string, string[]>;
   manual_overrides: Record<string, ManualOverrideEntry>;
   budget_suffix: string | null;

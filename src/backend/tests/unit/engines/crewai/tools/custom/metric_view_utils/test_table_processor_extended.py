@@ -1464,3 +1464,33 @@ class TestIsRealSwitchDecomp:
     def test_non_dict_is_not_real(self):
         assert _is_real_switch_decomp('not-a-dict') is False
         assert _is_real_switch_decomp(None) is False
+
+
+class TestReferencedByPopulation:
+    """process_table populates TranslationResult.referenced_by from config
+    ['measure_usage'] (global) with a local-graph fallback when absent."""
+
+    def test_from_config_measure_usage(self):
+        ti = _make_table_info()
+        ctx = _make_context(config={'measure_usage': {'Total': 5}})
+        dax = [{'measure_name': 'total', 'dax_expression': 'SUM(Sales[amount])',
+                'original_name': 'Total'}]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        by_name = {m.original_name: m for m in spec.measures}
+        assert 'Total' in by_name
+        assert by_name['Total'].referenced_by == 5
+
+    def test_local_fallback_when_config_absent(self):
+        # No measure_usage in config → local graph over this table's measures.
+        # 'Base' is referenced by 'Derived' → Base.referenced_by == 1.
+        ti = _make_table_info()
+        ctx = _make_context(config={})
+        dax = [
+            {'measure_name': 'base', 'dax_expression': 'SUM(Sales[amount])',
+             'original_name': 'Base'},
+            {'measure_name': 'derived', 'dax_expression': '[Base] * 2',
+             'original_name': 'Derived'},
+        ]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        by_name = {m.original_name: m for m in (spec.measures + spec.untranslatable)}
+        assert by_name['Base'].referenced_by == 1

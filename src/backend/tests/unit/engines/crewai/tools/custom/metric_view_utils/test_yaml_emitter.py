@@ -236,6 +236,75 @@ class TestEmitYaml:
         assert '# Complex Measure' in yaml
 
 
+class TestMeasureUsageSurfacing:
+    """referenced_by count surfaced in per-measure comments + sorted TODO block.
+
+    Counts measure→measure references so reviewers prioritize high-impact gaps.
+    """
+
+    def _base(self, name, ref):
+        return TranslationResult(
+            measure_name=name, original_name=name,
+            sql_expr=f'SUM(source.{name})', is_translatable=True,
+            skip_reason='', dax_expression='', confidence='high', category='base',
+            referenced_by=ref,
+        )
+
+    def test_comment_shows_count_when_referenced(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 1)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by 1 measure' in yaml
+        # singular, not "1 measures"
+        assert 'referenced by 1 measures' not in yaml
+
+    def test_plural_wording(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 3)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by 3 measures' in yaml
+
+    def test_no_suffix_at_zero(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 0)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by' not in yaml
+
+    def test_untranslatable_block_sorted_desc_and_annotated(self):
+        def _todo(name, ref):
+            return TranslationResult(
+                measure_name=name.lower(), original_name=name,
+                sql_expr=None, is_translatable=False,
+                skip_reason='TODO gap', dax_expression='SWITCH(...)',
+                confidence='none', category='unassigned', referenced_by=ref,
+            )
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('anchor', 0)],
+            untranslatable=[_todo('LowImpact', 1), _todo('HighImpact', 9),
+                            _todo('MidImpact', 4)],
+        )
+        yaml = emit_yaml(spec)
+        # Annotated with counts
+        assert 'referenced by 9 measures' in yaml
+        assert 'referenced by 1 measure' in yaml
+        # Sorted highest-first: HighImpact appears before MidImpact before LowImpact
+        i_high = yaml.index('HighImpact')
+        i_mid = yaml.index('MidImpact')
+        i_low = yaml.index('LowImpact')
+        assert i_high < i_mid < i_low
+
+
 # ─── _check_dangerous_sql Tests ─────────────────────────────────────────────
 
 from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import _check_dangerous_sql
