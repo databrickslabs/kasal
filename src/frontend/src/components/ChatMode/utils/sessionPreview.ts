@@ -46,20 +46,28 @@ export async function deriveSessionPreviews(
   const seen = new Set<string>();
   const history: PreviewContent[] = [];
   for (const m of messages) {
-    if (!m.executionId || seen.has(m.executionId)) continue;
-    seen.add(m.executionId);
     // Prefer the surface persisted ON the message (`resultData` round-trips
     // through the session API and carries any user restyle `theme`) over the
     // pristine execution.result — otherwise a "Customize → Look" palette is
-    // lost on every session switch. The execution result stays the fallback
-    // for runs whose message carries no surface copy.
-    let surface = m.resultData != null ? toSurface(m.resultData) : null;
-    if (!surface) {
-      const result = await fetchResult(m.executionId);
-      if (result) surface = toSurface(result);
-    }
-    if (surface) {
-      history.push({ type: 'ui', data: JSON.stringify(surface), sourceMessageId: m.id });
+    // lost on every session switch. Gated on the a2ui card type so crew cards /
+    // trace payloads are never mistaken for a deliverable.
+    const local = m.resultType === 'a2ui' && m.resultData != null ? toSurface(m.resultData) : null;
+    if (m.executionId) {
+      if (seen.has(m.executionId)) continue;
+      seen.add(m.executionId);
+      let surface = local;
+      if (!surface) {
+        const result = await fetchResult(m.executionId);
+        if (result) surface = toSurface(result);
+      }
+      if (surface) {
+        history.push({ type: 'ui', data: JSON.stringify(surface), sourceMessageId: m.id });
+      }
+    } else if (local) {
+      // An a2ui card with NO run anchor: an envelope-clobbered row (an old
+      // partial update stripped executionId). Its surface — including any
+      // restyle theme — is still the deliverable; don't drop it.
+      history.push({ type: 'ui', data: JSON.stringify(local), sourceMessageId: m.id });
     }
   }
 

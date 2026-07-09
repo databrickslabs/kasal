@@ -137,6 +137,32 @@ describe('sessionApi - messages', () => {
     expect(messages[1].role).toBe('assistant');
   });
 
+  it('heals an envelope-clobbered a2ui card (surface-shaped resultData, no resultType)', async () => {
+    // Regression (HAR-confirmed): an old partial PUT replaced generation_result
+    // with {resultData} only, stripping resultType — the presentation then never
+    // rendered as a card again. A surface-shaped resultData must load as 'a2ui'.
+    const surface = { surfaceKind: 'presentation', components: [], theme: { accent: '#FF3621' } };
+    mockGet.mockResolvedValue({
+      data: {
+        messages: [{
+          id: 'm1', session_id: 's1', message_type: 'assistant', content: '[ui-card]',
+          generation_result: { __chatmode: { resultData: surface } },
+          timestamp: '2026-06-11T07:00:00',
+        }, {
+          // NOT surface-shaped → no inference (stays typeless).
+          id: 'm2', session_id: 's1', message_type: 'assistant', content: '[ui-card]',
+          generation_result: { __chatmode: { resultData: { agents: [] } } },
+          timestamp: '2026-06-11T07:00:01',
+        }],
+      },
+    });
+
+    const [healed, other] = await api.getSessionMessages('s1');
+    expect(healed.resultType).toBe('a2ui');
+    expect(healed.resultData).toEqual(surface);
+    expect(other.resultType).toBeUndefined();
+  });
+
   it('maps user and system wire types to their roles', async () => {
     mockGet.mockResolvedValue({
       data: {
