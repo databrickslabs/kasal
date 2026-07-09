@@ -437,6 +437,44 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         return await self._get_by_job_id(job_id, limit, offset, since_id)
     
+    async def get_state_events_by_job_id(
+        self,
+        job_id: str,
+        event_types: List[str],
+        limit: int = 15000,
+    ) -> List[ExecutionTrace]:
+        """Fetch ONLY the state-transition events (task/crew lifecycle) for a job.
+
+        The crew-node-states / task-states endpoints derive a tiny state dict
+        from these events; fetching the run's ENTIRE trace set (LLM/tool
+        payload blobs included) per poll was the dominant cost. The filter is
+        case-insensitive on event_type because writers differ in casing.
+
+        Args:
+            job_id: Job ID to filter by
+            event_types: Event types to include (matched case-insensitively)
+            limit: Safety cap on returned rows
+
+        Returns:
+            Matching ExecutionTrace rows in insertion (id) order
+        """
+        try:
+            wanted = [e.lower() for e in event_types]
+            stmt = (
+                select(ExecutionTrace)
+                .where(
+                    ExecutionTrace.job_id == job_id,
+                    func.lower(ExecutionTrace.event_type).in_(wanted),
+                )
+                .order_by(ExecutionTrace.id.asc())
+                .limit(limit)
+            )
+            result = await self.session.execute(stmt)
+            return result.scalars().all()
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving state events for job_id {job_id}: {str(e)}")
+            raise
+
     async def get_all_traces(
         self,
         limit: Optional[int] = None,

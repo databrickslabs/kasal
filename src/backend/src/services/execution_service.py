@@ -802,12 +802,18 @@ class ExecutionService:
             # Create repository with session if available
             if self.session:
                 repository = ExecutionHistoryRepository(self.session)
-                execution = await repository.get_execution_by_job_id(execution_id, group_ids=group_ids)
+                # Slim scalar-only probe first: the vast majority of poll ticks
+                # observe an in-flight run, where nobody needs the result blob —
+                # the full row (result/inputs JSON) is fetched only once the
+                # status is terminal.
+                execution = await repository.get_execution_summary_by_job_id(
+                    execution_id, group_ids=group_ids
+                )
             else:
                 # Log error if no session available
                 exec_logger.error(f"No database session available for getting execution status")
                 return None
-            
+
             if not execution:
                 # DB miss — before declaring a 404, fall back to the in-memory
                 # registry. A just-created run can be polled before its row is
@@ -831,21 +837,39 @@ class ExecutionService:
                         "result": None,
                         "run_name": in_memory.get("run_name"),
                         "error": None,
+                        "execution_type": None,
                         "mlflow_trace_id": None,
                         "mlflow_experiment_name": None,
                         "mlflow_evaluation_run_id": None,
                     }
                 exec_logger.warning(f"Execution {execution_id} not found in database.")
                 return None
-            
+
+            # Only terminal statuses carry a result the caller can use; fetch
+            # the full row (with the JSON blobs) just for those. In-flight
+            # statuses answer straight from the slim probe with result=None —
+            # the same value they returned before, without dragging a completed
+            # prior payload through the driver on every 2s poll.
+            in_flight = {"PENDING", "PREPARING", "RUNNING", "WAITING_FOR_APPROVAL", "STOPPING"}
+            result_value = None
+            if (execution.status or "").upper() not in in_flight:
+                full_row = await repository.get_execution_by_job_id(
+                    execution_id, group_ids=group_ids
+                )
+                if full_row is not None:
+                    result_value = full_row.result
+
             return {
                 "execution_id": execution_id,
                 "status": execution.status,
                 "created_at": execution.created_at,
                 "completed_at": execution.completed_at,
-                "result": execution.result,
+                "result": result_value,
                 "run_name": execution.run_name,
                 "error": execution.error,
+                # Lets the trace poller skip requests that don't apply to this
+                # run type (e.g. task-states for light/agent chat runs).
+                "execution_type": execution.execution_type,
                 # MLflow integration fields
                 "mlflow_trace_id": execution.mlflow_trace_id,
                 "mlflow_experiment_name": execution.mlflow_experiment_name,

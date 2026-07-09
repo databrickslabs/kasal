@@ -414,7 +414,7 @@ class TestGetExecutionStatus:
         session = AsyncMock()
         svc = make_service(session=session)
         mock_repo = AsyncMock()
-        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=None)
         mock_repo_cls = MagicMock(return_value=mock_repo)
         with patch.dict("sys.modules", {
             "src.repositories.execution_history_repository": MagicMock(
@@ -435,11 +435,15 @@ class TestGetExecutionStatus:
             result={"output": "done"},
             run_name="run-1",
             error=None,
+            execution_type="crew",
             mlflow_trace_id="trace-1",
             mlflow_experiment_name="exp-1",
             mlflow_evaluation_run_id="eval-1",
         )
         mock_repo = AsyncMock()
+        # Slim probe answers the scalars; the terminal status triggers the
+        # full-row fetch that supplies the result blob.
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=fake_exec)
         mock_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         mock_repo_cls = MagicMock(return_value=mock_repo)
         with patch.dict("sys.modules", {
@@ -451,6 +455,39 @@ class TestGetExecutionStatus:
         assert result["execution_id"] == "exec-1"
         assert result["status"] == "COMPLETED"
         assert result["mlflow_trace_id"] == "trace-1"
+        assert result["result"] == {"output": "done"}
+
+    @pytest.mark.asyncio
+    async def test_in_flight_status_skips_the_result_blob_fetch(self):
+        """Perf regression (W2.2): a RUNNING poll must answer from the slim
+        scalar probe alone — never load the full row (result/inputs JSON)."""
+        session = AsyncMock()
+        svc = make_service(session=session)
+        fake_summary = SimpleNamespace(
+            status="RUNNING",
+            created_at=datetime(2024, 1, 1),
+            completed_at=None,
+            run_name="run-1",
+            error=None,
+            execution_type="agent",
+            mlflow_trace_id=None,
+            mlflow_experiment_name=None,
+            mlflow_evaluation_run_id=None,
+        )
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=fake_summary)
+        mock_repo.get_execution_by_job_id = AsyncMock()
+        mock_repo_cls = MagicMock(return_value=mock_repo)
+        with patch.dict("sys.modules", {
+            "src.repositories.execution_history_repository": MagicMock(
+                ExecutionHistoryRepository=mock_repo_cls
+            )
+        }):
+            result = await svc.get_execution_status("exec-1")
+        assert result["status"] == "RUNNING"
+        assert result["result"] is None
+        assert result["run_name"] == "run-1"
+        mock_repo.get_execution_by_job_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self):
@@ -481,7 +518,7 @@ class TestGetExecutionStatus:
             "group_email": "u@e.com",
         }
         mock_repo = AsyncMock()
-        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=None)
         mock_repo_cls = MagicMock(return_value=mock_repo)
         try:
             with patch.dict("sys.modules", {
@@ -513,7 +550,7 @@ class TestGetExecutionStatus:
             "group_email": "x@y.com",
         }
         mock_repo = AsyncMock()
-        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=None)
         mock_repo_cls = MagicMock(return_value=mock_repo)
         try:
             with patch.dict("sys.modules", {
@@ -533,7 +570,7 @@ class TestGetExecutionStatus:
         svc = make_service(session=session)
         ExecutionService.executions.clear()
         mock_repo = AsyncMock()
-        mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=None)
         mock_repo_cls = MagicMock(return_value=mock_repo)
         with patch.dict("sys.modules", {
             "src.repositories.execution_history_repository": MagicMock(

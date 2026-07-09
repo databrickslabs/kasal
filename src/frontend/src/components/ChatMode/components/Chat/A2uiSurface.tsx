@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Maximize2, Palette, PanelRight } from 'lucide-react';
 import {
   A2UIRenderer,
@@ -112,12 +112,28 @@ export const A2uiSurface: React.FC<{
     a2uiThemes?.[deliverableKey] ??
     a2uiThemes?.default ??
     (isTokenThemed ? DEFAULT_THEME : null);
-  const deckTheme = deckPalette
-    ? themeToDeck(deckPalette)
-    : getDeckTheme(DEFAULT_DECK_THEME_ID);
-  const tokenStyle = tokenPalette
-    ? (themeToTokens(tokenPalette) as React.CSSProperties)
-    : undefined;
+  // Memoized: parents re-render per trace tick, and a fresh theme object /
+  // context value each render forces every themed child inside the surface to
+  // re-render even when nothing about the surface changed.
+  const deckTheme = useMemo(
+    () => (deckPalette ? themeToDeck(deckPalette) : getDeckTheme(DEFAULT_DECK_THEME_ID)),
+    [deckPalette],
+  );
+  const tokenStyle = useMemo(
+    () => (tokenPalette ? (themeToTokens(tokenPalette) as React.CSSProperties) : undefined),
+    [tokenPalette],
+  );
+  // A quiz is an interactive, multi-question surface — a PDF/PPTX snapshot
+  // captures only the current question, so it has nothing meaningful to
+  // export. Suppress its Download control (the other kinds keep it).
+  const chromeContext = useMemo(
+    () => ({
+      downloads: !hideDownloads && surface.surfaceKind !== 'quiz',
+      onDownloadPdf,
+      fit,
+    }),
+    [hideDownloads, surface.surfaceKind, onDownloadPdf, fit],
+  );
   // Paint the surface's OWN themed background + foreground so its content reads
   // correctly instead of compositing over the (possibly opposite-theme) chat page.
   // Two theming systems → two sources:
@@ -280,16 +296,7 @@ export const A2uiSurface: React.FC<{
         </div>
       )}
       <DeckThemeContext.Provider value={deckTheme}>
-        {/* A quiz is an interactive, multi-question surface — a PDF/PPTX snapshot
-            captures only the current question, so it has nothing meaningful to
-            export. Suppress its Download control (the other kinds keep it). */}
-        <SurfaceChromeContext.Provider
-          value={{
-            downloads: !hideDownloads && surface.surfaceKind !== 'quiz',
-            onDownloadPdf,
-            fit,
-          }}
-        >
+        <SurfaceChromeContext.Provider value={chromeContext}>
           <A2UIRenderer payload={surface} />
         </SurfaceChromeContext.Provider>
       </DeckThemeContext.Provider>

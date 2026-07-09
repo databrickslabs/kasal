@@ -14,14 +14,18 @@ class ExecutionTrace(Base):
     __tablename__ = "execution_trace"
     
     id = Column(Integer, primary_key=True)
-    run_id = Column(Integer, ForeignKey('executionhistory.id'))
+    # run_id/created_at are indexed: run-scoped reads/deletes filter on run_id
+    # and ordered trace reads sort on created_at — both polled during live runs
+    # on one of the fastest-growing tables. (Existing deployed DBs get these via
+    # the _ensure_hot_polling_indexes self-heal; create_all won't ALTER.)
+    run_id = Column(Integer, ForeignKey('executionhistory.id'), index=True)
     job_id = Column(String, ForeignKey('executionhistory.job_id'), index=True)
     event_source = Column(String, nullable=False)  # was agent_name
     event_context = Column(String, nullable=False)  # was task_name
     event_type = Column(String, nullable=False, index=True)  # now required
     output = Column(JSON)
     trace_metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     # OTel span hierarchy columns
     span_id = Column(String(32), nullable=True, index=True)

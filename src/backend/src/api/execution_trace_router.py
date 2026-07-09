@@ -152,11 +152,14 @@ async def get_current_crew_node_states(
     Returns:
         Dictionary mapping crew names to their current states
     """
-    # Get all traces for the job with authorization check
-    result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=15000, offset=0
+    # Fetch ONLY the lifecycle events (SQL-side filter) — deriving these tiny
+    # state dicts used to pull the run's entire trace set per poll.
+    state_traces = await service.get_state_events_by_job_id(
+        group_context=group_context,
+        job_id=job_id,
+        event_types=["task_started", "task_completed", "task_failed", "crew_completed"],
     )
-    if not result:
+    if state_traces is None:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
 
     crew_states = {}
@@ -168,7 +171,7 @@ async def get_current_crew_node_states(
     crew_completed_tasks = {}  # Track completed tasks per crew
     crew_failed = set()  # Track failed crews
 
-    for trace in result.traces:
+    for trace in state_traces:
         event_type_upper = trace.event_type.upper() if trace.event_type else ""
 
         # Check for crew-related events from flow execution
@@ -265,18 +268,21 @@ async def get_current_task_states(
     Returns:
         Dictionary mapping task IDs to their current states
     """
-    # Get all traces for the job with authorization check
-    result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=15000, offset=0
+    # Fetch ONLY the task lifecycle events (SQL-side filter) — deriving these
+    # tiny state dicts used to pull the run's entire trace set per poll.
+    state_traces = await service.get_state_events_by_job_id(
+        group_context=group_context,
+        job_id=job_id,
+        event_types=["task_started", "task_completed", "task_failed"],
     )
-    if not result:
+    if state_traces is None:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
 
     task_states = {}
     task_name_to_id = {}  # Track the proper task ID for each task name
 
     # First pass: collect all task IDs with proper UUIDs (those that have task_id in metadata)
-    for trace in result.traces:
+    for trace in state_traces:
         event_type_upper = trace.event_type.upper() if trace.event_type else ""
         if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED"]:
             if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
@@ -290,7 +296,7 @@ async def get_current_task_states(
                         task_name_to_id[trace.event_context] = task_id
 
     # Second pass: process traces to determine current task states
-    for trace in result.traces:
+    for trace in state_traces:
         # Normalize event type to uppercase for consistency
         event_type_upper = trace.event_type.upper() if trace.event_type else ""
 

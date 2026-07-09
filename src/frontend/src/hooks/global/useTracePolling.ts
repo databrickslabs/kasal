@@ -55,6 +55,8 @@ export const useTracePolling = () => {
   const isPollingRef = useRef(false);
   /** Highest trace id seen — the server-side `since_id` cursor. */
   const lastTraceIdRef = useRef<number>(0);
+  /** execution_type from the status probe — gates run-type-specific requests. */
+  const executionTypeRef = useRef<string | null>(null);
   const lastStatusRef = useRef<string | null>(null);
   /** Consecutive 404s on the status probe — a gone job (deleted / different group). */
   const notFoundCountRef = useRef(0);
@@ -95,6 +97,9 @@ export const useTracePolling = () => {
       if (results[0].status === 'fulfilled') {
         notFoundCountRef.current = 0;
         const execData = results[0].value.data;
+        if (execData?.execution_type) {
+          executionTypeRef.current = String(execData.execution_type).toLowerCase();
+        }
         if (execData?.status) {
           const status = execData.status.toLowerCase();
 
@@ -239,7 +244,9 @@ export const useTracePolling = () => {
       }
 
       // --- 4. Update task states (for TaskNode visual indicators) ---
-      if (!isFlow) {
+      // Light/agent (ChatMode) runs have no task nodes and nothing consumes
+      // taskExecutionStore for them — skip the extra request per tick.
+      if (!isFlow && executionTypeRef.current !== 'agent') {
         try {
           const taskResp = await apiClient.get(`/traces/job/${jobId}/task-states`);
           const taskStates = taskResp.data;
@@ -284,6 +291,7 @@ export const useTracePolling = () => {
     lastTraceIdRef.current = 0;
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
+    executionTypeRef.current = null;
     sseProvenWorkingRef.current = false;
     console.log(`[TracePolling] ▶ Starting polling for job ${jobId}`);
 
@@ -306,6 +314,7 @@ export const useTracePolling = () => {
     lastTraceIdRef.current = 0;
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
+    executionTypeRef.current = null;
   }, []);
 
   // Listen for job lifecycle events
