@@ -60,7 +60,7 @@ class TestSampleSchemas:
     def test_sample_schemas_structure(self):
         """Test that SAMPLE_SCHEMAS has correct structure."""
         assert isinstance(SAMPLE_SCHEMAS, list)
-        assert len(SAMPLE_SCHEMAS) == 10  # We have exactly 10 schemas
+        assert len(SAMPLE_SCHEMAS) == 16  # the business-outcome catalog
 
         for schema in SAMPLE_SCHEMAS:
             assert "name" in schema
@@ -72,121 +72,80 @@ class TestSampleSchemas:
             assert isinstance(schema["schema_definition"], dict)
             assert "type" in schema["schema_definition"]
 
-    def test_article_schema(self):
-        """Test Article schema definition."""
-        article_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Article"),
+    def test_required_fields_exist_in_properties(self):
+        """Every schema's `required` list only names declared properties."""
+        for schema in SAMPLE_SCHEMAS:
+            definition = schema["schema_definition"]
+            properties = definition.get("properties", {})
+            for field in definition.get("required", []):
+                assert field in properties, \
+                    f"'{schema['name']}' requires undeclared field '{field}'"
+
+    def test_operation_result_schema(self):
+        """Test OperationResult schema definition (action outcomes)."""
+        op_schema = next(
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "OperationResult"),
             None
         )
 
-        assert article_schema is not None
-        assert article_schema["schema_type"] == "schema"
-        assert "title" in article_schema["schema_definition"]["properties"]
-        assert "content" in article_schema["schema_definition"]["properties"]
-        assert "summary" in article_schema["schema_definition"]["properties"]
-        assert "tags" in article_schema["schema_definition"]["properties"]
-        assert "title" in article_schema["schema_definition"]["required"]
-        assert "content" in article_schema["schema_definition"]["required"]
+        assert op_schema is not None
+        assert op_schema["schema_type"] == "schema"
+        assert "success" in op_schema["schema_definition"]["properties"]
+        assert "status" in op_schema["schema_definition"]["properties"]
+        assert "status" in op_schema["schema_definition"]["required"]
+        assert "success" in op_schema["schema_definition"]["required"]
 
-    def test_summary_schema(self):
-        """Test Summary schema definition."""
-        summary_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Summary"),
+    def test_data_load_result_schema(self):
+        """Test DataLoadResult schema definition (ETL row counts)."""
+        load_schema = next(
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "DataLoadResult"),
             None
         )
 
-        assert summary_schema is not None
-        assert summary_schema["schema_type"] == "schema"
-        assert "key_points" in summary_schema["schema_definition"]["properties"]
-        assert "conclusion" in summary_schema["schema_definition"]["properties"]
+        assert load_schema is not None
+        assert load_schema["schema_type"] == "schema"
+        assert "table" in load_schema["schema_definition"]["properties"]
+        assert "rows_inserted" in load_schema["schema_definition"]["properties"]
+        assert "rows_inserted" in load_schema["schema_definition"]["required"]
 
-    def test_analysis_schema(self):
-        """Test Analysis schema definition."""
-        analysis_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Analysis"),
+    def test_support_ticket_triage_schema(self):
+        """Test SupportTicketTriage schema definition (classification/routing)."""
+        triage_schema = next(
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "SupportTicketTriage"),
             None
         )
 
-        assert analysis_schema is not None
-        assert analysis_schema["schema_type"] == "schema"
-        assert "findings" in analysis_schema["schema_definition"]["properties"]
-        assert "insights" in analysis_schema["schema_definition"]["properties"]
-        assert "next_steps" in analysis_schema["schema_definition"]["properties"]
+        assert triage_schema is not None
+        assert triage_schema["schema_type"] == "schema"
+        assert "category" in triage_schema["schema_definition"]["properties"]
+        assert "priority" in triage_schema["schema_definition"]["properties"]
+        assert "requires_human" in triage_schema["schema_definition"]["properties"]
 
-    def test_search_results_schema(self):
-        """Test SearchResults schema definition."""
-        search_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "SearchResults"),
+    def test_sentiment_analysis_schema(self):
+        """Test SentimentAnalysis schema definition."""
+        sentiment_schema = next(
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "SentimentAnalysis"),
             None
         )
 
-        assert search_schema is not None
-        assert search_schema["schema_type"] == "schema"
-        assert "results" in search_schema["schema_definition"]["properties"]
-        assert "sources" in search_schema["schema_definition"]["properties"]
+        assert sentiment_schema is not None
+        assert sentiment_schema["schema_type"] == "schema"
+        assert "sentiment" in sentiment_schema["schema_definition"]["properties"]
+        assert "score" in sentiment_schema["schema_definition"]["properties"]
+        assert "sentiment" in sentiment_schema["schema_definition"]["required"]
 
-    def test_recommendation_schema(self):
-        """Test Recommendation schema definition."""
-        rec_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Recommendation"),
+    def test_intent_classification_schema(self):
+        """Test IntentClassification schema definition."""
+        intent_schema = next(
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "IntentClassification"),
             None
         )
 
-        assert rec_schema is not None
-        assert rec_schema["schema_type"] == "schema"
-        assert "recommendation" in rec_schema["schema_definition"]["properties"]
-        assert "reasoning" in rec_schema["schema_definition"]["properties"]
-        assert "confidence" in rec_schema["schema_definition"]["properties"]
-
-    def test_action_items_schema(self):
-        """Test ActionItems schema definition."""
-        action_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "ActionItems"),
-            None
-        )
-
-        assert action_schema is not None
-        assert action_schema["schema_type"] == "schema"
-        assert "items" in action_schema["schema_definition"]["properties"]
-        assert "priority" in action_schema["schema_definition"]["properties"]
-
-    def test_email_schema(self):
-        """Test Email schema definition."""
-        email_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Email"),
-            None
-        )
-
-        assert email_schema is not None
-        assert email_schema["schema_type"] == "schema"
-        assert "subject" in email_schema["schema_definition"]["properties"]
-        assert "body" in email_schema["schema_definition"]["properties"]
-        assert "tone" in email_schema["schema_definition"]["properties"]
-
-    def test_report_schema(self):
-        """Test Report schema definition."""
-        report_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Report"),
-            None
-        )
-
-        assert report_schema is not None
-        assert report_schema["schema_type"] == "schema"
-        assert "title" in report_schema["schema_definition"]["properties"]
-        assert "sections" in report_schema["schema_definition"]["properties"]
-        assert "executive_summary" in report_schema["schema_definition"]["properties"]
-
-    def test_qa_schema(self):
-        """Test QA schema definition."""
-        qa_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "QA"),
-            None
-        )
-
-        assert qa_schema is not None
-        assert qa_schema["schema_type"] == "schema"
-        assert "question" in qa_schema["schema_definition"]["properties"]
-        assert "answer" in qa_schema["schema_definition"]["properties"]
+        assert intent_schema is not None
+        assert intent_schema["schema_type"] == "schema"
+        assert "intent" in intent_schema["schema_definition"]["properties"]
+        assert "confidence" in intent_schema["schema_definition"]["properties"]
+        assert "intent" in intent_schema["schema_definition"]["required"]
 
     def test_evaluation_schema(self):
         """Test Evaluation schema definition."""
@@ -204,9 +163,11 @@ class TestSampleSchemas:
     def test_all_schema_names(self):
         """Test all expected schema names are present."""
         expected_names = [
-            "Article", "Summary", "Analysis", "SearchResults",
-            "Recommendation", "ActionItems", "Email", "Report",
-            "QA", "Evaluation"
+            "OperationResult", "DataLoadResult", "SupportTicketTriage",
+            "SentimentAnalysis", "IntentClassification", "CustomerFeedback",
+            "WebSearchResult", "ApprovalDecision", "LeadQualification",
+            "ResumeScreening", "Evaluation", "RiskAssessment",
+            "ContentModeration", "FraudCheck", "ExpenseApproval", "InvoiceData",
         ]
 
         actual_names = [s["name"] for s in SAMPLE_SCHEMAS]
@@ -385,9 +346,9 @@ class TestSchemaValidation:
 class TestSchemaCount:
     """Test schema count and naming."""
 
-    def test_exactly_ten_schemas(self):
-        """Test that there are exactly 10 schemas."""
-        assert len(SAMPLE_SCHEMAS) == 10
+    def test_exactly_sixteen_schemas(self):
+        """Test that the catalog carries exactly the 16 seeded schemas."""
+        assert len(SAMPLE_SCHEMAS) == 16
 
     def test_unique_schema_names(self):
         """Test that all schema names are unique."""

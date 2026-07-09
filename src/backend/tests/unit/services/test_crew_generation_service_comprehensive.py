@@ -2402,6 +2402,7 @@ class TestProgressiveGeneration:
         disable_memory=False,
         mcp_servers=None,
         agentbricks_endpoints=None,
+        knowledge_file_paths=None,
     ):
         """Create a mock CrewStreamingRequest.
 
@@ -2409,7 +2410,8 @@ class TestProgressiveGeneration:
         backend run branch is skipped; ChatMode tests pass auto_execute=True.
         The run-setting attrs are set explicitly because a bare Mock would make
         ``getattr(req, "auto_execute", False)`` truthy and ``request.mcp_servers``
-        (or ``request.agentbricks_endpoints``) a non-iterable Mock.
+        (or ``request.agentbricks_endpoints`` / ``request.knowledge_file_paths``)
+        a non-iterable Mock.
         """
         req = Mock()
         req.prompt = prompt
@@ -2422,6 +2424,7 @@ class TestProgressiveGeneration:
         req.disable_memory = disable_memory
         req.mcp_servers = mcp_servers or []
         req.agentbricks_endpoints = agentbricks_endpoints or []
+        req.knowledge_file_paths = knowledge_file_paths or []
         return req
 
     def _make_plan(

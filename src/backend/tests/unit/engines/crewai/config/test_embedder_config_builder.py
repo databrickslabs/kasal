@@ -182,9 +182,15 @@ class TestEmbedderConfigBuilder:
                 assert result_kwargs['agents'] == ['agent1']
                 assert result_kwargs['tasks'] == ['task1']
 
-                # Embedder should be None due to error
+                # No Databricks embedder could be built…
                 assert custom_embedder is None
-                assert embedder_config is None
+                # …so the builder falls back to a LOCAL Ollama embedder (the
+                # FastEmbed fallback was retired — this CrewAI build has no
+                # "fastembed" provider, so memory init crashed). Model/host are
+                # env-driven, never hardcoded.
+                assert embedder_config is not None
+                assert embedder_config['provider'] == 'ollama'
+                assert result_kwargs['embedder'] == embedder_config
 
     @pytest.mark.asyncio
     async def test_configure_embedder_with_no_embedder_config(self):

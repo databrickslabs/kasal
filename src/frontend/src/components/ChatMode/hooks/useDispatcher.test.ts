@@ -49,13 +49,14 @@ function result(
 
 // ChatMode run settings the hook passes to dispatch() as the 4th arg. Defaults:
 // session-1 (getCurrentSessionId), and the execution store's own defaults
-// (workspace-wide memory recall, memory on, no MCP servers). The 5th arg is the
-// CLEAN user message (before the intent-steering prefix is added to dispatch).
+// (workspace-wide memory recall, memory OFF by default since the "default to
+// Session memory" change — disable_memory: true, no MCP servers). The 5th arg
+// is the CLEAN user message (before the intent-steering prefix is added).
 const RUN_SETTINGS = {
   auto_execute: true,
   session_id: 'session-1',
   memory_workspace_scope: true,
-  disable_memory: false,
+  disable_memory: true,
   mcp_servers: [],
   agentbricks_endpoints: [],
   // Default answer mode is 'chat' (single light agent) — also skips the

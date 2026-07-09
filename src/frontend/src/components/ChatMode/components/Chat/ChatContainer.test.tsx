@@ -412,7 +412,10 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getAllByText(/find stock photos/).length).toBeGreaterThan(0);
   });
 
-  it('keeps an inline-rendered Genie answer in the chat (not inside the container)', () => {
+  it('folds a Genie trace into the run-activity container (answers render via the A2UI surface)', () => {
+    // Genie's inline trace renderer was removed on purpose: its ANSWER now
+    // arrives as the shared A2UI surface like every other deliverable, so the
+    // trace itself is plain run activity — grouped, not a standalone bubble.
     const genie = {
       id: 'g1',
       role: 'assistant',
@@ -422,8 +425,8 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       resultData: { label: 'GenieTool', kind: 'tool_result', detail: 'SQL Query:\nSELECT 1' },
     } as unknown as ChatMessageType;
     render(<ChatContainer {...baseProps} messages={[msg('u', 'q'), genie]} />);
-    // The Genie trace renders as a normal chat message (stubbed), not folded away.
-    expect(screen.getByTestId('msg-g1')).toBeInTheDocument();
+    expect(screen.queryByTestId('msg-g1')).toBeNull();
+    expect(screen.getByText('Run activity')).toBeInTheDocument();
   });
 
   it('renders a completed run as plain conversation — no card, no leftover container', () => {

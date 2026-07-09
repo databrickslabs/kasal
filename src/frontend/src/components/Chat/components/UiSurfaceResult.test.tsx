@@ -14,6 +14,10 @@ const mockGetConfig = vi.fn();
 vi.mock('../../../api/UIConfigService', () => ({
   UIConfigService: {
     getConfig: (...args: unknown[]) => mockGetConfig(...args),
+    // useA2uiThemes seeds synchronously from the session cache and subscribes
+    // for Configurator saves — stub both (no cache hit, no-op unsubscribe).
+    peek: () => null,
+    subscribe: () => () => undefined,
   },
 }));
 
