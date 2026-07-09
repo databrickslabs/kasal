@@ -388,3 +388,29 @@ class TestBuildFallbackExtract:
         )
         # table with measures sorts before the one without
         assert rows[0]["table_name"] == "HasMeasures"
+
+
+class TestAgentJunkKwargsGuard:
+    """A capable agent (e.g. opus), told to 'call the tool with ALL inputs', may
+    pass placeholder strings for the JSON fields — overriding the good flow-injected
+    values and causing 'Invalid JSON input: char 0'. The tool must ignore non-JSON
+    kwargs when a valid flow-injected default exists.
+    """
+
+    def test_junk_kwargs_do_not_override_injected_data(self):
+        measures = json.dumps([{"measure_name": "total", "original_name": "Total",
+                                "dax_expression": "SUM(F[amt])", "proposed_allocation": "F"}])
+        # Flow injected good data into _default_config:
+        tool = UCMetricViewGeneratorTool(measures_json=measures, mquery_json="[]", config_json="{}")
+        # Agent passes junk placeholders at call time:
+        result = tool._run(config_json="<config_json>", measures_json="the measures json")
+        data = json.loads(result)
+        assert not data.get("error", "").startswith("Invalid JSON"), \
+            "junk agent kwargs must not defeat the injected JSON data"
+
+    def test_empty_string_json_does_not_error(self):
+        tool = UCMetricViewGeneratorTool()
+        # Empty strings for the JSON inputs → treated as empty, not a parse error.
+        result = tool._run(measures_json="", mquery_json="", config_json="")
+        data = json.loads(result)
+        assert not data.get("error", "").startswith("Invalid JSON")

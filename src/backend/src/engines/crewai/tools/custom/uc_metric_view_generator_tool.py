@@ -100,11 +100,45 @@ class UCMetricViewGeneratorTool(BaseTool):
         def _get(key):
             return kwargs.get(key) or self._default_config.get(key)
 
-        measures_raw = _get('measures_json') or '[]'
-        mquery_raw = _get('mquery_json') or '[]'
-        relationships_raw = _get('relationships_json')
-        scan_raw = _get('scan_data_json')
-        config_raw = _get('config_json') or '{}'
+        # JSON inputs (measures/mquery/config/relationships/scan) are injected into
+        # _default_config by the flow handoff. A capable agent, told to "call the
+        # tool with ALL inputs", often passes its OWN placeholder for these (e.g.
+        # a description string or "<measures_json>") which is truthy and overrides
+        # the good injected value via _get's `or` — then json.loads() fails at
+        # char 0. Guard: for JSON-shaped fields, if the kwarg isn't valid JSON but
+        # the injected default IS present, use the injected default.
+        _JSON_KEYS = ('measures_json', 'mquery_json', 'config_json',
+                      'relationships_json', 'scan_data_json')
+
+        def _get_json(key):
+            kw_val = kwargs.get(key)
+            default_val = self._default_config.get(key)
+
+            def _looks_like_json(v):
+                if not isinstance(v, (str, list, dict)):
+                    return False
+                if isinstance(v, (list, dict)):
+                    return True
+                s = v.strip()
+                return s.startswith('{') or s.startswith('[')
+
+            # Prefer a valid kwarg; else the injected default; else the kwarg as-is.
+            if kw_val is not None and _looks_like_json(kw_val):
+                return kw_val
+            if default_val is not None and _looks_like_json(default_val):
+                if kw_val is not None and not _looks_like_json(kw_val):
+                    logger.warning(
+                        f"[UCMV] agent passed non-JSON {key}={str(kw_val)[:40]!r}; "
+                        f"using flow-injected value instead"
+                    )
+                return default_val
+            return kw_val or default_val
+
+        measures_raw = _get_json('measures_json') or '[]'
+        mquery_raw = _get_json('mquery_json') or '[]'
+        relationships_raw = _get_json('relationships_json')
+        scan_raw = _get_json('scan_data_json')
+        config_raw = _get_json('config_json') or '{}'
         catalog = _get('catalog') or 'main'
         schema = _get('schema_name') or 'default'
         inner_joins = _get('inner_dim_joins') or False
@@ -161,10 +195,19 @@ class UCMetricViewGeneratorTool(BaseTool):
                 'translation_mode': _get('translation_mode') or 'llm_first',
             }
 
+        def _parse_json_input(raw, default):
+            """Parse a JSON input; treat empty/blank as the default (never error)."""
+            if not isinstance(raw, str):
+                return raw if raw is not None else default
+            s = raw.strip()
+            if not s:
+                return default
+            return json.loads(s)
+
         try:
-            measures = json.loads(measures_raw) if isinstance(measures_raw, str) else measures_raw
-            mquery_entries = json.loads(mquery_raw) if isinstance(mquery_raw, str) else mquery_raw
-            config = json.loads(config_raw) if isinstance(config_raw, str) else config_raw
+            measures = _parse_json_input(measures_raw, [])
+            mquery_entries = _parse_json_input(mquery_raw, [])
+            config = _parse_json_input(config_raw, {})
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
