@@ -354,6 +354,22 @@ export const useExecutionStore = create<ExecutionStore>()(
       if (owner) {
         void saveSessionPreview(owner, { type: updated.type, data: updated.data, title: updated.title });
       }
+      // Round-trip the restyle to the owning MESSAGE's resultData (persisted via
+      // the session API), mirroring the inline Look picker. Session restore
+      // derives previews from message.resultData first (deriveSessionPreviews),
+      // so without this a pane "Customize → Look" palette only lives in this
+      // in-memory slot and is lost on the next session switch.
+      const msgId = updated.sourceMessageId ?? s.previewSourceMessageId;
+      if (msgId && updated.type === 'ui' && owner) {
+        try {
+          const restyled = JSON.parse(updated.data);
+          useSessionStore
+            .getState()
+            .updateMessageInTargetSession(owner, msgId, { resultData: restyled });
+        } catch {
+          /* non-JSON preview data — nothing to persist on the message */
+        }
+      }
       return { previewContent: updated, previewHistory };
     }),
   // Page back/forward through the captured task-output previews.

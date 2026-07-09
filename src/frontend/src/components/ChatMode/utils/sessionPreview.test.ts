@@ -87,4 +87,36 @@ describe('deriveSessionPreviews', () => {
     expect(history).toHaveLength(0);
     expect(current).toBeNull();
   });
+
+  it('prefers the surface persisted on the message (restyle theme survives) over execution.result', async () => {
+    // Regression: a "Customize → Look" restyle is persisted on message.resultData
+    // (with `theme`); the pristine execution.result has no theme. Session restore
+    // must render the RESTYLED copy — and must not even need the fetch.
+    const restyled = { ...doc, theme: { accent: '#ff0000', _pinned: true } };
+    mockedGet.mockResolvedValue({ id: 'job-t', result: { text: 'Hi', a2ui: doc } } as never);
+
+    const { history } = await deriveSessionPreviews([
+      { ...msg('m1', 'job-t'), resultData: restyled },
+    ]);
+
+    expect(history).toHaveLength(1);
+    expect(JSON.parse(history[0].data).theme).toEqual({ accent: '#ff0000', _pinned: true });
+    expect(mockedGet).not.toHaveBeenCalled();
+  });
+
+  it('stamps sourceMessageId so a pane restyle can round-trip to the message', async () => {
+    mockedGet.mockResolvedValue({ id: 'job-s', result: doc } as never);
+    const { history } = await deriveSessionPreviews([msg('m9', 'job-s')]);
+    expect(history[0].sourceMessageId).toBe('m9');
+  });
+
+  it('falls back to execution.result when the message resultData carries no surface', async () => {
+    mockedGet.mockResolvedValue({ id: 'job-f', result: doc } as never);
+    const { history } = await deriveSessionPreviews([
+      { ...msg('m1', 'job-f'), resultData: { just: 'metadata' } },
+    ]);
+    expect(history).toHaveLength(1);
+    expect(JSON.parse(history[0].data)).toEqual(doc);
+    expect(mockedGet).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { PanelLeft } from 'lucide-react';
 import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
 import { toSurface } from '../../utils/surfaceAdapter';
@@ -45,6 +45,11 @@ export interface PreviewContent {
   type: PreviewContentType;
   data: string;
   title?: string;
+  /** The chat message this content was derived from (the run's assistant
+   *  message). Lets a pane restyle round-trip to that message's `resultData`
+   *  (persisted via the session API), so a "Customize → Look" palette survives
+   *  session switches instead of living only in this in-memory slot. */
+  sourceMessageId?: string;
 }
 
 interface PreviewPanelProps {
@@ -67,6 +72,9 @@ interface PreviewPanelProps {
   /** The run's step timeline (from the persistent chat trace), shown collapsed
    *  above the result so the activity is never lost once the deliverable lands. */
   runSteps?: RunStep[];
+  /** Open the pane directly on THIS step's content (master→detail pre-selected)
+   *  — set when the user clicks a step ROW in the chat's activity dropdown. */
+  focusStep?: RunStep | null;
   /** Dock the activity into the chat's "Working…" bar instead of this pane. */
   onMoveActivityToChat?: () => void;
   /** Embedded in a host shell that already provides fullscreen + close (e.g. the
@@ -124,7 +132,7 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   return surface ? { type: 'ui', data: JSON.stringify(surface) } : null;
 }
 
-const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], onMoveActivityToChat, embedded }) => {
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, runSteps = [], focusStep, onMoveActivityToChat, embedded }) => {
   const [refineOpen, setRefineOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   // The single top-toolbar download is a menu: PDF or PowerPoint.
@@ -142,6 +150,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     setActivityOpen((v) => !v);
     setActiveStep(null); // toggling always returns to the list / deliverable
   };
+  // A step ROW clicked in the chat's activity dropdown lands the pane directly
+  // on that step's content; "Back" then returns to the (opened) step list.
+  useEffect(() => {
+    if (focusStep) {
+      setActiveStep(focusStep);
+      setActivityOpen(true);
+    }
+  }, [focusStep]);
 
   // Heal already-stored previews that include the chat layer's bold-title prefix.
   const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);

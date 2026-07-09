@@ -70,13 +70,17 @@ export function liveStepLine(step: TraceEntryData): { name: string; line: string
   return { name: step.label, line: line.length > 100 ? `${line.slice(0, 100)}…` : line };
 }
 
-/** Convert a segment's chat trace groups into RunStep[] (tool_result steps only)
- *  for the thinking stream — the same shape the preview pane uses. */
+/** Convert a segment's chat trace groups into RunStep[] for the thinking stream
+ *  — the same shape the preview pane uses. EVERY labeled trace kind is kept
+ *  (tool_call / tool_result / event): whatever the user watched stream by while
+ *  the run was live must stay visible after it completes. No duplicate risk — a
+ *  pending tool_call message is PROMOTED IN PLACE to its result (processTrace),
+ *  so a call and its result never coexist as two messages. */
 function deriveStepsFromGroups(groups: TraceGroupItem[]): RunStep[] {
   const out: RunStep[] = [];
   groups.flatMap((g) => g.msgs).forEach((m, i) => {
     const t = m.resultData as TraceEntryData | undefined;
-    if (!t || t.kind !== 'tool_result' || !t.label) return;
+    if (!t || !t.label) return;
     out.push({ id: m.id || `step-${i}`, label: t.label, sublabel: t.sublabel, detail: t.detail, durationMs: t.durationMs });
   });
   return out;
@@ -105,7 +109,10 @@ const RunProgress: React.FC<{
   /** Open THIS run in the side preview pane (its deliverable + activity). Shown as
    *  a pane icon on every run card; the pane is opt-in, so it opens only on click. */
   onShowInPane?: () => void;
-}> = ({ groups, running, generating, onStop, streamSteps, onShowInPane }) => {
+  /** Click an individual step row in the expanded timeline → open THAT step's
+   *  context in the preview pane (not just the whole run via the pane icon). */
+  onSelectStep?: (step: RunStep) => void;
+}> = ({ groups, running, generating, onStop, streamSteps, onShowInPane, onSelectStep }) => {
   const [open, setOpen] = useState(false);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
@@ -252,7 +259,9 @@ const RunProgress: React.FC<{
         </div>
         {open && hasTimeline && (
           <div className="px-4 py-3 max-h-[60vh] overflow-y-auto" style={{ borderTop: '1px solid var(--border-color)' }}>
-            <ThinkingStream steps={displaySteps} live={running} />
+            {/* Rows with context are clickable: they open that step's content in
+                the preview panel (same master→detail the pane itself offers). */}
+            <ThinkingStream steps={displaySteps} live={running} onSelect={onSelectStep} />
           </div>
         )}
       </div>
@@ -299,8 +308,9 @@ interface ChatContainerProps {
   runSteps?: RunStep[];
   /** Open a run in the side preview pane — its deliverable (A2UI surface or the
    *  plain-text answer) with the activity collapsed above. Wired to the per-run
-   *  pane icon; the pane is opt-in, so it opens only on this click. */
-  onShowRunInPane?: (deliverable: PreviewContent | undefined, steps: RunStep[]) => void;
+   *  pane icon AND to individual step rows (which pass `focusStep` so the pane
+   *  opens directly on that step's content); the pane is opt-in — click only. */
+  onShowRunInPane?: (deliverable: PreviewContent | undefined, steps: RunStep[], focusStep?: RunStep) => void;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -541,6 +551,12 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   // Pane icon on every run card — opens THIS run's deliverable +
                   // activity in the side pane. Opt-in: nothing opens until clicked.
                   onShowInPane={onShowRunInPane ? () => onShowRunInPane(segDeliverables.get(s), stepsForSeg) : undefined}
+                  // A step ROW opens the pane focused on that step's content.
+                  onSelectStep={
+                    onShowRunInPane
+                      ? (step) => onShowRunInPane(segDeliverables.get(s), stepsForSeg, step)
+                      : undefined
+                  }
                 />
               );
             };
