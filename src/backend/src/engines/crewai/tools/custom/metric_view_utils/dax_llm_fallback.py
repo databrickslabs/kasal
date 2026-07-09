@@ -137,12 +137,21 @@ def _build_user_prompt(
     dax_expression: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
+    table_context: str = "",
 ) -> str:
-    """Build the user prompt with context."""
+    """Build the user prompt with context.
+
+    ``table_context`` is a pre-formatted block describing the fact table this
+    measure is allocated to (source table, available columns, joins, filters).
+    It goes in the VARIABLE user message (not the cached skill prefix) so the
+    LLM emits real column/join names instead of guessing — while the corpus
+    stays cacheable. Stable within a table, so cheap relative to the corpus.
+    """
     available_measures = ', '.join(sorted(base_names)[:50])  # cap at 50 for token efficiency
+    ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
 
     return f"""Translate this DAX measure to Spark SQL for a UC Metric View.
-
+{ctx_block}
 ## Measure
 Name: {measure_name}
 
@@ -153,9 +162,10 @@ Name: {measure_name}
 {available_measures}
 
 ## Instructions
+- Use ONLY the source columns / join aliases listed in the fact table context above; do not invent column names.
 - If referencing another measure, use MEASURE(snake_case_name)
-- Column references: source.column_name
-- Return JSON with success, sql_expr, confidence, explanation"""
+- Column references: source.column_name (fact) or alias.column_name (joined dimension)
+- Return JSON with success, sql_expr, dax_class, confidence, explanation"""
 
 
 def _parse_response(response_text: str) -> dict:
@@ -258,6 +268,7 @@ async def translate_with_llm(
     original_to_snake: dict[str, str],
     model: str = 'databricks-claude-sonnet-4',
     cache: OrderedDict | None = None,
+    table_context: str = "",
 ) -> TranslationResult:
     """Attempt LLM translation of a single untranslatable measure.
 
@@ -267,11 +278,14 @@ async def translate_with_llm(
     Args:
         cache: Run-scoped cache to prevent cross-tenant leakage.
                Falls back to a local (non-shared) OrderedDict if not provided.
+        table_context: Pre-formatted fact-table schema/join context for this
+               measure's table (goes in the user prompt, not the cached prefix).
     """
     _cache = cache if cache is not None else OrderedDict()
 
-    # Check cache
-    cache_key = _content_hash(measure.dax_expression)
+    # Cache key includes table_context: identical DAX on different tables (with
+    # different source columns/joins) must translate independently.
+    cache_key = _content_hash(measure.dax_expression + "\x00" + table_context)
     if cache_key in _cache:
         _cache.move_to_end(cache_key)
         cached = _cache[cache_key]
@@ -292,6 +306,7 @@ async def translate_with_llm(
         measure.dax_expression,
         base_names,
         original_to_snake,
+        table_context=table_context,
     )
 
     # Call LLM
@@ -359,6 +374,7 @@ async def translate_batch_with_llm(
     original_to_snake: dict[str, str],
     model: str = 'databricks-claude-sonnet-4',
     topo_priority: dict[str, int] | None = None,
+    table_context: str = "",
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
@@ -421,7 +437,7 @@ async def translate_batch_with_llm(
         await asyncio.gather(*(
             translate_with_llm(
                 m, table_key, snap_names, snap_map,
-                model=model, cache=run_cache,
+                model=model, cache=run_cache, table_context=table_context,
             )
             for m in chunk
         ))
