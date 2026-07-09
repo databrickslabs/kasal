@@ -160,12 +160,12 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             raise
 
     async def get_user_sessions(
-        self, 
-        user_id: str, 
-        group_ids: List[str], 
-        page: int = 0, 
+        self,
+        user_id: str,
+        group_ids: List[str],
+        page: int = 0,
         per_page: int = 20
-    ) -> List[ChatHistory]:
+    ) -> list:
         """
         Get recent chat sessions for a specific user with group filtering.
         
@@ -176,7 +176,12 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             per_page: Number of sessions per page
             
         Returns:
-            List of ChatHistory messages (one per session)
+            List of latest-message rows (one per session). Slim projection:
+            everything EXCEPT ``generation_result`` — assistant messages carry
+            crew plans / A2UI result payloads in that JSON column, and a
+            20-session sidebar listing was shipping megabytes of it just to
+            render one-line titles. Rows validate into ChatHistoryResponse
+            (generation_result defaults to None).
         """
         if not group_ids:
             return []
@@ -193,20 +198,31 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                 )
             ).group_by(self.model.session_id).subquery()
 
-            # Join back to get full message details
-            query = select(self.model).join(
+            # Join back for the message details the listing needs (no blobs)
+            query = select(
+                self.model.id,
+                self.model.session_id,
+                self.model.user_id,
+                self.model.message_type,
+                self.model.content,
+                self.model.intent,
+                self.model.confidence,
+                self.model.timestamp,
+                self.model.group_id,
+                self.model.group_email,
+            ).join(
                 subquery,
                 and_(
                     self.model.session_id == subquery.c.session_id,
                     self.model.timestamp == subquery.c.max_timestamp
                 )
             ).order_by(desc(subquery.c.max_timestamp))
-            
+
             # Apply pagination
             query = query.offset(page * per_page).limit(per_page)
-            
+
             result = await self.session.execute(query)
-            return list(result.scalars().all())
+            return list(result.all())
         except Exception as e:
             await self.session.rollback()
             raise

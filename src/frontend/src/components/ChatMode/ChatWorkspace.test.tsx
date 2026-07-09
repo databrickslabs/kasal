@@ -867,13 +867,17 @@ describe('ChatWorkspace component', () => {
     expect(h.exec.failExecution).toHaveBeenCalledWith('boom', undefined);
   });
 
-  it('onTaskOutput persists a preview and summarizes output', () => {
+  it('onTaskOutput shows the preview live WITHOUT a per-task server upload (perf W4.4)', () => {
+    // Mid-run task outputs used to PUT the full artifact to the server per
+    // task; durable persistence now happens once at completion, so the live
+    // path only updates the in-memory pane.
     h.parsePreview.mockReturnValue({ type: 'ui', data: '<p>x</p>' });
     render(<ChatWorkspace />);
     act(() => {
       h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' });
     });
-    expect(h.saveSessionPreview).toHaveBeenCalled();
+    expect(h.exec.setPreviewContent).toHaveBeenCalled();
+    expect(h.saveSessionPreview).not.toHaveBeenCalled();
   });
 
   it('generation onComplete finalizes the plan; the backend runs it and execution_started observes the run', async () => {
@@ -1708,7 +1712,9 @@ describe('ChatWorkspace component', () => {
     h.exec.executionOwnerSessionId = 's2';
     render(<ChatWorkspace />);
     act(() => { h.streamOpts.onTrace('', { event_type: 'task_completed', trace_metadata: { task_name: 'Build' }, output: '<p>x</p>' }); });
-    expect(h.saveSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    // Parked into the owner's snapshot; no mid-run server upload (perf W4.4).
+    expect(h.exec.stashSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    expect(h.saveSessionPreview).not.toHaveBeenCalled();
     expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
   });
 
@@ -2060,10 +2066,11 @@ describe('ChatWorkspace component', () => {
         },
       }));
     });
-    // Parked into s2's snapshot (for switch-back) and persisted server-side; the
-    // owner is off screen, so the live preview slot is deliberately untouched.
+    // Parked into s2's snapshot (for switch-back); the owner is off screen, so
+    // the live preview slot is deliberately untouched. No mid-run server upload
+    // (perf W4.4) — completion persists once and derivation covers refreshes.
     expect(h.exec.stashSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
-    expect(h.saveSessionPreview).toHaveBeenCalledWith('s2', expect.anything());
+    expect(h.saveSessionPreview).not.toHaveBeenCalled();
     expect(h.exec.setPreviewContent).not.toHaveBeenCalled();
   });
 

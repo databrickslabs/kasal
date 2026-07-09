@@ -242,7 +242,15 @@ async function loadDerivedOrStoredPreview(
     useSessionStore.getState().currentSessionId === sessionId;
   let history: PreviewContent[] = [];
   try {
-    const msgs = await getSessionMessages(sessionId);
+    // The session switch that triggers this restore has ALREADY loaded the
+    // session's messages into the store — reuse them instead of re-downloading
+    // the whole (surface-laden) message page a second time per switch.
+    const sess = useSessionStore.getState();
+    const loaded =
+      sess.currentSessionId === sessionId && Array.isArray(sess.messages) && sess.messages.length > 0
+        ? sess.messages
+        : null;
+    const msgs = loaded ?? (await getSessionMessages(sessionId));
     history = (await deriveSessionPreviews(msgs)).history;
   } catch {
     /* fall through to the legacy persisted preview */

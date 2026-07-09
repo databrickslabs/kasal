@@ -40,6 +40,7 @@ interface RunStatusState {
   setSSEConnected: (connected: boolean) => void; // Update SSE connection state
   setSSEError: (error: string | null) => void; // Update SSE error state
   addTrace: (jobId: string, trace: Trace) => void; // Add trace from SSE
+  addTraces: (jobId: string, traces: Trace[]) => void; // Batch add (one store update per poll tick)
   setTracesForJob: (jobId: string, traces: Trace[]) => void; // Set all traces for a job (initial load)
   getTracesForJob: (jobId: string) => Trace[]; // Get traces for a specific job
   clearTracesForJob: (jobId: string) => void; // Clear traces when job is removed
@@ -553,21 +554,35 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
 
     // Trace management methods
     addTrace: (jobId: string, trace: Trace) => {
+      get().addTraces(jobId, [trace]);
+    },
+
+    // Batch variant: ONE Map copy + Set-based dedup for a whole poll tick.
+    // The previous per-trace path copied the traces Map and .some()-scanned the
+    // job's full array for EVERY trace — O(n²) across a run, ×500 on the final
+    // fetch. Dedup matches the old composite key (created_at/type/source) and
+    // additionally the row id, so SSE/poller overlap still collapses.
+    addTraces: (jobId: string, traces: Trace[]) => {
+      if (traces.length === 0) return;
       set((state) => {
-        const newTraces = new Map(state.traces);
-        const existingTraces = newTraces.get(jobId) || [];
-
-        // Check if trace already exists (avoid duplicates)
-        const exists = existingTraces.some(
-          t => t.created_at === trace.created_at &&
-               t.event_type === trace.event_type &&
-               t.event_source === trace.event_source
-        );
-
-        if (!exists) {
-          newTraces.set(jobId, [...existingTraces, trace]);
+        const existing = state.traces.get(jobId) || [];
+        const seen = new Set<string>();
+        for (const t of existing) {
+          seen.add(`${t.created_at}::${t.event_type}::${t.event_source}`);
+          if (t.id != null) seen.add(`id:${t.id}`);
         }
-
+        const fresh: Trace[] = [];
+        for (const t of traces) {
+          const compositeKey = `${t.created_at}::${t.event_type}::${t.event_source}`;
+          const idKey = t.id != null ? `id:${t.id}` : null;
+          if (seen.has(compositeKey) || (idKey !== null && seen.has(idKey))) continue;
+          seen.add(compositeKey);
+          if (idKey !== null) seen.add(idKey);
+          fresh.push(t);
+        }
+        if (fresh.length === 0) return state;
+        const newTraces = new Map(state.traces);
+        newTraces.set(jobId, [...existing, ...fresh]);
         return { traces: newTraces };
       });
     },

@@ -20,7 +20,7 @@ import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview
 import type { RunStep } from './components/Preview/RunTimeline';
 import { parseUiDocument, extractDocSummary } from './utils/surfaceAdapter';
 import type { Surface } from '../../shared/a2ui';
-import { saveSessionPreview, getSessionPreview } from './db/sessionApi';
+import { getSessionPreview } from './db/sessionApi';
 import { useThemeStore } from '../../store/theme';
 import ChatMcpDialog from './components/Chat/ChatMcpDialog';
 import './chat.css';
@@ -860,10 +860,10 @@ const ChatWorkspace: React.FC = () => {
         // and a later null-preview completion snapshot hid it.
         execState.stashSessionPreview(ownerSession, preview);
       }
-      // Always persist to IndexedDB so it's available after a page refresh too.
-      if (ownerSession) {
-        saveSessionPreview(ownerSession, preview);
-      }
+      // NOT persisted per task output: each PUT re-uploaded the full artifact
+      // (multi-100KB surfaces) mid-run. Durable persistence happens ONCE at
+      // completion (executionStore.completeExecution) — and after a mid-run
+      // refresh the deliverable derives from execution.result anyway.
     }
 
     // Build a concise chat-message body. Raw task output (HTML dumps, status

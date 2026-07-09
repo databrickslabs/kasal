@@ -144,6 +144,61 @@ describe('runStatus store', () => {
   });
 
   // -------------------------------------------------------
+  // addTraces (batch — one store update per poll tick, perf W3.4)
+  // -------------------------------------------------------
+  describe('addTraces', () => {
+    const mkTrace = (id: number, overrides: Partial<Trace> = {}): Trace => ({
+      id,
+      event_source: 'crewai',
+      event_context: 'ctx',
+      event_type: 'TOOL_USAGE',
+      output: null,
+      created_at: `2024-06-01T10:00:${String(id).padStart(2, '0')}Z`,
+      ...overrides,
+    });
+
+    it('adds a whole batch in one update and preserves order', () => {
+      const store = useRunStatusStore.getState();
+      store.addTraces('job-1', [mkTrace(1), mkTrace(2), mkTrace(3)]);
+
+      const traces = useRunStatusStore.getState().traces.get('job-1');
+      expect(traces?.map((t) => t.id)).toEqual([1, 2, 3]);
+    });
+
+    it('dedups against existing traces by id AND by composite signature', () => {
+      const store = useRunStatusStore.getState();
+      store.addTraces('job-1', [mkTrace(1), mkTrace(2)]);
+      store.addTraces('job-1', [
+        mkTrace(2), // same id → dropped
+        mkTrace(99, { created_at: '2024-06-01T10:00:01Z' }), // same signature as id 1 → dropped
+        mkTrace(3),
+      ]);
+
+      const traces = useRunStatusStore.getState().traces.get('job-1');
+      expect(traces?.map((t) => t.id)).toEqual([1, 2, 3]);
+    });
+
+    it('dedups duplicates within the same batch', () => {
+      const store = useRunStatusStore.getState();
+      store.addTraces('job-1', [mkTrace(1), mkTrace(1), mkTrace(2)]);
+
+      expect(useRunStatusStore.getState().traces.get('job-1')).toHaveLength(2);
+    });
+
+    it('is a no-op (no state churn) for an empty or fully-duplicate batch', () => {
+      const store = useRunStatusStore.getState();
+      store.addTraces('job-1', [mkTrace(1)]);
+      const before = useRunStatusStore.getState().traces;
+
+      store.addTraces('job-1', []);
+      store.addTraces('job-1', [mkTrace(1)]);
+
+      // Same Map identity → no downstream re-renders were triggered.
+      expect(useRunStatusStore.getState().traces).toBe(before);
+    });
+  });
+
+  // -------------------------------------------------------
   // setTracesForJob / getTracesForJob / clearTracesForJob
   // -------------------------------------------------------
   describe('trace management helpers', () => {
