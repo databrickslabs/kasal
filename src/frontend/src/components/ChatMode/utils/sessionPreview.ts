@@ -43,17 +43,24 @@ async function fetchResult(jobId: string): Promise<unknown> {
 export async function deriveSessionPreviews(
   messages: ChatMessage[],
 ): Promise<{ history: PreviewContent[]; current: PreviewContent | null }> {
-  const jobIds: string[] = [];
-  for (const m of messages) {
-    if (m.executionId && !jobIds.includes(m.executionId)) jobIds.push(m.executionId);
-  }
-
+  const seen = new Set<string>();
   const history: PreviewContent[] = [];
-  for (const jobId of jobIds) {
-    const result = await fetchResult(jobId);
-    if (!result) continue;
-    const surface = toSurface(result);
-    if (surface) history.push({ type: 'ui', data: JSON.stringify(surface) });
+  for (const m of messages) {
+    if (!m.executionId || seen.has(m.executionId)) continue;
+    seen.add(m.executionId);
+    // Prefer the surface persisted ON the message (`resultData` round-trips
+    // through the session API and carries any user restyle `theme`) over the
+    // pristine execution.result — otherwise a "Customize → Look" palette is
+    // lost on every session switch. The execution result stays the fallback
+    // for runs whose message carries no surface copy.
+    let surface = m.resultData != null ? toSurface(m.resultData) : null;
+    if (!surface) {
+      const result = await fetchResult(m.executionId);
+      if (result) surface = toSurface(result);
+    }
+    if (surface) {
+      history.push({ type: 'ui', data: JSON.stringify(surface), sourceMessageId: m.id });
+    }
   }
 
   return { history, current: history.length ? history[history.length - 1] : null };

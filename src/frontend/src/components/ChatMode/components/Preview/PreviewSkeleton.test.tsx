@@ -63,6 +63,15 @@ describe('PreviewSkeleton', () => {
     expect(screen.getByText('2 steps so far')).toBeInTheDocument();
     expect(screen.getByText('Thinking…')).toBeInTheDocument(); // live pulse at the tail
   });
+
+  it('opens directly on a focused step (row-clicked in the chat dropdown)', () => {
+    const steps: RunStep[] = [
+      { id: '1', label: 'GenieTool', sublabel: 'sales by region', detail: 'Revenue rose 12% in EMEA.', timestamp: 1 },
+    ];
+    render(<PreviewSkeleton steps={steps} focusStep={steps[0]} />);
+    expect(screen.getByTestId('run-step-context')).toBeInTheDocument();
+    expect(screen.getByLabelText('Back to the run activity')).toBeInTheDocument();
+  });
 });
 
 describe('PreviewSkeleton — running prop (live vs ended-but-docked)', () => {

@@ -552,6 +552,17 @@ describe('PreviewPanel run activity', () => {
     expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 
+  it('opens directly on a focused step (row-clicked in the chat dropdown), Back returns to the list', () => {
+    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={steps} focusStep={steps[0]} />);
+    // The pane lands on the step's full-page context immediately — no extra clicks.
+    expect(screen.getByTestId('run-step-context')).toBeInTheDocument();
+    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument();
+    // Back returns to the step list (activity stays open), not the deliverable.
+    fireEvent.click(screen.getByLabelText('Back to the run activity'));
+    expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
+    expect(screen.getByText('Querying your data')).toBeInTheDocument();
+  });
+
   it('renders "Show in chat" as an icon button that moves the activity to the chat', () => {
     const onMoveActivityToChat = vi.fn();
     render(

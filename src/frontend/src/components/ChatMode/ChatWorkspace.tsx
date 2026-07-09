@@ -250,12 +250,26 @@ export function buildTraceEntry(
 export function tracesToRunSteps(
   traces: { id?: number; event_type?: string; output?: unknown; trace_metadata?: unknown; event_source?: string }[],
 ): { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] {
-  const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
+  // Keep EVERY labeled kind (tool_result / event / tool_call) — anything the
+  // user watched stream by must survive the restore. Unlike the live message
+  // path (where a pending tool_call is PROMOTED in place to its result), the
+  // durable trace rows keep BOTH the tool_usage start row and its `*_run`
+  // result row — so suppress a tool_call whose label also has a result row,
+  // keeping only genuinely dangling calls (tool started, no result recorded).
+  const entries: { entry: NonNullable<ReturnType<typeof buildTraceEntry>>; id: string }[] = [];
   traces.forEach((t, idx) => {
     const entry = buildTraceEntry('', t as unknown as Record<string, unknown>);
-    if (!entry || entry.kind !== 'tool_result' || !entry.label) return;
+    if (!entry || !entry.label) return;
+    entries.push({ entry, id: `trace-${t.id ?? idx}` });
+  });
+  const resultLabels = new Set(
+    entries.filter(({ entry }) => entry.kind === 'tool_result').map(({ entry }) => entry.label),
+  );
+  const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
+  entries.forEach(({ entry, id }, idx) => {
+    if (entry.kind === 'tool_call' && resultLabels.has(entry.label)) return;
     steps.push({
-      id: `trace-${t.id ?? idx}`,
+      id,
       label: entry.label,
       sublabel: entry.sublabel,
       detail: entry.detail,
@@ -264,6 +278,51 @@ export function tracesToRunSteps(
     });
   });
   return steps;
+}
+
+/**
+ * The LATEST run segment's activity steps from the persistent chat trace
+ * messages (everything after the last user message). Shows EVERY labeled step —
+ * tool results AND tool calls / events — with no pruning/dedup: the user wants
+ * each step the agent ran, even when two look similar (repeated memory recalls
+ * or Genie queries sharing a SQL prefix), and anything shown while the run
+ * streamed must not vanish when it ends (a pending tool_call message is
+ * promoted in place to its result, so a call and its result never appear twice).
+ */
+export function deriveMessageActivitySteps(
+  messages: { id?: string; role: string; resultType?: string; resultData?: unknown }[],
+): { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] {
+  let start = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') { start = i + 1; break; }
+  }
+  const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
+  messages.slice(start).forEach((m, idx) => {
+    if (m.resultType !== 'trace') return;
+    const t = m.resultData as Partial<TraceEntry> | undefined;
+    if (!t || !t.label) return;
+    steps.push({
+      id: m.id || `step-${idx}`,
+      label: t.label,
+      sublabel: t.sublabel,
+      detail: t.detail,
+      durationMs: t.durationMs,
+      timestamp: t.timestamp ?? idx,
+    });
+  });
+  return steps;
+}
+
+/**
+ * Which step list the activity views show: the durable DB-restored steps when
+ * available (complete + survives a refresh), else the per-message steps (the
+ * live source during a run) — but NEVER a swap that SHRINKS the visible list.
+ * The messages hold everything the user watched stream by, so if the restored
+ * rows reproduce fewer steps, the richer message-derived set wins.
+ */
+export function pickRunActivitySteps<T>(restored: T[] | undefined, messageSteps: T[]): T[] {
+  if (!restored || !restored.length) return messageSteps;
+  return restored.length >= messageSteps.length ? restored : messageSteps;
 }
 
 /**
@@ -520,6 +579,10 @@ const ChatWorkspace: React.FC = () => {
   // a historical run's pane shows ITS OWN activity. Cleared on close / session
   // switch / when a new live run starts (so the pane tracks the live run again).
   const [focusedRunSteps, setFocusedRunSteps] = useState<RunStep[] | null>(null);
+  // …and when the user clicks an individual step ROW in a run's expanded
+  // timeline, the pane opens directly on THAT step's content (master→detail
+  // pre-selected). Cleared together with focusedRunSteps.
+  const [focusedRunStep, setFocusedRunStep] = useState<RunStep | null>(null);
   // Memory mode (workspace vs session) is owned by the store so it persists
   // across the empty→conversation input swap (local state would reset to ON).
   const memoryEnabled = useExecutionStore((s) => s.memoryEnabled);
@@ -550,21 +613,28 @@ const ChatWorkspace: React.FC = () => {
   // belong to the other session's run).
   useEffect(() => {
     setFocusedRunSteps(null);
+    setFocusedRunStep(null);
   }, [currentSessionId]);
   // …and when a NEW live run starts (rising edge), so the pane stops pinning a
   // past run and tracks the fresh one. A run finishing does NOT clear the pin.
   const prevExecutingRef = useRef(false);
   useEffect(() => {
-    if (viewIsExecuting && !prevExecutingRef.current) setFocusedRunSteps(null);
+    if (viewIsExecuting && !prevExecutingRef.current) {
+      setFocusedRunSteps(null);
+      setFocusedRunStep(null);
+    }
     prevExecutingRef.current = viewIsExecuting;
   }, [viewIsExecuting]);
 
   // Open a specific run in the side preview pane: its deliverable (A2UI surface or
   // the plain-text answer) with that run's activity. The pane is opt-in — this is
   // the ONLY way it opens for a chat run, and it fires only on the user's click.
-  const handleShowRunInPane = useCallback((deliverable: PreviewContent | undefined, steps: RunStep[]) => {
+  const handleShowRunInPane = useCallback((deliverable: PreviewContent | undefined, steps: RunStep[], focusStep?: RunStep) => {
     const st = useExecutionStore.getState();
     setFocusedRunSteps(steps.length ? steps : null);
+    // A step ROW click opens the pane directly on that step's content; the
+    // per-run pane icon (no focusStep) opens the run normally.
+    setFocusedRunStep(focusStep ?? null);
     st.setActivityPlacement('preview');
     if (deliverable) {
       st.openPreviewPane(deliverable);
@@ -579,33 +649,10 @@ const ChatWorkspace: React.FC = () => {
 
   // The run-activity timeline shown in the preview pane (live skeleton AND
   // collapsed above the finished result). Sourced from the PERSISTENT chat trace
-  // messages — the latest run's tool_result steps — so it survives the run
-  // finishing (unlike the ephemeral live feed). Each tool_result message's
-  // resultData carries the label / query / context the step pulled in.
-  const messageActivitySteps = useMemo(() => {
-    let start = 0;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') { start = i + 1; break; }
-    }
-    // Show EVERY tool_result step — no pruning/dedup. The user wants to see each
-    // step the agent ran, even when two look similar (repeated memory recalls or
-    // Genie queries that share a SQL prefix).
-    const steps: { id: string; label: string; sublabel?: string; detail?: string; durationMs?: number; timestamp: number }[] = [];
-    messages.slice(start).forEach((m, idx) => {
-      if (m.resultType !== 'trace') return;
-      const t = m.resultData as Partial<TraceEntry> | undefined;
-      if (!t || t.kind !== 'tool_result' || !t.label) return;
-      steps.push({
-        id: m.id || `step-${idx}`,
-        label: t.label,
-        sublabel: t.sublabel,
-        detail: t.detail,
-        durationMs: t.durationMs,
-        timestamp: t.timestamp ?? idx,
-      });
-    });
-    return steps;
-  }, [messages]);
+  // messages — the latest run's steps — so it survives the run finishing (unlike
+  // the ephemeral live feed). Each trace message's resultData carries the
+  // label / query / context the step pulled in.
+  const messageActivitySteps = useMemo(() => deriveMessageActivitySteps(messages), [messages]);
 
   // The latest run's job id (a crew_actions / result message carries `executionId`)
   // — used to restore the activity from the durable execution traces on refresh.
@@ -641,12 +688,12 @@ const ChatWorkspace: React.FC = () => {
     return () => { cancelled = true; };
   }, [latestRunJobId, viewIsExecuting]);
 
-  // Prefer the durable restored steps when available (complete + survives a
-  // refresh); otherwise the per-message steps (the live source during a run).
-  const runActivitySteps = useMemo(() => {
-    const restored = latestRunJobId ? restoredStepsByJob[latestRunJobId] : undefined;
-    return restored && restored.length ? restored : messageActivitySteps;
-  }, [restoredStepsByJob, latestRunJobId, messageActivitySteps]);
+  // Durable restored steps vs the per-message live source — see
+  // pickRunActivitySteps (the swap may never shrink the visible list).
+  const runActivitySteps = useMemo(
+    () => pickRunActivitySteps(latestRunJobId ? restoredStepsByJob[latestRunJobId] : undefined, messageActivitySteps),
+    [restoredStepsByJob, latestRunJobId, messageActivitySteps],
+  );
 
   // When the user routes activity to the pane ('preview' placement), the pane
   // shows the run-activity surface. It appears immediately during a live run
@@ -2297,7 +2344,7 @@ const ChatWorkspace: React.FC = () => {
         <PreviewPanel
           key={currentSessionId}
           content={previewContent}
-          onClose={() => { setFocusedRunSteps(null); useExecutionStore.getState().clearPreview(); }}
+          onClose={() => { setFocusedRunSteps(null); setFocusedRunStep(null); useExecutionStore.getState().clearPreview(); }}
           chatCollapsed={chatCollapsed}
           onToggleChat={() => useExecutionStore.getState().toggleChatCollapsed()}
           onRefine={handleRefine}
@@ -2308,7 +2355,9 @@ const ChatWorkspace: React.FC = () => {
           // A focused run (opened via its "Show in panel" icon) shows ITS steps;
           // otherwise the latest run's, hidden when activity lives in the chat bar.
           runSteps={focusedRunSteps ?? (activityInChat ? [] : runActivitySteps)}
-          onMoveActivityToChat={() => { setFocusedRunSteps(null); useExecutionStore.getState().setActivityPlacement('chat'); }}
+          // A clicked step ROW pre-opens that step's content in the pane.
+          focusStep={focusedRunStep}
+          onMoveActivityToChat={() => { setFocusedRunSteps(null); setFocusedRunStep(null); useExecutionStore.getState().setActivityPlacement('chat'); }}
         />
       )}
 
@@ -2319,6 +2368,7 @@ const ChatWorkspace: React.FC = () => {
         <PreviewSkeleton
           steps={focusedRunSteps ?? runActivitySteps}
           running={viewIsExecuting}
+          focusStep={focusedRunStep}
           onMoveActivityToChat={() => {
             // Collapse activity back to the chat bar AND close the pane — the
             // skeleton only ever shows when there's no deliverable, so leaving the
@@ -2326,6 +2376,7 @@ const ChatWorkspace: React.FC = () => {
             // must open only on a manual expand click).
             const st = useExecutionStore.getState();
             setFocusedRunSteps(null);
+            setFocusedRunStep(null);
             st.setActivityPlacement('chat');
             st.clearPreview();
           }}

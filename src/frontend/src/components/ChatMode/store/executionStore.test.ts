@@ -11,6 +11,7 @@ vi.mock('./sessionStore', () => {
     currentSessionId: null as string | null,
     addMessage: vi.fn(),
     addMessageToTargetSession: vi.fn(),
+    updateMessageInTargetSession: vi.fn(),
   };
   return {
     useSessionStore: {
@@ -364,6 +365,36 @@ describe('executionStore - preview history', () => {
     store.updatePreviewData('X');
     expect(useExecutionStore.getState().previewContent?.data).toBe('X');
     expect(mockedSave).not.toHaveBeenCalled();
+  });
+
+  it('updatePreviewData round-trips a UI restyle to the owning message resultData', () => {
+    // Regression: a pane "Customize → Look" restyle must persist onto the
+    // source message (session-API round-trip), or the palette is lost on the
+    // next session switch (deriveSessionPreviews reads message.resultData first).
+    setCurrentSessionId('sess-A');
+    const surface = { surfaceKind: 'presentation', root: 'd', components: [], theme: { accent: '#f00' } };
+    useExecutionStore.getState().setPreviewContent({
+      type: 'ui',
+      data: '{}',
+      sourceMessageId: 'msg-42',
+    } as any);
+    useExecutionStore.getState().updatePreviewData(JSON.stringify(surface));
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-A',
+      'msg-42',
+      { resultData: surface },
+    );
+  });
+
+  it('updatePreviewData skips the message round-trip without a source message or on non-JSON data', () => {
+    setCurrentSessionId('sess-A');
+    useExecutionStore.getState().setPreviewContent({ type: 'ui', data: '{}' } as any);
+    useExecutionStore.getState().updatePreviewData('{"ok":true}');
+    expect(sessionState().updateMessageInTargetSession).not.toHaveBeenCalled();
+    // Non-JSON data with a source message: swallow, never throw.
+    useExecutionStore.getState().setPreviewContent({ type: 'ui', data: '{}', sourceMessageId: 'm1' } as any);
+    expect(() => useExecutionStore.getState().updatePreviewData('not json')).not.toThrow();
+    expect(sessionState().updateMessageInTargetSession).not.toHaveBeenCalled();
   });
 
   it('completeExecution appends the final preview to history when viewing owner', () => {

@@ -269,6 +269,8 @@ import ChatWorkspace, {
   extractA2uiSurface,
   stripEmbeddedUiDocument,
   tracesToRunSteps,
+  deriveMessageActivitySteps,
+  pickRunActivitySteps,
 } from './ChatWorkspace';
 import { buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 
@@ -345,6 +347,76 @@ describe('tracesToRunSteps — durable restore from execution traces', () => {
     expect(steps[0]).toMatchObject({ label: 'Memory', detail: 'recalled the project goals' });
     expect(steps[1]).toMatchObject({ label: 'databricks_sql_execute_sql_read_only' });
     expect(steps.every((s) => s.id.startsWith('trace-'))).toBe(true);
+  });
+
+  it('keeps tool_error events and dangling tool_calls; suppresses a call whose result row exists', () => {
+    // Anything the user watched stream by must survive the durable restore —
+    // but the trace table keeps BOTH the tool_usage start row and its result
+    // row, so the start is suppressed only when its result is present.
+    const traces = [
+      { id: 1, event_type: 'tool_usage', output: { extra_data: { tool_name: 'Search', tool_args: '{"q":"hi"}' } } },
+      { id: 2, event_type: 'Search_run', output: { tool_name: 'Search', content: 'ten blue links' } },
+      { id: 3, event_type: 'tool_error', output: { content: "MCP server 'x': HTTP 403 - Forbidden" } },
+      { id: 4, event_type: 'tool_usage', output: { extra_data: { tool_name: 'Scraper', tool_args: '{}' } } },
+    ];
+    const steps = tracesToRunSteps(traces);
+    expect(steps.map((s) => s.label)).toEqual([
+      'Search', // the RESULT row (the promoted form); its start row is suppressed
+      "⚠ MCP server 'x': HTTP 403 - Forbidden", // events the user saw stay visible
+      'Scraper', // a dangling call (no result recorded) stays visible too
+    ]);
+  });
+});
+
+describe('deriveMessageActivitySteps — the latest segment from persisted trace messages', () => {
+  const trace = (id: string, data: Record<string, unknown>) => ({
+    id, role: 'assistant', resultType: 'trace', resultData: data,
+  });
+
+  it('keeps every LABELED kind (tool_result, tool_call, event) — nothing seen live may vanish', () => {
+    const steps = deriveMessageActivitySteps([
+      { id: 'u1', role: 'user' },
+      trace('t1', { kind: 'tool_result', label: 'Memory', detail: 'recalled 3 items' }),
+      trace('t2', { kind: 'tool_call', label: 'Scraper', sublabel: 'fetching' }),
+      trace('t3', { kind: 'event', label: '⚠ Tool error' }),
+      trace('t4', { kind: 'tool_result' }), // no label → dropped (nothing to show)
+      { id: 'a1', role: 'assistant', resultType: 'a2ui', resultData: {} }, // not a trace
+    ]);
+    expect(steps.map((s) => s.label)).toEqual(['Memory', 'Scraper', '⚠ Tool error']);
+    expect(steps[0]).toMatchObject({ id: 't1', detail: 'recalled 3 items' });
+  });
+
+  it('scopes to the LATEST run segment (messages after the last user message)', () => {
+    const steps = deriveMessageActivitySteps([
+      { id: 'u1', role: 'user' },
+      trace('old', { kind: 'tool_result', label: 'OldRun' }),
+      { id: 'u2', role: 'user' },
+      trace('new', { kind: 'tool_result', label: 'NewRun' }),
+    ]);
+    expect(steps.map((s) => s.label)).toEqual(['NewRun']);
+  });
+});
+
+describe('pickRunActivitySteps — completion-time source swap may never shrink', () => {
+  const s = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${i}` }));
+
+  it('falls back to the message steps when nothing was restored', () => {
+    const msg = s(3);
+    expect(pickRunActivitySteps(undefined, msg)).toBe(msg);
+    expect(pickRunActivitySteps([], msg)).toBe(msg);
+  });
+
+  it('prefers the durable restored steps when they are at least as complete', () => {
+    const restored = s(3);
+    expect(pickRunActivitySteps(restored, s(3))).toBe(restored);
+    expect(pickRunActivitySteps(restored, s(2))).toBe(restored);
+  });
+
+  it('keeps the richer message-derived list when the DB rows reproduce fewer steps', () => {
+    // Regression: the swap to restored steps at completion used to SHRINK the
+    // list the user had just watched stream by.
+    const msg = s(5);
+    expect(pickRunActivitySteps(s(2), msg)).toBe(msg);
   });
 });
 

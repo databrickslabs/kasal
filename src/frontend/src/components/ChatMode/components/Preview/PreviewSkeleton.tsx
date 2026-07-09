@@ -35,6 +35,9 @@ function mmss(seconds: number): string {
 interface PreviewSkeletonProps {
   /** The run's steps (sourced from the persistent chat trace messages). */
   steps: RunStep[];
+  /** Open directly on THIS step's content (master→detail pre-selected) — set
+   *  when the user clicks a step ROW in the chat's activity dropdown. */
+  focusStep?: RunStep | null;
   /** Dock the activity into the chat's "Working…" bar instead of this pane. */
   onMoveActivityToChat?: () => void;
   /** False once the run has ended but the activity stays docked into the pane —
@@ -65,11 +68,15 @@ const RunElapsed: React.FC = () => {
   );
 };
 
-const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ steps, running = true, onMoveActivityToChat }) => {
+const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ steps, focusStep, running = true, onMoveActivityToChat }) => {
   const stepCount = steps.length;
   // A step the user opened to read its full context WHILE the run is still going
   // (null = show the live thinking stream). "Back" returns to the stream.
   const [activeStep, setActiveStep] = useState<RunStep | null>(null);
+  // A step ROW clicked in the chat's activity dropdown lands here pre-selected.
+  useEffect(() => {
+    if (focusStep) setActiveStep(focusStep);
+  }, [focusStep]);
 
   return (
     <aside
