@@ -19,6 +19,23 @@ from .utils import to_snake_case, spark_sql_compat, col_to_readable, run_async
 
 logger = logging.getLogger(__name__)
 
+def _is_real_switch_decomp(entry) -> bool:
+    """True when a config switch_decomposition entry carries REAL SQL.
+
+    `derive_switch_decompositions` emits skeleton entries whose ``raw_expr`` is a
+    literal ``"TODO: SQL expression for SWITCH measure ..."`` placeholder. Those
+    are NOT authoritative and must not suppress the LLM (Step 5d) nor rebuild a
+    TODO stub over an LLM-translated measure (Step 6). Only a structured
+    ``num``/``den`` decomposition or a non-TODO ``raw_expr`` counts as real.
+    """
+    if not isinstance(entry, dict):
+        return False
+    raw = entry.get('raw_expr')
+    if raw is not None:
+        return not str(raw).lstrip().upper().startswith('TODO')
+    return 'num' in entry and 'den' in entry
+
+
 # Keywords that classify a measure as a PBI UI artifact (not a real business measure)
 _ARTIFACT_SKIP_KEYWORDS = (
     'FORMAT', 'Color', 'ISBLANK+BLANK', 'SELECTEDVALUE+SWITCH',
@@ -459,22 +476,33 @@ def process_table(
     if ctx.llm_config and ctx.llm_config.get('use_llm_fallback'):
         from .dax_llm_fallback import translate_batch_with_llm
 
-        # Precedence: if config-gen supplied an authoritative SWITCH decomposition
-        # for a measure (Step 6, from the $SYSTEM.MDSCHEMA_MEASURES API), that
-        # customer-validated SQL wins over a best-effort LLM attempt. Exclude those
-        # measures from the LLM batch so the decomposition isn't preempted. (SWITCH
-        # measures WITHOUT a config decomposition still reach the LLM — that's the
-        # whole point of routing SELECTEDVALUE/SWITCH here.)
+        # Precedence: if config-gen supplied an AUTHORITATIVE SWITCH decomposition
+        # for a measure (Step 6, real SQL from the $SYSTEM.MDSCHEMA_MEASURES API),
+        # that customer-validated SQL wins over a best-effort LLM attempt — exclude
+        # it from the LLM batch so it isn't preempted.
+        #
+        # BUT `derive_switch_decompositions` also emits SKELETON entries whose
+        # `raw_expr` is a literal "TODO: SQL expression for SWITCH measure ..."
+        # placeholder (no real SQL). Those are NOT authoritative — they're exactly
+        # the measures we want the skill-corpus LLM to translate. So only a
+        # decomposition carrying real SQL (structured num/den, or a raw_expr that
+        # isn't a TODO stub) suppresses the LLM. TODO skeletons fall through.
         _decomp_entries = ctx.config.get('switch_decompositions', {}).get(table_key, {})
-        _decomp_names: set[str] = set()
+        _authoritative_names: set[str] = set()
         if isinstance(_decomp_entries, list):
-            _decomp_names = {d.get('name', '') for d in _decomp_entries}
+            _authoritative_names = {
+                d.get('name', '') for d in _decomp_entries if _is_real_switch_decomp(d)
+            }
         elif isinstance(_decomp_entries, dict):
-            _decomp_names = set(_decomp_entries.keys())
+            # dict form: values are per-branch sql_expr maps — treat any present
+            # branch SQL as authoritative (Step 6 emits it directly).
+            _authoritative_names = {
+                k for k, v in _decomp_entries.items() if isinstance(v, dict) and v
+            }
         _llm_batch = [
             m for m in untranslatable
-            if m.original_name not in _decomp_names
-            and to_snake_case(m.original_name) not in _decomp_names
+            if m.original_name not in _authoritative_names
+            and to_snake_case(m.original_name) not in _authoritative_names
         ]
 
         # Build the fact-table context block ONCE (stable across this table's
@@ -560,7 +588,14 @@ def process_table(
         entries = switch_decomps[table_key]
         # Support both list (original monolith) and dict (Kasal structured) formats
         if isinstance(entries, list):
+            # Names already translated (regex or LLM) as real SQL this run.
+            _real_translated = {m.measure_name for m in translated if m.sql_expr}
             for defn in entries:
+                # A TODO-skeleton decomposition must NOT overwrite a measure the
+                # LLM already translated to real SQL at Step 5d. Only rebuild the
+                # skeleton when the measure isn't already a real translation.
+                if not _is_real_switch_decomp(defn) and defn['name'] in _real_translated:
+                    continue
                 if defn['name'] not in base_names or defn['name'] in dax_translated_names:
                     switch_measures.append(
                         build_switch_measure_fn(defn, filter_sets=ctx.translator.filter_sets)

@@ -7,6 +7,7 @@ from src.engines.crewai.tools.custom.metric_view_utils.table_processor import (
     TableProcessorContext,
     expand_calculation_groups,
     process_table,
+    _is_real_switch_decomp,
 )
 from src.engines.crewai.tools.custom.metric_view_utils.data_classes import (
     MetricViewSpec,
@@ -1428,3 +1429,38 @@ class TestProcessTableScanDataDimExclude:
         spec = _run_process_table('fact_test', ti, [], ctx)
         dim_names = [d['name'] for d in spec.dimensions]
         assert 'join_key' not in dim_names
+
+
+class TestIsRealSwitchDecomp:
+    """`_is_real_switch_decomp` gates whether a config switch_decomposition entry
+    is authoritative SQL (suppresses the LLM / wins Step 6) or a TODO skeleton
+    (must fall through to the skill-corpus LLM).
+
+    Regression: `derive_switch_decompositions` emits TODO-`raw_expr` skeletons for
+    SELECTEDVALUE+SWITCH measures. Treating those as authoritative starved the LLM
+    and rebuilt TODO stubs over real translations.
+    """
+
+    def test_todo_raw_expr_is_not_real(self):
+        entry = {'name': 'f_start_date',
+                 'raw_expr': "TODO: SQL expression for SWITCH measure 'F_Start_date' (DAX: ...)",
+                 'comment': 'SWITCH measure from F_Start_date'}
+        assert _is_real_switch_decomp(entry) is False
+
+    def test_todo_case_insensitive_and_leading_ws(self):
+        assert _is_real_switch_decomp({'raw_expr': '   todo: fill me in'}) is False
+
+    def test_real_raw_expr_is_real(self):
+        entry = {'name': 'ratio', 'raw_expr': 'SUM(source.a) / NULLIF(SUM(source.b), 0)'}
+        assert _is_real_switch_decomp(entry) is True
+
+    def test_structured_num_den_is_real(self):
+        entry = {'name': 'ratio', 'num': 'a', 'den': 'b', 'num_fs': None, 'den_fs': None}
+        assert _is_real_switch_decomp(entry) is True
+
+    def test_missing_sql_is_not_real(self):
+        assert _is_real_switch_decomp({'name': 'x', 'comment': 'note'}) is False
+
+    def test_non_dict_is_not_real(self):
+        assert _is_real_switch_decomp('not-a-dict') is False
+        assert _is_real_switch_decomp(None) is False
