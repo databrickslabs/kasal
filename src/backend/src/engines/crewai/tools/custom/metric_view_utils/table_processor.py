@@ -458,6 +458,25 @@ def process_table(
     # ── Step 5d: LLM fallback for remaining untranslatable measures (opt-in) ──
     if ctx.llm_config and ctx.llm_config.get('use_llm_fallback'):
         from .dax_llm_fallback import translate_batch_with_llm
+
+        # Build the fact-table context block ONCE (stable across this table's
+        # measures) so the LLM emits real source columns / join aliases instead
+        # of guessing. Goes in the per-measure user prompt (not the cached prefix).
+        _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
+        _agg_cols = [c.get('source_col') or c.get('name') for c in (table_info.aggregate_columns or [])]
+        _agg_cols = [c for c in _agg_cols if c]
+        if _agg_cols:
+            _ctx_lines.append(f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}")
+        if table_info.group_by_columns:
+            _ctx_lines.append(f"- dimension / group-by columns: {', '.join(table_info.group_by_columns[:60])}")
+        if getattr(table_info, 'dim_source_tables', None):
+            _joins = [f"{alias} → {tbl}" for alias, tbl in table_info.dim_source_tables.items()]
+            if _joins:
+                _ctx_lines.append(f"- joined dimensions (use as alias.<col>): {'; '.join(_joins[:30])}")
+        if getattr(table_info, 'static_filters', None):
+            _ctx_lines.append(f"- table-level filters already applied: {'; '.join(table_info.static_filters[:10])}")
+        _table_context = "\n".join(_ctx_lines)
+
         try:
             llm_results = run_async(
                 translate_batch_with_llm(
@@ -470,6 +489,9 @@ def process_table(
                     # lands in a later concurrency chunk than the measure it
                     # references — its MEASURE() ref resolves (Step 3.9).
                     topo_priority=_topo_priority,
+                    # Fact-table schema/join context so the LLM uses real column
+                    # and alias names instead of guessing.
+                    table_context=_table_context,
                 )
             )
             llm_translated = []

@@ -131,9 +131,10 @@ class TestTranslateWithLLM:
             dax_expression="SUM(T[x])",
             confidence="none", category="unassigned",
         )
-        # Pre-populate a run-scoped cache
+        # Pre-populate a run-scoped cache. The key now includes the (empty)
+        # table_context, matching translate_with_llm's derivation.
         run_cache: OrderedDict[str, dict] = OrderedDict()
-        cache_key = _content_hash("SUM(T[x])")
+        cache_key = _content_hash("SUM(T[x])" + "\x00" + "")
         run_cache[cache_key] = {"success": True, "sql_expr": "SUM(source.x)", "confidence": "high"}
 
         result = await translate_with_llm(
@@ -287,3 +288,44 @@ class TestLLMFirstCorpus:
         asyncio.run(go())
         # parent must be attempted before child
         assert seen_order.index('Parent') < seen_order.index('Child')
+
+
+class TestTableContext:
+    """Per-measure fact-table context in the user prompt (not the cached prefix)."""
+
+    def test_context_in_prompt(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback import _build_user_prompt
+        p = _build_user_prompt("Total", "SUM(Sales[amt])", set(), {},
+                               table_context="- source table: cat.sch.fact_sales\n- fact source columns: amt, qty")
+        assert "cat.sch.fact_sales" in p
+        assert "Fact table context" in p
+        assert "do not invent column names" in p
+
+    def test_context_absent_when_empty(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_llm_fallback import _build_user_prompt
+        p = _build_user_prompt("Total", "SUM(Sales[amt])", set(), {})
+        assert "Fact table context" not in p
+
+    def test_same_dax_different_context_caches_separately(self):
+        import asyncio, json
+        from src.engines.crewai.tools.custom.metric_view_utils import dax_llm_fallback as d
+        from src.engines.crewai.tools.custom.metric_view_utils.data_classes import TranslationResult
+        from collections import OrderedDict
+
+        def mk():
+            return TranslationResult(original_name="M", measure_name="m", dax_expression="SUM(t[c])",
+                                     sql_expr="", is_translatable=False, skip_reason="", confidence="", category="")
+        calls = {"n": 0}
+
+        async def fake_call(prompt, sysp, model):
+            calls["n"] += 1
+            return {"content": json.dumps({"success": True, "sql_expr": "SUM(source.c)"}), "usage": {}}
+
+        async def go():
+            cache = OrderedDict()
+            with patch.object(d, "_call_llm", new=fake_call):
+                await d.translate_with_llm(mk(), "t", set(), {}, cache=cache, table_context="ctx-A")
+                await d.translate_with_llm(mk(), "t", set(), {}, cache=cache, table_context="ctx-B")
+        asyncio.run(go())
+        # different table context → two distinct cache keys → two LLM calls
+        assert calls["n"] == 2
