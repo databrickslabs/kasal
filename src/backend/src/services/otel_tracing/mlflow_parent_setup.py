@@ -24,6 +24,7 @@ Auth uses the Databricks Apps SPN (``DATABRICKS_CLIENT_ID`` /
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,47 @@ try:  # mirror dispatcher's guarded import
 except Exception:  # pragma: no cover - mlflow always present in prod
     _mlflow = None
     _HAS_MLFLOW = False
+
+
+# ---------------------------------------------------------------------------
+# Setup memoization.
+#
+# The full setup costs 2 DB reads + an SPN OAuth mint + an ``mlflow.set_experiment``
+# HTTP roundtrip, and it used to run on EVERY dispatcher message and every
+# agent/task/crew generation call (a research generation repeated it ~7 times).
+# MLflow binding is process-global, so we memoize per group with a TTL and track
+# which group currently OWNS the global binding — a different group's dispatch
+# re-binds, identical repeats are free. The lock also serializes setups, which
+# removes the concurrent-dispatch race on the DATABRICKS_TOKEN/HOST env swap
+# inside ``_setup_sync``.
+# ---------------------------------------------------------------------------
+_SETUP_TTL_SECONDS = 300.0
+_FAILURE_TTL_SECONDS = 60.0
+_setup_lock = asyncio.Lock()
+# Group whose config currently owns the process-global MLflow binding.
+_bound_group_key: Optional[str] = None
+_bound_expires_at: float = 0.0
+# Groups whose setup resolved to "off" (disabled workspace or failed setup).
+_off_cache: dict = {}  # group_key -> expires_at
+
+
+def _group_cache_key(group_context: Any) -> str:
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    return str(group_id) if group_id else "_default_"
+
+
+def invalidate_parent_mlflow_cache() -> None:
+    """Drop the memoized setup state so the next call re-runs the full setup.
+
+    Call after mutating MLflow enablement or the Databricks config — otherwise
+    changes take up to ``_SETUP_TTL_SECONDS`` to apply to parent-process tracing.
+    """
+    global _bound_group_key, _bound_expires_at
+    _bound_group_key = None
+    _bound_expires_at = 0.0
+    _off_cache.clear()
 
 
 def set_mlflow_tracing(enabled: bool) -> None:
@@ -214,52 +256,87 @@ async def configure_parent_mlflow_tracing(
     Makes the caller's traces land in the same UC experiment as crew execution.
     Returns True when tracing is ready (caller should then wrap its work in
     ``start_root_trace``); False when MLflow is disabled or setup failed.
+
+    Memoized per group with a TTL (see module header): repeat calls for the
+    group that already owns the process-global binding skip the DB reads, the
+    SPN OAuth mint and the ``set_experiment`` roundtrip entirely.
     """
-    try:
-        from src.services.mlflow_service import MLflowService
+    global _bound_group_key, _bound_expires_at
 
-        group_id = (
-            getattr(group_context, "primary_group_id", None) if group_context else None
-        )
-        svc = MLflowService(session, group_id=group_id)
-        if not await svc.is_enabled():
-            logger.info("[%s] MLflow disabled for this workspace; skipping tracing", label)
-            set_mlflow_tracing(False)
-            return False
+    group_key = _group_cache_key(group_context)
+    now = time.monotonic()
 
-        # Resolve experiment + UC config in the async context (avoids nesting an
-        # event loop inside the to_thread setup).
-        exp_name = "/Shared/kasal-crew-execution-traces"
-        uc_catalog = uc_schema = warehouse_id = None
-        try:
-            from src.services.databricks_service import DatabricksService
-
-            db_config = await DatabricksService(
-                session, group_id=group_id
-            ).get_databricks_config()
-            if db_config:
-                if getattr(db_config, "mlflow_experiment_name", None):
-                    name = db_config.mlflow_experiment_name
-                    exp_name = name if name.startswith("/") else f"/Shared/{name}"
-                uc_catalog = getattr(db_config, "catalog", None)
-                # schema field is `db_schema` (aliased "schema"); reading
-                # "schema" returns BaseModel.schema (a method) -> MLflow error.
-                uc_schema = getattr(db_config, "db_schema", None)
-                warehouse_id = getattr(db_config, "warehouse_id", None)
-        except Exception as cfg_err:
-            logger.info("[%s] Could not fetch MLflow config: %s; using default", label, cfg_err)
-
-        setup_ok = await asyncio.to_thread(
-            _setup_sync, exp_name, uc_catalog, uc_schema, warehouse_id, label
-        )
-        if not setup_ok:
-            set_mlflow_tracing(False)
-            return False
-
-        logger.info("[%s] MLflow tracing configured (experiment + autolog)", label)
-        set_mlflow_tracing(True)
-        return True
-    except Exception as e:
-        logger.warning("[%s] MLflow setup skipped: %s", label, e)
+    # Fast paths — no lock needed for reads of these monotonic caches.
+    if _off_cache.get(group_key, 0.0) > now:
         set_mlflow_tracing(False)
         return False
+    if _bound_group_key == group_key and _bound_expires_at > now:
+        set_mlflow_tracing(True)
+        return True
+
+    async with _setup_lock:
+        # Re-check under the lock: a concurrent call may have just set up.
+        now = time.monotonic()
+        if _off_cache.get(group_key, 0.0) > now:
+            set_mlflow_tracing(False)
+            return False
+        if _bound_group_key == group_key and _bound_expires_at > now:
+            set_mlflow_tracing(True)
+            return True
+
+        try:
+            from src.services.mlflow_service import MLflowService
+
+            group_id = (
+                getattr(group_context, "primary_group_id", None) if group_context else None
+            )
+            svc = MLflowService(session, group_id=group_id)
+            if not await svc.is_enabled():
+                logger.info("[%s] MLflow disabled for this workspace; skipping tracing", label)
+                _off_cache[group_key] = time.monotonic() + _SETUP_TTL_SECONDS
+                set_mlflow_tracing(False)
+                return False
+
+            # Resolve experiment + UC config in the async context (avoids nesting an
+            # event loop inside the to_thread setup).
+            exp_name = "/Shared/kasal-crew-execution-traces"
+            uc_catalog = uc_schema = warehouse_id = None
+            try:
+                from src.services.databricks_service import DatabricksService
+
+                db_config = await DatabricksService(
+                    session, group_id=group_id
+                ).get_databricks_config()
+                if db_config:
+                    if getattr(db_config, "mlflow_experiment_name", None):
+                        name = db_config.mlflow_experiment_name
+                        exp_name = name if name.startswith("/") else f"/Shared/{name}"
+                    uc_catalog = getattr(db_config, "catalog", None)
+                    # schema field is `db_schema` (aliased "schema"); reading
+                    # "schema" returns BaseModel.schema (a method) -> MLflow error.
+                    uc_schema = getattr(db_config, "db_schema", None)
+                    warehouse_id = getattr(db_config, "warehouse_id", None)
+            except Exception as cfg_err:
+                logger.info("[%s] Could not fetch MLflow config: %s; using default", label, cfg_err)
+
+            setup_ok = await asyncio.to_thread(
+                _setup_sync, exp_name, uc_catalog, uc_schema, warehouse_id, label
+            )
+            if not setup_ok:
+                # Missing SPN creds etc. — likely persistent; back off briefly
+                # instead of re-minting OAuth on every message.
+                _off_cache[group_key] = time.monotonic() + _FAILURE_TTL_SECONDS
+                set_mlflow_tracing(False)
+                return False
+
+            logger.info("[%s] MLflow tracing configured (experiment + autolog)", label)
+            _bound_group_key = group_key
+            _bound_expires_at = time.monotonic() + _SETUP_TTL_SECONDS
+            _off_cache.pop(group_key, None)
+            set_mlflow_tracing(True)
+            return True
+        except Exception as e:
+            logger.warning("[%s] MLflow setup skipped: %s", label, e)
+            _off_cache[group_key] = time.monotonic() + _FAILURE_TTL_SECONDS
+            set_mlflow_tracing(False)
+            return False

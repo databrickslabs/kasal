@@ -93,6 +93,20 @@ class TestCreateTrace:
         assert trace_data.get('run_id') == 42
 
     @pytest.mark.asyncio
+    async def test_create_trace_skips_existence_check_when_verification_disabled(
+        self, repository, mock_session, trace_data
+    ):
+        """Perf (W1.3): per-run batch writers verify the parent ExecutionHistory
+        row once, then pass verify_execution_exists=False — no SELECT per event."""
+        mock_session.execute = AsyncMock()
+
+        await repository.create(trace_data, verify_execution_exists=False)
+
+        mock_session.execute.assert_not_called()  # no existence SELECT
+        mock_session.add.assert_called_once()     # insert still happens
+        mock_session.flush.assert_called()
+
+    @pytest.mark.asyncio
     async def test_create_trace_raises_error_for_nonexistent_job(self, repository, mock_session):
         """Test that error is raised when job doesn't exist."""
         trace_data = {
@@ -224,6 +238,65 @@ class TestGetTraceMethods:
         result = await repository.get_by_job_id('test-job-123', limit=1, offset=0)
 
         assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_by_job_id_orders_by_id(self, repository, mock_session, mock_traces):
+        """Regression: offset pagination must carry a deterministic ORDER BY id.
+
+        Without it, Postgres may return rows in any order, so pollers paging
+        with offset can skip or duplicate traces between requests.
+        """
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_job_id('test-job-123', limit=50, offset=10)
+
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "ORDER BY" in sql
+        assert ".ID" in sql.split("ORDER BY", 1)[1]
+
+    @pytest.mark.asyncio
+    async def test_get_by_run_id_orders_by_id(self, repository, mock_session, mock_traces):
+        """Regression: run_id pagination must also carry ORDER BY id."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_run_id(1, limit=50, offset=10)
+
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "ORDER BY" in sql
+        assert ".ID" in sql.split("ORDER BY", 1)[1]
+
+    @pytest.mark.asyncio
+    async def test_get_by_job_id_since_id_filters_new_rows_only(self, repository, mock_session, mock_traces):
+        """Perf regression (W2.1): the since_id cursor must land in the WHERE
+        clause (id > N) so polls ship only new traces."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_job_id('test-job-123', limit=50, offset=0, since_id=41)
+
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "ID >" in sql
+
+    @pytest.mark.asyncio
+    async def test_get_by_job_id_without_since_id_reads_from_start(self, repository, mock_session, mock_traces):
+        """No cursor → full read (no id > filter), for restore/full fetches."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_job_id('test-job-123', limit=50, offset=0)
+
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "ID >" not in sql
 
     @pytest.mark.asyncio
     async def test_get_all_traces(self, repository, mock_session, mock_traces):

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from sqlalchemy import select, desc, and_, func
+from sqlalchemy import select, delete, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -226,18 +226,18 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             return False
 
         try:
-            # Get all messages in the session for this group
-            messages = await self.get_by_session_and_group(session_id, group_ids)
-            
-            if not messages:
-                return False
-
-            # Delete all messages
-            for message in messages:
-                await self.session.delete(message)
-            
+            # Bulk delete in one statement. The previous implementation loaded a
+            # page of messages (default 50) and deleted them one by one, which
+            # silently orphaned the rest of sessions longer than one page.
+            stmt = delete(self.model).where(
+                and_(
+                    self.model.session_id == session_id,
+                    self.model.group_id.in_(group_ids)
+                )
+            )
+            result = await self.session.execute(stmt)
             await self.session.flush()
-            return True
+            return (result.rowcount or 0) > 0
         except Exception as e:
             await self.session.rollback()
             raise
@@ -261,15 +261,15 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             return 0
 
         try:
-            query = select(self.model.id).where(
+            query = select(func.count()).select_from(self.model).where(
                 and_(
                     self.model.session_id == session_id,
                     self.model.group_id.in_(group_ids)
                 )
             )
-            
+
             result = await self.session.execute(query)
-            return len(result.scalars().all())
+            return result.scalar() or 0
         except Exception as e:
             await self.session.rollback()
             raise

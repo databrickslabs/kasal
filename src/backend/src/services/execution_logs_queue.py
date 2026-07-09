@@ -1,7 +1,18 @@
 import queue
+import threading
 from datetime import datetime
 from typing import Optional
+
+from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
+
+logger = LoggerManager.get_instance().system
+
+# Dropped-line accounting: when the queue is full, lines are lost. That must be
+# visible — a silent drop makes truncated execution logs look like an engine bug.
+_DROP_REPORT_EVERY = 100
+_drop_lock = threading.Lock()
+_dropped_total = 0
 
 class JobOutputQueue:
     """Singleton holder for the job output queue."""
@@ -21,6 +32,22 @@ class JobOutputQueue:
 # Function to get the singleton queue instance easily
 def get_job_output_queue() -> queue.Queue:
     return JobOutputQueue().get_queue()
+
+def get_dropped_log_count() -> int:
+    """Total log lines dropped because the queue was full (process lifetime)."""
+    return _dropped_total
+
+def _record_dropped_log(execution_id: str) -> None:
+    """Count a dropped line; warn on the first drop and every Nth after."""
+    global _dropped_total
+    with _drop_lock:
+        _dropped_total += 1
+        count = _dropped_total
+    if count == 1 or count % _DROP_REPORT_EVERY == 0:
+        logger.warning(
+            f"Execution log queue full — dropped {count} log line(s) so far "
+            f"(latest from execution {execution_id}); execution logs will be incomplete"
+        )
 
 def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] = None, group_context: GroupContext = None) -> bool:
     """
@@ -55,7 +82,7 @@ def enqueue_log(execution_id: str, content: str, timestamp: Optional[datetime] =
         job_queue.put_nowait(log_data)
         return True
     except queue.Full:
-        # Queue is full
+        _record_dropped_log(execution_id)
         return False
     except Exception:
         # Any other error

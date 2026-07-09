@@ -49,6 +49,13 @@ class MLflowService:
 
     async def set_enabled(self, enabled: bool) -> bool:
         ok = await self.repo.set_enabled(enabled=enabled, group_id=self.group_id)
+        if ok:
+            # Drop the memoized parent-process setup so the toggle takes effect
+            # on the next dispatch instead of after the cache TTL.
+            from src.services.otel_tracing.mlflow_parent_setup import (
+                invalidate_parent_mlflow_cache,
+            )
+            invalidate_parent_mlflow_cache()
         return ok
 
     # Evaluation toggle

@@ -14,6 +14,7 @@ import pytest
 
 from src.services.otel_tracing.mlflow_parent_setup import (
     configure_parent_mlflow_tracing,
+    invalidate_parent_mlflow_cache,
     set_root_span_outputs,
     _setup_sync,
 )
@@ -30,6 +31,15 @@ def _restore_os_environ():
     yield
     os.environ.clear()
     os.environ.update(snapshot)
+
+
+@pytest.fixture(autouse=True)
+def _reset_setup_memo():
+    """configure_parent_mlflow_tracing memoizes per group at module level;
+    reset between tests so each starts from a cold cache."""
+    invalidate_parent_mlflow_cache()
+    yield
+    invalidate_parent_mlflow_cache()
 
 
 class TestSetRootSpanOutputs:
@@ -205,6 +215,93 @@ class TestSetupSyncAuth:
                 ok = _setup_sync("/Shared/base", "c", "s", None, "X")
         assert ok is True
         assert os.environ.get("DATABRICKS_HOST") == "https://example.cloud.databricks.com"
+
+
+class TestParentSetupMemoization:
+    """Perf regression (W1.1): the full setup (2 DB reads + SPN OAuth mint +
+    set_experiment HTTP call) used to run on EVERY dispatch and EVERY
+    agent/task/crew generation call. Repeats for the group that owns the
+    process-global binding must be free until the TTL or an invalidation."""
+
+    def _ctx(self, group_id):
+        ctx = MagicMock()
+        ctx.primary_group_id = group_id
+        return ctx
+
+    def _enabled_stack(self, setup_result=True):
+        svc = MagicMock()
+        svc.is_enabled = AsyncMock(return_value=True)
+        dbx = MagicMock()
+        dbx.get_databricks_config = AsyncMock(return_value=None)
+        setup = MagicMock(return_value=setup_result)
+        return svc, dbx, setup
+
+    @pytest.mark.asyncio
+    async def test_repeat_call_same_group_skips_full_setup(self):
+        svc, dbx, setup = self._enabled_stack()
+        with (
+            patch("src.services.mlflow_service.MLflowService", MagicMock(return_value=svc)),
+            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+        ):
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+
+        setup.assert_called_once()          # OAuth + set_experiment ran once
+        svc.is_enabled.assert_awaited_once()  # DB read ran once
+
+    @pytest.mark.asyncio
+    async def test_different_group_rebinds(self):
+        svc, dbx, setup = self._enabled_stack()
+        with (
+            patch("src.services.mlflow_service.MLflowService", MagicMock(return_value=svc)),
+            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+        ):
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+            # A different group must NOT reuse g1's binding — MLflow experiment
+            # binding is process-global, so its traces would land in g1's experiment.
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g2")) is True
+
+        assert setup.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_disabled_workspace_result_is_cached(self):
+        svc = MagicMock()
+        svc.is_enabled = AsyncMock(return_value=False)
+        with patch("src.services.mlflow_service.MLflowService", MagicMock(return_value=svc)):
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is False
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is False
+
+        svc.is_enabled.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failed_setup_backs_off_instead_of_reminting_oauth(self):
+        svc, dbx, setup = self._enabled_stack(setup_result=False)
+        with (
+            patch("src.services.mlflow_service.MLflowService", MagicMock(return_value=svc)),
+            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+        ):
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is False
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is False
+
+        setup.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_invalidate_forces_full_setup(self):
+        svc, dbx, setup = self._enabled_stack()
+        with (
+            patch("src.services.mlflow_service.MLflowService", MagicMock(return_value=svc)),
+            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+        ):
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+            invalidate_parent_mlflow_cache()  # e.g. config toggled in the UI
+            assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
+
+        assert setup.call_count == 2
 
 
 class TestConfigureParentMlflowTracing:

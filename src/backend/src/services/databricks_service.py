@@ -123,6 +123,13 @@ class DatabricksService:
             # cached Databricks auth config so the new flag/workspace reload.
             self._apply_ai_gateway_env(config_data.get("ai_gateway_enabled", False))
 
+            # New catalog/schema/warehouse/experiment must reach parent-process
+            # MLflow tracing on the next dispatch, not after the memo TTL.
+            from src.services.otel_tracing.mlflow_parent_setup import (
+                invalidate_parent_mlflow_cache,
+            )
+            invalidate_parent_mlflow_cache()
+
             # Return the response
             return {
                 "status": "success",

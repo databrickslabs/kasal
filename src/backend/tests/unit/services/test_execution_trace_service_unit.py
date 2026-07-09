@@ -261,6 +261,43 @@ class TestGetTracesByJobId:
         assert fallback_trace.job_id == "job-abc-123"
 
     @pytest.mark.asyncio
+    async def test_since_id_cursor_is_forwarded_to_repository(
+        self, service, mock_history_repo, mock_trace_repo
+    ):
+        """Perf regression (W2.1): pollers pass since_id so each poll reads only
+        NEW traces instead of re-reading the run's whole trace set."""
+        execution = _make_execution_obj(id=10)
+        mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=execution)
+        mock_trace_repo.get_by_job_id = AsyncMock(return_value=[_make_trace_obj()])
+
+        result = await service.get_traces_by_job_id(
+            group_context=_make_group_context(), job_id="job-abc-123",
+            limit=50, offset=0, since_id=41,
+        )
+
+        assert result is not None
+        mock_trace_repo.get_by_job_id.assert_awaited_once_with("job-abc-123", 50, 0, 41)
+
+    @pytest.mark.asyncio
+    async def test_since_id_empty_result_skips_run_id_fallback(
+        self, service, mock_history_repo, mock_trace_repo
+    ):
+        """With a cursor, 'no new traces' is the NORMAL poll result — the
+        legacy run_id fallback query must not fire on every empty tick."""
+        execution = _make_execution_obj(id=10)
+        mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=execution)
+        mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
+        mock_trace_repo.get_by_run_id = AsyncMock(return_value=[])
+
+        result = await service.get_traces_by_job_id(
+            group_context=None, job_id="job-abc-123", since_id=99,
+        )
+
+        assert result is not None
+        assert len(result.traces) == 0
+        mock_trace_repo.get_by_run_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_execution_not_found_at_all(
         self, service, mock_history_repo
     ):
@@ -657,6 +694,27 @@ class TestCreateTrace:
 
             assert result.id == 7
             mock_sse.broadcast_to_job.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_forwards_verify_execution_exists_to_repository(
+        self, service, mock_trace_repo
+    ):
+        """Perf (W1.3): batch writers verify the parent row once, then skip the
+        per-event existence SELECT — the flag must reach the repository."""
+        created = _make_trace_obj(id=8, job_id="j1", event_type="tool_usage")
+        mock_trace_repo.create = AsyncMock(return_value=created)
+
+        with patch("src.services.execution_trace_service.sse_manager") as mock_sse:
+            mock_sse.broadcast_to_job = AsyncMock(return_value=0)
+            await service.create_trace(
+                {"job_id": "j1", "event_type": "tool_usage"},
+                verify_execution_exists=False,
+            )
+
+        mock_trace_repo.create.assert_awaited_once_with(
+            {"job_id": "j1", "event_type": "tool_usage"},
+            verify_execution_exists=False,
+        )
 
     @pytest.mark.asyncio
     async def test_skips_sse_in_subprocess_mode(

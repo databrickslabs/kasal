@@ -288,6 +288,66 @@ class ExecutionStatusService:
             return False
 
     @staticmethod
+    async def update_run_name(
+        job_id: str,
+        run_name: str,
+        session: AsyncSession | None = None
+    ) -> bool:
+        """
+        Update the run name for an execution.
+
+        Used by the deferred (off-critical-path) run-name generation: executions
+        start with an instant placeholder name and are renamed once the LLM
+        naming call returns, so starting a run never waits on a model roundtrip.
+
+        Args:
+            job_id: Execution ID (string UUID, maps to job_id field)
+            run_name: The generated descriptive run name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not job_id or not isinstance(job_id, str):
+            logger.error(f"[ExecutionStatusService] Invalid job_id: {job_id}")
+            return False
+
+        if not run_name or not isinstance(run_name, str):
+            logger.error(f"[ExecutionStatusService] Invalid run_name: {run_name}")
+            return False
+
+        try:
+            async def _update_name_operation(session):
+                repo = ExecutionRepository(session)
+
+                execution_record = await repo.get_execution_by_job_id(job_id=job_id)
+                if not execution_record:
+                    logger.error(f"[ExecutionStatusService] Execution record not found for job_id: {job_id}. Cannot update run name.")
+                    return False
+
+                updated_execution = await repo.update_execution(
+                    execution_id=execution_record.id,
+                    data={"run_name": run_name}
+                )
+
+                if updated_execution:
+                    await session.flush()
+                    await session.commit()
+                    logger.info(f"[ExecutionStatusService] Updated run name for job_id {job_id} to '{run_name}'")
+                    return True
+                else:
+                    logger.error(f"[ExecutionStatusService] Failed to update run name for job_id: {job_id}")
+                    await session.rollback()
+                    return False
+
+            if session is not None:
+                return await _update_name_operation(session)
+            return await execute_db_operation_smart(_update_name_operation)
+
+        except Exception as e:
+            logger.error(f"[ExecutionStatusService] Error updating run name for job_id {job_id}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
     async def update_mlflow_evaluation_run_id(
         session: AsyncSession,
         job_id: str,

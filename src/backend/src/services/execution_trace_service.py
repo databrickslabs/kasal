@@ -142,20 +142,24 @@ class ExecutionTraceService:
     
     async def get_traces_by_job_id(
         self,
-        group_context=None, 
+        group_context=None,
         job_id: str = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        since_id: int = 0
     ) -> ExecutionTraceResponseByJobId:
         """
         Get traces for an execution by job_id with pagination and authorization.
-        
+
         Args:
             group_context: Group context for authorization (contains group_ids and email)
             job_id: String ID of the execution (job_id in database)
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+            since_id: Incremental cursor — only traces with id greater than this.
+                Pollers pass their last seen id so each poll returns only NEW
+                rows instead of re-reading (and re-masking) the whole trace set.
+
         Returns:
             ExecutionTraceResponseByJobId with traces for the execution if authorized
         """
@@ -189,11 +193,15 @@ class ExecutionTraceService:
             traces = await self.repository.get_by_job_id(
                 job_id,
                 limit,
-                offset
+                offset,
+                since_id
             )
-            
-            # If no traces found using the direct job_id field, try via the run_id (for backward compatibility)
-            if not traces:
+
+            # If no traces found using the direct job_id field, try via the run_id
+            # (for backward compatibility). Full reads only: with a cursor,
+            # "no new traces" is the NORMAL result of most polls — falling back
+            # would add a pointless second query per empty tick.
+            if not traces and not since_id:
                 logger.debug(f"No traces found directly with job_id {job_id}, trying via run_id lookup")
                 traces = await self.repository.get_by_run_id(
                     run_id,
@@ -386,12 +394,20 @@ class ExecutionTraceService:
             logger.error(f"Error retrieving trace {trace_id}: {str(e)}")
             raise
     
-    async def create_trace(self, trace_data: Dict[str, Any]) -> ExecutionTraceItem:
+    async def create_trace(
+        self,
+        trace_data: Dict[str, Any],
+        verify_execution_exists: bool = True,
+    ) -> ExecutionTraceItem:
         """
         Create a new trace.
 
         Args:
             trace_data: Dictionary with trace data
+            verify_execution_exists: Whether to check the parent ExecutionHistory
+                row exists before inserting. Batch writers (e.g. the light-agent
+                per-run persister) verify once for the first event of a run and
+                skip the extra SELECT for the rest.
 
         Returns:
             Created ExecutionTraceItem
@@ -402,12 +418,15 @@ class ExecutionTraceService:
         try:
             job_id = trace_data.get('job_id')
             event_type = trace_data.get('event_type', 'unknown')
-            logger.info(f"[ExecutionTraceService] Creating trace for job_id={job_id}, event_type={event_type}")
+            # DEBUG: this runs per tool/LLM event during runs — INFO was log spam.
+            logger.debug(f"[ExecutionTraceService] Creating trace for job_id={job_id}, event_type={event_type}")
 
-            trace = await self.repository.create(trace_data)
+            trace = await self.repository.create(
+                trace_data, verify_execution_exists=verify_execution_exists
+            )
 
             trace_item = ExecutionTraceItem.model_validate(trace)
-            logger.info(f"[ExecutionTraceService] Trace created successfully: id={trace.id}, job_id={job_id}")
+            logger.debug(f"[ExecutionTraceService] Trace created successfully: id={trace.id}, job_id={job_id}")
 
             # Broadcast SSE event for real-time trace updates
             # CRITICAL: Skip SSE broadcast in subprocess mode because:
@@ -420,17 +439,13 @@ class ExecutionTraceService:
                 logger.debug(f"[ExecutionTraceService] Skipping SSE broadcast in subprocess mode for job_id={job_id}")
             elif job_id:
                 try:
-                    # Check SSE connection statistics before broadcast
-                    stats = sse_manager.get_statistics()
-                    logger.info(f"[ExecutionTraceService] SSE stats before broadcast: connections={stats['total_connections']}, active_jobs={stats['active_jobs']}")
-
                     event = SSEEvent(
                         data=trace_item.model_dump(),
                         event="trace",
                         id=f"{job_id}_trace_{trace.id}"
                     )
                     sent_count = await sse_manager.broadcast_to_job(job_id, event)
-                    logger.info(f"[ExecutionTraceService] Broadcasted SSE trace event for job_id={job_id}, sent to {sent_count} clients")
+                    logger.debug(f"[ExecutionTraceService] Broadcasted SSE trace event for job_id={job_id}, sent to {sent_count} clients")
                 except Exception as sse_error:
                     # Don't fail trace creation if SSE fails
                     logger.warning(f"[ExecutionTraceService] Failed to broadcast SSE trace event: {sse_error}")

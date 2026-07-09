@@ -303,6 +303,41 @@ class TestEnqueueLog:
         # Queue is now full (maxsize=2)
         assert enqueue_log("exec-3", "msg3") is False
 
+    def test_queue_full_drops_are_counted_and_logged(self):
+        """Regression: dropped lines must be counted and surfaced, not silent.
+
+        A full queue used to lose log lines with no accounting, making
+        truncated execution logs look like an engine bug.
+        """
+        import src.services.execution_logs_queue as elq
+
+        job_queue_instance = JobOutputQueue()
+        job_queue_instance._queue = queue.Queue(maxsize=1)
+
+        with patch.object(elq, '_dropped_total', 0), \
+             patch.object(elq, 'logger') as mock_logger:
+            assert enqueue_log("exec-1", "msg1") is True
+            assert enqueue_log("exec-1", "msg2") is False  # dropped
+
+            assert elq.get_dropped_log_count() == 1
+            # The first drop always warns
+            mock_logger.warning.assert_called_once()
+            assert "dropped" in mock_logger.warning.call_args[0][0]
+
+            # Subsequent drops within the report interval don't spam the log
+            assert enqueue_log("exec-1", "msg3") is False
+            assert elq.get_dropped_log_count() == 2
+            mock_logger.warning.assert_called_once()
+
+    def test_drop_warning_repeats_at_report_interval(self):
+        """Every Nth drop re-warns so long-running loss stays visible."""
+        import src.services.execution_logs_queue as elq
+
+        with patch.object(elq, '_dropped_total', elq._DROP_REPORT_EVERY - 1), \
+             patch.object(elq, 'logger') as mock_logger:
+            elq._record_dropped_log("exec-x")  # crosses the interval boundary
+            mock_logger.warning.assert_called_once()
+
     def test_integration_with_job_output_queue(self):
         """Test integration between enqueue_log and JobOutputQueue."""
         # Use enqueue_log to add data

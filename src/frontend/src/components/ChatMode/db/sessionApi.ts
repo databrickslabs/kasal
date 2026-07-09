@@ -154,12 +154,26 @@ export async function renameSession(id: string, title: string): Promise<void> {
   await getClient().put(`${BASE}/sessions/${id}`, { title });
 }
 
+/** Backend caps per_page at 100 (chat_history router). */
+const MESSAGES_PER_PAGE = 100;
+/** Runaway-loop guard: 50 pages = 5000 messages, far beyond any real session. */
+const MAX_MESSAGE_PAGES = 50;
+
 export async function getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-  const res = await getClient().get<{ messages: MessageWire[] }>(
-    `${BASE}/sessions/${sessionId}/messages`,
-    { params: { page: 0, per_page: 100 } },
-  );
-  return (res.data?.messages || []).map(toMessage);
+  // Page through the whole session. A single page-0 fetch returned only the
+  // OLDEST 100 rows (backend orders ascending), silently dropping the newest
+  // turns of long sessions on reload.
+  const all: MessageWire[] = [];
+  for (let page = 0; page < MAX_MESSAGE_PAGES; page += 1) {
+    const res = await getClient().get<{ messages: MessageWire[] }>(
+      `${BASE}/sessions/${sessionId}/messages`,
+      { params: { page, per_page: MESSAGES_PER_PAGE } },
+    );
+    const batch = res.data?.messages || [];
+    all.push(...batch);
+    if (batch.length < MESSAGES_PER_PAGE) break;
+  }
+  return all.map(toMessage);
 }
 
 // Card-only messages (crew cards, prompts) carry no text — the backend

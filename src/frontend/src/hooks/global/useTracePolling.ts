@@ -10,7 +10,8 @@
  *   - GET /traces/job/{id}/crew-node-states  (~200 bytes per crew)
  *   - GET /traces/job/{id}/task-states       (~200 bytes per task)
  *   - GET /executions/{id}                   (for job lifecycle status)
- *   - GET /traces/job/{id}?offset=N&limit=50 (only new traces, for chat panel)
+ *   - GET /traces/job/{id}?since_id=N&limit=50 (only NEW traces via id cursor
+ *     — the server filters id > N, so a poll never re-ships prior rows)
  *
  * ACTIVATION STRATEGY:
  *   Polling always starts on jobCreated (after a short delay to give SSE a chance).
@@ -26,6 +27,13 @@ import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 
 const POLL_INTERVAL_MS = 2000;
+/**
+ * Cadence while the tab is hidden. Background tabs used to keep polling at the
+ * full 2s × 3-requests rate for the whole run — the single biggest source of
+ * sustained deployed backend load. A hidden tab only needs a slow heartbeat;
+ * returning to the tab polls immediately and restores the fast cadence.
+ */
+const HIDDEN_POLL_INTERVAL_MS = 15000;
 /** Delay before starting polling after jobCreated — gives SSE a chance to work */
 const SSE_GRACE_PERIOD_MS = 4000;
 /**
@@ -45,7 +53,8 @@ export const useTracePolling = () => {
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const isPollingRef = useRef(false);
-  const seenTraceCountRef = useRef<number>(0);
+  /** Highest trace id seen — the server-side `since_id` cursor. */
+  const lastTraceIdRef = useRef<number>(0);
   const lastStatusRef = useRef<string | null>(null);
   /** Consecutive 404s on the status probe — a gone job (deleted / different group). */
   const notFoundCountRef = useRef(0);
@@ -71,7 +80,7 @@ export const useTracePolling = () => {
       const requests: Promise<any>[] = [
         apiClient.get(`/executions/${jobId}`),
         apiClient.get(`/traces/job/${jobId}`, {
-          params: { limit: 50, offset: seenTraceCountRef.current }
+          params: { limit: 50, since_id: lastTraceIdRef.current }
         }),
       ];
 
@@ -79,7 +88,7 @@ export const useTracePolling = () => {
         requests.push(apiClient.get(`/traces/job/${jobId}/crew-node-states`));
       }
 
-      console.log(`[TracePolling] Polling | job=${jobId} | isFlow=${isFlow} | offset=${seenTraceCountRef.current}`);
+      console.log(`[TracePolling] Polling | job=${jobId} | isFlow=${isFlow} | since_id=${lastTraceIdRef.current}`);
       const results = await Promise.allSettled(requests);
 
       // --- 1. Process execution status ---
@@ -112,7 +121,7 @@ export const useTracePolling = () => {
             console.log(`[TracePolling] Job ${jobId} finished (${status}), final trace fetch`);
             try {
               const finalResp = await apiClient.get(`/traces/job/${jobId}`, {
-                params: { limit: 500, offset: seenTraceCountRef.current }
+                params: { limit: 500, since_id: lastTraceIdRef.current }
               });
               const finalTraces = finalResp.data?.traces;
               if (Array.isArray(finalTraces) && finalTraces.length > 0) {
@@ -122,8 +131,10 @@ export const useTracePolling = () => {
                     detail: { jobId, trace }
                   }));
                   useRunStatusStore.getState().addTrace(jobId, trace);
+                  if (typeof trace?.id === 'number' && trace.id > lastTraceIdRef.current) {
+                    lastTraceIdRef.current = trace.id;
+                  }
                 }
-                seenTraceCountRef.current += finalTraces.length;
               }
             } catch { /* non-fatal */ }
 
@@ -133,7 +144,7 @@ export const useTracePolling = () => {
               intervalRef.current = null;
             }
             activeJobIdRef.current = null;
-            seenTraceCountRef.current = 0;
+            lastTraceIdRef.current = 0;
             lastStatusRef.current = null;
             console.log(`[TracePolling] Stopped after job finished`);
             return;
@@ -161,7 +172,7 @@ export const useTracePolling = () => {
               intervalRef.current = null;
             }
             activeJobIdRef.current = null;
-            seenTraceCountRef.current = 0;
+            lastTraceIdRef.current = 0;
             lastStatusRef.current = null;
             notFoundCountRef.current = 0;
             // Let ChatMode (and any other consumer) drop the running banner + the
@@ -177,18 +188,20 @@ export const useTracePolling = () => {
         }
       }
 
-      // --- 2. Process new traces (incremental via offset) ---
+      // --- 2. Process new traces (incremental via since_id cursor) ---
       if (results[1].status === 'fulfilled') {
         const traces = results[1].value.data?.traces;
         if (Array.isArray(traces) && traces.length > 0) {
           console.log(`[TracePolling] ${traces.length} new traces for job ${jobId}`);
-          seenTraceCountRef.current += traces.length;
 
           for (const trace of traces) {
             window.dispatchEvent(new CustomEvent('traceUpdate', {
               detail: { jobId, trace }
             }));
             useRunStatusStore.getState().addTrace(jobId, trace);
+            if (typeof trace?.id === 'number' && trace.id > lastTraceIdRef.current) {
+              lastTraceIdRef.current = trace.id;
+            }
           }
         }
       }
@@ -252,13 +265,23 @@ export const useTracePolling = () => {
     }
   }, []);
 
-  const startPolling = useCallback((jobId: string) => {
+  /**
+   * (Re)arm the poll interval at the cadence appropriate for tab visibility:
+   * fast while the user is watching, slow heartbeat while the tab is hidden.
+   */
+  const armInterval = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
+    const cadence = typeof document !== 'undefined' && document.hidden
+      ? HIDDEN_POLL_INTERVAL_MS
+      : POLL_INTERVAL_MS;
+    intervalRef.current = setInterval(pollStates, cadence);
+  }, [pollStates]);
 
+  const startPolling = useCallback((jobId: string) => {
     activeJobIdRef.current = jobId;
-    seenTraceCountRef.current = 0;
+    lastTraceIdRef.current = 0;
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
     sseProvenWorkingRef.current = false;
@@ -266,8 +289,8 @@ export const useTracePolling = () => {
 
     // Poll immediately, then at intervals
     pollStates();
-    intervalRef.current = setInterval(pollStates, POLL_INTERVAL_MS);
-  }, [pollStates]);
+    armInterval();
+  }, [pollStates, armInterval]);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -280,7 +303,7 @@ export const useTracePolling = () => {
       graceTimerRef.current = null;
     }
     activeJobIdRef.current = null;
-    seenTraceCountRef.current = 0;
+    lastTraceIdRef.current = 0;
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
   }, []);
@@ -336,18 +359,21 @@ export const useTracePolling = () => {
       }
     };
 
-    const handleJobCompleted = () => {
-      console.log(`[TracePolling] jobCompleted received`);
-      stopPolling();
+    // Terminal events must only stop the poller when they are for OUR job.
+    // Multiple runs can be live at once (ChatMode backgrounds older runs), so
+    // an unGated stop meant any run completing anywhere froze the foreground
+    // run's traces until the 10s reconciliation loop. Mirror the
+    // handleJobNotFound gate: act only on the active job.
+    const makeTerminalHandler = (kind: string) => (event: CustomEvent) => {
+      const { jobId } = event.detail || {};
+      if (jobId && jobId === activeJobIdRef.current) {
+        console.log(`[TracePolling] ${kind} received for active job — stopping`);
+        stopPolling();
+      }
     };
-    const handleJobFailed = () => {
-      console.log(`[TracePolling] jobFailed received`);
-      stopPolling();
-    };
-    const handleJobStopped = () => {
-      console.log(`[TracePolling] jobStopped received`);
-      stopPolling();
-    };
+    const handleJobCompleted = makeTerminalHandler('jobCompleted');
+    const handleJobFailed = makeTerminalHandler('jobFailed');
+    const handleJobStopped = makeTerminalHandler('jobStopped');
     // Another consumer (the ChatMode reconnect backstop) proved this job is gone
     // before our grace timer even fired. Stop for it specifically — gated on the
     // active job so a jobNotFound for a different job can't kill a live poll, and
@@ -360,12 +386,24 @@ export const useTracePolling = () => {
       }
     };
 
+    // Re-pace polling when tab visibility flips: hidden → slow heartbeat,
+    // visible → immediate poll + fast cadence. Only acts while a poll is live.
+    const handleVisibilityChange = () => {
+      if (!activeJobIdRef.current || !intervalRef.current) return;
+      armInterval();
+      if (!document.hidden) {
+        console.log('[TracePolling] Tab visible again — polling immediately');
+        pollStates();
+      }
+    };
+
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
     window.addEventListener('traceUpdate', handleSSETrace as EventListener);
     window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
     window.addEventListener('jobFailed', handleJobFailed as EventListener);
     window.addEventListener('jobStopped', handleJobStopped as EventListener);
     window.addEventListener('jobNotFound', handleJobNotFound as EventListener);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     console.log('[TracePolling] Hook mounted, event listeners registered');
 
@@ -376,10 +414,11 @@ export const useTracePolling = () => {
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
       window.removeEventListener('jobStopped', handleJobStopped as EventListener);
       window.removeEventListener('jobNotFound', handleJobNotFound as EventListener);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       stopPolling();
       console.log('[TracePolling] Hook unmounted');
     };
-  }, [startPolling, stopPolling]);
+  }, [startPolling, stopPolling, armInterval, pollStates]);
 
   return { startPolling, stopPolling };
 };
