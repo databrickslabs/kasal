@@ -1,6 +1,12 @@
 # LLM-First DAX Transpilation — Implementation Plan
 
-**Status:** Proposed (plan only — no code written yet)
+**Status:** IMPLEMENTED (2026-07-09) on `feat/pbi-ucmv-fixes-v2`. Skill corpus vendored
+(10 files under `metric_view_utils/skills/`), `LLMManager.completion_with_usage`
+added (cached structured content + usage), `dax_llm_fallback` is now LLM-first
+(corpus system prompt with `cache_control:ephemeral`, 7-category `dax_class`,
+topo-ordered batch), `DaxTranslator.translate(trivial_only=)` fast-path,
+`translation_mode='llm_first'` default. Verify harness: `/tmp/verify_llm_first_transpilation.py`.
+(Original plan below.)
 **Scope:** DAX measure → Spark SQL / UC Metric View translation
 **Owner tools:** `tool-85-dax-to-sql-translator`, `tool-86-uc-metric-view-generator`
 **Goal:** Match or exceed Databricks engineering's PowerBI→UCMV transpilation quality by

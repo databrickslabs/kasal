@@ -228,3 +228,62 @@ class TestBatchConcurrency:
 
         asyncio.run(go())
         assert called is False  # artifact never sent to the LLM
+
+
+class TestLLMFirstCorpus:
+    """LLM-first translator: skill corpus + dax_class + cached system prompt."""
+
+    def test_corpus_loaded_and_in_prompt(self):
+        from src.engines.crewai.tools.custom.metric_view_utils import dax_llm_fallback as d
+        # The 10 skill files are vendored → corpus non-empty and in the system prompt.
+        assert len(d._SKILL_CORPUS) > 1000
+        assert 'PATTERNS' in d._SYSTEM_PROMPT
+        assert 'dax_class' in d._SYSTEM_PROMPT  # 7-category contract present
+
+    def test_system_message_is_cache_marked_when_corpus_present(self):
+        from src.engines.crewai.tools.custom.metric_view_utils import dax_llm_fallback as d
+        msg = d._system_message(d._SYSTEM_PROMPT)
+        # With a corpus, the system content is a structured block with cache_control.
+        assert isinstance(msg['content'], list)
+        assert msg['content'][0]['cache_control'] == {'type': 'ephemeral'}
+
+    def test_dax_class_captured_on_success(self):
+        import asyncio, json
+        from src.engines.crewai.tools.custom.metric_view_utils import dax_llm_fallback as d
+        from src.engines.crewai.tools.custom.metric_view_utils.data_classes import TranslationResult
+        m = TranslationResult(original_name='M', measure_name='m', dax_expression='SUM(t[c])',
+                              sql_expr='', is_translatable=False, skip_reason='', confidence='', category='')
+        fake = json.dumps({"success": True, "sql_expr": "SUM(source.c)",
+                           "dax_class": "translatable_direct", "confidence": "high"})
+
+        async def go():
+            with patch.object(d, "_call_llm", new=AsyncMock(return_value={"content": fake, "usage": {}})):
+                return await d.translate_with_llm(m, "t", set(), {}, model="x")
+        out = asyncio.run(go())
+        assert out.is_translatable and out.dax_class == "translatable_direct"
+        assert out.category == "llm_translated"  # emission routing unchanged
+
+    def test_topo_priority_orders_batch(self):
+        import asyncio, json
+        from src.engines.crewai.tools.custom.metric_view_utils import dax_llm_fallback as d
+        from src.engines.crewai.tools.custom.metric_view_utils.data_classes import TranslationResult
+        # child references parent; topo puts parent first so child resolves.
+        parent = TranslationResult(original_name='Parent', measure_name='parent', dax_expression='SUM(t[a])',
+                                   sql_expr='', is_translatable=False, skip_reason='', confidence='', category='')
+        child = TranslationResult(original_name='Child', measure_name='child', dax_expression='[Parent]*2',
+                                  sql_expr='', is_translatable=False, skip_reason='', confidence='', category='')
+        seen_order = []
+
+        async def fake_call(prompt, sysp, model):
+            # record which measure ran (prompt carries the name)
+            seen_order.append('Parent' if 'Parent' in prompt and 'Child' not in prompt else 'Child')
+            return {"content": json.dumps({"success": True, "sql_expr": "SUM(source.a)", "dax_class": "translatable_direct"}), "usage": {}}
+
+        async def go():
+            with patch.object(d, "_call_llm", new=fake_call):
+                # child listed first, but topo_priority puts parent (rank 0) before child (rank 1)
+                await d.translate_batch_with_llm([child, parent], "t", set(), {}, model="x",
+                                                 topo_priority={'Parent': 0, 'Child': 1})
+        asyncio.run(go())
+        # parent must be attempted before child
+        assert seen_order.index('Parent') < seen_order.index('Child')

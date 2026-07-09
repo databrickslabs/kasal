@@ -56,14 +56,30 @@ class DaxTranslator:
         """Set current fact joins for cross-table resolution."""
         self._fact_joins = fact_joins
 
-    def translate(self, measure: dict, table_key: str) -> TranslationResult:
-        """Translate a single DAX measure to SQL using the pattern registry."""
+    # In llm_first mode, only these patterns run as the regex fast-path (Step 3.8):
+    # display-artifact rejects + the trivial single-column, high-confidence
+    # aggregations. Everything else falls through to the LLM-first translator.
+    _TRIVIAL_FAST_PATH = frozenset(
+        {'quick_reject', 'simple_sum', 'simple_sumx', 'distinctcountnoblank'}
+    )
+
+    def translate(self, measure: dict, table_key: str, trivial_only: bool = False) -> TranslationResult:
+        """Translate a single DAX measure to SQL using the pattern registry.
+
+        ``trivial_only`` (llm_first mode): run ONLY the trivial fast-path
+        matchers (single-column aggregations + display-artifact rejects). Any
+        non-trivial measure returns untranslatable so the caller routes it to the
+        skill-corpus LLM translator. The remaining ~11 complex matchers are not
+        deleted — they simply stop being the primary path.
+        """
         name = measure.get('measure_name', '')
         dax = measure.get('dax_expression', '')
         original_name = measure.get('original_name', name)
         snake = to_snake_case(original_name)
 
         for pattern_name, match_fn, translate_fn in self._patterns:
+            if trivial_only and pattern_name not in self._TRIVIAL_FAST_PATH:
+                continue
             match = match_fn(dax, name)
             if match is not None:
                 sql, skip_reason = translate_fn(match, dax, table_key)
