@@ -17,7 +17,12 @@ def reset_globals():
 
 def make_mock_mcp_module(adapter=None):
     mock_adapter = adapter or MagicMock()
+    # Satisfy _adapter_is_healthy: initialized, NO initialization_error, and a
+    # non-empty tool list — an auto-generated Mock attribute would read as a
+    # truthy error and the adapter would (correctly) never be pooled.
     mock_adapter._initialized = True
+    mock_adapter.initialization_error = None
+    mock_adapter.tools = [MagicMock()]
     mock_adapter.initialize = AsyncMock()
     mock_module = MagicMock()
     mock_module.MCPAdapter = MagicMock(return_value=mock_adapter)
@@ -52,10 +57,16 @@ async def test_get_or_create_mcp_adapter_creates_new():
 @pytest.mark.asyncio
 async def test_get_or_create_mcp_adapter_reuses_from_pool():
     reset_globals()
+    # A pooled adapter is only reused when HEALTHY (_adapter_is_healthy):
+    # initialized, no initialization_error, and discovered tools.
     mock_adapter = MagicMock()
     mock_adapter._initialized = True
+    mock_adapter.initialization_error = None
+    mock_adapter.tools = [MagicMock()]
 
-    pool_key = "http://example.com_token"
+    # HTTP pool keys carry an identity fingerprint (per-user OBO pooling);
+    # with no credential material the fingerprint is 'noauth'.
+    pool_key = "http://example.com_token_noauth"
     mcp_handler._mcp_connection_pool[pool_key] = mock_adapter
 
     params = {"url": "http://example.com", "auth_type": "token"}
@@ -65,12 +76,46 @@ async def test_get_or_create_mcp_adapter_reuses_from_pool():
 
 
 @pytest.mark.asyncio
+async def test_get_or_create_mcp_adapter_pools_per_identity():
+    """Two callers with DIFFERENT credentials must not share a pooled
+    connection — a pooled connection's server-side identity is fixed when it
+    opens (the per-user OBO 'does not own conversation' bug)."""
+    reset_globals()
+    pooled = MagicMock()
+    pooled._initialized = True
+    pooled.initialization_error = None
+    pooled.tools = [MagicMock()]
+
+    import hashlib
+    fp_a = hashlib.sha256(b"Bearer token-user-a").hexdigest()[:12]
+    mcp_handler._mcp_connection_pool[f"http://example.com_token_{fp_a}"] = pooled
+
+    # Same URL/auth_type, user A's token → reused.
+    params_a = {"url": "http://example.com", "auth_type": "token",
+                "headers": {"Authorization": "Bearer token-user-a"}}
+    assert await mcp_handler.get_or_create_mcp_adapter(params_a) is pooled
+
+    # User B's token → different key → a NEW adapter (mocked), never A's.
+    fresh = MagicMock()
+    fresh._initialized = True
+    fresh.initialization_error = None
+    fresh.tools = [MagicMock()]
+    fresh.initialize = AsyncMock()
+    mock_module = MagicMock()
+    mock_module.MCPAdapter = MagicMock(return_value=fresh)
+    params_b = {"url": "http://example.com", "auth_type": "token",
+                "headers": {"Authorization": "Bearer token-user-b"}}
+    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+        assert await mcp_handler.get_or_create_mcp_adapter(params_b) is fresh
+
+
+@pytest.mark.asyncio
 async def test_get_or_create_mcp_adapter_removes_stale_from_pool():
     reset_globals()
     stale_adapter = MagicMock()
     stale_adapter._initialized = False
 
-    pool_key = "http://example.com_token"
+    pool_key = "http://example.com_token_noauth"
     mcp_handler._mcp_connection_pool[pool_key] = stale_adapter
 
     mock_new_adapter = MagicMock()

@@ -36,10 +36,13 @@ def _patch_embedding(value):
     return patch("src.core.llm_manager.LLMManager.get_embedding", AsyncMock(return_value=value))
 
 
-def _patch_doc_service(search_mock):
+def _patch_doc_service(search_mock, group_paths=None):
     # Knowledge search goes through DocumentationEmbeddingRepository(model=KnowledgeEmbedding).
     repo = MagicMock()
     repo.search_similar = search_mock
+    # When a specific file is requested, the service resolves its basename
+    # against the group's stored paths BEFORE ranking (scoped search).
+    repo.list_group_file_paths = AsyncMock(return_value=group_paths or [])
     return patch(
         "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository",
         return_value=repo,
@@ -85,19 +88,36 @@ class TestKnowledgeSearchService:
 
     @pytest.mark.asyncio
     async def test_search_forwards_group_and_file_paths(self):
-        """group_id (tenant isolation) + file_paths are forwarded to the embedding service."""
+        """group_id (tenant isolation) + the RESOLVED file paths scope the ranking."""
         svc = _make_service(group_id="grp-7")
         search_mock = AsyncMock(return_value=[])
 
-        with _patch_embedding([0.2] * 1024), _patch_doc_service(search_mock):
+        # The stored full path differs from the requested one — the service
+        # matches by (NFC-normalized) basename and forwards the STORED path so
+        # the DB ranks only within that file's chunks (see the scoping comment
+        # in knowledge_search_service.search).
+        stored = "/Volumes/c/s/v/grp-7/exec/b.txt"
+        with _patch_embedding([0.2] * 1024), _patch_doc_service(search_mock, group_paths=[stored, "/Volumes/x/other.pdf"]):
             await svc.search("q", file_paths=["/Volumes/a/b.txt"], limit=8)
 
         search_mock.assert_awaited_once()
         args, kwargs = search_mock.call_args
         assert kwargs["group_id"] == "grp-7"
-        # file_paths are filtered in-memory by the service, not forwarded to the repo
-        assert kwargs["file_paths"] is None
+        assert kwargs["file_paths"] == [stored]
         assert kwargs["limit"] == 8
+
+    @pytest.mark.asyncio
+    async def test_search_returns_empty_when_requested_file_not_in_store(self):
+        """A requested file with no stored chunks yields NO results — never a
+        substitute document (the hallucination guard)."""
+        svc = _make_service(group_id="grp-7")
+        search_mock = AsyncMock(return_value=[])
+
+        with _patch_embedding([0.2] * 1024), _patch_doc_service(search_mock, group_paths=["/Volumes/x/other.pdf"]):
+            results = await svc.search("q", file_paths=["/Volumes/a/missing.txt"])
+
+        assert results == []
+        search_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_search_empty_file_paths_become_none(self):

@@ -185,7 +185,7 @@ describe('ensureDatabricksServer', () => {
     expect(client.post).not.toHaveBeenCalled();
   });
 
-  it('registers a new workspace-scoped server (streamable + databricks_spn, lowercase name)', async () => {
+  it('registers a new workspace-scoped server (streamable + databricks_obo, lowercase name)', async () => {
     client.get.mockResolvedValue({ data: { servers: [] } });
     client.post.mockResolvedValue({ data: {} });
 
@@ -199,7 +199,9 @@ describe('ensureDatabricksServer', () => {
         name: 'databricks genie: sales space',
         server_url: genieOption.server_url,
         server_type: 'streamable',
-        auth_type: 'databricks_spn',
+        // Managed MCP runs per-user OBO (commit 89253b874) — the SPN auth type
+        // was retired for these registrations.
+        auth_type: 'databricks_obo',
         enabled: true,
       }),
     );
