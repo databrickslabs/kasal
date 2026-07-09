@@ -396,10 +396,23 @@ async def translate_batch_with_llm(
     """
     import asyncio
 
-    # Skip PBI artifacts — don't waste LLM tokens on FORMAT/Color/ISBLANK
+    # Skip genuine display-only PBI artifacts — no business logic to translate,
+    # so they'd only waste LLM tokens (FORMAT/Color/ISBLANK guards, empty DAX,
+    # BLANK placeholders).
+    #
+    # NOTE: SELECTEDVALUE / SELECTEDVALUE+SWITCH are deliberately NOT here. The
+    # regex quick-reject correctly refuses to translate them (they can't be
+    # expressed as a single regex pattern), but they are real, parameterized
+    # business measures — exactly what the skill corpus (UNSUPPORTED.md's
+    # "skip the SELECTEDVALUE guard, the measure is still valid" + WINDOW.md
+    # time-intelligence → window-measure patterns) was vendored to handle. They
+    # must reach the LLM. If the LLM genuinely can't express one (e.g. a slicer-
+    # driven time-period selector), it returns success=false and the measure
+    # stays a TODO — no worse than filtering it out here, and strictly better
+    # for the salvageable ones.
     _ARTIFACT_KEYWORDS = (
-        'FORMAT', 'Color', 'ISBLANK+BLANK', 'SELECTEDVALUE+SWITCH',
-        'SELECTEDVALUE', 'DAX expression not available', 'ISFILTERED',
+        'FORMAT', 'Color', 'ISBLANK+BLANK',
+        'DAX expression not available', 'ISFILTERED',
         'BLANK() placeholder',
     )
 

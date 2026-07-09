@@ -459,6 +459,24 @@ def process_table(
     if ctx.llm_config and ctx.llm_config.get('use_llm_fallback'):
         from .dax_llm_fallback import translate_batch_with_llm
 
+        # Precedence: if config-gen supplied an authoritative SWITCH decomposition
+        # for a measure (Step 6, from the $SYSTEM.MDSCHEMA_MEASURES API), that
+        # customer-validated SQL wins over a best-effort LLM attempt. Exclude those
+        # measures from the LLM batch so the decomposition isn't preempted. (SWITCH
+        # measures WITHOUT a config decomposition still reach the LLM — that's the
+        # whole point of routing SELECTEDVALUE/SWITCH here.)
+        _decomp_entries = ctx.config.get('switch_decompositions', {}).get(table_key, {})
+        _decomp_names: set[str] = set()
+        if isinstance(_decomp_entries, list):
+            _decomp_names = {d.get('name', '') for d in _decomp_entries}
+        elif isinstance(_decomp_entries, dict):
+            _decomp_names = set(_decomp_entries.keys())
+        _llm_batch = [
+            m for m in untranslatable
+            if m.original_name not in _decomp_names
+            and to_snake_case(m.original_name) not in _decomp_names
+        ]
+
         # Build the fact-table context block ONCE (stable across this table's
         # measures) so the LLM emits real source columns / join aliases instead
         # of guessing. Goes in the per-measure user prompt (not the cached prefix).
@@ -480,7 +498,7 @@ def process_table(
         try:
             llm_results = run_async(
                 translate_batch_with_llm(
-                    measures=untranslatable,
+                    measures=_llm_batch,
                     table_key=table_key,
                     base_names=base_names,
                     original_to_snake=original_to_snake,
