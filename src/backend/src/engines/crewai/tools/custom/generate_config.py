@@ -37,7 +37,7 @@ __all__ = [
     "build_config", "to_snake_case",
     "derive_join_key_map", "derive_enrichment_joins", "derive_dim_alias_map",
     "derive_switch_decompositions", "derive_filter_sets",
-    "derive_measure_resolutions", "derive_column_overrides",
+    "derive_measure_resolutions", "derive_measure_usage", "derive_column_overrides",
     "derive_mapping_only_tables", "derive_column_metadata",
     "derive_column_alias_map", "derive_parameter_defaults",
     "derive_name_prefixes", "derive_dimension_exclusions", "derive_period_dims",
@@ -680,6 +680,55 @@ def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
                 }
 
     return resolutions
+
+
+def derive_measure_usage(measures: list[dict]) -> dict[str, int]:
+    """Count how many OTHER measures reference each measure (in-degree).
+
+    Reviewers use this to prioritize gaps: a TODO/untranslatable measure that
+    many other measures depend on blocks that many downstream translations, so
+    it should be fixed first. This counts measure→measure references only (the
+    DAX dependency graph's in-degree) — NOT dashboard/visual usage.
+
+    A ``[Name]`` token counts only when ``Name`` matches a known measure, which
+    naturally excludes ``Table[Column]`` refs (same discrimination used by
+    ``derive_measure_resolutions``). Self-references are ignored.
+
+    Returns ``{measure_name: referenced_by_count}`` keyed by the ORIGINAL PBI
+    measure name, PLUS a snake_case alias for each (same value). The alias lets
+    consumers keyed on snaked names resolve the count too — notably
+    ``switch_decompositions`` entries, whose ``name`` is ``to_snake_case``'d
+    (e.g. ``F_Start_date`` → ``f_start_date``). Without the alias those entries
+    can't join to this map. When an original name already IS its own snake form
+    the two keys coincide (no duplication).
+    """
+    ref_re = re.compile(r'\[([^\]]+)\]')
+    measure_names = {m["measure_name"] for m in measures}
+    usage: dict[str, int] = {name: 0 for name in measure_names}
+
+    for m in measures:
+        name = m["measure_name"]
+        dax = m.get("expression", "") or ""
+        if not dax:
+            continue
+        # Count each referenced measure at most once per referencing measure.
+        referenced = {
+            ref for ref in (rm.group(1) for rm in ref_re.finditer(dax))
+            if ref in measure_names and ref != name
+        }
+        for ref in referenced:
+            usage[ref] += 1
+
+    # Add snake_case aliases so snaked consumers (switch_decompositions) resolve.
+    # Never overwrite a real measure name's own count. When two originals snake
+    # to the SAME alias, keep the higher count (safest for "highest priority").
+    real_names = set(usage.keys())
+    for name in list(real_names):
+        snake = to_snake_case(name)
+        if snake and snake not in real_names:
+            usage[snake] = max(usage.get(snake, 0), usage[name])
+
+    return usage
 
 
 def derive_column_overrides(
@@ -1502,6 +1551,11 @@ def build_config(
             k: v for k, v in entry.items() if not k.startswith("_")
         }
     config["measure_resolutions"] = clean_resolutions
+
+    # 7b. measure_usage — how many other measures reference each measure
+    # (in-degree). Surfaced on TODOs + the UCMV overview so reviewers prioritize
+    # high-impact gaps. Measure→measure references only (not visual usage).
+    config["measure_usage"] = derive_measure_usage(measures)
 
     # 8. mapping_only_tables
     raw_mapping = derive_mapping_only_tables(measures, admin_tables)

@@ -96,6 +96,19 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     return value
 
 
+def _usage_suffix(referenced_by: int) -> str:
+    """Human-readable usage annotation for a measure comment.
+
+    Counts measure→measure references only (not dashboard/visual usage), so the
+    wording is deliberately "referenced by N measure(s)". Empty string when the
+    measure is referenced by nothing (avoids noise on the many leaf measures).
+    """
+    if not referenced_by or referenced_by < 1:
+        return ''
+    noun = 'measure' if referenced_by == 1 else 'measures'
+    return f' — referenced by {referenced_by} {noun}'
+
+
 def _yaml_needs_quoting(val: str) -> bool:
     """Check if a YAML scalar value needs quoting."""
     if not val:
@@ -573,6 +586,7 @@ def emit_yaml(spec: MetricViewSpec,
             # Use per-table metadata override, fall back to generated
             m_override = _mm.get(m.measure_name, {})
             comment = m_override.get('comment') or m.skip_reason or col_to_readable(m.measure_name)
+            comment += _usage_suffix(m.referenced_by)
             lines.append(f'    comment: {_yaml_val(comment)}')
             m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
             display_name = m_override.get('display_name') or m_meta.get('display_name', '')
@@ -635,6 +649,7 @@ def emit_yaml(spec: MetricViewSpec,
             dax_comment = m_override.get('comment', '')
             if not dax_comment and m.original_name != m.measure_name:
                 dax_comment = f'PBI: {m.original_name}'
+            dax_comment += _usage_suffix(m.referenced_by)
             if dax_comment:
                 lines.append(f'    comment: {_yaml_val(dax_comment)}')
             # Display name
@@ -690,14 +705,21 @@ def emit_yaml(spec: MetricViewSpec,
                 lines.append(f"      - order: {m.window_spec['order']}")
                 lines.append(f"        range: {m.window_spec['range']}")
                 lines.append(f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}")
-            lines.append(f'    comment: "{m.skip_reason}"')
+            lines.append(f'    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by))}')
             lines.append('')
 
-    # Untranslatable measures as comments
+    # Untranslatable measures as comments \u2014 sorted highest-usage-first so the
+    # gaps that block the most downstream measures surface at the top for
+    # reviewers with scarce time.
     if spec.untranslatable:
-        lines.append(f'  # \u2500\u2500\u2500 Untranslatable PBI Measures ({len(spec.untranslatable)}) \u2500\u2500\u2500')
-        for m in spec.untranslatable:
-            lines.append(f'  # {m.original_name}: {m.skip_reason}')
+        lines.append(f'  # \u2500\u2500\u2500 Untranslatable PBI Measures ({len(spec.untranslatable)}, sorted by usage) \u2500\u2500\u2500')
+        _sorted_untrans = sorted(
+            spec.untranslatable, key=lambda m: m.referenced_by, reverse=True)
+        for m in _sorted_untrans:
+            _suffix = f' (referenced by {m.referenced_by}'\
+                      f' {"measure" if m.referenced_by == 1 else "measures"})' \
+                      if m.referenced_by else ''
+            lines.append(f'  # {m.original_name}: {m.skip_reason}{_suffix}')
 
     lines.append('')
     return '\n'.join(lines)

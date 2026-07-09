@@ -1092,11 +1092,30 @@ def process_table(
 
     if untranslatable:
         comment_lines.append('')
-        comment_lines.append('Untranslatable:')
-        for r in untranslatable:
-            comment_lines.append(f'  {r.original_name} — {r.skip_reason}')
+        comment_lines.append('Untranslatable (sorted by usage — fix high-impact gaps first):')
+        for r in sorted(untranslatable, key=lambda m: m.referenced_by, reverse=True):
+            _usage = (f' [referenced by {r.referenced_by}'
+                      f' {"measure" if r.referenced_by == 1 else "measures"}]'
+                      if r.referenced_by else '')
+            comment_lines.append(f'  {r.original_name} — {r.skip_reason}{_usage}')
 
     view_name = f'mv_{table_key.lower().replace("ft_", "").replace("fact_", "")}'
+
+    # ── Populate referenced_by (measure→measure in-degree) on every measure ──
+    # Prefer the GLOBAL count from config['measure_usage'] (computed by config-gen
+    # over the full cross-table measure set). Fall back to a LOCAL graph over this
+    # table's measures only when the config key is absent (older config) — note
+    # the local fallback is table-scoped and can undercount cross-table refs.
+    _measure_usage = (ctx.config or {}).get('measure_usage') or {}
+    if not _measure_usage:
+        _local_graph = build_dependency_graph([
+            {'measure_name': m.original_name, 'dax_expression': m.dax_expression}
+            for m in (all_measures + untranslatable)
+        ])
+        _rev = _local_graph.get('reverse_adjacency', {})
+        _measure_usage = {name: len(deps) for name, deps in _rev.items()}
+    for m in all_measures + untranslatable:
+        m.referenced_by = _measure_usage.get(m.original_name, 0)
 
     return MetricViewSpec(
         fact_table_key=table_key,

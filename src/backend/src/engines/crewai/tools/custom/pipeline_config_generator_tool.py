@@ -365,12 +365,33 @@ class PipelineConfigGeneratorTool(BaseTool):
             ucmv_measures = self._build_ucmv_measures(measures)
             ucmv_mquery = self._build_ucmv_mquery(admin_tables)
 
+            # ── Measure usage ranking (reviewer prioritization) ──────────────
+            # How many OTHER measures reference each measure (in-degree). Lets
+            # reviewers prioritize gaps: a high-usage measure that ends up a TODO
+            # blocks that many downstream translations. Measure→measure refs only
+            # (not dashboard/visual usage). Sorted highest-first; zero-usage
+            # measures omitted from the ranking to keep it focused.
+            _usage = config.get("measure_usage", {}) or {}
+            usage_ranking = [
+                {"measure_name": name, "referenced_by": count}
+                for name, count in sorted(
+                    _usage.items(), key=lambda kv: kv[1], reverse=True)
+                if count > 0
+            ]
+            # Carry the count into the UCMV handoff so the overview can show it.
+            for _um in ucmv_measures:
+                _um["referenced_by"] = _usage.get(
+                    _um.get("original_name") or _um.get("measure_name"), 0)
+
             output = {
                 "proposed_config": config,
                 # Consumed by the flow handoff → UCMV JSON mode.
                 "measures_json": ucmv_measures,
                 "mquery_json": ucmv_mquery,
                 "relationships_json": relationships,
+                # Measures ranked by how many other measures reference them —
+                # reviewers use this to prioritize which gaps/TODOs to fix first.
+                "measure_usage_ranking": usage_ranking,
                 "summary": {
                     "total_keys": len(config),
                     "auto_filled": auto_count,
@@ -379,6 +400,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "total_todo_markers": config_json.count("TODO"),
                     "relationships_extracted": len(relationships),
                     "measures_extracted": len(measures),
+                    "measures_referenced_by_others": len(usage_ranking),
                     "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
                 },
