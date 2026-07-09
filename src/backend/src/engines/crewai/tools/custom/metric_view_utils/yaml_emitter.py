@@ -614,8 +614,11 @@ def emit_yaml(spec: MetricViewSpec,
                         break
             if any(c in expr for c in ("'", '"', ':', '#', '{', '}', '[', ']')) or 'FILTER' in expr:
                 if len(expr) > 120 or '\n' in expr or ('"' in expr and "'" in expr):
-                    lines.append('    expr: >-')
-                    lines.append(f'      {expr}')
+                    # Use the shared scalar formatter: multi-line values become a
+                    # properly-indented block scalar (|-). Writing a raw multi-line
+                    # string after 'expr: >-' left continuation lines unindented and
+                    # broke YAML parsing ("while scanning a simple key").
+                    lines.append(f'    expr: {_yaml_scalar(expr, indent=4)}')
                 elif '"' in expr:
                     lines.append(f"    expr: '{expr}'")
                 else:
@@ -676,9 +679,10 @@ def emit_yaml(spec: MetricViewSpec,
             expr = m.sql_expr
             if expr is None:
                 continue
-            if len(expr) > 120 or 'FILTER' in expr:
-                lines.append('    expr: >-')
-                lines.append(f'      {expr}')
+            if len(expr) > 120 or 'FILTER' in expr or '\n' in expr:
+                # Shared scalar formatter → multi-line becomes an indented block
+                # scalar (|-); avoids the unindented-continuation YAML parse error.
+                lines.append(f'    expr: {_yaml_scalar(expr, indent=4)}')
             else:
                 lines.append(f'    expr: {expr}')
             if m.window_spec:

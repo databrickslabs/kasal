@@ -220,3 +220,55 @@ from contextlib import contextmanager
 @contextmanager
 def _noop_ctx():
     yield
+
+
+class TestResolvedMeasuresPairing:
+    """Validator prefers resolved_measures_by_table (fact-table-keyed, with DAX).
+
+    Regression: the flow passed measures_json=None and the validator's raw-measure
+    source was keyed by PBI holder-table, so no measure paired with a YAML fact
+    table → every table 'skipped: No measures found' → total_valid=0.
+    """
+
+    def test_uses_resolved_measures_by_table_from_ucmv_output(self):
+        tool = MetricViewValidatorTool()
+        ucmv_output = json.dumps({
+            "yaml": {"fact_pe002": "version: '1.1'\nmeasures:\n  - name: paid_hours\n    expr: SUM(source.paid_hours)\n"},
+            "resolved_measures_by_table": {
+                "fact_pe002": [
+                    {"measure_name": "paid_hours", "original_name": "Paid Hours",
+                     "sql_expr": "SUM(source.paid_hours)", "dax_expression": "SUM(fact_pe002[paid_hours])",
+                     "proposed_allocation": "fact_pe002", "table_name": "fact_pe002"},
+                ]
+            },
+            "measures_with_dax": [],  # empty (holder-table junk would go here)
+        })
+
+        captured = {}
+
+        class _FakePipeline:
+            def __init__(self, *a, **k): pass
+            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+                # capture the measures that reached the pipeline
+                with open(table_mapping_json_path) as f:
+                    captured['measures'] = json.load(f)
+                return {"evaluated": [
+                    {"measure_name": "paid_hours", "measure_eval_result": {"status": "VALID"}}
+                ]}
+
+        # Isolate from real DB / tmp side-channels that would override ucmv_output
+        import os as _os
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+            _FakePipeline,
+        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
+           patch.object(_os.path, "exists", return_value=False):
+            result = tool._run(ucmv_output=ucmv_output)
+
+        data = json.loads(result)
+        # The measure paired to fact_pe002 and got validated (not skipped)
+        assert captured.get('measures'), "resolved measures should have reached the pipeline"
+        assert captured['measures'][0]['dax_expression'] == "SUM(fact_pe002[paid_hours])"
+        assert data.get('summary', {}).get('total_valid', 0) >= 1

@@ -178,6 +178,28 @@ class MetricViewValidatorTool(BaseTool):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # PREFERRED source: resolved_measures_by_table from the UCMV output. This
+        # is the translated measures paired with their ORIGINAL DAX, keyed by the
+        # FACT TABLE (same key as the YAML). It is the only source with the correct
+        # measure↔fact-table pairing the comparison needs — the raw measures list
+        # is keyed by PBI holder-table and won't line up with the YAML.
+        if not measures or measures == []:
+            if ucmv_raw:
+                try:
+                    ucmv_full = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                    if isinstance(ucmv_full, dict) and ucmv_full.get('resolved_measures_by_table'):
+                        flat = []
+                        for _tbl, _rows in ucmv_full['resolved_measures_by_table'].items():
+                            flat.extend(_rows)
+                        if flat:
+                            measures = flat
+                            logger.info(
+                                f"[Validator] Using {len(measures)} resolved measures "
+                                f"(fact-table-keyed, with DAX) from UCMV output"
+                            )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
         # If no measures, try extracting from the UCMV output (measures_with_dax key)
         if not measures or measures == []:
             if ucmv_raw:
@@ -322,8 +344,14 @@ class MetricViewValidatorTool(BaseTool):
                 inner = json.loads(content) if isinstance(content, str) else content
                 if not isinstance(inner, dict):
                     return []
-                # Extract measures from the migration_report or stats
-                # First try measures_with_dax (added by UCMV Generator)
+                # PREFERRED: resolved_measures_by_table (fact-table-keyed, with DAX)
+                if inner.get('resolved_measures_by_table'):
+                    flat = []
+                    for _rows in inner['resolved_measures_by_table'].values():
+                        flat.extend(_rows)
+                    if flat:
+                        return flat
+                # Fallback: measures_with_dax (raw, holder-table-keyed)
                 if 'measures_with_dax' in inner and inner['measures_with_dax']:
                     return inner['measures_with_dax']
                 return []
