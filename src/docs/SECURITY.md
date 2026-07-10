@@ -12,6 +12,21 @@ See [security compliance](./README_SECURITY_COMPLIANCE.md) (design items D1 to D
 
 Kasal is multi-tenant and group-aware. Resources and permissions are scoped to the workspace (group) context so that one workspace's data, executions, and configuration do not leak into another. All LLM and embedding calls route through Databricks model serving endpoints in the workspace; the platform does not create or use fine-tuned models that could encode sensitive information.
 
+## Secrets and encryption at rest
+
+Sensitive values — provider API keys, MCP server credentials, Databricks personal access tokens, and encrypted tool configurations — are stored encrypted in the application database (SQLite in local development, Databricks Lakebase in production). Only ciphertext is persisted; plaintext secrets are never written to the database, to `.env` files, or to logs.
+
+**Cipher.** Encryption uses a hybrid scheme: each value is encrypted with a per-value symmetric (Fernet) key, and that symmetric key is in turn encrypted with an RSA public key. Decryption requires the corresponding RSA private key. This is implemented in `EncryptionUtils` and is identical across environments.
+
+**Key storage and lifecycle.** The RSA private key must remain stable for previously stored ciphertext to stay decryptable:
+
+- **On Databricks**, the private key is held in a Databricks **secret scope** and materialized at application startup, before the database and any workflow run initialize. Because the key lives in the secret scope rather than on the container, it survives redeploys and restarts. (The container filesystem is ephemeral: a key kept only on disk would be regenerated on each redeploy, leaving every previously stored secret undecryptable.) The key is materialized once at startup so that in-process code and spawned crew/flow subprocesses share the same key.
+- **On non-Databricks installs**, the private key lives on the local filesystem (`~/.backendcrew/keys/`, owner-only permissions) and is generated on first use — the original, unchanged behavior.
+
+**Provisioning and access.** The app auto-provisions the key on first boot with no manual setup: it creates the secret scope (scoped so that only the creating service principal has `MANAGE` — it is not shared with other workspace users), stores the private key, and reuses it on every later boot. Because the app's service principal creates the scope it automatically owns it, so no separate grant is required; the only workspace-level assumption is that the service principal is allowed to create secret scopes. On that first boot the app also **adopts the key the container is already using** (rather than generating a new one) whenever a live key is present, so secrets already encrypted by the running instance keep working without being re-entered. The scope name defaults to `kasal` and is overridable with `KASAL_ENCRYPTION_KEY_SCOPE`; `KASAL_ENCRYPTION_KEY_SCOPE_DISABLE` forces local-filesystem mode even on Databricks. If provisioning fails (for example, the service principal cannot create scopes), the app logs an actionable warning and continues rather than blocking startup.
+
+**Rotation and recovery.** Rotating or losing the private key makes all ciphertext encrypted under the previous key permanently unrecoverable; those secrets must be re-entered. Storing the key in a durable secret scope (rather than on ephemeral storage) is what prevents unintended "rotation" on every redeploy.
+
 ## Agent guardrails
 
 Kasal layers several always-on and opt-in defenses into the crew execution pipeline. The always-on layers are log-only (fail-open) by design: they emit structured `[SECURITY]` audit warnings rather than blocking legitimate execution. Blocking behavior is provided by the opt-in LLM guardrails.
