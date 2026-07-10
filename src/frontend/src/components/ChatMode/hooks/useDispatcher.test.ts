@@ -988,4 +988,41 @@ describe('useDispatcher', () => {
       });
     });
   });
+
+  describe('referential stability (perf W3.7)', () => {
+    it('keeps a STABLE dispatcher identity + sendMessage across re-renders with fresh options', () => {
+      // ChatWorkspace passes a NEW options literal every render; the returned
+      // dispatcher (and sendMessage) must not churn, or ChatWorkspace.handleSend
+      // → ChatContainer.handleCommand churn and the memoized ChatMessage bubbles
+      // re-render on every tick.
+      const { result: hook, rerender } = renderHook(() => useDispatcher(makeOptions()));
+      const first = hook.current;
+      const firstSend = hook.current.sendMessage;
+
+      rerender();
+      rerender();
+
+      expect(hook.current).toBe(first);
+      expect(hook.current.sendMessage).toBe(firstSend);
+    });
+
+    it('sendMessage still sees the LATEST options after a re-render', async () => {
+      const firstEnsure = vi.fn(async () => 'session-A');
+      const secondEnsure = vi.fn(async () => 'session-B');
+      const { result: hook, rerender } = renderHook(
+        ({ ensure }) => useDispatcher(makeOptions({ ensureSession: ensure })),
+        { initialProps: { ensure: firstEnsure } },
+      );
+
+      rerender({ ensure: secondEnsure });
+      await act(async () => {
+        await hook.current.sendMessage('hi');
+      });
+
+      // The stable callback reads options from a ref → uses the newest ensureSession.
+      expect(secondEnsure).toHaveBeenCalled();
+      expect(firstEnsure).not.toHaveBeenCalled();
+    });
+  });
+
 });
