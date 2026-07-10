@@ -684,11 +684,10 @@ class TestGetSession:
         mock_session = AsyncMock()
 
         # Mock session factory as an async context manager
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
@@ -706,11 +705,10 @@ class TestGetSession:
         factory = LakebaseSessionFactory()
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         async def fake_create_engine():
             factory._engine = MagicMock()
@@ -730,11 +728,10 @@ class TestGetSession:
         factory._engine = MagicMock()  # engine exists but session factory doesn't
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         async def fake_create_engine():
             factory._session_factory = mock_sf
@@ -794,11 +791,10 @@ class TestGetSession:
         factory = LakebaseSessionFactory()
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
@@ -817,11 +813,10 @@ class TestGetSession:
         factory = LakebaseSessionFactory()
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
@@ -842,11 +837,10 @@ class TestGetSession:
         factory = LakebaseSessionFactory()
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
@@ -1611,11 +1605,10 @@ class TestMissingCoverage:
         factory = LakebaseSessionFactory()
         mock_session = AsyncMock()
 
-        mock_sf = MagicMock()
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_sf.return_value = mock_ctx
+        # get_session now manages the session lifecycle manually (the
+        # sessionmaker context manager's close() is not cancellation-safe), so
+        # the factory call returns the session directly.
+        mock_sf = MagicMock(return_value=mock_session)
 
         factory._engine = MagicMock()
         factory._session_factory = mock_sf
@@ -1880,3 +1873,78 @@ class TestLazyTokenRefresh:
         assert factory._is_token_stale() is True
         factory._token_holder["refreshed_at"] = _time.time()
         assert factory._is_token_stale() is False
+
+
+class TestCancellationSafeTeardown:
+    """A request aborted mid-query (client disconnect) cancels the awaited DB
+    call and leaves the session state machine mid-operation; close() then
+    raises IllegalStateChangeError. Teardown must degrade gracefully — never
+    crash the request teardown (the old sessionmaker __aexit__ did, producing
+    'Error in Lakebase session: Method close() can't be called here' +
+    'Unexpected ASGI message' pairs in production logs)."""
+
+    def _factory_with(self, mock_session):
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        factory._engine = MagicMock()
+        factory._session_factory = MagicMock(return_value=mock_session)
+        factory._engine_loop_id = id(asyncio.get_event_loop())
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_close_raising_illegal_state_invalidates_instead(self):
+        from sqlalchemy.exc import IllegalStateChangeError
+
+        mock_session = AsyncMock()
+        mock_session.close = AsyncMock(
+            side_effect=IllegalStateChangeError(
+                "Method 'close()' can't be called here; method "
+                "'_connection_for_bind()' is already in progress"
+            )
+        )
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        # Must NOT raise out of the context manager.
+        async with factory.get_session() as session:
+            assert session is mock_session
+
+        mock_session.invalidate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_and_invalidate_both_broken_still_no_raise(self):
+        from sqlalchemy.exc import IllegalStateChangeError
+
+        mock_session = AsyncMock()
+        mock_session.close = AsyncMock(side_effect=IllegalStateChangeError("mid-op"))
+        mock_session.invalidate = AsyncMock(side_effect=RuntimeError("also broken"))
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        async with factory.get_session() as _:
+            pass  # teardown must swallow both failures
+
+    @pytest.mark.asyncio
+    async def test_normal_path_closes_the_session(self):
+        mock_session = AsyncMock()
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        async with factory.get_session() as _:
+            pass
+
+        mock_session.close.assert_awaited_once()
+        mock_session.invalidate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_body_exception_still_closes_and_reraises(self):
+        mock_session = AsyncMock()
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        with pytest.raises(ValueError, match="boom"):
+            async with factory.get_session() as _:
+                raise ValueError("boom")
+
+        mock_session.close.assert_awaited_once()

@@ -20,6 +20,7 @@ from typing import AsyncGenerator, Optional
 from contextlib import asynccontextmanager
 
 from sqlalchemy import event, text
+from sqlalchemy.exc import IllegalStateChangeError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
@@ -492,24 +493,48 @@ class LakebaseSessionFactory:
             except Exception as e:
                 logger.warning(f"[LAKEBASE SESSION] Lazy token refresh failed (will retry next op): {e}")
 
+        # Manual session lifecycle (not `async with self._session_factory()`):
+        # the sessionmaker's __aexit__ close() is NOT cancellation-safe — a
+        # request aborted mid-query (client disconnect) cancels the awaited DB
+        # call and leaves the session's state machine mid-operation, so close()
+        # raises IllegalStateChangeError ("_connection_for_bind() is already in
+        # progress") out of the context manager, crashing the whole request
+        # teardown. Managing the close ourselves lets us degrade gracefully.
+        session = self._session_factory()
         try:
-            async with self._session_factory() as session:
+            try:
                 yield session
-        except GeneratorExit:
-            # Client disconnected — nothing to clean up, the session
-            # factory context manager will handle connection return.
-            pass
-        except Exception as e:
-            # Check if this is a token/auth error that might be fixable by refreshing
-            err_str = str(e).lower()
-            if "token" in err_str or "authentication" in err_str or "password" in err_str:
-                logger.info("Token may have expired, refreshing and recreating engine...")
-                await self.create_engine()
-                # Re-raise so the caller can retry with a fresh session
-                raise
-            else:
-                logger.error(f"Error in Lakebase session: {e}")
-                raise
+            except GeneratorExit:
+                # Client disconnected — nothing to do beyond the close below.
+                pass
+            except Exception as e:
+                # Check if this is a token/auth error that might be fixable by refreshing
+                err_str = str(e).lower()
+                if "token" in err_str or "authentication" in err_str or "password" in err_str:
+                    logger.info("Token may have expired, refreshing and recreating engine...")
+                    await self.create_engine()
+                    # Re-raise so the caller can retry with a fresh session
+                    raise
+                else:
+                    logger.error(f"Error in Lakebase session: {e}")
+                    raise
+        finally:
+            try:
+                await session.close()
+            except IllegalStateChangeError:
+                # Session was cancelled mid-operation (aborted request). The
+                # normal close state machine can't run; invalidate so the
+                # connection is discarded instead of returned dirty. Never
+                # raise from teardown — the client is already gone.
+                try:
+                    await session.invalidate()
+                    logger.debug("[LAKEBASE SESSION] Session cancelled mid-operation; connection invalidated")
+                except Exception:
+                    logger.debug("[LAKEBASE SESSION] Session cancelled mid-operation; abandoned to GC")
+            except Exception as close_err:
+                # Connection may already be closed / broken (e.g. asyncpg
+                # InterfaceError during concurrent cleanup).
+                logger.debug(f"[LAKEBASE SESSION] Session close skipped: {close_err}")
 
     async def dispose(self):
         """Dispose of the engine, cancel refresh task, and clean up resources."""

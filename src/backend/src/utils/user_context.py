@@ -704,9 +704,20 @@ class UserContextMiddleware:
             await self.app(scope, receive, send)
 
         except Exception as e:
-            logger.error(f"Error in user context middleware: {e}")
+            # NEVER re-invoke the downstream app here. By this point it already
+            # ran (or died mid-run): a second pass re-sends http.response.start
+            # on a connection that may already carry a response, which uvicorn
+            # rejects ("Unexpected ASGI message ... after response already
+            # completed") — this was the double-crash seen on client
+            # disconnects. Log (quietly for aborted clients), clear the
+            # context, and let the server's error middleware handle it — it
+            # knows whether a response has started.
+            if "ClientDisconnect" in type(e).__name__ or "Disconnect" in type(e).__name__:
+                logger.debug(f"Client disconnected during request: {e}")
+            else:
+                logger.error(f"Error in user context middleware: {e}")
             UserContext.clear_context()
-            await self.app(scope, receive, send)
+            raise
 
         finally:
             UserContext.clear_context()
