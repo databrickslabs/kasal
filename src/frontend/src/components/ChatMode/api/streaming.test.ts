@@ -620,3 +620,35 @@ describe('streamExecution when SSE is disabled', () => {
     vi.resetModules();
   });
 });
+
+describe('streamGeneration when SSE is disabled (deployed)', () => {
+  it('never opens an EventSource and polls the result endpoint immediately', async () => {
+    // Perf regression (W6.2): on Databricks Apps the HTTP/2 proxy refuses
+    // EventSource, so every dispatch burned up to 6 doomed connect attempts
+    // while the result poll did the real work. Poll-only, starting NOW (no
+    // SSE head-start delay).
+    vi.resetModules();
+    const get = vi.fn().mockResolvedValue({ data: { status: 'pending' } });
+    vi.doMock('../../../utils/sseTransport', () => ({ SSE_ENABLED: false }));
+    vi.doMock('./client', () => ({
+      __esModule: true,
+      getBaseUrl: () => 'https://example.com/api/v1',
+      getClient: () => ({ get }),
+    }));
+    const mod = await import('./streaming');
+    FakeEventSource.instances = [];
+
+    const cleanup = mod.streamGeneration('gen-deployed', vi.fn());
+    // Let the immediate poll's microtasks run — no timer advance needed.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(FakeEventSource.instances.length).toBe(0); // SSE never opened
+    expect(get).toHaveBeenCalledWith('/sse/generations/gen-deployed/result');
+
+    cleanup();
+    vi.doUnmock('../../../utils/sseTransport');
+    vi.doUnmock('./client');
+    vi.resetModules();
+  });
+});

@@ -168,10 +168,6 @@ export function streamGeneration(
   onEvent: EventCallback,
   onError?: (error: Event) => void
 ): () => void {
-  // NOTE: generation SSE is intentionally NOT gated on SSE_ENABLED. Unlike the
-  // long-lived execution stream, crew generation is short (a few seconds) and
-  // survives the Databricks Apps HTTP/2 proxy — and the result-endpoint poll
-  // below now backstops it, so a dropped stream no longer strands the run.
   let closed = false;
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;
@@ -333,11 +329,19 @@ export function streamGeneration(
     };
   }
 
-  connect();
-  // Backstop even when the stream "succeeds" but stalls (proxy buffering can
-  // swallow the terminal frame). No-op if the stream delivers the terminal
-  // event before POLL_START_DELAY elapses.
-  ensurePolling(false);
+  if (SSE_ENABLED) {
+    connect();
+    // Backstop even when the stream "succeeds" but stalls (proxy buffering can
+    // swallow the terminal frame). No-op if the stream delivers the terminal
+    // event before POLL_START_DELAY elapses.
+    ensurePolling(false);
+  } else {
+    // Deployed (Databricks Apps): the HTTP/2 proxy refuses EventSource, so
+    // every dispatch used to burn up to 6 doomed connect attempts (1→16s
+    // backoff) while this result poll did the real work anyway. Poll-only —
+    // and start immediately, since there's no SSE to give a head start to.
+    ensurePolling(true);
+  }
 
   return () => {
     console.log('[SSE] Closing generation stream for', generationId);
