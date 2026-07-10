@@ -331,29 +331,14 @@ class ExecutionTraceService:
             if not group_context or not group_context.group_ids:
                 return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
             
-            # Get all executions for the group first
-            executions = await self.execution_history_repository.get_all_executions_for_groups(
-                group_ids=group_context.group_ids
+            # Single group-scoped page (group_id is denormalized + indexed on
+            # execution_trace). The previous implementation walked EVERY
+            # execution in the group with one query per job (N+1), materialized
+            # up to 100×N rows to slice one page in Python, and reported a
+            # wrong total (capped at 100 per job).
+            traces, total_count = await self.repository.get_by_group_ids(
+                group_context.group_ids, limit=limit, offset=offset
             )
-            
-            if not executions:
-                return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
-            
-            # Get job_ids from executions
-            job_ids = [exec.job_id for exec in executions if exec.job_id]
-            
-            if not job_ids:
-                return ExecutionTraceList(traces=[], total=0, limit=limit, offset=offset)
-            
-            # Get traces for these job_ids
-            traces = []
-            for job_id in job_ids:
-                job_traces = await self.repository.get_by_job_id(job_id, limit=100, offset=0)
-                traces.extend(job_traces)
-            
-            # Apply pagination
-            total_count = len(traces)
-            traces = traces[offset:offset + limit]
 
             # Convert to schema objects and mask sensitive data
             trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]

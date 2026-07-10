@@ -205,6 +205,14 @@ def cleanup_after_test():
             os.environ.pop("CREW_SUBPROCESS_MODE", None)
         else:
             os.environ["CREW_SUBPROCESS_MODE"] = saved_subprocess_mode
+        # The resolved-template cache is module-global; without clearing it a
+        # template one test resolved bleeds into the next test's expectations.
+        # (Sync fixture → clear the dict directly; no event loop is running.)
+        try:
+            from src.core.cache import template_cache
+            template_cache._cache.clear()
+        except Exception:
+            pass
 
 
 # Skip integration tests marker

@@ -65,7 +65,6 @@ const resetStore = () => {
     previewIndex: 0,
     chatCollapsed: false,
     executionOwnerSessionId: null,
-    executionLog: [],
   });
 };
 
@@ -84,20 +83,6 @@ afterEach(() => {
 const preview = { type: 'ui' as const, data: '<p>hi</p>', title: 'T' };
 
 describe('executionStore - basic setters & log', () => {
-  it('appendLog adds entry with generated id/timestamp and clearLog empties it', () => {
-    const store = useExecutionStore.getState();
-    store.appendLog({ kind: 'trace', label: 'L1' });
-    store.appendLog({ kind: 'status', label: 'L2', detail: 'd' });
-    const log = useExecutionStore.getState().executionLog;
-    expect(log).toHaveLength(2);
-    expect(log[0].id).toBeTruthy();
-    expect(typeof log[0].timestamp).toBe('number');
-    expect(log[1].label).toBe('L2');
-
-    useExecutionStore.getState().clearLog();
-    expect(useExecutionStore.getState().executionLog).toHaveLength(0);
-  });
-
   it('chatModeType defaults to chat (single light agent) and setChatModeType updates it', () => {
     // Default answer mode is the fast single-agent path.
     expect(useExecutionStore.getState().chatModeType).toBe('chat');
@@ -554,7 +539,6 @@ describe('executionStore - startExecution & updateExecutionStatus', () => {
     expect(s.activeExecution).toEqual({ jobId: 'job-1', status: 'running' });
     expect(s.previewContent).toBeNull();
     expect(s.previewOwnerSessionId).toBeNull();
-    expect(s.executionLog).toEqual([]);
   });
 
   it('startExecution falls back to current session', () => {
@@ -1223,7 +1207,6 @@ describe('executionStore - resetForSession', () => {
 describe('executionStore - initial state', () => {
   it('exposes initial defaults', () => {
     expect(initialState.activeExecution).toBeNull();
-    expect(initialState.executionLog).toEqual([]);
     expect(initialState.chatCollapsed).toBe(false);
     // The side preview pane is opt-in — closed until the user opens it.
     expect(initialState.previewPaneOpen).toBe(false);

@@ -284,7 +284,9 @@ class TemplateService:
             Created PromptTemplate
         """
         template_dict = template_data.model_dump()
-        return await self.repository.create(template_dict)
+        result = await self.repository.create(template_dict)
+        await TemplateService.invalidate_template_cache()
+        return result
 
     async def create_with_group(self, template_data: PromptTemplateCreate, group_context: GroupContext) -> PromptTemplate:
         """
@@ -304,7 +306,9 @@ class TemplateService:
             template_dict['group_id'] = group_context.primary_group_id
             template_dict['created_by_email'] = group_context.group_email
 
-        return await self.repository.create(template_dict)
+        result = await self.repository.create(template_dict)
+        await TemplateService.invalidate_template_cache()
+        return result
 
     # Removed UoW-based class method - use instance method instead
 
@@ -322,7 +326,9 @@ class TemplateService:
             Updated PromptTemplate if found, else None
         """
         update_data = template_data.model_dump(exclude_unset=True)
-        return await self.repository.update_template(id, update_data)
+        result = await self.repository.update_template(id, update_data)
+        await TemplateService.invalidate_template_cache()
+        return result
 
     async def update_with_group_check(self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext) -> Optional[PromptTemplate]:
         """
@@ -342,7 +348,9 @@ class TemplateService:
         if current_group_id and original.group_id == current_group_id:
             update_data = template_data.model_dump(exclude_unset=True)
             update_data.pop('name', None)  # prevent cross-scope renames
-            return await self.repository.update_template(id, update_data)
+            result = await self.repository.update_template(id, update_data)
+            await TemplateService.invalidate_template_cache()
+            return result
 
         # Otherwise, upsert the group-scoped row with the same name
         if not current_group_id:
@@ -354,7 +362,9 @@ class TemplateService:
         incoming.pop('name', None)
 
         if existing_group_row:
-            return await self.repository.update_template(existing_group_row.id, incoming)
+            result = await self.repository.update_template(existing_group_row.id, incoming)
+            await TemplateService.invalidate_template_cache()
+            return result
         else:
             create_payload = {
                 'name': original.name,
@@ -364,7 +374,9 @@ class TemplateService:
                 'group_id': current_group_id,
                 'created_by_email': current_email,
             }
-            return await self.repository.create(create_payload)
+            result = await self.repository.create(create_payload)
+            await TemplateService.invalidate_template_cache()
+            return result
 
     # Removed UoW-based class method - use instance method instead
 
@@ -380,7 +392,9 @@ class TemplateService:
         Returns:
             True if deleted, False if not found
         """
-        return await self.repository.delete(id)
+        result = await self.repository.delete(id)
+        await TemplateService.invalidate_template_cache()
+        return result
 
     async def delete_with_group_check(self, id: int, group_context: GroupContext) -> bool:
         """
@@ -398,7 +412,9 @@ class TemplateService:
         if not template:
             return False
 
-        return await self.repository.delete(id)
+        result = await self.repository.delete(id)
+        await TemplateService.invalidate_template_cache()
+        return result
 
     # Removed UoW-based class method - use instance method instead
 
@@ -411,7 +427,9 @@ class TemplateService:
         Returns:
             Number of templates deleted
         """
-        return await self.repository.delete_all()
+        result = await self.repository.delete_all()
+        await TemplateService.invalidate_template_cache()
+        return result
 
     async def delete_all_for_group_internal(self, group_context: GroupContext) -> int:
         """
@@ -538,15 +556,29 @@ class TemplateService:
         """
         Get effective template content for current group: prefer the group's
         same-name row; if absent, fall back to the global/base row.
+
+        TTL-cached per (group, name): this runs before every LLM interaction
+        (intent, plan, per-agent, per-task, run naming) and templates
+        essentially never change. Failures are never cached.
         """
+        from src.core.cache import template_cache
+
+        gid = group_context.primary_group_id if group_context else None
+        cache_group = gid or "__base__"
+        cached = await template_cache.get(cache_group, f"tpl:{name}")
+        if cached is not None:
+            return cached
         try:
-            gid = group_context.primary_group_id if group_context else None
+            content = ""
             if gid:
                 grp = await self.repository.find_by_name_and_group(name, gid)
                 if grp and grp.template:
-                    return grp.template
-            base = await self.repository.find_by_name_and_group(name, None)
-            return base.template if base and base.template else ""
+                    content = grp.template
+            if not content:
+                base = await self.repository.find_by_name_and_group(name, None)
+                content = base.template if base and base.template else ""
+            await template_cache.set(cache_group, f"tpl:{name}", content)
+            return content
         except Exception as e:
             logger.error(f"Error resolving effective template for {name}: {e}")
             return ""
@@ -555,9 +587,31 @@ class TemplateService:
     async def get_effective_template_content(name: str, group_context: GroupContext) -> str:
         """
         Static helper to retrieve composed template content for the current group/user.
+
+        Checks the TTL cache BEFORE opening a DB session, so the hot path
+        (dispatcher + generation services, called per LLM interaction) usually
+        costs a dict lookup instead of a session + 2 queries.
         """
+        from src.core.cache import template_cache
+
+        gid = group_context.primary_group_id if group_context else None
+        cached = await template_cache.get(gid or "__base__", f"tpl:{name}")
+        if cached is not None:
+            return cached
+
         from src.db.database_router import get_smart_db_session
         async for session in get_smart_db_session():
             service = TemplateService(session)
             return await service._get_effective_template_content_instance(name, group_context)
+
+    @staticmethod
+    async def invalidate_template_cache() -> None:
+        """Clear the resolved-template cache after any template mutation.
+
+        Resolution mixes group + base rows (a base-row edit changes every
+        group's effective content), so a full clear is the only safe policy.
+        """
+        from src.core.cache import template_cache
+
+        await template_cache.clear()
 

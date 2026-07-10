@@ -479,25 +479,26 @@ class TestGetAllTraces:
 # get_all_traces_for_group
 # =========================================================================
 class TestGetAllTracesForGroup:
+    """Perf (W7.4): ONE group-scoped page query + ONE COUNT. The old
+    implementation walked every execution in the group with a query per job
+    (N+1) and reported a total capped at 100 per job."""
 
     @pytest.mark.asyncio
-    async def test_returns_traces_for_group(
-        self, service, mock_history_repo, mock_trace_repo
+    async def test_returns_traces_for_group_in_a_single_repo_call(
+        self, service, mock_trace_repo
     ):
-        exec1 = _make_execution_obj(id=1, job_id="j1")
-        exec2 = _make_execution_obj(id=2, job_id="j2")
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            return_value=[exec1, exec2]
-        )
-
-        t1 = _make_trace_obj(id=1, job_id="j1")
-        t2 = _make_trace_obj(id=2, job_id="j2")
-        mock_trace_repo.get_by_job_id = AsyncMock(side_effect=[[t1], [t2]])
+        t1 = _make_trace_obj(id=2, job_id="j2")
+        t2 = _make_trace_obj(id=1, job_id="j1")
+        mock_trace_repo.get_by_group_ids = AsyncMock(return_value=([t1, t2], 2))
 
         ctx = _make_group_context()
         result = await service.get_all_traces_for_group(ctx, limit=10, offset=0)
+
         assert result.total == 2
         assert len(result.traces) == 2
+        mock_trace_repo.get_by_group_ids.assert_awaited_once_with(
+            ctx.group_ids, limit=10, offset=0
+        )
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_group_context(self, service):
@@ -506,67 +507,45 @@ class TestGetAllTracesForGroup:
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_group_ids_empty(self, service):
-        ctx = _make_group_context(group_ids=[])
+        # Built directly: the helper coerces [] back to a default group.
+        ctx = SimpleNamespace(group_ids=[], group_email="test@example.com")
         result = await service.get_all_traces_for_group(group_context=ctx)
         assert result.total == 0
 
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_executions(
-        self, service, mock_history_repo
+    async def test_returns_empty_when_group_has_no_traces(
+        self, service, mock_trace_repo
     ):
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(return_value=[])
-
-        ctx = _make_group_context()
-        result = await service.get_all_traces_for_group(ctx)
+        mock_trace_repo.get_by_group_ids = AsyncMock(return_value=([], 0))
+        result = await service.get_all_traces_for_group(_make_group_context())
         assert result.total == 0
 
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_job_ids(
-        self, service, mock_history_repo
+    async def test_pagination_pushed_into_sql_with_exact_total(
+        self, service, mock_trace_repo
     ):
-        exec_no_job = _make_execution_obj(job_id=None)
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            return_value=[exec_no_job]
-        )
-
-        ctx = _make_group_context()
-        result = await service.get_all_traces_for_group(ctx)
-        assert result.total == 0
-
-    @pytest.mark.asyncio
-    async def test_pagination_applied(
-        self, service, mock_history_repo, mock_trace_repo
-    ):
-        exec1 = _make_execution_obj(id=1, job_id="j1")
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            return_value=[exec1]
-        )
-        traces = [_make_trace_obj(id=i) for i in range(5)]
-        mock_trace_repo.get_by_job_id = AsyncMock(return_value=traces)
+        page = [_make_trace_obj(id=3), _make_trace_obj(id=2)]
+        mock_trace_repo.get_by_group_ids = AsyncMock(return_value=(page, 5))
 
         ctx = _make_group_context()
         result = await service.get_all_traces_for_group(ctx, limit=2, offset=1)
-        assert result.total == 5
+
+        assert result.total == 5  # exact COUNT, not len(fetched)
         assert len(result.traces) == 2
         assert result.offset == 1
+        mock_trace_repo.get_by_group_ids.assert_awaited_once_with(
+            ctx.group_ids, limit=2, offset=1
+        )
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_group_ids = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.get_all_traces_for_group(_make_group_context())
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
+    async def test_generic_exception_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_group_ids = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(RuntimeError):
             await service.get_all_traces_for_group(_make_group_context())
 
