@@ -541,12 +541,12 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
     try {
       const mcpService = MCPService.getInstance();
       await mcpService.enableForWorkspace(server.id);
-      setNotification({ open: true, message: 'Enabled for this workspace', severity: 'success' });
+      setNotification({ open: true, message: 'Enabled for this teamspace', severity: 'success' });
       await loadMcpServers();
     } catch (error) {
       setNotification({
         open: true,
-        message: error instanceof Error ? error.message : 'Failed to enable for this workspace',
+        message: error instanceof Error ? error.message : 'Failed to enable for this teamspace',
         severity: 'error',
       });
     }
@@ -717,11 +717,11 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
             {isSystem
               ? t('configuration.mcp.globalSubtitle', {
                   defaultValue:
-                    'MCP servers available to all workspaces. Workspace admins can disable any of these for their own workspace.',
+                    'MCP servers available to all teamspaces. Teamspace admins can disable any of these for their own teamspace.',
                 })
               : t('configuration.mcp.workspaceSubtitle', {
                   defaultValue:
-                    'MCP servers usable in this workspace — globally-available ones (inherited) plus this workspace’s own. Disabling hides a server from this workspace only.',
+                    'MCP servers usable in this teamspace — globally-available ones (inherited) plus this teamspace’s own. Disabling hides a server from this teamspace only.',
                 })}
           </Typography>
         </Box>

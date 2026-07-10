@@ -61,7 +61,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/crews` | List all crews in workspace |
+| `GET` | `/crews` | List all crews in the teamspace |
 | `POST` | `/crews` | Create a new crew |
 | `GET` | `/crews/{id}` | Get crew details by ID |
 | `PUT` | `/crews/{id}` | Update crew configuration |
@@ -136,8 +136,8 @@ Authorization: Bearer <JWT_TOKEN>
 | `GET` | `/tools` | List all available tools |
 | `GET` | `/tools/{id}` | Get tool details by ID |
 | `PUT` | `/tools/{id}` | Update tool configuration |
-| `POST` | `/tools/{id}/enable` | Enable tool for workspace |
-| `POST` | `/tools/{id}/disable` | Disable tool for workspace |
+| `POST` | `/tools/{id}/enable` | Enable tool for the teamspace |
+| `POST` | `/tools/{id}/disable` | Disable tool for the teamspace |
 
 ### Tool categories
 

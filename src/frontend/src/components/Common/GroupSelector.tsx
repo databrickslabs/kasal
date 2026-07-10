@@ -90,8 +90,8 @@ const GroupSelector: React.FC = () => {
 
       // Show success message with the actual group ID being used
       const displayName = group.id.startsWith('user_')
-        ? 'My Workspace'
-        : `${group.name} workspace`;
+        ? 'Personal Space'
+        : `${group.name} teamspace`;
       toast.success(`Switched to ${displayName}`);
 
       // Small delay then reload to apply new context
@@ -176,8 +176,8 @@ const GroupSelector: React.FC = () => {
       <Tooltip
         title={
           currentGroup.id.startsWith('user_')
-            ? `My Workspace (${currentUser?.email})`
-            : `${currentGroup.name} - Shared Workspace`
+            ? `Personal Space (${currentUser?.email})`
+            : `${currentGroup.name} - Shared Teamspace`
         }
         enterDelay={500}
         leaveDelay={200}
@@ -239,7 +239,7 @@ const GroupSelector: React.FC = () => {
       >
         <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
           <Typography variant="subtitle2" color="text.secondary">
-            Switch Workspace
+            Switch Teamspace
           </Typography>
         </Box>
         {groups.length > 0 && <Divider />}
@@ -288,7 +288,7 @@ const GroupSelector: React.FC = () => {
                       variant="body2"
                       sx={{ fontWeight: isSelected ? 600 : 400 }}
                     >
-                      {isPersonalWorkspace ? 'My Workspace' : group.name}
+                      {isPersonalWorkspace ? 'Personal Space' : group.name}
                     </Typography>
                     {isSelected && (
                       <Chip
@@ -304,7 +304,7 @@ const GroupSelector: React.FC = () => {
                   <Typography variant="caption" color="text.secondary">
                     {isPersonalWorkspace
                       ? `Personal - ${currentUser?.email}`
-                      : `Shared workspace`}
+                      : `Shared teamspace`}
                   </Typography>
                 }
                 sx={{ my: 0 }}

@@ -112,7 +112,7 @@ describe('GroupManagement', () => {
     renderWithProviders(<GroupManagement />);
 
     await waitFor(() => {
-      expect(screen.getByText('Workspaces')).toBeInTheDocument();
+      expect(screen.getByText('Teamspaces')).toBeInTheDocument();
     });
   });
 
@@ -153,7 +153,7 @@ describe('GroupManagement', () => {
     renderWithProviders(<GroupManagement />);
 
     await waitFor(() => {
-      expect(screen.getByText('Workspaces')).toBeInTheDocument();
+      expect(screen.getByText('Teamspaces')).toBeInTheDocument();
     });
 
     // The mock useGroupStore was called with selector functions during render.

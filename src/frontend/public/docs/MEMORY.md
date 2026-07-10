@@ -1,6 +1,6 @@
 # Memory
 
-Kasal gives agents a unified cognitive memory: a single store where crews capture what they learn during a run and recall relevant context on later runs, scoped to your workspace. It is built on CrewAI's unified `Memory` class (one `Memory` instance over one storage backend), so short-term, long-term, and entity context all live in one place rather than as separate stores.
+Kasal gives agents a unified cognitive memory: a single store where crews capture what they learn during a run and recall relevant context on later runs, scoped to your teamspace. It is built on CrewAI's unified `Memory` class (one `Memory` instance over one storage backend), so short-term, long-term, and entity context all live in one place rather than as separate stores.
 
 ## Memory backends
 
@@ -42,16 +42,16 @@ Memory records and recall queries are embedded with the same model and dimension
 
 The same model is also used for documentation embeddings that improve crew generation. See `src/docs/archive/technical/EMBEDDINGS.md` for that flow.
 
-## Per-workspace isolation
+## Per-teamspace isolation
 
-Memory is group aware. Every read and write is filtered by `group_id` (the tenant or workspace identifier), so one workspace can never observe another workspace's memory. `group_id` is the isolation boundary in all backends.
+Memory is group aware. Every read and write is filtered by `group_id` (the tenant or teamspace identifier), so one teamspace can never observe another teamspace's memory. `group_id` is the isolation boundary in all backends.
 
-Within a workspace, read scope is controlled per execution:
+Within a teamspace, read scope is controlled per execution:
 
-- Workspace wide (default): recall spans the whole workspace (`group_id`), so any crew can recall context written by earlier runs.
+- Teamspace wide (default): recall spans the whole teamspace (`group_id`), so any crew can recall context written by earlier runs.
 - Session only: recall is confined to the current chat session (`session_id`), so only this conversation's history is recalled.
 
-In Chat mode this is the "Workspace memory" versus "Session memory" toggle. Note that `crew_id` is deliberately not a read scoping key: it is a deterministic per-crew-structure hash used for tracing and write tagging, and it changes whenever the crew structure changes, so scoping reads by it would wall every run off from the rest of the workspace.
+In Chat mode this is the "Teamspace memory" versus "Session memory" toggle. Note that `crew_id` is deliberately not a read scoping key: it is a deterministic per-crew-structure hash used for tracing and write tagging, and it changes whenever the crew structure changes, so scoping reads by it would wall every run off from the rest of the teamspace.
 
 ## Memory browser
 
@@ -59,4 +59,4 @@ The Cognitive Memory Browser (`src/frontend/src/components/MemoryBackend/MemoryR
 
 ## Configuration
 
-Memory is configured per workspace under Configuration > Memory. There you select the backend (Default or Lakebase), point it at the storage target (for Lakebase, a table and instance), set the embedding dimension, and adjust the cognitive ranking knobs (`CognitiveMemoryConfig`). Settings are stored as a `MemoryBackendConfig` and loaded at run time by the factory.
+Memory is configured per teamspace under Configuration > Memory. There you select the backend (Default or Lakebase), point it at the storage target (for Lakebase, a table and instance), set the embedding dimension, and adjust the cognitive ranking knobs (`CognitiveMemoryConfig`). Settings are stored as a `MemoryBackendConfig` and loaded at run time by the factory.

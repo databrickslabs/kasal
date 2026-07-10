@@ -95,7 +95,7 @@ function themesFor(deliverable: string): { themes: DeckTheme[]; defaultId: strin
   const wsTheme: DeckTheme = {
     ...themeToDeck(ws),
     id: `workspace-${deliverable}`,
-    name: 'Workspace',
+    name: 'Teamspace',
   }
   return { themes: [wsTheme, ...DECK_THEMES], defaultId: wsTheme.id }
 }

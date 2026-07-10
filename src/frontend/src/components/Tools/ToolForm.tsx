@@ -340,10 +340,10 @@ const ToolForm: React.FC = () => {
         setTools(prev => prev.map(p => p.id === groupTool.id ? { ...p, enabled: true } : p));
       }
 
-      setNotification({ open: true, message: 'Workspace override created', severity: 'success' });
+      setNotification({ open: true, message: 'Teamspace override created', severity: 'success' });
     } catch (error) {
       console.error('Error enabling tool for workspace:', error);
-      setNotification({ open: true, message: error instanceof Error ? error.message : 'Error enabling tool for workspace', severity: 'error' });
+      setNotification({ open: true, message: error instanceof Error ? error.message : 'Error enabling tool for teamspace', severity: 'error' });
     }
   };
 
@@ -457,7 +457,7 @@ const ToolForm: React.FC = () => {
                             <Stack direction="row" spacing={1} alignItems="center">
                               <span>{tool.title}</span>
                               {tool.group_id && (
-                                <Chip size="small" label="Workspace" color="primary" variant="outlined" />
+                                <Chip size="small" label="Teamspace" color="primary" variant="outlined" />
                               )}
                             </Stack>
                           </TableCell>
@@ -476,13 +476,13 @@ const ToolForm: React.FC = () => {
                           </TableCell>
                           <TableCell align="center">
                             {(!tool.group_id && userRole === 'admin') && (
-                              <Tooltip title="Enable for this workspace (create override)">
+                              <Tooltip title="Enable for this teamspace (create override)">
                                 <IconButton
                                   size="small"
                                   color="primary"
                                   onClick={() => handleEnableForWorkspace(tool)}
                                   sx={{ mr: 1 }}
-                                  aria-label="Enable for this workspace"
+                                  aria-label="Enable for this teamspace"
                                 >
                                   <ContentCopyOutlinedIcon fontSize="small" />
                                 </IconButton>
@@ -536,7 +536,7 @@ const ToolForm: React.FC = () => {
                             <Stack direction="row" spacing={1} alignItems="center">
                               <span>{tool.title}</span>
                               {tool.group_id && (
-                                <Chip size="small" label="Workspace" color="primary" variant="outlined" />
+                                <Chip size="small" label="Teamspace" color="primary" variant="outlined" />
                               )}
                             </Stack>
                           </TableCell>
@@ -555,13 +555,13 @@ const ToolForm: React.FC = () => {
                           </TableCell>
                           <TableCell align="center">
                             {(!tool.group_id && userRole === 'admin') && (
-                              <Tooltip title="Enable for this workspace (create override)">
+                              <Tooltip title="Enable for this teamspace (create override)">
                                 <IconButton
                                   size="small"
                                   color="primary"
                                   onClick={() => handleEnableForWorkspace(tool)}
                                   sx={{ mr: 1 }}
-                                  aria-label="Enable for this workspace"
+                                  aria-label="Enable for this teamspace"
                                 >
                                   <ContentCopyOutlinedIcon fontSize="small" />
                                 </IconButton>

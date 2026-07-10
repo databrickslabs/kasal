@@ -42,7 +42,7 @@ export class GroupToolService {
       return res.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error adding tool to workspace');
+      throw new Error(axiosError.response?.data?.detail || 'Error adding tool to teamspace');
     }
   }
 
@@ -71,7 +71,7 @@ export class GroupToolService {
       await apiClient.delete(`/group-tools/${toolId}`);
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error removing tool from workspace');
+      throw new Error(axiosError.response?.data?.detail || 'Error removing tool from teamspace');
     }
   }
 }

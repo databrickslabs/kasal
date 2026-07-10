@@ -244,7 +244,7 @@ const UIConfigurator: React.FC = () => {
       await UIConfigService.updateConfig(payload);
       setSaved(true);
     } catch {
-      setError('Failed to save. You may need workspace-admin permissions.');
+      setError('Failed to save. You may need teamspace-admin permissions.');
     } finally {
       setSaving(false);
     }
@@ -328,7 +328,7 @@ const UIConfigurator: React.FC = () => {
         UI Configurator
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        When enabled, crews in this workspace produce a structured, on-brand UI that renders
+        When enabled, crews in this teamspace produce a structured, on-brand UI that renders
         consistently in the chat preview — instead of arbitrary, ad-hoc HTML. Branding and
         per-type settings are configured below. Disabled by default.
       </Typography>
@@ -338,7 +338,7 @@ const UIConfigurator: React.FC = () => {
 
       <FormControlLabel
         control={<Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />}
-        label="Enable predefined UI for this workspace"
+        label="Enable predefined UI for this teamspace"
       />
 
       {enabled && (

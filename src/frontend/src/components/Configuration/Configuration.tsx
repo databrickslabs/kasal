@@ -181,7 +181,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     // System admin-only sections (manage entire system)
     if (isSystemAdmin) {
       baseNavItems.push({
-        label: t('configuration.workspaces.tab', { defaultValue: 'Workspaces' }),
+        label: t('configuration.workspaces.tab', { defaultValue: 'Teamspaces' }),
         icon: <WorkspacesIcon fontSize="small" />,
         index: currentIndex++,
         group: 'system'
@@ -231,7 +231,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     // Workspace admin sections (configure workspace-specific settings)
     if (isWorkspaceAdmin) {
       baseNavItems.push({
-        label: t('configuration.workspaceOverview.tab', { defaultValue: 'Workspace Overview' }),
+        label: t('configuration.workspaceOverview.tab', { defaultValue: 'Teamspace Overview' }),
         icon: <WorkspacesIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -250,14 +250,14 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       });
       // Models (Workspace) - workspace models management
       baseNavItems.push({
-        label: t('configuration.models.workspace', { defaultValue: 'Models (Workspace)' }),
+        label: t('configuration.models.workspace', { defaultValue: 'Models (Teamspace)' }),
         icon: <ModelIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
       // Tools (Workspace) - workspace tools management
       baseNavItems.push({
-        label: t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' }),
+        label: t('configuration.tools.workspace', { defaultValue: 'Tools (Teamspace)' }),
         icon: <BuildIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -265,7 +265,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       // MCP (Workspace) - workspace MCP servers. Ordered after Models/Tools to
       // match the System Administration section (Models → Tools → MCP).
       baseNavItems.push({
-        label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Workspace)' }),
+        label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' }),
         icon: <CloudIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -539,7 +539,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             {/* Workspace Settings */}
             {workspaceItems.length > 0 && (
               <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
-                <Typography variant="overline" color="text.secondary">Workspace Settings</Typography>
+                <Typography variant="overline" color="text.secondary">Teamspace Settings</Typography>
               </Box>
             )}
             {workspaceItems.map((item) => (
@@ -644,7 +644,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // Workspace Overview (Workspace Admins)
-            if (item.label === t('configuration.workspaceOverview.tab', { defaultValue: 'Workspace Overview' })) {
+            if (item.label === t('configuration.workspaceOverview.tab', { defaultValue: 'Teamspace Overview' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <WorkspaceOverview />
@@ -653,7 +653,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // Workspaces (System Admin only)
-            if (item.label === t('configuration.workspaces.tab', { defaultValue: 'Workspaces' })) {
+            if (item.label === t('configuration.workspaces.tab', { defaultValue: 'Teamspaces' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <GroupManagement />
@@ -680,7 +680,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // Models (Workspace) - Workspace Settings
-            if (item.label === t('configuration.models.workspace', { defaultValue: 'Models (Workspace)' })) {
+            if (item.label === t('configuration.models.workspace', { defaultValue: 'Models (Teamspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <ModelConfiguration mode="workspace" />
@@ -698,7 +698,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // Tools (Workspace) - Workspace Settings
-            if (item.label === t('configuration.tools.workspace', { defaultValue: 'Tools (Workspace)' })) {
+            if (item.label === t('configuration.tools.workspace', { defaultValue: 'Tools (Teamspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <ToolsConfiguration mode="workspace" />
@@ -743,7 +743,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             }
 
             // MCP (Workspace) - Workspace Settings
-            if (item.label === t('configuration.mcp.workspace', { defaultValue: 'MCP (Workspace)' })) {
+            if (item.label === t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <MCPConfiguration mode="workspace" />

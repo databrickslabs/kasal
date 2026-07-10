@@ -335,7 +335,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} mb={1}>
             <RocketLaunchIcon color="primary" fontSize="small" />
-            <Typography variant="subtitle1">Workspace Tools</Typography>
+            <Typography variant="subtitle1">Teamspace Tools</Typography>
           </Stack>
 
           <Grid container spacing={2}>
@@ -357,7 +357,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
             </Grid>
 
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Added in this Workspace</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Added in this Teamspace</Typography>
               <Stack spacing={1}>
                 {added.map((m) => {
                   const readiness = getReadiness(m);
@@ -373,7 +373,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
                         <Button size="small" onClick={() => openConfigure(m)}>Configure</Button>
                         {/* Added tools are enabled by default — no separate enable step.
                             To turn a tool off, remove it from the workspace. */}
-                        <Tooltip title="Remove from workspace">
+                        <Tooltip title="Remove from teamspace">
                           <IconButton size="small" onClick={() => void handleRemove(m.tool_id)}>
                             <DeleteIcon fontSize="small" />
                           </IconButton>
@@ -383,7 +383,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
                   );
                 })}
                 {added.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">No tools added to this workspace yet.</Typography>
+                  <Typography variant="body2" color="text.secondary">No tools added to this teamspace yet.</Typography>
                 )}
               </Stack>
             </Grid>
@@ -414,7 +414,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
             </Box>
           )}
           <TextField
-            label="Workspace Configuration (JSON)"
+            label="Teamspace Configuration (JSON)"
             value={configText}
             onChange={(e) => setConfigText(e.target.value)}
             multiline

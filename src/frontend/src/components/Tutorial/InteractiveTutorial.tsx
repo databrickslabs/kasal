@@ -141,7 +141,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
     },
     {
       target: '[data-tour="workspace-section"]',
-      content: 'Workspace Overview: This is the first section you see. Here you can:\n• View system status and health\n• See active users and groups\n• Monitor resource usage\n• Check system configuration\n• View platform statistics',
+      content: 'Teamspace Overview: This is the first section you see. Here you can:\n• View system status and health\n• See active users and groups\n• Monitor resource usage\n• Check system configuration\n• View platform statistics',
       placement: 'right',
     },
     {
@@ -161,7 +161,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
     },
     {
       target: '[data-tour="groups-section"]',
-      content: 'Group Management: Organize users and resources:\n• Create workspace groups\n• Assign users to groups\n• Set group permissions\n• Manage group resources',
+      content: 'Group Management: Organize users and resources:\n• Create teamspace groups\n• Assign users to groups\n• Set group permissions\n• Manage group resources',
       placement: 'right',
     },
     {

@@ -99,4 +99,4 @@ Rather than duplicate the details here, see the Power BI section: [Power BI inte
 
 Beyond the seeded registry, agents can reach the wider Model Context Protocol (MCP) ecosystem through `MCPTool`, an adapter that connects to MCP servers (over SSE or stdio) and exposes their tools to agents without custom integration work. This is how you extend Kasal with domain-specific tools that are not built in.
 
-For configuring MCP servers, per-workspace overrides, and the Genie MCP integration, see the [MCP guide](./MCP.md).
+For configuring MCP servers, per-teamspace overrides, and the Genie MCP integration, see the [MCP guide](./MCP.md).

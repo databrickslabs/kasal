@@ -52,7 +52,7 @@ export const useGroupStore = create<GroupState>()(
 
         const personalGroup: GroupWithRole = {
           id: primaryGroupId,
-          name: 'My Workspace',
+          name: 'Personal Space',
           status: 'active',
           auto_created: true,
           created_at: new Date().toISOString(),

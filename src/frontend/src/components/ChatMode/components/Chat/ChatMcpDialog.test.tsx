@@ -60,7 +60,7 @@ describe('ChatMcpDialog', () => {
 
     expect(await screen.findByText('nemo')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Global availability: nemo' })).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Enabled for this workspace: nemo' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Enabled for this teamspace: nemo' })).toBeInTheDocument();
   });
 
   it('the Global toggle flips availability; the Workspace toggle flips per-workspace enable', async () => {
@@ -70,7 +70,7 @@ describe('ChatMcpDialog', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Global availability: nemo' }));
     await waitFor(() => expect(api.setGlobalAvailability).toHaveBeenCalledWith('g1', false)); // was true
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Enabled for this workspace: nemo' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Enabled for this teamspace: nemo' }));
     await waitFor(() => expect(api.setWorkspaceEnabled).toHaveBeenCalledWith('w1', true)); // was false
   });
 
@@ -79,7 +79,7 @@ describe('ChatMcpDialog', () => {
     await screen.findByText('orphan');
     // orphan has a Global toggle but no workspace-effective row → Workspace toggle disabled.
     expect(screen.getByRole('switch', { name: 'Global availability: orphan' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Enabled for this workspace: orphan' })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Enabled for this teamspace: orphan' })).toBeDisabled();
   });
 
   it('registers a new server from the manual add form', async () => {
@@ -122,7 +122,7 @@ describe('ChatMcpDialog', () => {
     await waitFor(() => expect(api.getMcpServers).toHaveBeenCalled());
     expect(api.getBaseServers).not.toHaveBeenCalled();
     expect(await screen.findByText('nemo')).toBeInTheDocument();
-    const toggle = screen.getByRole('switch', { name: 'Enabled for this workspace: nemo' });
+    const toggle = screen.getByRole('switch', { name: 'Enabled for this teamspace: nemo' });
     expect(toggle).toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: 'Global availability: nemo' })).toBeNull();
     expect(screen.queryByText('Add server')).toBeNull();

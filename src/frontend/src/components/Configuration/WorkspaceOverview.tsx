@@ -84,8 +84,8 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
       } else {
         // Personal workspace info
         setWorkspaceInfo({
-          name: 'Personal Workspace',
-          description: 'Your personal workspace',
+          name: 'Personal Space',
+          description: 'Your Personal Space',
           is_default: true,
           member_count: 1,
         });
@@ -125,7 +125,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
     } catch (err) {
       console.error('Error loading workspace info:', err);
-      setError('Failed to load workspace information');
+      setError('Failed to load teamspace information');
     } finally {
       setLoading(false);
     }
@@ -169,7 +169,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
-        <Typography>Loading workspace information...</Typography>
+        <Typography>Loading teamspace information...</Typography>
 
       </Box>
     );
@@ -188,10 +188,10 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
       {/* Workspace Header */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h5" gutterBottom>
-          Workspace Configuration Overview
+          Teamspace Configuration Overview
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Manage your workspace settings and configurations
+          Manage your teamspace settings and configurations
         </Typography>
       </Box>
 
@@ -201,17 +201,17 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
             <GroupIcon sx={{ mr: 1, color: 'primary.main' }} />
             <Typography variant="h6">
-              {workspaceInfo?.name || 'Workspace'}
+              {workspaceInfo?.name || 'Teamspace'}
             </Typography>
           </Box>
 
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                Workspace Type
+                Type
               </Typography>
               <Typography variant="body1">
-                {isPersonalWorkspace ? 'Personal' : 'Team'}
+                {isPersonalWorkspace ? 'Personal Space' : 'Teamspace'}
               </Typography>
             </Grid>
 
@@ -323,7 +323,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                Databricks is not configured for this workspace
+                Databricks is not configured for this teamspace
               </Typography>
             )}
           </Paper>
@@ -375,7 +375,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                Memory backend is not configured for this workspace
+                Memory backend is not configured for this teamspace
               </Typography>
             )}
           </Paper>
@@ -416,7 +416,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
             ) : (
               <Typography variant="body2" color="text.secondary">
-                Volume storage is not configured for this workspace
+                Volume storage is not configured for this teamspace
               </Typography>
             )}
           </Paper>
@@ -456,7 +456,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                Knowledge base is not configured for this workspace
+                Knowledge base is not configured for this teamspace
               </Typography>
             )}
           </Paper>
@@ -481,15 +481,15 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
                     </ListItemIcon>
                     <ListItemText
                       primary={tool.title}
-                      secondary={tool.group_id ? 'Workspace override' : 'Base'}
+                      secondary={tool.group_id ? 'Teamspace override' : 'Base'}
                     />
-                    {tool.group_id && <Chip label="Workspace" size="small" color="primary" variant="outlined" />}
+                    {tool.group_id && <Chip label="Teamspace" size="small" color="primary" variant="outlined" />}
                   </ListItem>
                 ))}
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                No tools enabled for this workspace
+                No tools enabled for this teamspace
               </Typography>
             )}
           </Paper>
@@ -520,15 +520,15 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
                     </ListItemIcon>
                     <ListItemText
                       primary={server.name}
-                      secondary={server.group_id ? 'Workspace override' : 'Base'}
+                      secondary={server.group_id ? 'Teamspace override' : 'Base'}
                     />
-                    {server.group_id && <Chip label="Workspace" size="small" color="primary" variant="outlined" />}
+                    {server.group_id && <Chip label="Teamspace" size="small" color="primary" variant="outlined" />}
                   </ListItem>
                 ))}
               </List>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                No MCP servers enabled for this workspace
+                No MCP servers enabled for this teamspace
               </Typography>
             )}
           </Paper>
@@ -540,7 +540,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
       {userRole === 'admin' && (
         <Alert severity="info" sx={{ mt: 3 }}>
           <Typography variant="body2">
-            As a workspace admin, you can configure all workspace-specific settings including
+            As a teamspace admin, you can configure all teamspace-specific settings including
             Databricks integration, memory backend, and storage volumes. Use the navigation
             menu to access each configuration section.
           </Typography>

@@ -14,7 +14,7 @@ Kasal turns complex AI orchestration into an intuitive visual experience. Design
 ## Why Kasal?
 
 - **Visual Workflow Designer** — Drag-and-drop canvas for composing sophisticated agent interactions
-- **Enterprise-Ready** — Built for Databricks with OAuth, workspace isolation, and scale in mind
+- **Enterprise-Ready** — Built for Databricks with OAuth, teamspace isolation, and scale in mind
 - **Extensible Toolkit** — A rich library of tools, including Genie, MCP servers, custom APIs, and data connectors
 - **Real-Time Monitoring** — Live execution tracking with detailed logs, traces, and performance insights
 - **Production-Grade** — Robust error handling, retry logic, and enterprise deployment patterns

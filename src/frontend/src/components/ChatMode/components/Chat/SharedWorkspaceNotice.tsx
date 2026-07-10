@@ -72,15 +72,15 @@ const SharedWorkspaceNotice: React.FC = () => {
         />
       </svg>
       <div className="flex-1 min-w-0">
-        <span style={{ fontWeight: 600 }}>Shared workspace. </span>
+        <span style={{ fontWeight: 600 }}>Shared teamspace. </span>
         Your team can build on each other's work here. Chats, runs, results, logs, and agent memory in this
-        workspace are visible to {audience}, including data your agents read from Databricks that teammates may
+        teamspace are visible to {audience}, including data your agents read from Databricks that teammates may
         not otherwise have access to. Avoid queries whose results shouldn't be shared with the team.
       </div>
       <button
         type="button"
         onClick={onDismiss}
-        aria-label="Dismiss shared workspace notice"
+        aria-label="Dismiss shared teamspace notice"
         className="flex-shrink-0 -mr-1 -mt-0.5 p-0.5 rounded hover:opacity-70 transition-opacity"
         style={{ color: ACCENT }}
       >

@@ -54,9 +54,9 @@ GROUP BY Region
 
 ### Fast path: show me it works (1-2 hours with an SA)
 
-Use the **BI Specialist workspace** in Kasal (no setup required):
+Use the **BI Specialist teamspace** in Kasal (no setup required):
 
-1. Open Kasal, then **Workspaces**, then switch to **BI Specialist**
+1. Open Kasal, then **Teamspaces**, then switch to **BI Specialist**
 2. Go to **Crews**. The UCMV Generation Pipeline crew is pre-configured
 3. Connect the crews on the **Flows** canvas and run
 

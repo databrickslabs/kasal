@@ -98,7 +98,7 @@ function UserPermissionManagement(): JSX.Element {
 
       const permissionName = permission === 'is_system_admin'
         ? 'System Admin'
-        : 'Personal Workspace Manager';
+        : 'Personal Space Manager';
 
       showNotification(
         `${permissionName} permission ${value ? 'granted' : 'revoked'} for ${updatedUser.email}`,
@@ -157,7 +157,7 @@ function UserPermissionManagement(): JSX.Element {
       badges.push(
         <Chip
           key="pw"
-          label="Personal Workspace Manager"
+          label="Personal Space Manager"
           color="primary"
           size="small"
           icon={<WorkspacesIcon />}
@@ -203,7 +203,7 @@ function UserPermissionManagement(): JSX.Element {
                   User Permission Management
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Grant system-wide and personal workspace permissions to users
+                  Grant system-wide and Personal Space permissions to users
                 </Typography>
               </Box>
             </Box>
@@ -228,16 +228,16 @@ function UserPermissionManagement(): JSX.Element {
                 System Admin
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Full platform control, can manage all workspaces and grant permissions
+                Full platform control, can manage all teamspaces and grant permissions
               </Typography>
             </Paper>
 
             <Paper sx={{ p: 2, border: '1px solid', borderColor: 'primary.light' }}>
               <Typography variant="subtitle1" color="primary.main" fontWeight="600">
-                Personal Workspace Manager
+                Personal Space Manager
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Can configure Databricks, Memory, and Volumes in their personal workspace
+                Can configure Databricks, Memory, and Volumes in their Personal Space
               </Typography>
             </Paper>
           </Box>
@@ -249,7 +249,7 @@ function UserPermissionManagement(): JSX.Element {
                   <TableCell>User</TableCell>
                   <TableCell>Current Permissions</TableCell>
                   <TableCell align="center">System Admin</TableCell>
-                  <TableCell align="center">Personal Workspace Manager</TableCell>
+                  <TableCell align="center">Personal Space Manager</TableCell>
                   <TableCell>Last Login</TableCell>
                   <TableCell align="center">Actions</TableCell>
                 </TableRow>
@@ -293,7 +293,7 @@ function UserPermissionManagement(): JSX.Element {
                     </TableCell>
 
                     <TableCell align="center">
-                      <Tooltip title="Allow user to configure their personal workspace">
+                      <Tooltip title="Allow user to configure their Personal Space">
                         <FormControlLabel
                           control={
                             <Switch
@@ -391,7 +391,7 @@ function UserPermissionManagement(): JSX.Element {
             <br /><br />
             This will permanently remove:
             • User account and authentication
-            • All workspace memberships
+            • All teamspace memberships
             • User permissions and settings
             • Any associated data
           </DialogContentText>

@@ -56,7 +56,7 @@ describe('SharedWorkspaceNotice', () => {
   it('stays dismissed for that workspace after dismissal (once per workspace)', () => {
     setWorkspace(SHARED.id, [SHARED]);
     const { unmount } = render(<SharedWorkspaceNotice />);
-    fireEvent.click(screen.getByLabelText('Dismiss shared workspace notice'));
+    fireEvent.click(screen.getByLabelText('Dismiss shared teamspace notice'));
     expect(screen.queryByTestId('shared-workspace-notice')).toBeNull();
     expect(localStorage.getItem(`kasal_shared_ws_notice_dismissed:${SHARED.id}`)).toBe('1');
 

@@ -71,8 +71,8 @@ const MODES = [
 //   session   = semantic memory OFF — recall comes ONLY from this chat's history
 type MemoryModeId = 'workspace' | 'session';
 const MEMORY_MODES: { id: MemoryModeId; label: string; short: string; hint: string }[] = [
-  { id: 'workspace', label: 'Workspace memory', short: 'Workspace', hint: 'Recall context across the whole workspace' },
-  { id: 'session', label: 'Session memory', short: 'Session', hint: "Recall only this chat's history — no workspace memory" },
+  { id: 'workspace', label: 'Teamspace memory', short: 'Teamspace', hint: 'Recall context across the whole teamspace' },
+  { id: 'session', label: 'Session memory', short: 'Session', hint: "Recall only this chat's history — no teamspace memory" },
 ];
 
 // NOTE: there is deliberately NO per-message output-format picker. The
