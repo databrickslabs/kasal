@@ -701,7 +701,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
           <Typography variant="h4" component="h1">
             {isSystemView
               ? t('configuration.models.globalTitle', { defaultValue: 'Global Models (System Admin)' })
-              : t('configuration.models.workspaceTitle', { defaultValue: 'Workspace Models' })}
+              : t('configuration.models.workspaceTitle', { defaultValue: 'Teamspace Models' })}
           </Typography>
           {isSystemView && (
             <Button

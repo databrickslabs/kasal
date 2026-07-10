@@ -1,6 +1,6 @@
 # Security
 
-Kasal runs AI agent workflows against your enterprise data, so security spans identity, workspace isolation, agent guardrails, and the dependency supply chain. This page is a concise overview; each section links to the detailed guide for depth.
+Kasal runs AI agent workflows against your enterprise data, so security spans identity, teamspace isolation, agent guardrails, and the dependency supply chain. This page is a concise overview; each section links to the detailed guide for depth.
 
 ## Identity and on-behalf-of (OBO)
 
@@ -8,9 +8,9 @@ Every action runs as the signed-in user. All Databricks resource access (Unity C
 
 See [security compliance](./README_SECURITY_COMPLIANCE.md) (design items D1 to D4) for details.
 
-## Workspace isolation
+## Teamspace isolation
 
-Kasal is multi-tenant and group-aware. Resources and permissions are scoped to the workspace (group) context so that one workspace's data, executions, and configuration do not leak into another. All LLM and embedding calls route through Databricks model serving endpoints in the workspace; the platform does not create or use fine-tuned models that could encode sensitive information.
+Kasal is multi-tenant and group-aware. Resources and permissions are scoped to the teamspace (group) context so that one teamspace's data, executions, and configuration do not leak into another. All LLM and embedding calls route through Databricks model serving endpoints in the Databricks workspace; the platform does not create or use fine-tuned models that could encode sensitive information.
 
 ## Secrets and encryption at rest
 

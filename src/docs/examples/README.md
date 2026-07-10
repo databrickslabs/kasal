@@ -3,11 +3,11 @@
 Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View (UCMV) migration pipeline.
 
 > [!TIP]
-> Use the **BI Specialist workspace** (built into Kasal) for zero-config setup.
+> Use the **BI Specialist teamspace** (built into Kasal) for zero-config setup.
 > All 9 pipeline crews are pre-seeded with tools enabled — just fill in your credentials.
 >
 > These JSON files are for users who want to **customise** beyond the defaults or import
-> individual crews into other workspaces.
+> individual crews into other teamspaces.
 
 ---
 

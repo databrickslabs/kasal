@@ -183,7 +183,7 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
   };
   const remove = (row: ServerRow) => {
     if (!row.base) return;
-    if (!window.confirm(`Delete "${row.name}"? This removes it from all workspaces.`)) return;
+    if (!window.confirm(`Delete "${row.name}"? This removes it from all teamspaces.`)) return;
     void run(`d:${row.name}`, () => svc().deleteMcpServer(row.base!.id));
   };
 
@@ -280,8 +280,8 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
               className="text-xs leading-relaxed rounded-lg mb-3"
               style={{ padding: '10px 12px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
             >
-              Make a server <strong style={{ color: 'var(--text-primary)' }}>Global</strong> (available to all workspaces),
-              then turn it on for <strong style={{ color: 'var(--text-primary)' }}>This workspace</strong> — a server appears
+              Make a server <strong style={{ color: 'var(--text-primary)' }}>Global</strong> (available to all teamspaces),
+              then turn it on for <strong style={{ color: 'var(--text-primary)' }}>This teamspace</strong> — a server appears
               in chat only when both are on.
             </div>
           )}
@@ -292,7 +292,7 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
               <div className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Loading…</div>
             ) : rows.length === 0 ? (
               <div className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-                {isSystemAdmin ? 'No servers registered yet.' : 'No servers available for this workspace yet.'}
+                {isSystemAdmin ? 'No servers registered yet.' : 'No servers available for this teamspace yet.'}
               </div>
             ) : (
               rows.map((row) => {
@@ -337,10 +337,10 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
                           />
                         )}
                         <LabeledToggle
-                          caption="Workspace"
+                          caption="Teamspace"
                           checked={Boolean(row.effective?.enabled)}
                           disabled={wsDisabled}
-                          ariaLabel={`Enabled for this workspace: ${row.name}`}
+                          ariaLabel={`Enabled for this teamspace: ${row.name}`}
                           onChange={() => toggleWorkspace(row)}
                         />
                         {row.base && (
@@ -362,7 +362,7 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
                       <Toggle
                         checked={Boolean(row.effective?.enabled)}
                         disabled={rowBusy}
-                        label={`Enabled for this workspace: ${row.name}`}
+                        label={`Enabled for this teamspace: ${row.name}`}
                         onChange={() => toggleWorkspace(row)}
                       />
                     )}

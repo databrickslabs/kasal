@@ -202,10 +202,10 @@ class GmailTool(BaseTool):
     )
 
     _SHARED_WORKSPACE_MESSAGE = (
-        "Gmail is available only in your personal workspace. In a shared "
-        "workspace, crews and their output are visible to other members, so "
+        "Gmail is available only in your Personal Space. In a shared "
+        "teamspace, crews and their output are visible to other members, so "
         "reading your inbox there would expose your personal mail to the "
-        "group. Switch to your personal workspace to use Gmail."
+        "group. Switch to your Personal Space to use Gmail."
     )
 
     async def _get_auth(self) -> Optional[Dict[str, str]]:

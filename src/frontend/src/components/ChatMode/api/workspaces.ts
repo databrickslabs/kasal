@@ -35,7 +35,7 @@ export async function fetchWorkspaces(email: string): Promise<Workspace[]> {
   if (email) {
     workspaces.push({
       id: generatePersonalWorkspaceId(email),
-      name: 'Personal Workspace',
+      name: 'Personal Space',
       user_role: null,
     });
   }

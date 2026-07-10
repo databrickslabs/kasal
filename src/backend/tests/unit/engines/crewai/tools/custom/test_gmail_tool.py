@@ -100,13 +100,13 @@ class TestPersonalWorkspaceEnforcement:
         # Shared workspace: group_id is NOT the user's personal workspace.
         tool = _tool(group_id="bi-specialist", user_email="alice@x.com")
         result = await tool._run_async(action="search")
-        assert "personal workspace" in result
+        assert "Switch to your Personal Space to use Gmail" in result
 
     @pytest.mark.asyncio
     async def test_refuses_when_workspace_identity_is_unknown(self):
         tool = _tool(group_id=None, user_email=None)
         result = await tool._run_async(action="read", message_id="m1")
-        assert "personal workspace" in result
+        assert "Switch to your Personal Space to use Gmail" in result
 
     @pytest.mark.asyncio
     async def test_personal_workspace_check_is_case_insensitive(self):

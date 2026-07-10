@@ -88,7 +88,7 @@ Edit `MODEL_OVERRIDE`, `INPUT_KEY`, or `MCP_SERVERS` in `agent_server/agent.py` 
 
 **Tools & MCP fidelity:** the export equips the crew with the tools and MCP servers configured in
 Kasal:
-- **MCP servers** enabled for the workspace are auto-attached to every agent and authenticated with
+- **MCP servers** enabled for the teamspace are auto-attached to every agent and authenticated with
   the requesting user's OBO token (falling back to the app service principal).
 - **Tools** are pre-wired into `TOOL_MAP` keyed by each tool's title, with their non-secret config
   baked in (e.g. the Genie space id, Serper result count); secrets are read from env vars
@@ -118,12 +118,12 @@ and starts it — no local CLI needed. The deploy runs in the background; the di
 (`CREATING_APP → CREATING_LAKEBASE → CONFIGURING_APP → UPLOADING → DEPLOYING → STARTING → SUCCEEDED`)
 and shows the live app URL when finished.
 
-**Deploy-screen options.** Besides the app name, you can pick the model (from the workspace's enabled
+**Deploy-screen options.** Besides the app name, you can pick the model (from the teamspace's enabled
 models), the UC catalog/schema (used for tools/memory and the OTel telemetry tables), an MLflow
 experiment name + **SQL Warehouse ID** (for Unity Catalog tracing — see below), and a **Lakebase
 instance** for persistent memory:
 - **None** — no database attached.
-- **An existing instance** — chosen from the workspace's Lakebase instances; it's attached to the app
+- **An existing instance** — chosen from the Databricks workspace's Lakebase instances; it's attached to the app
   as a `database` resource (the app's identity gets connect+create on it).
 - **Create new** — Kasal creates a new Lakebase instance and then attaches it to the app.
 
@@ -139,8 +139,8 @@ existing experiment. So **the deployed app owns and creates its own experiment**
 which provisions the UC Delta tables (`<catalog>.<schema>.agent_otel_*`) through the SQL warehouse and
 stores traces there — unlimited storage, fine-grained access, queryable from SQL/notebooks/dashboards.
 Requirements: a **SQL warehouse** (`MLFLOW_TRACING_SQL_WAREHOUSE_ID`, runs the table DDL — a deploy-screen
-field defaulting to the workspace's configured warehouse), the catalog + schema, MLflow ≥ 3.11, the
-workspace UC-tracing previews, and **MODIFY + SELECT** grants on the `<prefix>_otel_*` tables. Because the
+field defaulting to the teamspace's configured warehouse), the catalog + schema, MLflow ≥ 3.11, the
+Databricks workspace's UC-tracing previews, and **MODIFY + SELECT** grants on the `<prefix>_otel_*` tables. Because the
 app creates the experiment under its own service principal, that experiment is **not** attached as an app
 *resource* (and the deploy must not pre-create it — a plain experiment can never be made UC-backed). The
 app creates it under `/Shared/<name>` and logs the resolved trace location at startup. This is separate
@@ -150,16 +150,16 @@ regardless.
 **Authentication** follows Kasal's standard chain via `get_workspace_client`:
 1. **OBO** — the requesting user's forwarded token (`X-Forwarded-Access-Token`), preferred when Kasal is
    opened from the Databricks workspace.
-2. **PAT** — the workspace personal access token stored for the group (used when no OBO token is
-   present, e.g. running the deploy locally).
+2. **PAT** — the Databricks workspace personal access token stored for the teamspace (group), used
+   when no OBO token is present, e.g. running the deploy locally.
 3. **Service principal** — Kasal's configured client credentials, as a last resort.
 
 The app is created under whichever identity authenticates. The deploy fails with a clear message only
 when none of the above can authenticate.
 
 **Prerequisites:**
-- A valid Databricks identity (OBO login, a configured workspace PAT, or service-principal credentials)
-  with permission to create Databricks Apps and write to the workspace.
+- A valid Databricks identity (OBO login, a configured Databricks workspace PAT, or service-principal
+  credentials) with permission to create Databricks Apps and write to the workspace.
 - Editor or Admin role in Kasal.
 
 ### Deployment to Databricks Model Serving

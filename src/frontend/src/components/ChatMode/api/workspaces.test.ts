@@ -66,7 +66,7 @@ describe('fetchWorkspaces', () => {
     expect(result).toEqual([
       {
         id: 'user_john_doe_example_com',
-        name: 'Personal Workspace',
+        name: 'Personal Space',
         user_role: null,
       },
       { id: 'group-1', name: 'Engineering', user_role: 'admin' },
@@ -94,7 +94,7 @@ describe('fetchWorkspaces', () => {
     expect(result).toEqual([
       {
         id: 'user_jane_example_com',
-        name: 'Personal Workspace',
+        name: 'Personal Space',
         user_role: null,
       },
     ]);

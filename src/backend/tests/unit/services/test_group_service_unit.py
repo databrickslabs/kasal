@@ -12,7 +12,7 @@ class Ctx:
 
 
 @pytest.mark.asyncio
-async def test_ensure_group_exists_creates_personal_workspace():
+async def test_ensure_group_exists_creates_personal_space():
     session = AsyncMock()
     with patch('src.services.group_service.GroupRepository') as GR, \
          patch('src.services.group_service.GroupUserRepository') as GUR:
@@ -23,7 +23,7 @@ async def test_ensure_group_exists_creates_personal_workspace():
         svc = GroupService(session)
         ctx = Ctx(gid='user_abc', email='u@x.com')
         out = await svc.ensure_group_exists(ctx)
-        assert out.name.startswith('Personal Workspace')
+        assert out.name == 'Personal Space - u@x.com'
         grepo.add.assert_awaited()
 
 

@@ -621,10 +621,10 @@ describe('ChatInput — pending run mode (loaded catalog crew/flow)', () => {
 describe('ChatInput — memory mode toggle (Workspace ⇄ Session)', () => {
   it('is a switch labelled with the active mode — Workspace memory when enabled', () => {
     render(<ChatInput {...baseProps} memoryEnabled />);
-    const toggle = screen.getByRole('switch', { name: 'Memory mode: Workspace memory' });
+    const toggle = screen.getByRole('switch', { name: 'Memory mode: Teamspace memory' });
     expect(toggle).toBeTruthy();
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle).toHaveTextContent('Workspace memory');
+    expect(toggle).toHaveTextContent('Teamspace memory');
     // It is a toggle, not a dropdown — there is no "No memory" option anywhere.
     expect(screen.queryByText('No memory')).toBeNull();
   });
@@ -642,7 +642,7 @@ describe('ChatInput — memory mode toggle (Workspace ⇄ Session)', () => {
 
     // Workspace active → click → memory OFF (session, chat-history only).
     const { rerender } = render(<ChatInput {...props} memoryEnabled />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Workspace memory' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Teamspace memory' }));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(false);
 
     // Session active → click → memory ON (workspace-scoped).

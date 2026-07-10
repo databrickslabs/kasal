@@ -57,8 +57,8 @@ class GroupService:
 
         # Generate a name based on the group_id
         if primary_group_id.startswith("user_"):
-            # Personal workspace - use email-based name
-            name = f"Personal Workspace - {group_email}" if group_email else "Personal Workspace"
+            # Personal (private) group — the user's Personal Space, not a teamspace
+            name = f"Personal Space - {group_email}" if group_email else "Personal Space"
         else:
             # Regular group - clean up the group_id for display
             name = primary_group_id.replace("_", " ").title()

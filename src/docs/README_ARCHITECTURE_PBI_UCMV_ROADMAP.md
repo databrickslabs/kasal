@@ -705,7 +705,7 @@ Notes for whenever this is picked up:
   group may let its coding agent touch which repos/volumes/workspaces) — that governance
   model is the feature; the integration is the easy part.
 - **Kasal does not "become a tool"** under any vector: the application (flow builder,
-  multi-tenant workspace, pipeline-as-product) is untouched; the capabilities (the tool
+  multi-tenant teamspaces, pipeline-as-product) is untouched; the capabilities (the tool
   registry) are *additionally* exported. Kasal holds both positions — consumer of engines and
   provider of tools — simultaneously, which is the most durable posture toward a platform
   runtime it does not control.

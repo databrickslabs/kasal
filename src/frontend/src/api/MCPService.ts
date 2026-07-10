@@ -262,7 +262,7 @@ export class MCPService {
       return response.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || `Error enabling server ${id} for workspace`);
+      throw new Error(axiosError.response?.data?.detail || `Error enabling server ${id} for teamspace`);
     }
   }
 
@@ -377,7 +377,7 @@ export class MCPService {
       return response.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error updating MCP server for workspace');
+      throw new Error(axiosError.response?.data?.detail || 'Error updating MCP server for teamspace');
     }
   }
 

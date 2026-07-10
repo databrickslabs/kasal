@@ -292,10 +292,10 @@ LIMIT 10;
 
 ## Running the demo (no PBI credentials needed)
 
-The fastest way to demo the pipeline is the **BI Specialist workspace** built into Kasal.
+The fastest way to demo the pipeline is the **BI Specialist teamspace** built into Kasal.
 On startup, Kasal seeds 9 pre-configured crew templates covering the full pipeline:
 
-1. Open Kasal, then **Workspaces**, then switch to **BI Specialist**
+1. Open Kasal, then **Teamspaces**, then switch to **BI Specialist**
 2. Go to **Crews**. The UCMV Generation Pipeline crew is already there
 3. Build a flow by connecting crews on the **Flows** canvas
 4. Run it against your own data or use the pre-configured demo inputs

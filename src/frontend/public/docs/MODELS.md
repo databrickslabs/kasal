@@ -70,6 +70,6 @@ Fallback candidates are the currently enabled models, loaded from the database v
 ## Configuration
 
 - Per-model enablement: each model in the catalog has an `enabled` flag. Seeding enables only Databricks-provider models; you enable other providers from the model configuration UI. Model rows are seeded from `src/backend/src/seeds/model_configs.py`.
-- Per-workspace overrides: model availability is resolved per group (workspace), so a workspace can enable or disable individual models for its members.
+- Per-teamspace overrides: model availability is resolved per group (teamspace), so a teamspace can enable or disable individual models for its members.
 - AI Gateway toggle: the `ai_gateway_enabled` flag on `DatabricksConfig` controls how Databricks LLM and embedding traffic is routed. When it is off (the default), Kasal calls the standard `/serving-endpoints` path with the model in the URL. When it is on, traffic is routed through the OpenAI-compatible `/ai-gateway/mlflow/v1` path with the model in the request body. Routing logic lives in `src/backend/src/utils/databricks_url_utils.py`.
 - Adding a model: add a new entry to `DEFAULT_MODELS` in `src/backend/src/seeds/model_configs.py` with its `name`, `temperature`, `provider`, `context_window`, and `max_output_tokens`, then re-run the seeders.

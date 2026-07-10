@@ -7,7 +7,7 @@ Build and run a Genie-backed Kasal workflow that retrieves Superstore data, anal
 
 - A Genie Space connected to the Superstore dataset (see [Creating a Genie Space for the Superstore dataset](./create_genie_space.md))
 - Access to the Kasal Workflow Designer
-- The GenieTool enabled for your workspace
+- The GenieTool enabled for your teamspace
 
 This guide explains how to run the **Genie-backed Kasal workflow** for the Superstore dataset.
 

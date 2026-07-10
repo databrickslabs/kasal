@@ -125,7 +125,7 @@ const GroupManagement: React.FC = () => {
       });
     } catch (error) {
       console.error('Error loading workspaces:', error);
-      showNotification('Failed to load workspaces', 'error');
+      showNotification('Failed to load teamspaces', 'error');
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -185,13 +185,13 @@ const GroupManagement: React.FC = () => {
 
       setCreateDialogOpen(false);
       setNewGroup({ name: '', description: '' });
-      showNotification('Workspace created successfully', 'success');
+      showNotification('Teamspace created successfully', 'success');
       loadGroups();
       // Refresh the Zustand store so GroupSelector picks up the new workspace
       refreshGroupStore();
     } catch (error) {
       console.error('Error creating workspace:', error);
-      showNotification('Failed to create workspace', 'error');
+      showNotification('Failed to create teamspace', 'error');
     } finally {
       setLoading(false);
     }
@@ -274,13 +274,13 @@ const GroupManagement: React.FC = () => {
         setSelectedGroup(null);
         setGroupUsers([]);
       }
-      showNotification('Workspace deleted successfully', 'success');
+      showNotification('Teamspace deleted successfully', 'success');
       loadGroups();
       // Refresh the Zustand store so GroupSelector reflects the deletion
       refreshGroupStore();
     } catch (error) {
       console.error('Error deleting workspace:', error);
-      showNotification('Failed to delete workspace', 'error');
+      showNotification('Failed to delete teamspace', 'error');
     } finally {
       setLoading(false);
     }
@@ -431,7 +431,7 @@ const GroupManagement: React.FC = () => {
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
         <CircularProgress />
         <Typography variant="body2" sx={{ ml: 2 }}>
-          Loading workspace management...
+          Loading teamspace management...
         </Typography>
       </Box>
     );
@@ -446,10 +446,10 @@ const GroupManagement: React.FC = () => {
         </Avatar>
         <Typography variant="h6" gutterBottom>Access Denied</Typography>
         <Typography variant="body2" color="text.secondary">
-          You do not have permission to manage workspaces.
+          You do not have permission to manage teamspaces.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Only administrators can manage workspaces and team members.
+          Only administrators can manage teamspaces and team members.
         </Typography>
       </Box>
     );
@@ -466,10 +466,10 @@ const GroupManagement: React.FC = () => {
             </Avatar>
             <Box>
               <Typography variant="h5" fontWeight="600" color="text.primary">
-                Workspaces
+                Teamspaces
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Create team workspaces for collaboration • {groups.length} workspaces • {totalUsers} members
+                Create teamspaces for collaboration • {groups.length} teamspaces • {totalUsers} members
               </Typography>
             </Box>
           </Box>
@@ -498,7 +498,7 @@ const GroupManagement: React.FC = () => {
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Search workspaces by name..."
+                placeholder="Search teamspaces by name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 InputProps={{
@@ -520,8 +520,8 @@ const GroupManagement: React.FC = () => {
         sx={{ mb: 3, borderRadius: 2 }}
       >
         <Typography variant="body2">
-          <strong>Secure Workspaces:</strong> Each workspace provides isolated data and workflows.
-          Users can belong to multiple workspaces and switch between them easily.
+          <strong>Secure Teamspaces:</strong> Each teamspace provides isolated data and workflows.
+          Users can belong to multiple teamspaces and switch between them easily.
         </Typography>
       </Alert>
 
@@ -533,14 +533,14 @@ const GroupManagement: React.FC = () => {
               <CardHeader
                 title={
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="h6">Workspaces ({filteredGroups.length})</Typography>
+                    <Typography variant="h6">Teamspaces ({filteredGroups.length})</Typography>
                     <Button
                       variant="outlined"
                       size="small"
                       startIcon={<AddIcon />}
                       onClick={() => setCreateDialogOpen(true)}
                     >
-                      New Workspace
+                      New Teamspace
                     </Button>
                   </Box>
                 }
@@ -565,7 +565,7 @@ const GroupManagement: React.FC = () => {
                         startIcon={<AddIcon />}
                         onClick={() => setCreateDialogOpen(true)}
                       >
-                        Create First Workspace
+                        Create First Teamspace
                       </Button>
                     )}
                   </Box>
@@ -652,7 +652,7 @@ const GroupManagement: React.FC = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <PersonIcon />
                     <Typography variant="h6">
-                      {selectedGroup ? `${selectedGroup.name} Members` : 'Select a Workspace'}
+                      {selectedGroup ? `${selectedGroup.name} Members` : 'Select a Teamspace'}
                     </Typography>
                   </Box>
                 }
@@ -801,10 +801,10 @@ const GroupManagement: React.FC = () => {
                 <Box sx={{ textAlign: 'center', py: 6 }}>
                   <WorkspacesIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                   <Typography variant="h6" color="text.secondary" gutterBottom>
-                    Select a Workspace
+                    Select a Teamspace
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Click on a workspace to view and manage team members
+                    Click on a teamspace to view and manage team members
                   </Typography>
                 </Box>
               )}
@@ -832,7 +832,7 @@ const GroupManagement: React.FC = () => {
             sx={{ color: 'error.main' }}
           >
             <DeleteIcon sx={{ mr: 1 }} fontSize="small" />
-            Delete Workspace
+            Delete Teamspace
           </MenuItem>
         </MenuList>
       </Menu>
@@ -857,7 +857,7 @@ const GroupManagement: React.FC = () => {
             sx={{ color: 'error.main' }}
           >
             <PersonIcon sx={{ mr: 1 }} fontSize="small" />
-            Remove from Workspace
+            Remove from Teamspace
           </MenuItem>
         </MenuList>
       </Menu>
@@ -992,23 +992,23 @@ const GroupManagement: React.FC = () => {
               <WorkspacesIcon />
             </Avatar>
             <Box>
-              <Typography variant="h6">Create New Workspace</Typography>
+              <Typography variant="h6">Create New Teamspace</Typography>
               <Typography variant="body2" color="text.secondary">
-                Set up a collaborative workspace for your team
+                Set up a collaborative teamspace for your team
               </Typography>
             </Box>
           </Box>
         </DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 3, mt: 1 }}>
-            Workspaces provide secure, isolated environments for teams. Members can belong to multiple workspaces.
+            Teamspaces provide secure, isolated environments for teams. Members can belong to multiple teamspaces.
           </Alert>
           
           <Grid container spacing={3}>
             <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="Workspace Name"
+                label="Teamspace Name"
                 value={newGroup.name}
                 onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })}
                 placeholder="e.g., Product Team, Marketing, Engineering"
@@ -1026,8 +1026,8 @@ const GroupManagement: React.FC = () => {
                 onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })}
                 multiline
                 rows={3}
-                placeholder="Describe the purpose of this workspace..."
-                helperText="Help others understand this workspace's purpose"
+                placeholder="Describe the purpose of this teamspace..."
+                helperText="Help others understand this teamspace's purpose"
               />
             </Grid>
           </Grid>
@@ -1046,7 +1046,7 @@ const GroupManagement: React.FC = () => {
             disabled={loading || !newGroup.name}
             startIcon={loading ? undefined : <AddIcon />}
           >
-            {loading ? 'Creating...' : 'Create Workspace'}
+            {loading ? 'Creating...' : 'Create Teamspace'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1076,7 +1076,7 @@ const GroupManagement: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 3, mt: 1 }}>
-            Team members will gain access to this workspace&apos;s data and workflows based on their role.
+            Team members will gain access to this teamspace&apos;s data and workflows based on their role.
           </Alert>
 
           <Alert severity="warning" sx={{ mb: 3 }}>

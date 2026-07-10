@@ -1959,7 +1959,7 @@ export const MemoryConfiguration: React.FC = () => {
         >
           CrewAI unified cognitive memory is stored locally in LanceDB under
           <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
-          relative to the backend working directory — one store per workspace, no
+          relative to the backend working directory — one store per teamspace, no
           external infrastructure required. Click &ldquo;Browse Memory&rdquo; to
           inspect the records your crews have persisted.
         </Alert>
@@ -1991,7 +1991,7 @@ export const MemoryConfiguration: React.FC = () => {
             )}
             <Typography variant="caption" color="text.secondary">
               {savedConfig?.backend_id
-                ? 'Saved — this tuning applies to every local crew run in the workspace.'
+                ? 'Saved — this tuning applies to every local crew run in the teamspace.'
                 : 'Not saved yet. Save to apply this tuning (memory LLM, recall speed) to local crew runs.'}
             </Typography>
           </Box>

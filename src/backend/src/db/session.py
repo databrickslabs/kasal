@@ -889,6 +889,25 @@ async def _ensure_hot_polling_indexes(conn) -> None:
     logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
 
 
+async def _heal_personal_group_names(conn) -> None:
+    """One-time data heal for the workspace→teamspace rename: auto-created
+    personal groups persisted the old display name ("Personal Workspace - …")
+    in groups.name, which surfaces in the admin group list. The personal tenant
+    is now the "Personal Space" (it is not a teamspace), so rewrite the prefix
+    in place. Idempotent (the WHERE prefix no longer matches after the first
+    run) and DML-only, so it also runs on deployments where DDL is unavailable."""
+    try:
+        res = await conn.exec_driver_sql(
+            "UPDATE \"groups\" SET name = REPLACE(name, 'Personal Workspace', 'Personal Space') "
+            "WHERE name LIKE 'Personal Workspace%'"
+        )
+        renamed = getattr(res, "rowcount", 0) or 0
+        if renamed > 0:
+            logger.info(f"Renamed {renamed} personal group(s) to 'Personal Space'")
+    except Exception as e:
+        logger.warning(f"Could not heal personal group names: {e}")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -1135,6 +1154,7 @@ async def init_db() -> None:
                     await _ensure_crew_columns(conn)
                     await _ensure_ui_config_columns(conn)
                     await _ensure_hot_polling_indexes(conn)
+                    await _heal_personal_group_names(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

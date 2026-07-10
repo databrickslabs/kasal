@@ -16,7 +16,7 @@ Tracing only runs when **both** of the following are satisfied:
 
 | # | Gate | What it is | Where it is set |
 |---|------|-----------|-----------------|
-| 1 | **Config toggle** | `mlflow_enabled` + the experiment name | Kasal's DB, set once per workspace by an admin in the **Configuration** UI. Persists; not per-user. Defaults to **OFF**. |
+| 1 | **Config toggle** | `mlflow_enabled` + the experiment name | Kasal's DB, set once per teamspace by an admin in the **Configuration** UI. Persists; not per-user. Defaults to **OFF**. |
 | 2 | **Service Principal (SPN) credentials** | `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` | Must be present in the **backend process environment**. |
 
 If the toggle is off, the execution subprocess skips MLflow before it ever touches
