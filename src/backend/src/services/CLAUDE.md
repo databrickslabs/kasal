@@ -62,3 +62,28 @@ never the reverse.
 - Do not `commit()` inside service CRUD helpers that run within a request — the
   session lifecycle owns the transaction. Commit explicitly only when you own the
   session (UoW / background task).
+
+## Crew generation (`crew_generation_service.py`) — learned the hard way
+
+Two mistakes here shipped a "crew generation always produces 1 agent + 1 task"
+regression (vs v1.3.0). Do not reintroduce them:
+
+- **Never gate generation behavior on `chat_mode_type` alone.** The field
+  DEFAULTS to `"chat"` in the schema, and the AgentBuilder canvas chat (which
+  builds real multi-agent crews as nodes) sends `auto_execute=False` with that
+  default. The light-agent 1-agent/1-task constraint belongs ONLY to the ChatMode
+  ANSWER run — i.e. `chat_mode_type == "chat" AND auto_execute` (that path
+  normally short-circuits into `_run_chat_fast_path` anyway). A generate-only
+  request must plan the full crew like research/deep.
+- **Caps passed to `_generate_crew_plan` are UPPER BOUNDS, not predictions.**
+  Never derive them from keyword heuristics: a hardcoded ACTION_VERBS lexicon
+  capped "list data products, understand the contracts, …" to ONE task because
+  "list"/"understand" weren't in the list. Verb-to-task mapping is the PLAN
+  LLM's job (the `generate_crew_plan` template + few-shots own it; "use the
+  minimum agents needed" keeps simple prompts small). Only an EXPLICIT numeric
+  request ("4 agents", "8 tasks") changes the caps (hard cap 10/10); otherwise
+  they stay at the template limits (6 tasks / 3 agents).
+- Prompt templates are DB-backed (`TemplateService.get_effective_template_content`)
+  but the seeder **overwrites** existing rows from `src/seeds/prompt_templates.py`
+  on every startup — so edit templates in the seed file, and remember a running
+  backend applies them only after a restart/reseed.

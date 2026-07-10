@@ -2403,11 +2403,15 @@ class TestProgressiveGeneration:
         mcp_servers=None,
         agentbricks_endpoints=None,
         knowledge_file_paths=None,
+        chat_mode_type="research",
     ):
         """Create a mock CrewStreamingRequest.
 
         auto_execute defaults to False (AgentBuilder: generate-only) so the
         backend run branch is skipped; ChatMode tests pass auto_execute=True.
+        chat_mode_type defaults to "research" here (the crew-building path these
+        tests exercise) — the real schema default is "chat", which combined with
+        auto_execute short-circuits into _run_chat_fast_path before any planning.
         The run-setting attrs are set explicitly because a bare Mock would make
         ``getattr(req, "auto_execute", False)`` truthy and ``request.mcp_servers``
         (or ``request.agentbricks_endpoints`` / ``request.knowledge_file_paths``)
@@ -2425,6 +2429,7 @@ class TestProgressiveGeneration:
         req.mcp_servers = mcp_servers or []
         req.agentbricks_endpoints = agentbricks_endpoints or []
         req.knowledge_file_paths = knowledge_file_paths or []
+        req.chat_mode_type = chat_mode_type
         return req
 
     def _make_plan(
@@ -2603,6 +2608,84 @@ class TestProgressiveGeneration:
                     p.stop()
 
         return ProgressivePatchCtx()
+
+    @pytest.mark.asyncio
+    async def test_canvas_generate_only_plans_multiple_agents_and_tasks(self):
+        """Regression (vs v1.3.0): the AgentBuilder canvas chat generates with
+        auto_execute=False and the SCHEMA-DEFAULT chat_mode_type='chat'. The
+        light-agent 1/1 clamp must NOT apply to it — the plan gets the template
+        LIMITS as headroom (6 tasks / 3 agents), exactly like research/deep.
+        (The clamp used to key on chat_mode_type alone, collapsing every canvas
+        generation to one agent with one task.)"""
+        request = self._make_progressive_request(
+            prompt="research the top competitors, analyze their pricing, and write a summary report",
+            auto_execute=False,
+            chat_mode_type="chat",  # the schema default the canvas ends up with
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-canvas")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_tasks"] == 6
+            assert kwargs["max_agents"] == 3
+
+    @pytest.mark.asyncio
+    async def test_caps_are_upper_bounds_not_verb_lexicon_predictions(self):
+        """Regression: caps must not be derived from a hardcoded verb lexicon.
+        This real user prompt's verbs ("list", "understand") were not in the old
+        ACTION_VERBS set — only "create" matched — so the plan was capped to ONE
+        task and ONE agent. The plan LLM owns verb-to-task mapping; the caps
+        stay at the template limits."""
+        request = self._make_progressive_request(
+            prompt=(
+                "list dataproducts, create a comprehensive information on the "
+                "product, understand the contracts on the product, understand "
+                "the domain and team members and create a report with it"
+            ),
+            auto_execute=False,
+            chat_mode_type="chat",
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-lexicon")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_tasks"] == 6
+            assert kwargs["max_agents"] == 3
+
+    @pytest.mark.asyncio
+    async def test_explicit_agent_and_task_counts_set_the_caps(self):
+        """An explicit numeric request overrides the defaults (up to the hard cap)."""
+        request = self._make_progressive_request(
+            prompt="build a crew with 4 agents and 8 tasks to run our market analysis",
+            auto_execute=False,
+            chat_mode_type="chat",
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-explicit")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_agents"] == 4
+            assert kwargs["max_tasks"] == 8
+
+    @pytest.mark.asyncio
+    async def test_chat_answer_mode_short_circuits_to_fast_path(self):
+        """chat_mode_type='chat' + auto_execute=True IS the chat answer run: it
+        takes _run_chat_fast_path (single light agent) and never plans a crew."""
+        request = self._make_progressive_request(
+            auto_execute=True, chat_mode_type="chat", session_id="chat-1",
+        )
+
+        with self._progressive_patches() as m:
+            with patch.object(
+                self.service, "_run_chat_fast_path", new_callable=AsyncMock
+            ) as fast_path:
+                await self.service.create_crew_progressive(request, None, "gen-fast")
+
+            fast_path.assert_awaited_once()
+            m["plan"].assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_happy_path(self):
@@ -3512,8 +3595,8 @@ class TestProgressiveGeneration:
             ],
             process_type="parallel",  # Not sequential, so [:max_tasks]
         )
-        # Prompt with 2 verbs -> max_tasks=2, but plan has 3
-        request = self._make_progressive_request(prompt="find and analyze data")
+        # Explicit "2 tasks" request -> max_tasks=2, but plan has 3
+        request = self._make_progressive_request(prompt="find and analyze data in 2 tasks")
         request.original_prompt = None
         gen_id = "gen-trunc-tasks"
 
@@ -3547,8 +3630,8 @@ class TestProgressiveGeneration:
             ],
             process_type="parallel",
         )
-        # max_tasks=2 -> Task3 gets truncated, Task2's context ref to Task3 should be removed
-        request = self._make_progressive_request(prompt="find and analyze data")
+        # Explicit "2 tasks" -> Task3 gets truncated, Task2's stale context ref removed
+        request = self._make_progressive_request(prompt="find and analyze data in 2 tasks")
         request.original_prompt = None
         gen_id = "gen-context-filter"
 

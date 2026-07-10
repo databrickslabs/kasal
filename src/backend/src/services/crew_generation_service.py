@@ -1232,96 +1232,65 @@ class CrewGenerationService:
                 model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
-                # Count distinct action verbs to determine task count.
-                # Each verb maps to one task. Agents stay minimal.
+                # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the
+                # actual counts by mapping the user's distinct actions to tasks
+                # (the generate_crew_plan template + few-shots own that logic, and
+                # "use the minimum agents needed" keeps simple prompts small).
+                # NEVER derive ceilings from keyword heuristics here — a hardcoded
+                # verb lexicon capped "list data products, understand the
+                # contracts, …" to ONE task because none of its verbs were in the
+                # list (the "always 1 agent / 1 task" regression vs v1.3.0). Only
+                # an EXPLICIT numeric request tightens/raises the caps.
                 ABSOLUTE_MAX_AGENTS = 10
                 ABSOLUTE_MAX_TASKS = 10
-
-                # Action verbs that indicate distinct tasks
-                ACTION_VERBS = {
-                    "find", "search", "locate", "discover", "identify",
-                    "get", "fetch", "retrieve", "collect", "gather",
-                    "analyze", "examine", "study", "investigate", "review",
-                    "assess", "evaluate", "compare", "contrast",
-                    "create", "make", "build", "generate", "produce", "develop",
-                    "write", "compose", "draft", "prepare", "document",
-                    "calculate", "compute", "determine", "measure",
-                    "summarize", "condense", "extract", "compile",
-                    "organize", "sort", "categorize", "classify",
-                    "check", "verify", "validate", "test", "inspect", "audit",
-                    "monitor", "track",
-                    "send", "deliver", "share", "distribute",
-                    "convert", "transform", "translate", "format", "parse",
-                    "scrape", "research", "recommend", "load",
-                }
+                # Defaults mirror the generate_crew template LIMITS ("at most 3
+                # agents and 6 tasks unless the user explicitly asks for more").
+                DEFAULT_MAX_TASKS = 6
+                DEFAULT_MAX_AGENTS = 3
 
                 # Check BOTH the (possibly LLM-rewritten) prompt AND the original
-                # user message for cap signals.
+                # user message for explicit count requests.
                 user_prompt = (request.prompt or "").lower()
                 original_prompt = (
                     getattr(request, "original_prompt", None) or ""
                 ).lower()
-                # Combine both for signal detection
                 combined = user_prompt + " " + original_prompt
+                # Bounded gap (≤3 words, e.g. "4 specialized research agents") and a
+                # lookahead so a count can't be claimed ACROSS the other noun —
+                # "4 agents and 8 tasks" must read tasks=8, not greedily tasks=4.
+                _count_re = r'(\d+)\s+(?:(?!agents?\b|tasks?\b)\w+\s+){0,3}%s\b'
+                agent_count_match = re.search(_count_re % 'agents?', combined)
+                task_count_match = re.search(_count_re % 'tasks?', combined)
 
-                # Count distinct action verbs in the original user message
-                # to determine task count (verb-to-task mapping).
-                verb_source = original_prompt if original_prompt.strip() else user_prompt
-                words = set(re.findall(r'\b[a-z]+\b', verb_source))
-                detected_verbs = words & ACTION_VERBS
-                verb_count = max(1, len(detected_verbs))
-                logger.info(
-                    f"PROGRESSIVE [{generation_id}]: Detected {verb_count} action verb(s): "
-                    f"{sorted(detected_verbs)}"
-                )
-
-                # Detect explicit user-requested counts in the prompt.
-                agent_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*agents?', combined)
-                task_count_match = re.search(r'(\d+)\s+(?:\w+\s+)*tasks?', combined)
-
-                # Detect if user explicitly asks for multiple roles/specialists.
-                multi_role_patterns = [
-                    r'\b(team|group|squad)\b\s+\b(of|with)\b\s+(\w+\s+)?(agents?|roles?|specialists?|members?)\b',
-                    r'\b(multiple|several|different)\b.*\b(agents?|roles?|specialists?)\b',
-                    r'\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b.{1,40}\band\b.{1,20}\b(researcher|writer|analyst|designer|developer|validator|reviewer)\b',
-                ]
-                multi_check_text = original_prompt if original_prompt.strip() else combined
-                user_wants_multi = any(
-                    re.search(p, multi_check_text) for p in multi_role_patterns
-                )
-
-                # Determine max_tasks from verb count (primary) or explicit request
                 if task_count_match:
                     max_tasks = min(int(task_count_match.group(1)), ABSOLUTE_MAX_TASKS)
                     logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks")
                 else:
-                    max_tasks = min(verb_count, 6)
-                    logger.info(f"PROGRESSIVE [{generation_id}]: Verb-based max_tasks={max_tasks}")
-
-                # Determine max_agents: keep minimal, scale with tasks
+                    max_tasks = DEFAULT_MAX_TASKS
                 if agent_count_match:
                     max_agents = min(int(agent_count_match.group(1)), ABSOLUTE_MAX_AGENTS)
                     logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
-                elif user_wants_multi:
-                    max_agents = min(3, max_tasks)
-                    logger.info(f"PROGRESSIVE [{generation_id}]: Multi-role detected, max {max_agents} agents")
-                elif max_tasks >= 3:
-                    max_agents = 2
-                    logger.info(f"PROGRESSIVE [{generation_id}]: 3+ tasks, allowing 2 agents")
-                elif max_tasks == 2:
-                    max_agents = 2
-                    logger.info(f"PROGRESSIVE [{generation_id}]: 2 tasks, allowing up to 2 agents")
                 else:
-                    max_agents = 1
-                    logger.info(f"PROGRESSIVE [{generation_id}]: Single task, 1 agent")
+                    max_agents = min(DEFAULT_MAX_AGENTS, max_tasks)
 
-                # Chat (light agent) mode runs a SINGLE Agent.kickoff_async — force
-                # exactly one agent + one task so there is one agent to kick off and
-                # one grounded task description to use as its prompt.
-                if (getattr(request, "chat_mode_type", "chat") or "chat") == "chat":
+                # Chat (light agent) ANSWER mode runs a SINGLE Agent.kickoff_async —
+                # force exactly one agent + one task so there is one agent to kick
+                # off and one grounded task description to use as its prompt. This
+                # applies ONLY when this generation IS the chat answer run
+                # (auto_execute) — that path normally short-circuits into
+                # _run_chat_fast_path above, so this is a defensive guard. A
+                # GENERATE-ONLY request (the AgentBuilder canvas chat, which leaves
+                # auto_execute False and renders the plan as nodes) must plan the
+                # full crew like research/deep: chat_mode_type defaults to "chat"
+                # in the schema, and clamping on it alone collapsed every canvas
+                # generation to 1 agent / 1 task (regression vs v1.3.0).
+                if (
+                    (getattr(request, "chat_mode_type", "chat") or "chat") == "chat"
+                    and getattr(request, "auto_execute", False)
+                ):
                     max_agents = 1
                     max_tasks = 1
-                    logger.info(f"PROGRESSIVE [{generation_id}]: chat (light agent) mode — capping to 1 agent / 1 task")
+                    logger.info(f"PROGRESSIVE [{generation_id}]: chat (light agent) answer mode — capping to 1 agent / 1 task")
 
                 # ── Phase 1: Planning (LLM only, no DB writes) ───────────
                 # Inject the computed cap into the request so the LLM generates
@@ -2115,7 +2084,11 @@ class CrewGenerationService:
             {"role": "system", "content": system_cap + system_message},
         ]
 
-        # Add a few-shot example showing verb-to-task mapping
+        # Few-shot examples showing verb-to-task mapping AND both agent-count
+        # outcomes: consolidation (one specialist covers related tasks) and
+        # escalation (genuinely different specialisms get their own agent).
+        # Without the second example the model over-consolidated to one agent
+        # even when the cap allowed more.
         messages.extend([
             {
                 "role": "user",
@@ -2128,6 +2101,18 @@ class CrewGenerationService:
             {
                 "role": "assistant",
                 "content": '{"complexity":"complex","process_type":"sequential","agents":[{"name":"Swiss News Specialist","role":"News Research and Content Creation Expert"}],"tasks":[{"name":"Gather Swiss News","assigned_agent":"Swiss News Specialist","context":[]},{"name":"Create News Presentation","assigned_agent":"Swiss News Specialist","context":["Gather Swiss News"]},{"name":"Send Email to Team","assigned_agent":"Swiss News Specialist","context":["Create News Presentation"]}]}',
+            },
+            {
+                "role": "user",
+                "content": (
+                    "research our top competitors, analyze their pricing, and write a summary report\n\n"
+                    "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
+                    "Match task count to the number of distinct action verbs in the message."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": '{"complexity":"standard","process_type":"sequential","agents":[{"name":"Market Research Analyst","role":"Competitive research and pricing analysis specialist"},{"name":"Report Writer","role":"Business report composition specialist"}],"tasks":[{"name":"Research Competitors","assigned_agent":"Market Research Analyst","context":[]},{"name":"Analyze Pricing","assigned_agent":"Market Research Analyst","context":["Research Competitors"]},{"name":"Write Summary Report","assigned_agent":"Report Writer","context":["Analyze Pricing"]}]}',
             },
         ])
 
