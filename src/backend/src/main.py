@@ -106,6 +106,18 @@ async def lifespan(app: FastAPI):
     # Capture the main event loop for smart engine selection
     set_main_event_loop()
 
+    # Provision the encryption private key BEFORE init_db (seeders) or any
+    # request/subprocess can encrypt/decrypt. On Databricks this materializes a
+    # STABLE key sourced from a secret scope so secrets stay decryptable across
+    # redeploys (the container filesystem is ephemeral and would otherwise
+    # regenerate the key). No-op / never raises off Databricks. See
+    # src/utils/encryption_key_provisioner.py.
+    try:
+        from src.utils.encryption_key_provisioner import provision_encryption_keys
+        await provision_encryption_keys()
+    except Exception as e:
+        system_logger.warning(f"Encryption key provisioning skipped: {e}")
+
     # Initialize database first - this creates both the file and tables
     system_logger.info("Initializing database during lifespan...")
     try:
