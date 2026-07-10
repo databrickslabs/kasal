@@ -464,6 +464,95 @@ describe('sessionApi - card message persistence', () => {
   });
 });
 
+describe('sessionApi - per-message write ordering', () => {
+  // Regression: the store persists fire-and-forget, and a trace pill's
+  // promoting PUT fires milliseconds after its create POST (same poll batch).
+  // Unordered, the PUT reached the backend before the create committed and
+  // 404'd ("Chat message not found") — losing the pill's tool_result context
+  // on reload. Writes to the same message id must run strictly in order.
+  const deferred = () => {
+    let resolve!: (v: unknown) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  const traceMsg = {
+    id: 'm-pill', role: 'assistant' as const, content: '', timestamp: new Date(),
+    resultType: 'trace', resultData: { kind: 'tool_call' },
+  };
+
+  it('an update PUT waits for the pending create POST of the same message', async () => {
+    const create = deferred();
+    mockPost.mockReturnValue(create.promise);
+    mockPut.mockResolvedValue({ data: {} });
+
+    const addPromise = api.addMessageToSession('s1', traceMsg);
+    const updatePromise = api.updateMessageInSession('s1', 'm-pill', {
+      resultType: 'trace', resultData: { kind: 'tool_result' },
+    });
+    await flush();
+
+    // Create still in flight → the promoting PUT must not have raced past it.
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPut).not.toHaveBeenCalled();
+
+    create.resolve({ data: {} });
+    await Promise.all([addPromise, updatePromise]);
+
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/messages/m-pill', {
+      generation_result: { __chatmode: { resultType: 'trace', resultData: { kind: 'tool_result' } } },
+    });
+  });
+
+  it('a failed create does not block the follow-up update', async () => {
+    const create = deferred();
+    mockPost.mockReturnValue(create.promise);
+    mockPut.mockResolvedValue({ data: {} });
+
+    const addPromise = api.addMessageToSession('s1', traceMsg).catch(() => undefined);
+    const updatePromise = api.updateMessageInSession('s1', 'm-pill', { content: 'x' });
+    await flush();
+    expect(mockPut).not.toHaveBeenCalled();
+
+    create.reject(new Error('create failed'));
+    await Promise.all([addPromise, updatePromise]);
+
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/messages/m-pill', { content: 'x' });
+  });
+
+  it('writes to different message ids do not wait on each other', async () => {
+    const create = deferred();
+    mockPost.mockReturnValue(create.promise);
+    mockPut.mockResolvedValue({ data: {} });
+
+    void api.addMessageToSession('s1', traceMsg);
+    await api.updateMessageInSession('s1', 'm-other', { content: 'independent' });
+
+    // m-other's PUT completed while m-pill's create is still in flight.
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/messages/m-other', { content: 'independent' });
+
+    create.resolve({ data: {} });
+  });
+
+  it('successive updates to the same message run in order', async () => {
+    const first = deferred();
+    mockPut.mockReturnValueOnce(first.promise).mockResolvedValueOnce({ data: {} });
+
+    const p1 = api.updateMessageInSession('s1', 'm1', { content: 'v1' });
+    const p2 = api.updateMessageInSession('s1', 'm1', { content: 'v2' });
+    await flush();
+    expect(mockPut).toHaveBeenCalledTimes(1);
+
+    first.resolve({ data: {} });
+    await Promise.all([p1, p2]);
+
+    expect(mockPut).toHaveBeenCalledTimes(2);
+    expect(mockPut).toHaveBeenNthCalledWith(2, '/chat-history/messages/m1', { content: 'v2' });
+  });
+});
+
 describe('sessionApi - preview (server-backed, replaces IndexedDB)', () => {
   it('saves a preview via PUT', async () => {
     mockPut.mockResolvedValue({ data: {} });

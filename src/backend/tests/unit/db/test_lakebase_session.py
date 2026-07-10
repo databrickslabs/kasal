@@ -1948,3 +1948,56 @@ class TestCancellationSafeTeardown:
                 raise ValueError("boom")
 
         mock_session.close.assert_awaited_once()
+
+
+class TestDomainErrorsNotLoggedAsSessionErrors:
+    """Regression: a domain HTTP error (KasalError, e.g. the chat-history 404
+    'Chat message not found') raised by a request handler passes through the
+    session context on its way to the global exception handler, which already
+    logs it. Logging it here too ('Error in Lakebase session: ...') double-
+    reported every routine 404 as a DB-layer ERROR in production logs."""
+
+    def _factory_with(self, mock_session):
+        from src.db.lakebase_session import LakebaseSessionFactory
+
+        factory = LakebaseSessionFactory()
+        factory._engine = MagicMock()
+        factory._session_factory = MagicMock(return_value=mock_session)
+        factory._engine_loop_id = id(asyncio.get_event_loop())
+        # A fresh factory reads as token-stale and would attempt a real
+        # credential refresh (network + DB) — irrelevant to these tests.
+        factory._is_token_stale = MagicMock(return_value=False)
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_kasal_error_reraises_without_session_error_log(self):
+        from src.core.exceptions import NotFoundError
+
+        mock_session = AsyncMock()
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        with patch("src.db.lakebase_session.logger") as mock_logger:
+            with pytest.raises(NotFoundError, match="Chat message not found"):
+                async with factory.get_session() as _:
+                    raise NotFoundError("Chat message not found")
+
+        mock_logger.error.assert_not_called()
+        mock_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_still_logs_session_error(self):
+        mock_session = AsyncMock()
+        factory = self._factory_with(mock_session)
+        factory._engine_loop_id = id(asyncio.get_running_loop())
+
+        with patch("src.db.lakebase_session.logger") as mock_logger:
+            with pytest.raises(ValueError, match="boom"):
+                async with factory.get_session() as _:
+                    raise ValueError("boom")
+
+        assert any(
+            "Error in Lakebase session" in str(c.args[0])
+            for c in mock_logger.error.call_args_list
+        )
+        mock_session.close.assert_awaited_once()
