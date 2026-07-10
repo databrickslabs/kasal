@@ -181,19 +181,43 @@ export async function getSessionMessages(sessionId: string): Promise<ChatMessage
 // stripped again on load.
 const CARD_PLACEHOLDER = '[ui-card]';
 
+// Per-message write ordering. The store persists fire-and-forget, and a trace
+// pill's promoting PUT often fires milliseconds after its create POST (same
+// poll batch) — unordered, the PUT can reach the backend before the create
+// commits and 404 ("Chat message not found"). Chain each message's writes so
+// an update never overtakes the create. A failed predecessor doesn't poison
+// the chain (the follow-up still runs — it fails on its own terms if the row
+// truly doesn't exist).
+const messageWrites = new Map<string, Promise<void>>();
+
+function chainMessageWrite(msgId: string, write: () => Promise<void>): Promise<void> {
+  const prev = messageWrites.get(msgId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(write);
+  messageWrites.set(msgId, next);
+  void next
+    .catch(() => undefined)
+    .then(() => {
+      // Drop the entry once this write settles, unless a newer one chained on.
+      if (messageWrites.get(msgId) === next) messageWrites.delete(msgId);
+    });
+  return next;
+}
+
 export async function addMessageToSession(
   sessionId: string,
   msg: ChatMessage,
 ): Promise<void> {
   const hasCard = Boolean(msg.resultType || msg.resultData !== undefined);
   if (!msg.content && !hasCard) return; // nothing to persist
-  await getClient().post(`${BASE}/messages`, {
-    id: msg.id,
-    session_id: sessionId,
-    message_type: msg.role,
-    content: msg.content || CARD_PLACEHOLDER,
-    intent: msg.intent ?? null,
-    generation_result: packExtras(msg) ?? null,
+  await chainMessageWrite(msg.id, async () => {
+    await getClient().post(`${BASE}/messages`, {
+      id: msg.id,
+      session_id: sessionId,
+      message_type: msg.role,
+      content: msg.content || CARD_PLACEHOLDER,
+      intent: msg.intent ?? null,
+      generation_result: packExtras(msg) ?? null,
+    });
   });
 }
 
@@ -209,7 +233,9 @@ export async function updateMessageInSession(
   if (extras) payload.generation_result = extras;
   // isStreaming flips and other transient-only updates need no round trip
   if (Object.keys(payload).length === 0) return;
-  await getClient().put(`${BASE}/messages/${msgId}`, payload);
+  await chainMessageWrite(msgId, async () => {
+    await getClient().put(`${BASE}/messages/${msgId}`, payload);
+  });
 }
 
 /** Clearing keeps the session but drops its messages: delete + recreate id. */

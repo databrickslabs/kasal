@@ -26,7 +26,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
-from src.core.exceptions import LakebaseInstanceUnavailableError
+from src.core.exceptions import KasalError, LakebaseInstanceUnavailableError
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
 from src.utils.telemetry import get_application_name
@@ -507,6 +507,11 @@ class LakebaseSessionFactory:
             except GeneratorExit:
                 # Client disconnected — nothing to do beyond the close below.
                 pass
+            except KasalError:
+                # Domain HTTP errors (404/409/...) raised by request handlers are
+                # normal outcomes passing through the session teardown, not DB
+                # failures — the global exception handler already logs them.
+                raise
             except Exception as e:
                 # Check if this is a token/auth error that might be fixable by refreshing
                 err_str = str(e).lower()
