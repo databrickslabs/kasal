@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
 import {
@@ -236,6 +236,16 @@ export function useDispatcher(options: UseDispatcherOptions) {
   const isDispatchingRef = useRef(false);
   // Store last generated crew for "ec"/"execute crew" command
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
+  // Hold options in a ref (updated each render) so sendMessage can be a STABLE
+  // callback. ChatWorkspace passes a fresh options literal every render, and a
+  // sendMessage that depended on it churned the whole dispatcher object — which
+  // churned ChatWorkspace's handleSend → ChatContainer's handleCommand, making
+  // the memoized ChatMessage bubbles re-render on every tick anyway. Mirrors
+  // the optionsRef pattern in useExecutionStream.
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  });
 
   const sendMessage = useCallback(
     async (
@@ -247,6 +257,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       displayAs?: string,
       knowledgeFilePaths?: string[],
     ) => {
+      const options = optionsRef.current;
       if (isDispatchingRef.current) return;
       isDispatchingRef.current = true;
 
@@ -443,12 +454,17 @@ export function useDispatcher(options: UseDispatcherOptions) {
         isDispatchingRef.current = false;
       }
     },
-    [options]
+    []
   );
 
   const setLastGenerated = useCallback((data: GenerationCompleteData) => {
     lastGeneratedRef.current = data;
   }, []);
 
-  return { sendMessage, isDispatching: isDispatchingRef, setLastGenerated };
+  // Stable object identity (all members are stable): keeps ChatWorkspace's
+  // handleSend — which depends on the whole dispatcher — from churning per render.
+  return useMemo(
+    () => ({ sendMessage, isDispatching: isDispatchingRef, setLastGenerated }),
+    [sendMessage, setLastGenerated],
+  );
 }
