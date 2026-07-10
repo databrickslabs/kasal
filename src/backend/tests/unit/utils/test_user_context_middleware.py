@@ -126,8 +126,12 @@ class TestUserContextMiddlewareCall:
         mock_set_token.assert_called_once_with("test-token")
 
     @pytest.mark.asyncio
-    async def test_error_in_inner_app_clears_context(self):
-        """If the inner app raises, context is cleared and app still called."""
+    async def test_error_in_inner_app_clears_context_and_reraises_without_reinvoke(self):
+        """If the inner app raises, the middleware must clear the context and
+        RE-RAISE — never re-invoke the app. The old retry re-sent
+        http.response.start on a connection that could already carry a
+        response ("Unexpected ASGI message ... after response already
+        completed") and re-executed request side effects."""
         inner_app = AsyncMock(side_effect=RuntimeError("app error"))
         middleware = UserContextMiddleware(inner_app)
 
@@ -140,15 +144,39 @@ class TestUserContextMiddlewareCall:
              patch('src.utils.user_context.extract_user_context_from_request',
                     return_value={}), \
              patch.object(UserContext, 'clear_context') as mock_clear:
-            # The middleware catches the error and calls app again
-            # But since both calls raise, we need to handle that
-            try:
+            with pytest.raises(RuntimeError, match="app error"):
                 await middleware(scope, receive, send)
-            except RuntimeError:
-                pass
 
-        # clear_context should be called in the finally block
-        mock_clear.assert_called()
+        inner_app.assert_awaited_once()  # NEVER called a second time
+        mock_clear.assert_called()       # context cleared in except + finally
+
+    @pytest.mark.asyncio
+    async def test_client_disconnect_reraises_quietly_without_reinvoke(self):
+        """A client abort (starlette ClientDisconnect) propagating from the app
+        is re-raised without retrying and without an ERROR-level log."""
+        from starlette.requests import ClientDisconnect
+
+        inner_app = AsyncMock(side_effect=ClientDisconnect())
+        middleware = UserContextMiddleware(inner_app)
+
+        scope = _make_scope(scope_type="http")
+        receive = AsyncMock()
+        send = AsyncMock()
+
+        with patch('src.utils.user_context.extract_group_context_from_request',
+                    new_callable=AsyncMock, return_value=None), \
+             patch('src.utils.user_context.extract_user_context_from_request',
+                    return_value={}), \
+             patch.object(UserContext, 'clear_context'), \
+             patch('src.utils.user_context.logger') as mock_logger:
+            with pytest.raises(ClientDisconnect):
+                await middleware(scope, receive, send)
+
+        inner_app.assert_awaited_once()
+        # Aborted clients are routine — logged at debug, not error.
+        assert not any(
+            'middleware' in str(c) for c in mock_logger.error.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_group_context_extraction_greenlet_error(self):
