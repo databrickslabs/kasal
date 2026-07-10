@@ -15,6 +15,9 @@ litellm remains as a transitive dependency (used internally by CrewAI) but is
 """
 
 import asyncio
+import concurrent.futures
+import contextvars
+import functools
 import logging
 import os
 import json
@@ -27,6 +30,29 @@ from litellm import CustomLogger
 
 from crewai import LLM
 from src.schemas.model_provider import ModelProvider
+
+# Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
+# loop's DEFAULT ThreadPoolExecutor (max ~min(32, cpu+4) workers) with every
+# other to_thread user in the process, and Databricks LLM calls run with ~300s
+# timeouts — a burst of slow calls saturated that pool and queued ALL
+# concurrent chat users (plus every other to_thread caller) behind it. A
+# dedicated, larger pool caps LLM concurrency without starving anyone else.
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("KASAL_LLM_MAX_CONCURRENCY", "64")),
+    thread_name_prefix="llm-call",
+)
+
+
+async def _run_llm_blocking(func, /, *args, **kwargs):
+    """Run a blocking LLM call on the dedicated executor.
+
+    Mirrors ``asyncio.to_thread`` semantics (contextvars propagate, so ambient
+    group/user context inside callbacks keeps working) but on ``_LLM_EXECUTOR``.
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    call = functools.partial(ctx.run, func, *args, **kwargs)
+    return await loop.run_in_executor(_LLM_EXECUTOR, call)
 
 
 class _VLLMFunctionCallingLLM(LLM):
@@ -775,7 +801,7 @@ class LLMManager:
                 except Exception:
                     pass
             try:
-                result = await asyncio.to_thread(llm.call, messages)
+                result = await _run_llm_blocking(llm.call, messages)
                 duration = time.time() - start_time
                 logger.info(f"LLM completion: model={model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
                 _set_span_outputs(_span, result)
@@ -790,7 +816,7 @@ class LLMManager:
                             f"LLM completion got 400, retrying without system message: model={model}"
                         )
                         try:
-                            result = await asyncio.to_thread(llm.call, user_only)
+                            result = await _run_llm_blocking(llm.call, user_only)
                             fallback_duration = time.time() - start_time
                             logger.info(
                                 f"LLM completion (user-only fallback): model={model}, "

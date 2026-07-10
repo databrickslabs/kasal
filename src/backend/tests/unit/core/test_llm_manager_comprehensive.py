@@ -142,7 +142,7 @@ class TestCompletion:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="response text"),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
         ):
             result = await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -158,7 +158,7 @@ class TestCompletion:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=RuntimeError("LLM error")),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, side_effect=RuntimeError("LLM error")),
         ):
             with pytest.raises(RuntimeError, match="LLM error"):
                 await LLMManager.completion(
@@ -173,7 +173,7 @@ class TestCompletion:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="ok"),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
         ):
             await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -198,7 +198,7 @@ class TestCompletion:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="response text"),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
             patch("mlflow.get_current_active_span", return_value=MagicMock()),
             patch("mlflow.start_span", return_value=span_cm) as mock_start_span,
         ):
@@ -225,7 +225,7 @@ class TestCompletion:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="ok"),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
             patch("mlflow.get_current_active_span", return_value=None),
             patch("mlflow.start_span") as mock_start_span,
         ):
@@ -1368,7 +1368,7 @@ class TestCompletionMaxTokensPolicy:
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
             patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("asyncio.to_thread", new_callable=AsyncMock, return_value="ok"),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
         ):
             await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -1400,3 +1400,33 @@ class TestCompletionMaxTokensPolicy:
         llm = self._mock_llm()
         await self._run_completion(llm)
         assert llm.max_tokens == 4000
+
+
+class TestDedicatedLlmExecutor:
+    """Perf (W5.1): blocking LLM calls must run on their OWN thread pool —
+    asyncio's default executor (max ~32 workers, shared with every other
+    to_thread caller) was a process-wide concurrency ceiling once a burst of
+    slow ~300s LLM calls saturated it."""
+
+    @pytest.mark.asyncio
+    async def test_runs_on_dedicated_pool_and_propagates_contextvars(self):
+        import contextvars
+        import threading
+        from src.core.llm_manager import _run_llm_blocking
+
+        var = contextvars.ContextVar("kasal_llm_exec_test", default=None)
+        var.set("ambient")
+        seen = {}
+
+        def blocking(arg):
+            seen["thread"] = threading.current_thread().name
+            seen["ctx"] = var.get()
+            return f"done:{arg}"
+
+        result = await _run_llm_blocking(blocking, "x")
+
+        assert result == "done:x"
+        # Dedicated pool, not the loop's shared default executor.
+        assert seen["thread"].startswith("llm-call")
+        # to_thread-equivalent semantics: ambient contextvars reach the call.
+        assert seen["ctx"] == "ambient"
