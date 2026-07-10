@@ -27,14 +27,6 @@ interface SessionExecSnapshot {
   previewIndex?: number;
 }
 
-export interface ExecutionLogEntry {
-  id: string;
-  timestamp: number;
-  kind: 'trace' | 'task_output' | 'status';
-  label: string;
-  detail?: string;
-}
-
 interface ExecutionState {
   activeExecution: { jobId: string; status: ExecutionStatus } | null;
   isExecuting: boolean;
@@ -75,7 +67,6 @@ interface ExecutionState {
   previewSourceMessageId: string | null;
   chatCollapsed: boolean;
   executionOwnerSessionId: string | null;
-  executionLog: ExecutionLogEntry[];
   /**
    * "Workspace memory" recall scope for the next run. true (default) = recall
    * workspace-wide; false = restrict recall to this chat session only. Lives in
@@ -169,8 +160,6 @@ interface ExecutionActions {
   setActivityPlacement: (placement: 'preview' | 'chat') => void;
   clearPreview: () => void;
   reopenPreview: () => void;
-  appendLog: (entry: Omit<ExecutionLogEntry, 'id' | 'timestamp'>) => void;
-  clearLog: () => void;
 
   // Execution lifecycle
   startExecution: (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => void;
@@ -298,7 +287,6 @@ export const useExecutionStore = create<ExecutionStore>()(
   previewSourceMessageId: null,
   chatCollapsed: false,
   executionOwnerSessionId: null,
-  executionLog: [],
   workspaceMemory: true,
   memoryEnabled: false,
   chatModeType: 'chat',
@@ -311,18 +299,6 @@ export const useExecutionStore = create<ExecutionStore>()(
   activityPlacement: 'chat',
 
   setActivityPlacement: (placement) => set({ activityPlacement: placement }),
-
-  appendLog: (entry) => set((s) => ({
-    executionLog: [
-      ...s.executionLog,
-      {
-        ...entry,
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        timestamp: Date.now(),
-      },
-    ],
-  })),
-  clearLog: () => set({ executionLog: [] }),
 
   // --- Basic setters ---
   setIsLoading: (loading) => set({ isLoading: loading }),
@@ -507,7 +483,6 @@ export const useExecutionStore = create<ExecutionStore>()(
         previewHistory: preserve ? s.previewHistory : [],
         previewIndex: preserve ? s.previewIndex : 0,
         runStartedAt: Date.now(),
-        executionLog: [],
       });
     } else {
       // Backgrounded run (started for a session that isn't on screen — e.g. a

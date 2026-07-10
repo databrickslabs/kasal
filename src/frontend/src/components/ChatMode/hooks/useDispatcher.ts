@@ -337,9 +337,10 @@ export function useDispatcher(options: UseDispatcherOptions) {
         const content = getAssistantResponse(result);
         const resultType = getResultType(result);
 
+        // Keys only — pretty-printing the ENTIRE generation_result (multi-100KB
+        // A2UI payloads) just to slice a log sample was a per-dispatch CPU tax.
         console.log('[dispatcher] intent:', result.dispatcher.intent, 'resultType:', resultType,
-          'generation_result keys:', result.generation_result ? Object.keys(result.generation_result as Record<string, unknown>) : 'null',
-          'generation_result sample:', JSON.stringify(result.generation_result, null, 2)?.slice(0, 800));
+          'generation_result keys:', result.generation_result ? Object.keys(result.generation_result as Record<string, unknown>) : 'null');
 
         // For non-streaming crew results, convert to GenerationCompleteData format
         let resultData = result.generation_result;

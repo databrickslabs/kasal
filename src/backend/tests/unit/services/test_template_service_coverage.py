@@ -675,3 +675,90 @@ class TestFindTemplateByNameWithGroup:
         svc.repository._get_return = t
         result = await svc.get_template_with_group_check(1, make_gc())
         assert result == t
+
+
+# ---------------------------------------------------------------------------
+# Template TTL cache (perf W5.4)
+# ---------------------------------------------------------------------------
+
+class TestTemplateContentCache:
+    """Resolving a template costs 2 DB queries and runs before EVERY LLM
+    interaction — repeats within the TTL must be served from the cache, and
+    any template mutation must drop it."""
+
+    @pytest.mark.asyncio
+    async def test_repeat_resolution_hits_the_cache(self):
+        svc = make_svc()
+        calls = {"n": 0}
+        base_t = make_template(template="cached content", group_id=None)
+
+        async def find_by_name_and_group(name, gid):
+            calls["n"] += 1
+            return base_t if gid is None else None
+
+        svc.repository.find_by_name_and_group = find_by_name_and_group
+        gc = make_gc(primary="g1")
+
+        first = await svc._get_effective_template_content_instance("t-cache", gc)
+        second = await svc._get_effective_template_content_instance("t-cache", gc)
+        third = await svc._get_effective_template_content_instance("t-cache", gc)
+
+        assert first == second == third == "cached content"
+        assert calls["n"] == 2  # group miss + base hit, ONCE — repeats were free
+
+    @pytest.mark.asyncio
+    async def test_cache_is_group_scoped(self):
+        svc = make_svc()
+        group_t = make_template(template="g1 content", group_id="g1")
+        base_t = make_template(template="base content", group_id=None)
+
+        async def find_by_name_and_group(name, gid):
+            if gid == "g1":
+                return group_t
+            return base_t if gid is None else None
+
+        svc.repository.find_by_name_and_group = find_by_name_and_group
+
+        assert await svc._get_effective_template_content_instance(
+            "t-scope", make_gc(primary="g1")
+        ) == "g1 content"
+        # A different group must NOT see g1's cached content.
+        assert await svc._get_effective_template_content_instance(
+            "t-scope", make_gc(primary="g2")
+        ) == "base content"
+
+    @pytest.mark.asyncio
+    async def test_mutation_invalidates_the_cache(self):
+        svc = make_svc()
+        content = {"value": "before"}
+
+        async def find_by_name_and_group(name, gid):
+            return make_template(template=content["value"], group_id=None) if gid is None else None
+
+        svc.repository.find_by_name_and_group = find_by_name_and_group
+        gc = make_gc(primary="g1")
+
+        assert await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        content["value"] = "after"
+        # Still cached until a mutation clears it...
+        assert await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        await TemplateService.invalidate_template_cache()
+        assert await svc._get_effective_template_content_instance("t-inv", gc) == "after"
+
+    @pytest.mark.asyncio
+    async def test_failures_are_not_cached(self):
+        svc = make_svc()
+        attempts = {"n": 0}
+
+        async def find_by_name_and_group(name, gid):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise RuntimeError("db blip")
+            return make_template(template="recovered", group_id=None) if gid is None else None
+
+        svc.repository.find_by_name_and_group = find_by_name_and_group
+        gc = make_gc(primary="g1")
+
+        assert await svc._get_effective_template_content_instance("t-fail", gc) == ""
+        # The failure was NOT cached — the next call retries and succeeds.
+        assert await svc._get_effective_template_content_instance("t-fail", gc) == "recovered"

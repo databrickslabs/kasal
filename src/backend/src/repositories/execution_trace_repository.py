@@ -437,6 +437,41 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         return await self._get_by_job_id(job_id, limit, offset, since_id)
     
+    async def get_by_group_ids(
+        self,
+        group_ids: List[str],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[ExecutionTrace], int]:
+        """Group-scoped trace page + exact total, in two indexed queries.
+
+        ``execution_trace.group_id`` is denormalized AND indexed precisely so
+        this listing doesn't need the executions→per-job N+1 walk it replaced
+        (hundreds of queries for groups with hundreds of runs, with a wrong
+        ``total`` capped at 100 per job). Newest first.
+
+        Returns:
+            (traces page, exact total count)
+        """
+        try:
+            group_filter = ExecutionTrace.group_id.in_(group_ids)
+            stmt = (
+                select(ExecutionTrace)
+                .where(group_filter)
+                .order_by(ExecutionTrace.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await self.session.execute(stmt)
+            traces = result.scalars().all()
+
+            count_stmt = select(func.count()).select_from(ExecutionTrace).where(group_filter)
+            total = (await self.session.execute(count_stmt)).scalar() or 0
+            return traces, total
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving traces for groups: {str(e)}")
+            raise
+
     async def get_state_events_by_job_id(
         self,
         job_id: str,

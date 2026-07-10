@@ -250,6 +250,14 @@ intent_cache: TTLCache = TTLCache(ttl=120, maxsize=500, name="intent")
 # group_tools. Mutations clear the whole cache (it's tiny).
 tool_list_cache: TTLCache = TTLCache(ttl=60, maxsize=200, name="tool_list")
 
+# Prompt-template content cache - 5 minute TTL. Resolving a template costs 2
+# DB queries (group row, then base row) and runs before EVERY LLM interaction
+# (intent, plan, per-agent, per-task, run naming) — ~14-20 queries per research
+# generation for content that essentially never changes. Any template mutation
+# clears the whole cache (resolution mixes group + base rows, so targeted
+# invalidation is not safe).
+template_cache: TTLCache = TTLCache(ttl=300, maxsize=1000, name="template")
+
 
 def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
     """
@@ -263,4 +271,5 @@ def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
         "db_config": db_config_cache.stats(),
         "intent": intent_cache.stats(),
         "tool_list": tool_list_cache.stats(),
+        "template": template_cache.stats(),
     }

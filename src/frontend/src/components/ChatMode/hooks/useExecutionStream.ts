@@ -29,7 +29,9 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
         jobId,
         (event: StreamEvent) => {
           const opts = optionsRef.current;
-          console.log('[useExecutionStream] event:', event.event, 'status:', event.data?.status);
+          // No per-event log here: this fires for EVERY streamed trace and
+          // measurably slows trace-heavy runs with DevTools open. Lifecycle
+          // transitions below keep their own logs.
           switch (event.event) {
             case 'connected':
               console.log('[useExecutionStream] Connected');

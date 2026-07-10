@@ -1184,16 +1184,24 @@ Please analyze this message and provide your intent classification."""
             # membership — a plain set made the resolved tool order depend on
             # PYTHONHASHSEED, producing non-deterministic tool lists.
             enabled_titles: dict = {}
-            try:
-                from src.services.tool_service import ToolService
-                tool_svc = ToolService(self.session)
-                if group_context:
-                    tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
-                else:
-                    tools_resp = await tool_svc.get_enabled_tools()
-                enabled_titles = dict.fromkeys(t.title for t in tools_resp.tools)
-            except Exception as e:
-                logger.warning(f"Failed to fetch enabled workspace tools: {e}")
+            if available_tools:
+                # The router already fetched this workspace's enabled tools for
+                # this very request — reuse them instead of a second fetch
+                # (each tool_list cache hit also deep-copies the response).
+                enabled_titles = dict.fromkeys(
+                    t.get("title") for t in available_tools if t.get("title")
+                )
+            else:
+                try:
+                    from src.services.tool_service import ToolService
+                    tool_svc = ToolService(self.session)
+                    if group_context:
+                        tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
+                    else:
+                        tools_resp = await tool_svc.get_enabled_tools()
+                    enabled_titles = dict.fromkeys(t.title for t in tools_resp.tools)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch enabled workspace tools: {e}")
 
             effective_tools = self._resolve_effective_tools(request.tools, enabled_titles)
             if request.tools:
