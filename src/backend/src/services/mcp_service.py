@@ -168,13 +168,9 @@ class MCPService:
         server_responses: List[MCPServerResponse] = []
         for server in servers:
             server_response = MCPServerResponse.model_validate(server)
-            # Decrypt the API key for the response
-            try:
-                if server.encrypted_api_key:
-                    server_response.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
-            except Exception as e:
-                logger.error(f"Error decrypting API key for server {server.id}: {str(e)}")
-                server_response.api_key = ""
+            decrypted = self._decrypt_server_api_key(server)
+            if decrypted is not None:
+                server_response.api_key = decrypted
             server_responses.append(server_response)
         return server_responses
 
@@ -197,23 +193,49 @@ class MCPService:
         responses: List[MCPServerResponse] = []
         for server in best_by_name.values():
             resp = MCPServerResponse.model_validate(server)
-            try:
-                if server.encrypted_api_key:
-                    resp.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
-            except Exception as e:
-                logger.error(f"Error decrypting API key for server {server.id}: {str(e)}")
-                resp.api_key = ""
+            decrypted = self._decrypt_server_api_key(server)
+            if decrypted is not None:
+                resp.api_key = decrypted
             responses.append(resp)
         return responses
+
+    @staticmethod
+    def _decrypt_server_api_key(server) -> Optional[str]:
+        """Decrypt a server's stored API key — only when its auth mode uses one.
+
+        OBO/SPN servers authenticate with tokens, not the stored key. A row can
+        still carry a leftover ``encrypted_api_key`` blob (saved before the auth
+        type changed, possibly under an older encryption key); decrypting it on
+        every run produced anonymous "Error decrypting value with SSH key:
+        Decryption failed" errors for servers that never use the value. Skip
+        those outright, and when an api_key-mode server's stored key genuinely
+        cannot be decrypted, say WHICH server and how to fix it.
+
+        Returns the decrypted key, "" when decryption failed, or None when the
+        server has no usable stored key (no blob, or a token-auth server).
+        """
+        auth_type = getattr(server, "auth_type", None) or "api_key"
+        if auth_type != "api_key" or not server.encrypted_api_key:
+            return None
+        try:
+            decrypted = EncryptionUtils.decrypt_value(server.encrypted_api_key)
+        except Exception as e:  # decrypt_value normally returns "" — belt and braces
+            logger.warning(f"MCP server '{server.name}': error decrypting stored API key: {e}")
+            return ""
+        if not decrypted:
+            logger.warning(
+                f"MCP server '{server.name}': stored API key cannot be decrypted "
+                "(it was encrypted under a previous encryption key) — re-save the "
+                "server's API key to clear this warning."
+            )
+        return decrypted
 
     def _response_with_key(self, server) -> MCPServerResponse:
         """Build a response, decrypting the API key (best-effort)."""
         resp = MCPServerResponse.model_validate(server)
-        try:
-            if server.encrypted_api_key:
-                resp.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
-        except Exception:
-            resp.api_key = ""
+        decrypted = self._decrypt_server_api_key(server)
+        if decrypted is not None:
+            resp.api_key = decrypted
         return resp
 
     def _group_override_payload(
@@ -365,13 +387,9 @@ class MCPService:
 
         server_response = MCPServerResponse.model_validate(server)
 
-        try:
-            # Decrypt the API key for the response
-            if server.encrypted_api_key:
-                server_response.api_key = EncryptionUtils.decrypt_value(server.encrypted_api_key)
-        except Exception as e:
-            logger.error(f"Error decrypting API key for server {server_id}: {str(e)}")
-            server_response.api_key = ""
+        decrypted = self._decrypt_server_api_key(server)
+        if decrypted is not None:
+            server_response.api_key = decrypted
 
         return server_response
 
@@ -467,13 +485,9 @@ class MCPService:
             # Prepare response
             server_response = MCPServerResponse.model_validate(updated_server)
 
-            # Decrypt API key for response if one exists
-            if updated_server.encrypted_api_key:
-                try:
-                    server_response.api_key = EncryptionUtils.decrypt_value(updated_server.encrypted_api_key)
-                except Exception as e:
-                    logger.error(f"Error decrypting API key for server {server_id}: {str(e)}")
-                    server_response.api_key = ""
+            decrypted = self._decrypt_server_api_key(updated_server)
+            if decrypted is not None:
+                server_response.api_key = decrypted
 
             return server_response
         except Exception as e:

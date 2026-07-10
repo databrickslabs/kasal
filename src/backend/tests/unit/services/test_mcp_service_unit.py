@@ -623,3 +623,117 @@ async def test_delete_server_workspace_row_does_not_cascade():
     assert ok is True
     svc.server_repository.delete.assert_awaited_once_with(7)
     svc.server_repository.delete_overrides_by_name.assert_not_awaited()
+
+
+class TestDecryptSkippedForTokenAuthServers:
+    """Regression: servers with auth_type databricks_obo/databricks_spn authenticate
+    with tokens — a leftover encrypted_api_key blob (saved before the auth type
+    changed, possibly under an older encryption key) must never be decrypted, or
+    every run logs 'Error decrypting value with SSH key: Decryption failed'."""
+
+    def test_obo_server_never_decrypts_stale_blob(self, monkeypatch):
+        from src.services import mcp_service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called for OBO servers")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="ontos_obo", auth_type="databricks_obo",
+                           encrypted_api_key="stale-ciphertext-from-old-key")
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_spn_server_never_decrypts_stale_blob(self, monkeypatch):
+        from src.services import mcp_service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called for SPN servers")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="spn_srv", auth_type="databricks_spn",
+                           encrypted_api_key="stale-ciphertext")
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_missing_auth_type_defaults_to_api_key(self, monkeypatch):
+        from src.services import mcp_service as module
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "plain", raising=True)
+        server = mk_server(name="legacy", auth_type=None, encrypted_api_key="enc")
+        assert MCPService._decrypt_server_api_key(server) == "plain"
+
+    def test_no_blob_returns_none_without_decrypting(self, monkeypatch):
+        from src.services import mcp_service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called without a blob")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="keyless", auth_type="api_key", encrypted_api_key=None)
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_undecryptable_api_key_blob_warns_with_server_name(self, monkeypatch, caplog):
+        """decrypt_value returns '' when the ciphertext predates the current key —
+        the warning must name the server and say to re-save its API key."""
+        import logging
+        from src.services import mcp_service as module
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "", raising=True)
+        server = mk_server(name="old_key_srv", auth_type="api_key", encrypted_api_key="orphaned")
+        with caplog.at_level(logging.WARNING, logger=module.logger.name):
+            assert MCPService._decrypt_server_api_key(server) == ""
+        assert any("old_key_srv" in r.message and "re-save" in r.message
+                   for r in caplog.records)
+
+    def test_decrypt_exception_warns_and_returns_empty(self, monkeypatch, caplog):
+        import logging
+        from src.services import mcp_service as module
+
+        def raise_err(_v):
+            raise ValueError("bad blob")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", raise_err, raising=True)
+        server = mk_server(name="err_srv", auth_type="api_key", encrypted_api_key="enc")
+        with caplog.at_level(logging.WARNING, logger=module.logger.name):
+            assert MCPService._decrypt_server_api_key(server) == ""
+        assert any("err_srv" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_get_servers_by_names_skips_decrypt_for_obo(monkeypatch):
+    """End-to-end through the engine's lookup path: an OBO server with a stale
+    encrypted_api_key returns without any decryption attempt."""
+    from src.services import mcp_service as module
+
+    def boom(_v):
+        raise AssertionError("decrypt_value must not be called for OBO servers")
+
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    obo = mk_server(id=1, name="ontos_obo", auth_type="databricks_obo",
+                    encrypted_api_key="stale-ciphertext")
+    svc.server_repository.find_by_names = AsyncMock(return_value=[obo])
+
+    out = await svc.get_servers_by_names(["ontos_obo"])
+
+    assert len(out) == 1 and out[0].api_key == ""
+
+    svc.server_repository.find_by_names_group_scope = AsyncMock(return_value=[obo])
+    out2 = await svc.get_servers_by_names_group_aware(["ontos_obo"], group_id="g1")
+    assert len(out2) == 1 and out2[0].api_key == ""
+
+
+@pytest.mark.asyncio
+async def test_get_server_by_id_skips_decrypt_for_obo(monkeypatch):
+    from src.services import mcp_service as module
+
+    def boom(_v):
+        raise AssertionError("decrypt_value must not be called for OBO servers")
+
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    obo = mk_server(id=9, name="ontos_obo", auth_type="databricks_obo",
+                    encrypted_api_key="stale-ciphertext")
+    svc.server_repository.get = AsyncMock(return_value=obo)
+
+    resp = await svc.get_server_by_id(9)
+
+    assert resp is not None and resp.api_key == ""
