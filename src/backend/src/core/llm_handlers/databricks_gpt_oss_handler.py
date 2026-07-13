@@ -1026,6 +1026,15 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise  # a non-swappable error from the fallback → surface it
+                from src.core.llm_handlers.model_fallback import (
+                    ENDPOINT_MISSING,
+                    mark_endpoint_missing,
+                )
+                if fb_reason == ENDPOINT_MISSING:
+                    # This model has no serving endpoint here — remember it so it's
+                    # never offered again (this run or later), preventing the
+                    # rate-limit→undeployed-endpoint cascade from recurring.
+                    mark_endpoint_missing(candidate.name)
                 self._get_crew_logger().warning(
                     f"[DatabricksRetryLLM] fallback candidate {candidate.name} failed "
                     f"({fb_reason}); trying next candidate"
@@ -1062,6 +1071,12 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise
+                from src.core.llm_handlers.model_fallback import (
+                    ENDPOINT_MISSING,
+                    mark_endpoint_missing,
+                )
+                if fb_reason == ENDPOINT_MISSING:
+                    mark_endpoint_missing(candidate.name)
                 self._get_crew_logger().warning(
                     f"[DatabricksRetryLLM] fallback candidate {candidate.name} failed "
                     f"({fb_reason}); trying next candidate"
