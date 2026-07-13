@@ -61,6 +61,10 @@ export interface HITLApprovalResponse {
   gate_config: Record<string, unknown>;
   previous_crew_name?: string | null;
   previous_crew_output?: string | null;
+  // The status/list endpoints OMIT previous_crew_output (it can be ~1 MB) and set
+  // these instead. Fetch the full output via getApproval(id) on demand.
+  has_previous_crew_output?: boolean;
+  previous_crew_output_size?: number | null;
   flow_state_snapshot?: Record<string, unknown> | null;
   responded_by?: string | null;
   responded_at?: string | null;
