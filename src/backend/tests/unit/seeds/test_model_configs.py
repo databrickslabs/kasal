@@ -75,6 +75,14 @@ class TestDefaultModelsDataStructure:
         assert config["context_window"] == 400000
         assert config["max_output_tokens"] == 128000
 
+    def test_databricks_glm_5_2_config(self):
+        """system.ai.glm-5-2 is AI Gateway-only: UC-style name, 25k output cap."""
+        config = DEFAULT_MODELS["databricks-glm-5-2"]
+        assert config["provider"] == "databricks"
+        assert config["name"] == "system.ai.glm-5-2"
+        assert config["context_window"] == 200000
+        assert config["max_output_tokens"] == 25000
+
     def test_required_fields_present(self):
         """Test that every model has the required fields."""
         required_fields = [

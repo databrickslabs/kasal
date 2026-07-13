@@ -343,6 +343,16 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 8192
     },
+    "databricks-glm-5-2": {
+        # UC system.ai model served ONLY via the AI Gateway (/ai-gateway/mlflow/v1);
+        # /serving-endpoints returns ENDPOINT_NOT_FOUND, so it needs
+        # DatabricksConfig.ai_gateway_enabled. Gateway rejects max_tokens > 25000.
+        "name": "system.ai.glm-5-2",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 25000
+    },
     "databricks-gpt-5": {
         "name": "databricks-gpt-5",
         "temperature": 0.7,
