@@ -1514,3 +1514,31 @@ class TestReferencedByPopulation:
         spec = _run_process_table('fact_test', ti, dax, ctx)
         by_name = {m.original_name: m for m in (spec.measures + spec.untranslatable)}
         assert by_name['Base'].referenced_by == 1
+
+
+class TestPromotedConverterEmitterSurvival:
+    """Regression guard for the alias risk: a promoted SUMX-filter measure must
+    survive process_table -> emit_yaml without being dropped by the emitter's
+    undeclared-alias gate, and its FILTER clause must normalize to source.<col>
+    (not a raw DAX table alias like sales.<col>)."""
+
+    def test_sumx_filter_survives_and_uses_source_alias(self):
+        # table_key matches the DAX table name (Sales) — mirrors a real run where
+        # mquery maps the DAX table to the fact source, so a FILTER over the
+        # fact's OWN column resolves to source.<col> (not a raw sales.<col> alias
+        # that the emitter's undeclared-alias gate would drop).
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        ti = _make_table_info(
+            source_table='cat.sch.sales',
+            aggregate_columns=[{'name': 'amount', 'source_col': 'amount'}],
+            group_by_columns=['region'],
+        )
+        ti.table_name = 'Sales'
+        ctx = _make_context()
+        dax = [{'measure_name': 'eu_amt', 'original_name': 'EU Amt',
+                'dax_expression': 'SUMX(FILTER(Sales, Sales[region]="EU"), Sales[amount])'}]
+        spec = _run_process_table('Sales', ti, dax, ctx)
+        yaml = emit_yaml(spec)
+        # Survives emission (not dropped) and uses source. — no raw table alias.
+        assert 'eu_amt' in yaml
+        assert 'sales.' not in yaml.lower().replace('cat.sch.', '')

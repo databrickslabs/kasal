@@ -75,17 +75,33 @@ class DaxTranslator:
          'simple_sumx', 'distinctcountnoblank',
          # Deterministic scalar/date converters — cheap, reproducible, no LLM.
          'date_part', 'datediff', 'rankx', 'edate_eomonth',
-         'firstlastnonblank', 'format_func'}
+         'firstlastnonblank', 'format_func',
+         # Promoted bread-and-butter converters: these emit clean, correct SQL
+         # (verified through process_table→emit_yaml — FILTER aliases normalize to
+         # source., no leakage/drops), so they run deterministically instead of
+         # burning an LLM call in llm_first mode. DIVIDE is ANSI-safe
+         # (SUM(a)/NULLIF(SUM(b),0)). Deliberately EXCLUDES: userelationship
+         # (drops alt-relationship join semantics — LLM+join-context does better),
+         # selectedvalue_switch (noop by design), sameperiodlastyear (narrow
+         # conditional window measure — keep its existing path).
+         'divide', 'divide_calculate_measure_ref', 'calculate_measure_ref',
+         'sumx_filter', 'countx_filter', 'averagex_filter',
+         'calculate_sumx_vars_divide', 'calculate_sumx_filter_inner',
+         'calculate_sumx_filter_outer'}
     )
 
     def translate(self, measure: dict, table_key: str, trivial_only: bool = False) -> TranslationResult:
         """Translate a single DAX measure to SQL using the pattern registry.
 
-        ``trivial_only`` (llm_first mode): run ONLY the trivial fast-path
-        matchers (single-column aggregations + display-artifact rejects). Any
-        non-trivial measure returns untranslatable so the caller routes it to the
-        skill-corpus LLM translator. The remaining ~11 complex matchers are not
-        deleted — they simply stop being the primary path.
+        ``trivial_only`` (llm_first mode): run ONLY the fast-path matchers
+        (``_TRIVIAL_FAST_PATH``) — display-artifact rejects, single-column
+        aggregations, deterministic scalar/date converters, and the verified
+        bread-and-butter converters (DIVIDE, SUMX/COUNTX/AVERAGEX filters,
+        CALCULATE measure-refs) that emit clean SQL. Any measure not handled by
+        those returns untranslatable so the caller routes it to the skill-corpus
+        LLM translator. The remaining complex matchers (userelationship,
+        selectedvalue_switch, sameperiodlastyear) are not deleted — they simply
+        aren't the primary path in llm_first mode.
         """
         name = measure.get('measure_name', '')
         dax = measure.get('dax_expression', '')

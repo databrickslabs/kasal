@@ -1663,3 +1663,63 @@ class TestCalculateEqualityFilter:
         # It's fine if another pattern handles it, but the equality matcher itself returns None.
         assert translator._match_calculate_equality_filter(
             'CALCULATE(SUM(factsales[amount]), FILTER(ALL(factsales), factsales[qty]>10))', 'M') is None
+
+
+class TestPromotedFastPathConverters:
+    """Verified bread-and-butter converters promoted into _TRIVIAL_FAST_PATH.
+
+    These run deterministically in llm_first mode (trivial_only=True) instead of
+    burning an LLM call. userelationship / selectedvalue_switch / sameperiodlastyear
+    are deliberately NOT promoted.
+    """
+
+    @pytest.fixture
+    def tr(self):
+        return DaxTranslator(config={'measure_resolutions': {
+            'Revenue': {'base_expr': 'SUM(source.revenue)', 'base_filters': []},
+            'Total': {'base_expr': 'SUM(source.total)', 'base_filters': []},
+        }})
+
+    def _sql(self, tr, dax):
+        return tr.translate(
+            {'measure_name': 'm', 'original_name': 'M', 'dax_expression': dax},
+            'fact', trivial_only=True)
+
+    def test_divide_ansi_safe_in_fast_path(self, tr):
+        r = self._sql(tr, 'DIVIDE(SUM(Sales[Actual]), SUM(Sales[Target]))')
+        assert r.is_translatable
+        assert r.sql_expr == 'SUM(source.Actual) / NULLIF(SUM(source.Target), 0)'
+
+    def test_sumx_filter_in_fast_path(self, tr):
+        r = self._sql(tr, 'SUMX(FILTER(Sales, Sales[R]="EU"), Sales[Amount])')
+        assert r.is_translatable and 'SUM(source.Amount) FILTER (WHERE' in r.sql_expr
+
+    def test_countx_filter_in_fast_path(self, tr):
+        r = self._sql(tr, 'COUNTX(FILTER(Sales, Sales[Active]=1), Sales[ID])')
+        assert r.is_translatable and 'COUNT(source.ID) FILTER (WHERE source.Active = 1)' == r.sql_expr
+
+    def test_averagex_filter_in_fast_path(self, tr):
+        r = self._sql(tr, 'AVERAGEX(FILTER(Sales, Sales[R]="EU"), Sales[Amount])')
+        assert r.is_translatable and r.sql_expr.startswith('AVG(source.Amount) FILTER (WHERE')
+
+    def test_calculate_measure_ref_in_fast_path(self, tr):
+        r = self._sql(tr, 'CALCULATE([Revenue], Sales[R]="EU")')
+        assert r.is_translatable and 'SUM(source.revenue) FILTER (WHERE source.R = \'EU\')' == r.sql_expr
+
+    def test_divide_calculate_measure_ref_in_fast_path(self, tr):
+        r = self._sql(tr, 'DIVIDE(CALCULATE([Revenue], Sales[X]=1), [Total])')
+        assert r.is_translatable and 'NULLIF' in r.sql_expr and 'source.revenue' in r.sql_expr
+
+    # ── negative guards: NOT promoted ──
+    def test_userelationship_not_promoted(self, tr):
+        # Drops alt-relationship join semantics deterministically → stays LLM-routed.
+        r = self._sql(tr, 'CALCULATE(SUM(Sales[Amt]), USERELATIONSHIP(Sales[ShipDate], Calendar[Date]))')
+        assert r.is_translatable is False
+
+    def test_selectedvalue_switch_not_promoted(self, tr):
+        r = self._sql(tr, 'SWITCH(SELECTEDVALUE(P[X]), 1, [A], 2, [B])')
+        assert r.is_translatable is False
+
+    def test_reproducible(self, tr):
+        dax = 'DIVIDE(SUM(Sales[Actual]), SUM(Sales[Target]))'
+        assert self._sql(tr, dax).sql_expr == self._sql(tr, dax).sql_expr
