@@ -299,6 +299,45 @@ class MetricViewValidatorTool(BaseTool):
                     except OSError:
                         pass
 
+        # ── Build a COMPACT agent-facing return ──────────────────────────────
+        # The crew agent ingests this tool result into its LLM context. Returning
+        # the full per-measure `details` for every table PLUS all the YAML docs
+        # overflowed the model's context window on large models (28+ views →
+        # "Context window exceeded", non-retryable). The full detail is already
+        # captured in the execution trace / DB, so the agent only needs:
+        #   - the summary totals,
+        #   - per-table COUNTS (no per-measure detail),
+        #   - the measures that actually need a human (REVIEW/INVALID), capped.
+        # yaml is dropped from the return entirely (agent never needs it back).
+        _ATTENTION_CAP = 50
+        per_table_summary: dict = {}
+        attention: list = []
+        for table_key, r in results.items():
+            if not isinstance(r, dict):
+                per_table_summary[table_key] = r
+                continue
+            if 'skipped' in r or 'error' in r:
+                per_table_summary[table_key] = r
+                continue
+            per_table_summary[table_key] = {
+                "evaluated": r.get("evaluated", 0),
+                "valid": r.get("valid", 0),
+                "equivalent": r.get("equivalent", 0),
+                "review": r.get("review", 0),
+                "invalid": r.get("invalid", 0),
+            }
+            # Collect only the actionable (REVIEW / INVALID) measures.
+            for m in r.get("details", []):
+                status = (m.get("measure_eval_result", {}) or {}).get("status")
+                if status in ("REVIEW", "INVALID"):
+                    attention.append({
+                        "table": table_key,
+                        "measure_name": m.get("measure_name"),
+                        "status": status,
+                        "detail": m.get("measure_eval_result"),
+                    })
+
+        attention_truncated = len(attention) > _ATTENTION_CAP
         output = {
             "summary": {
                 "tables_validated": len(results),
@@ -308,13 +347,21 @@ class MetricViewValidatorTool(BaseTool):
                 "total_review": total_review,
                 "total_invalid": total_invalid,
             },
-            "per_table": results,
-            "yaml": yaml_tables,
+            "per_table_summary": per_table_summary,
+            # Only measures needing human attention (REVIEW/INVALID), capped.
+            "attention": attention[:_ATTENTION_CAP],
+            "attention_truncated": attention_truncated,
+            # Full per-measure details and the generated YAML are persisted to the
+            # execution trace / DB — not returned here to keep the agent's context
+            # within model limits.
+            "full_detail_in_trace": True,
         }
 
         logger.info(
             f"[Validator] Done: {total_valid} VALID, {total_equivalent} EQUIVALENT, "
-            f"{total_review} REVIEW, {total_invalid} INVALID out of {total_evaluated}"
+            f"{total_review} REVIEW, {total_invalid} INVALID out of {total_evaluated} "
+            f"({len(attention)} need attention"
+            f"{', capped at %d' % _ATTENTION_CAP if attention_truncated else ''})"
         )
         return json.dumps(output, indent=2, default=str)
 

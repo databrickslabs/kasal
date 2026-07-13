@@ -272,3 +272,95 @@ class TestResolvedMeasuresPairing:
         assert captured.get('measures'), "resolved measures should have reached the pipeline"
         assert captured['measures'][0]['dax_expression'] == "SUM(fact_pe002[paid_hours])"
         assert data.get('summary', {}).get('total_valid', 0) >= 1
+
+
+class TestCompactAgentReturn:
+    """The tool's agent-facing return must stay compact so the crew agent's LLM
+    context doesn't overflow on large models (regression: 28-view customer model
+    hit 'Context window exceeded'). Full detail persists to the trace, not here.
+    """
+
+    def _run_with_fake_pipeline(self, ucmv_output, evaluated_by_table):
+        """Run the tool with a fake validation pipeline that returns a given
+        `evaluated` list per table (keyed by yaml order)."""
+        import os as _os
+
+        calls = {"i": 0}
+        tables = list(evaluated_by_table.keys())
+
+        class _FakePipeline:
+            def __init__(self, *a, **k): pass
+            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+                # Return evaluated rows for each table in turn.
+                idx = calls["i"]
+                calls["i"] += 1
+                key = tables[idx] if idx < len(tables) else tables[-1]
+                return {"evaluated": evaluated_by_table[key]}
+
+        tool = MetricViewValidatorTool()
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+            _FakePipeline,
+        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
+           patch.object(_os.path, "exists", return_value=False):
+            return json.loads(tool._run(ucmv_output=ucmv_output))
+
+    def _big_ucmv(self, n_tables=28, per_table=5):
+        yaml = {}
+        rmbt = {}
+        evaluated = {}
+        for t in range(n_tables):
+            tk = f"fact_{t}"
+            names = [f"m{t}_{i}" for i in range(per_table)]
+            yaml[tk] = "version: '1.1'\nmeasures:\n" + "".join(
+                f"  - name: {nm}\n    expr: SUM(source.{nm})\n" for nm in names)
+            rmbt[tk] = [{"measure_name": nm, "original_name": nm,
+                         "sql_expr": f"SUM(source.{nm})", "dax_expression": f"SUM({tk}[{nm}])",
+                         "proposed_allocation": tk, "table_name": tk} for nm in names]
+            # Mostly VALID, but make one REVIEW and one INVALID per table.
+            evaluated[tk] = []
+            for i, nm in enumerate(names):
+                status = "VALID"
+                if i == 0: status = "REVIEW"
+                elif i == 1: status = "INVALID"
+                evaluated[tk].append({"measure_name": nm,
+                                      "measure_eval_result": {"status": status, "reason": "x" * 200}})
+        return json.dumps({"yaml": yaml, "resolved_measures_by_table": rmbt,
+                           "measures_with_dax": []}), evaluated
+
+    def test_return_is_compact_and_has_no_full_yaml(self):
+        ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
+        data = self._run_with_fake_pipeline(ucmv, evaluated)
+        # Summary totals present and correct.
+        assert data["summary"]["tables_validated"] == 28
+        assert data["summary"]["total_evaluated"] == 28 * 5
+        # Compact shape: per_table_summary (counts only), no full per-measure details.
+        assert "per_table_summary" in data
+        assert "per_table" not in data
+        assert "yaml" not in data              # the biggest contributor is dropped
+        sample = next(iter(data["per_table_summary"].values()))
+        assert set(sample) == {"evaluated", "valid", "equivalent", "review", "invalid"}
+        assert "details" not in sample
+
+    def test_attention_only_review_invalid_and_capped(self):
+        ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
+        data = self._run_with_fake_pipeline(ucmv, evaluated)
+        # 28 tables * (1 REVIEW + 1 INVALID) = 56 actionable → capped at 50.
+        assert data["attention_truncated"] is True
+        assert len(data["attention"]) == 50
+        assert all(a["status"] in ("REVIEW", "INVALID") for a in data["attention"])
+
+    def test_return_size_bounded(self):
+        ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
+        data = self._run_with_fake_pipeline(ucmv, evaluated)
+        # The whole agent-facing return must be small even for 28 tables.
+        assert len(json.dumps(data)) < 60_000
+
+    def test_small_input_still_reports(self):
+        ucmv, evaluated = self._big_ucmv(n_tables=1, per_table=2)
+        data = self._run_with_fake_pipeline(ucmv, evaluated)
+        assert data["summary"]["tables_validated"] == 1
+        assert data["summary"]["total_evaluated"] == 2
+        assert data["attention_truncated"] is False
