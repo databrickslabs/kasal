@@ -171,6 +171,28 @@ class TestStaticConfigFallback:
         assert tool._default_config["tenant_id"] == TENANT_ID
         assert tool._default_config["catalog"] == "my_catalog"
 
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_empty_string_kwargs_fall_back_to_injected_config(self, mock_get, mock_post):
+        """Regression: the flow injects workspace_id/dataset_id into _default_config,
+        but the agent calls the tool passing EMPTY STRINGS for them. The old
+        `if val is not None` returned "" and the tool errored
+        'workspace_id and dataset_id are required'. Empty kwargs must fall back to
+        the injected config."""
+        # Make the API calls fail fast — we only care that we got PAST the
+        # required-fields check (i.e. did not return the 'required' error).
+        mock_post.side_effect = Exception("stop after required-check")
+        mock_get.side_effect = Exception("stop after required-check")
+
+        tool = PipelineConfigGeneratorTool(**_make_sp_kwargs())  # injects real IDs
+        result = tool._run(
+            workspace_id="",   # agent's empty placeholder
+            dataset_id="",     # agent's empty placeholder
+            tenant_id="",
+        )
+        # Must NOT be the required-fields validation error.
+        assert "are required" not in result.lower()
+
 
 # ---------------------------------------------------------------------------
 # Mocked API execution

@@ -108,10 +108,17 @@ class PipelineConfigGeneratorTool(BaseTool):
     def _run(self, **kwargs: Any) -> str:
         """Execute the pipeline config generation."""
         def _get(key: str) -> Any:
+            # A capable agent, told to "call the tool with all inputs", often
+            # passes its OWN EMPTY placeholder for fields it doesn't have (e.g.
+            # workspace_id="") . The prior `if val is not None` returned that empty
+            # string, shadowing the real value the flow injected into
+            # _default_config → "workspace_id and dataset_id are required." Treat
+            # empty string/empty collection as absent and fall back to the
+            # injected default (same guard as the UCMV tool's `_get`).
             val = kwargs.get(key)
-            if val is not None:
-                return val
-            return self._default_config.get(key)
+            if val is None or val == "" or val == [] or val == {}:
+                return self._default_config.get(key)
+            return val
 
         workspace_id = _get("workspace_id")
         dataset_id = _get("dataset_id")
