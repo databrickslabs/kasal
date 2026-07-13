@@ -1495,3 +1495,112 @@ class TestTranslateSumxPartsLine462:
         # Then p.get('condition') is truthy → "Untranslatable FILTER condition"
         assert sql is None
         assert 'Untranslatable FILTER' in reason
+
+
+class TestDeterministicScalarConverters:
+    """Deterministic scalar/date converters (field-eng parity).
+
+    These translate cheap, high-frequency DAX functions to Spark SQL WITHOUT an
+    LLM call — cheaper + reproducible. All run in the trivial fast-path
+    (trivial_only=True) so they fire even in llm_first mode before any LLM.
+    """
+
+    def _sql(self, translator, dax, trivial_only=True):
+        r = translator.translate(
+            {'measure_name': 'm', 'original_name': 'M', 'dax_expression': dax},
+            'fact', trivial_only=trivial_only)
+        return r
+
+    # ── date parts ──
+    @pytest.mark.parametrize('dax,expected', [
+        ('YEAR(Dates[D])', 'year(source.D)'),
+        ('MONTH(Dates[D])', 'month(source.D)'),
+        ('DAY(Dates[D])', 'day(source.D)'),
+        ('QUARTER(Dates[D])', 'quarter(source.D)'),
+        ('HOUR(Dates[D])', 'hour(source.D)'),
+        ('MINUTE(Dates[D])', 'minute(source.D)'),
+        ('SECOND(Dates[D])', 'second(source.D)'),
+        ('WEEKNUM(Dates[D])', 'weekofyear(source.D)'),
+    ])
+    def test_date_parts(self, translator, dax, expected):
+        r = self._sql(translator, dax)
+        assert r.is_translatable and r.sql_expr == expected
+
+    # ── DATEDIFF per interval ──
+    @pytest.mark.parametrize('interval,expected', [
+        ('DAY', 'datediff(source.E, source.S)'),
+        ('WEEK', 'floor(datediff(source.E, source.S) / 7)'),
+        ('MONTH', 'floor(months_between(source.E, source.S))'),
+        ('QUARTER', 'floor(months_between(source.E, source.S) / 3)'),
+        ('YEAR', 'floor(months_between(source.E, source.S) / 12)'),
+        ('HOUR', 'floor((unix_timestamp(source.E) - unix_timestamp(source.S)) / 3600)'),
+        ('SECOND', '(unix_timestamp(source.E) - unix_timestamp(source.S))'),
+    ])
+    def test_datediff_intervals(self, translator, interval, expected):
+        r = self._sql(translator, f'DATEDIFF(Dates[S], Dates[E], {interval})')
+        assert r.is_translatable and r.sql_expr == expected
+
+    # ── RANKX ──
+    def test_rankx_desc_dense(self, translator):
+        r = self._sql(translator, 'RANKX(ALL(P), SUM(Sales[Amt]), , DESC, Dense)')
+        assert r.sql_expr == 'dense_rank() OVER (ORDER BY SUM(source.Amt) DESC)'
+
+    def test_rankx_asc_skip_defaults(self, translator):
+        # bare column expr, ASC + Skip (Skip → rank())
+        r = self._sql(translator, 'RANKX(ALL(P), Products[Sales], , ASC, Skip)')
+        assert r.sql_expr == 'rank() OVER (ORDER BY source.Sales ASC)'
+
+    # ── EDATE / EOMONTH ──
+    def test_edate(self, translator):
+        r = self._sql(translator, 'EDATE(Dates[D], 3)')
+        assert r.sql_expr == 'add_months(source.D, 3)'
+
+    def test_eomonth(self, translator):
+        r = self._sql(translator, 'EOMONTH(Dates[D], 0)')
+        assert r.sql_expr == 'last_day(add_months(source.D, 0))'
+
+    # ── FIRSTNONBLANK / LASTNONBLANK ──
+    def test_firstnonblank_is_min(self, translator):
+        r = self._sql(translator, 'FIRSTNONBLANK(Dates[D], 1)')
+        assert r.sql_expr == 'MIN(source.D)'
+
+    def test_lastnonblank_is_max(self, translator):
+        r = self._sql(translator, 'LASTNONBLANK(Dates[D], 1)')
+        assert r.sql_expr == 'MAX(source.D)'
+
+    # ── FORMAT string map ──
+    def test_format_date_on_bare_column_no_sum(self, translator):
+        # A date column must NOT be SUM-wrapped.
+        r = self._sql(translator, 'FORMAT(Dates[D], "MMM YYYY")')
+        assert r.sql_expr == "date_format(source.D, 'MMM yyyy')"
+
+    def test_format_number_on_aggregate(self, translator):
+        r = self._sql(translator, 'FORMAT(SUM(Sales[Amt]), "#,##0.00")')
+        assert r.sql_expr == 'format_number(SUM(source.Amt), 2)'
+
+    def test_format_percent(self, translator):
+        r = self._sql(translator, 'FORMAT(Sales[Ratio], "0.0%")')
+        assert r.sql_expr == "CONCAT(format_number(source.Ratio * 100, 1), '%')"
+
+    def test_format_currency(self, translator):
+        r = self._sql(translator, 'FORMAT(SUM(Sales[Amt]), "$#,##0.00")')
+        assert r.sql_expr == "CONCAT('$', format_number(SUM(source.Amt), 2))"
+
+    def test_format_unknown_code_passes_inner_through(self, translator):
+        # Unknown format must not lose the measure — return the value unformatted
+        # (bare column resolves to source.<col> in scalar context, no SUM wrap).
+        r = self._sql(translator, 'FORMAT(Sales[X], "@@weird@@")')
+        assert r.is_translatable and r.sql_expr == 'source.X'
+
+    # ── determinism: fast-path, no LLM ──
+    def test_converters_fire_in_trivial_fast_path(self, translator):
+        # trivial_only=True means the LLM path is NOT consulted; a translatable
+        # result proves the converter handled it deterministically.
+        for dax in ['YEAR(Dates[D])', 'DATEDIFF(Dates[S], Dates[E], DAY)',
+                    'RANKX(ALL(P), SUM(Sales[Amt]), , DESC)', 'FORMAT(SUM(Sales[Amt]), "#,##0")']:
+            r = self._sql(translator, dax, trivial_only=True)
+            assert r.is_translatable, f'{dax} should translate in fast-path'
+
+    def test_same_input_same_output(self, translator):
+        dax = 'RANKX(ALL(P), SUM(Sales[Amt]), , DESC, Dense)'
+        assert self._sql(translator, dax).sql_expr == self._sql(translator, dax).sql_expr
