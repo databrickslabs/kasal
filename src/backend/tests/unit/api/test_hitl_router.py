@@ -421,9 +421,91 @@ class TestGetApproval:
         assert result.id == 1
         assert result.execution_id == "exec-123"
         assert result.status == HITLApprovalStatusEnum.PENDING
+        # Default (no view): full output returned unchanged.
+        assert result.previous_crew_output == "Research findings..."
         mock_hitl_service.approval_repo.get_by_id.assert_called_once_with(
             1, mock_group_context.primary_group_id
         )
+
+    @pytest.mark.asyncio
+    async def test_get_approval_view_ui_strips_handoff_arrays(
+        self,
+        mock_hitl_service: AsyncMock,
+        mock_group_context: GroupContext,
+    ):
+        """view=ui strips the downstream-handoff arrays (measures_json/mquery_json/
+        relationships_json) but keeps proposed_config + summary."""
+        import json as _json
+        now = datetime.now(timezone.utc)
+        full = {
+            "proposed_config": {"join_key_map": {"a": 1}},
+            "summary": {"total_keys": 26},
+            "measure_usage_ranking": [{"measure_name": "m", "referenced_by": 3}],
+            "measures_json": [{"measure_name": "x"}] * 100,
+            "mquery_json": [{"table_name": "t"}] * 50,
+            "relationships_json": [{"from": "a", "to": "b"}] * 20,
+        }
+        mock_approval = MagicMock()
+        for attr, val in dict(
+            id=1, execution_id="e", flow_id="f", gate_node_id="g", crew_sequence=1,
+            status="pending", gate_config={}, previous_crew_name="Config Gen",
+            previous_crew_output=_json.dumps(full), flow_state_snapshot={},
+            responded_by=None, responded_at=None, approval_comment=None,
+            rejection_reason=None, rejection_action=None,
+            expires_at=now + timedelta(hours=1), is_expired=False, created_at=now,
+            group_id="test-group-123",
+        ).items():
+            setattr(mock_approval, attr, val)
+
+        mock_hitl_service.approval_repo = AsyncMock()
+        mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=mock_approval)
+
+        result = await get_approval(
+            approval_id=1, service=mock_hitl_service,
+            group_context=mock_group_context, view="ui",
+        )
+
+        projected = _json.loads(result.previous_crew_output)
+        assert "proposed_config" in projected      # kept
+        assert "summary" in projected              # kept
+        assert "measure_usage_ranking" in projected  # kept (usage counter)
+        assert "measures_json" not in projected    # stripped
+        assert "mquery_json" not in projected      # stripped
+        assert "relationships_json" not in projected  # stripped
+        # has-flag stays true; size reflects the projected (smaller) output.
+        assert result.has_previous_crew_output is True
+        assert result.previous_crew_output_size == len(result.previous_crew_output)
+
+    @pytest.mark.asyncio
+    async def test_get_approval_view_ui_leaves_validator_output_intact(
+        self,
+        mock_hitl_service: AsyncMock,
+        mock_group_context: GroupContext,
+    ):
+        """A validator gate output (yaml/sql/stats) has none of the strip keys,
+        so view=ui returns it unchanged."""
+        import json as _json
+        now = datetime.now(timezone.utc)
+        validator_out = {"yaml": {"t": "..."}, "sql": {"t": "..."}, "stats": {}}
+        mock_approval = MagicMock()
+        for attr, val in dict(
+            id=2, execution_id="e", flow_id="f", gate_node_id="g", crew_sequence=2,
+            status="pending", gate_config={}, previous_crew_name="Validator",
+            previous_crew_output=_json.dumps(validator_out), flow_state_snapshot={},
+            responded_by=None, responded_at=None, approval_comment=None,
+            rejection_reason=None, rejection_action=None,
+            expires_at=now + timedelta(hours=1), is_expired=False, created_at=now,
+            group_id="test-group-123",
+        ).items():
+            setattr(mock_approval, attr, val)
+        mock_hitl_service.approval_repo = AsyncMock()
+        mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=mock_approval)
+
+        result = await get_approval(
+            approval_id=2, service=mock_hitl_service,
+            group_context=mock_group_context, view="ui",
+        )
+        assert _json.loads(result.previous_crew_output) == validator_out
 
     @pytest.mark.asyncio
     async def test_get_approval_not_found(

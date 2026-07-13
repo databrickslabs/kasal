@@ -104,7 +104,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         // would make the gate slow to open if shipped in the status response).
         if (pending.has_previous_crew_output && !pending.previous_crew_output) {
           setOutputLoading(true);
-          HITLService.getApproval(pending.id)
+          // 'ui' projection strips downstream-handoff arrays (~390 KB) the gate
+          // doesn't render — the flow still injects the full blob downstream.
+          HITLService.getApproval(pending.id, 'ui')
             .then((full) => {
               setApproval((prev) =>
                 prev && prev.id === full.id

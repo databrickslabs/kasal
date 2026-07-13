@@ -158,7 +158,7 @@ describe('HITLApprovalDialog', () => {
       );
 
       // The dialog lazy-loads via getApproval(id), not from the status blob.
-      await waitFor(() => expect(mocks.mockGetApproval).toHaveBeenCalledWith(1));
+      await waitFor(() => expect(mocks.mockGetApproval).toHaveBeenCalledWith(1, 'ui'));
       await waitFor(() =>
         expect(screen.getByText(/LAZY-LOADED OUTPUT BODY/)).toBeInTheDocument()
       );
