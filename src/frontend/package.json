@@ -64,8 +64,8 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
-    "build": "tsc -b && NODE_OPTIONS=--max-old-space-size=4096 vite build",
-    "build:analyze": "ANALYZE=true vite build",
+    "build": "tsc -b && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
+    "build:analyze": "cross-env ANALYZE=true vite build",
     "preview": "vite preview",
     "prod": "serve -s dist",
     "test": "vitest",
@@ -100,6 +100,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.5.0",
+    "cross-env": "^7.0.3",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
