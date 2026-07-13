@@ -7,6 +7,8 @@ just need a different healthy model.
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.llm_handlers.model_fallback import (
     CONTEXT_WINDOW,
     ENDPOINT_MISSING,
@@ -15,8 +17,63 @@ from src.core.llm_handlers.model_fallback import (
     ModelCandidate,
     candidates_from_model_configs,
     classify_llm_error,
+    is_endpoint_missing,
+    mark_endpoint_missing,
+    reset_known_missing_endpoints,
     select_fallback,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_known_missing():
+    """Keep the process-wide known-missing set from leaking across tests."""
+    reset_known_missing_endpoints()
+    yield
+    reset_known_missing_endpoints()
+
+
+class TestKnownMissingEndpoints:
+    """Fallback must learn which serving endpoints aren't deployed here and stop
+    offering them — so a rate-limit on the primary model doesn't cascade into a
+    fatal ENDPOINT_NOT_FOUND (customer hit this: sonnet rate-limited → fell back
+    to databricks-gpt-5 which isn't deployed → 404)."""
+
+    def _models(self):
+        return [
+            SimpleNamespace(key="databricks-claude-sonnet-4", provider="databricks", context_window=200000),
+            SimpleNamespace(key="databricks-gpt-5", provider="databricks", context_window=400000),
+            SimpleNamespace(key="databricks-claude-haiku-4-5", provider="databricks", context_window=200000),
+        ]
+
+    def test_mark_and_query(self):
+        assert not is_endpoint_missing("databricks-gpt-5")
+        mark_endpoint_missing("databricks-gpt-5")
+        assert is_endpoint_missing("databricks-gpt-5")
+        # provider-prefixed form resolves to the same key
+        assert is_endpoint_missing("databricks/databricks-gpt-5")
+
+    def test_candidates_exclude_known_missing(self):
+        mark_endpoint_missing("databricks-gpt-5")
+        names = [c.name for c in candidates_from_model_configs(
+            self._models(), "databricks-claude-sonnet-4")]
+        assert "databricks-gpt-5" not in names
+        assert "databricks-claude-haiku-4-5" in names
+
+    def test_rate_limit_fallback_skips_missing_and_picks_deployed(self):
+        # Before marking, the roomiest (gpt-5) would be chosen on rate_limit.
+        cands = candidates_from_model_configs(self._models(), "databricks-claude-sonnet-4")
+        assert select_fallback(cands, 200000, RATE_LIMIT, set(),
+                               "databricks-claude-sonnet-4").name == "databricks-gpt-5"
+        # After a 404 on gpt-5, it's filtered → a deployed model is chosen instead.
+        mark_endpoint_missing("databricks-gpt-5")
+        cands2 = candidates_from_model_configs(self._models(), "databricks-claude-sonnet-4")
+        pick = select_fallback(cands2, 200000, RATE_LIMIT, set(), "databricks-claude-sonnet-4")
+        assert pick is not None and pick.name != "databricks-gpt-5"
+
+    def test_reset_clears_set(self):
+        mark_endpoint_missing("databricks-gpt-5")
+        reset_known_missing_endpoints()
+        assert not is_endpoint_missing("databricks-gpt-5")
 
 
 class NotFoundError(Exception):

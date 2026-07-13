@@ -47,6 +47,31 @@ _FATAL_4XX_MARKERS = (
     "invalid_request_error",
 )
 
+# Process-wide memory of serving endpoints that returned ENDPOINT_NOT_FOUND in
+# THIS workspace. A model can be enabled in config (e.g. databricks-gpt-5) yet
+# have no serving endpoint deployed here — falling back to it 404s. Once we've
+# seen that, stop offering it as a fallback target (this run AND later runs in
+# the same process) so a transient rate-limit on the primary model doesn't
+# cascade into a fatal ENDPOINT_NOT_FOUND. Process-scoped on purpose: it resets
+# when the flow/crew subprocess restarts, so a later deployment re-learns cleanly.
+_KNOWN_MISSING_ENDPOINTS: Set[str] = set()
+
+
+def mark_endpoint_missing(model_name: Optional[str]) -> None:
+    """Record that a model's serving endpoint isn't deployed in this workspace."""
+    if model_name:
+        _KNOWN_MISSING_ENDPOINTS.add(model_name.split("/")[-1])
+
+
+def is_endpoint_missing(model_name: Optional[str]) -> bool:
+    """True if this model was previously seen to have no serving endpoint here."""
+    return bool(model_name) and model_name.split("/")[-1] in _KNOWN_MISSING_ENDPOINTS
+
+
+def reset_known_missing_endpoints() -> None:
+    """Clear the known-missing set (test helper / manual re-probe)."""
+    _KNOWN_MISSING_ENDPOINTS.clear()
+
 
 @dataclass(frozen=True)
 class ModelCandidate:
@@ -225,6 +250,10 @@ def candidates_from_model_configs(models, current_model_key) -> List[ModelCandid
         if provider and provider != "databricks":
             continue
         if "codex" in key.lower():
+            continue
+        # Skip models whose serving endpoint 404'd here before — offering them
+        # again just re-triggers ENDPOINT_NOT_FOUND.
+        if is_endpoint_missing(key):
             continue
         out.append(
             ModelCandidate(
