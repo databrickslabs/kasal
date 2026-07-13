@@ -77,10 +77,30 @@ interface ValidatorSummary {
   source?: string;
 }
 
+interface ValidatorAttentionItem {
+  table?: string;
+  measure_name?: string;
+  status?: string;
+  detail?: {
+    status?: string;
+    is_valid?: boolean;
+    confidence?: string;
+    differences?: string[];
+    similarities?: string[];
+  };
+}
+
 export interface ValidatorResult {
   summary: ValidatorSummary;
-  per_table: Record<string, ValidatorPerTable>;
+  // Legacy full shape (per-measure details + yaml inline).
+  per_table?: Record<string, ValidatorPerTable>;
   yaml?: Record<string, string>;
+  // Compact shape (agent-context-safe): per-table counts + only the measures
+  // needing attention (REVIEW/INVALID). Full details/yaml live in the trace/DB.
+  per_table_summary?: Record<string, ValidatorPerTable>;
+  attention?: ValidatorAttentionItem[];
+  attention_truncated?: boolean;
+  full_detail_in_trace?: boolean;
   stats?: Record<string, {
     total?: number;
     translated?: number;
@@ -100,13 +120,15 @@ export interface ValidatorResult {
 export function isValidatorResult(value: unknown): value is ValidatorResult {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
-  return (
+  const summaryOk =
     typeof obj.summary === 'object' &&
     obj.summary !== null &&
-    typeof obj.per_table === 'object' &&
-    obj.per_table !== null &&
-    'total_evaluated' in (obj.summary as Record<string, unknown>)
-  );
+    'total_evaluated' in (obj.summary as Record<string, unknown>);
+  // Accept either the legacy `per_table` or the compact `per_table_summary`.
+  const hasTables =
+    (typeof obj.per_table === 'object' && obj.per_table !== null) ||
+    (typeof obj.per_table_summary === 'object' && obj.per_table_summary !== null);
+  return summaryOk && hasTables;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,7 +170,29 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [viewYamlTable, setViewYamlTable] = useState<string | null>(null);
 
-  const { summary, per_table: perTable, stats, yaml: yamlData } = result;
+  const { summary, stats, yaml: yamlData } = result;
+  // Support both shapes: legacy `per_table` (with inline per-measure details) and
+  // the compact `per_table_summary` (counts only). For the compact shape, fold
+  // the top-level `attention` list (REVIEW/INVALID measures) back into each
+  // table's `details` so the expandable rows still show the actionable measures.
+  const perTable = useMemo<Record<string, ValidatorPerTable>>(() => {
+    if (result.per_table && Object.keys(result.per_table).length > 0) {
+      return result.per_table;
+    }
+    const base: Record<string, ValidatorPerTable> = {
+      ...(result.per_table_summary || {}),
+    };
+    for (const item of result.attention || []) {
+      const tbl = item.table;
+      if (!tbl || !base[tbl]) continue;
+      if (!base[tbl].details) base[tbl] = { ...base[tbl], details: [] };
+      base[tbl].details!.push({
+        measure_name: item.measure_name,
+        measure_eval_result: item.detail || { status: item.status },
+      });
+    }
+    return base;
+  }, [result]);
   const hasYaml = yamlData && Object.keys(yamlData).length > 0;
 
   const handleDownloadYaml = (tableName: string) => {
@@ -291,6 +335,14 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
         {warnCount > 0 && <Chip icon={<WarningAmberIcon />} label={`${warnCount} review`} color="warning" size="small" />}
         {failCount > 0 && <Chip icon={<ErrorOutlineIcon />} label={`${failCount} failing`} color="error" size="small" />}
       </Box>
+
+      {(result.attention_truncated || result.full_detail_in_trace) && (
+        <Typography variant="caption" color="text.secondary">
+          {result.attention_truncated
+            ? 'Showing the highest-priority measures needing attention; full per-measure detail is in the execution trace.'
+            : 'Per-table counts shown; full per-measure detail and YAML are in the execution trace.'}
+        </Typography>
+      )}
 
       <Divider />
 
