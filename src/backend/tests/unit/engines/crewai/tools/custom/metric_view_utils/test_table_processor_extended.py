@@ -486,21 +486,41 @@ class TestProcessTablePass2:
 
 class TestProcessTableCascade:
     def test_cascade_reclassifies_divide_over_artifacts(self):
-        """Step 5c: DIVIDE sub-expression referencing artifact measures → reclassified."""
+        """Step 5c: DIVIDE sub-expression referencing artifact measures → reclassified.
+
+        Uses a GENUINE display-only artifact (FORMAT of a literal — not
+        translatable by the deterministic FORMAT converter, which only handles a
+        real column/aggregate inner) so the cascade-reclassification path is
+        still exercised. FORMAT-wrapping-an-aggregate is now translated
+        deterministically and is deliberately no longer an artifact.
+        """
+        ti = _make_table_info()
+        ctx = _make_context()
+        dax = [
+            {'measure_name': 'label', 'original_name': 'Label',
+             'dax_expression': 'FORMAT(TODAY(), "YYYY-MM-DD")'},
+            {'measure_name': 'ratio', 'original_name': 'Ratio',
+             'dax_expression': 'DIVIDE([Label], SUM(T[Y]))'},
+        ]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        all_skip_reasons = [m.skip_reason for m in spec.untranslatable]
+        # The display-only FORMAT (and the DIVIDE referencing it) stay untranslatable.
+        assert len(spec.untranslatable) >= 1
+        assert any(r for r in all_skip_reasons)
+
+    def test_format_wrapping_aggregate_now_translates(self):
+        """Regression: FORMAT wrapping a real aggregate is now translated
+        deterministically (field-eng parity) instead of being an artifact."""
         ti = _make_table_info()
         ctx = _make_context()
         dax = [
             {'measure_name': 'fmt_measure', 'original_name': 'Fmt Measure',
              'dax_expression': 'FORMAT(SUM(T[X]), "#,##0")'},
-            {'measure_name': 'ratio', 'original_name': 'Ratio',
-             'dax_expression': 'DIVIDE([Fmt Measure], SUM(T[Y]))'},
         ]
         spec = _run_process_table('fact_test', ti, dax, ctx)
-        # Either reclassified to PY/DIVIDE artifacts or DIVIDE sub-expression remains
-        all_skip_reasons = [m.skip_reason for m in spec.untranslatable]
-        # Both measures should be untranslatable (FORMAT and DIVIDE referencing it)
-        assert len(spec.untranslatable) >= 1
-        assert any(r for r in all_skip_reasons)
+        fmt = next((m for m in spec.measures if m.original_name == 'Fmt Measure'), None)
+        assert fmt is not None and fmt.is_translatable
+        assert 'format_number' in (fmt.sql_expr or '')
 
 
 # ─── process_table — source SQL enrichment ────────────────────────────────────
