@@ -1604,3 +1604,62 @@ class TestDeterministicScalarConverters:
     def test_same_input_same_output(self, translator):
         dax = 'RANKX(ALL(P), SUM(Sales[Amt]), , DESC, Dense)'
         assert self._sql(translator, dax).sql_expr == self._sql(translator, dax).sql_expr
+
+
+# ─── Deterministic converters: simple aggregations + CALCULATE equality filter ──
+
+class TestSimpleAggConverters:
+    """AVERAGE/COUNT/MIN/MAX/DISTINCTCOUNT/COUNTROWS handled deterministically (no LLM)."""
+
+    def _sql(self, translator, dax):
+        r = translator.translate({'measure_name': 'm', 'dax_expression': dax, 'original_name': 'M'}, 'factsales')
+        return r.sql_expr if r.is_translatable else None
+
+    def test_average(self, translator):
+        assert self._sql(translator, 'AVERAGE(factsales[price])') == 'AVG(source.price)'
+
+    def test_count(self, translator):
+        assert self._sql(translator, 'COUNT(factsales[id])') == 'COUNT(source.id)'
+
+    def test_min_max(self, translator):
+        assert self._sql(translator, 'MIN(factsales[amount])') == 'MIN(source.amount)'
+        assert self._sql(translator, 'MAX(factsales[amount])') == 'MAX(source.amount)'
+
+    def test_distinctcount(self, translator):
+        assert self._sql(translator, 'DISTINCTCOUNT(factsales[customer_id])') == 'COUNT(DISTINCT source.customer_id)'
+
+    def test_countrows(self, translator):
+        assert self._sql(translator, 'COUNTROWS(factsales)') == 'COUNT(*)'
+
+    def test_calculate_wrapped_agg(self, translator):
+        assert self._sql(translator, 'CALCULATE(AVERAGE(factsales[price]))') == 'AVG(source.price)'
+
+
+class TestCalculateEqualityFilter:
+    """CALCULATE(SUM(t[c]), t[dim]=value) → conditional aggregation, deterministic."""
+
+    def _sql(self, translator, dax):
+        r = translator.translate({'measure_name': 'm', 'dax_expression': dax, 'original_name': 'M'}, 'factsales')
+        return r.sql_expr if r.is_translatable else None
+
+    def test_string_equality(self, translator):
+        assert self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[region]="EU")') == \
+            'SUM(CASE WHEN source.region = "EU" THEN source.amount END)'
+
+    def test_numeric_equality(self, translator):
+        assert self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[year]=2026)') == \
+            'SUM(CASE WHEN source.year = 2026 THEN source.amount END)'
+
+    def test_boolean_true(self, translator):
+        assert self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[active]=TRUE())') == \
+            'SUM(CASE WHEN source.active = TRUE THEN source.amount END)'
+
+    def test_filter_form_not_matched_here(self, translator):
+        # A FILTER()-based CALCULATE must NOT be caught by the simple equality matcher.
+        r = translator.translate(
+            {'measure_name': 'm',
+             'dax_expression': 'CALCULATE(SUM(factsales[amount]), FILTER(ALL(factsales), factsales[qty]>10))',
+             'original_name': 'M'}, 'factsales')
+        # It's fine if another pattern handles it, but the equality matcher itself returns None.
+        assert translator._match_calculate_equality_filter(
+            'CALCULATE(SUM(factsales[amount]), FILTER(ALL(factsales), factsales[qty]>10))', 'M') is None

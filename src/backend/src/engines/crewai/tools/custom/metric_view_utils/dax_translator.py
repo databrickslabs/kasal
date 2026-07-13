@@ -37,6 +37,8 @@ class DaxTranslator:
             ('quick_reject', self._match_quick_reject, self._translate_noop),
             ('sameperiodlastyear', self._match_sameperiodlastyear, self._translate_sameperiodlastyear),
             ('simple_sum', self._match_simple_sum, self._translate_simple_sum),
+            ('simple_agg', self._match_simple_agg, self._translate_simple_agg),
+            ('calculate_equality_filter', self._match_calculate_equality_filter, self._translate_calculate_equality_filter),
             ('simple_sumx', self._match_simple_sumx, self._translate_simple_sumx),
             ('calculate_sumx_vars_divide', self._match_calc_sumx_vars_divide, self._translate_calc_sumx_vars_divide),
             ('calculate_sumx_filter_inner', self._match_calculate_sumx_filter_inner, self._translate_sumx_parts),
@@ -69,7 +71,8 @@ class DaxTranslator:
     # display-artifact rejects + the trivial single-column, high-confidence
     # aggregations. Everything else falls through to the LLM-first translator.
     _TRIVIAL_FAST_PATH = frozenset(
-        {'quick_reject', 'simple_sum', 'simple_sumx', 'distinctcountnoblank',
+        {'quick_reject', 'simple_sum', 'simple_agg', 'calculate_equality_filter',
+         'simple_sumx', 'distinctcountnoblank',
          # Deterministic scalar/date converters — cheap, reproducible, no LLM.
          'date_part', 'datediff', 'rankx', 'edate_eomonth',
          'firstlastnonblank', 'format_func'}
@@ -201,6 +204,74 @@ class DaxTranslator:
         if m:
             return {'table': m.group(1), 'column': m.group(3)}
         return None
+
+    # Simple single-column aggregations: AVERAGE / COUNT / MIN / MAX /
+    # DISTINCTCOUNT / COUNTA, plus COUNTROWS(table). Deterministic, no LLM.
+    _SIMPLE_AGG_FUNCS = {
+        'AVERAGE': 'AVG', 'COUNT': 'COUNT', 'COUNTA': 'COUNT',
+        'MIN': 'MIN', 'MAX': 'MAX', 'DISTINCTCOUNT': 'COUNT_DISTINCT',
+    }
+
+    def _match_simple_agg(self, dax: str, name: str) -> dict | None:
+        cleaned = self._strip_return(self._strip_var_block(dax)).strip()
+        # COUNTROWS(table) → COUNT(*)
+        m = re.fullmatch(
+            r'\s*(?:CALCULATE\s*\(\s*)?COUNTROWS\s*\(\s*(\w+)\s*\)\s*\)?\s*',
+            cleaned, re.IGNORECASE,
+        )
+        if m:
+            return {'func': 'COUNTROWS', 'column': None}
+        # AVERAGE/COUNT/MIN/MAX/DISTINCTCOUNT(table[col])
+        m = re.fullmatch(
+            r'\s*(?:CALCULATE\s*\(\s*)?'
+            r'(AVERAGE|COUNTA|COUNT|DISTINCTCOUNT|MIN|MAX)\s*'
+            r'\(\s*(\w+)\[(\w+)\]\s*\)\s*\)?\s*',
+            cleaned, re.IGNORECASE,
+        )
+        if m and m.group(1).upper() in self._SIMPLE_AGG_FUNCS:
+            return {'func': m.group(1).upper(), 'column': m.group(3)}
+        return None
+
+    def _translate_simple_agg(self, match: dict, dax: str, table_key: str) -> tuple[str | None, str]:
+        func = match['func']
+        if func == 'COUNTROWS':
+            return 'COUNT(*)', ''
+        spark = self._SIMPLE_AGG_FUNCS.get(func)
+        col = match['column']
+        if spark == 'COUNT_DISTINCT':
+            return f'COUNT(DISTINCT source.{col})', ''
+        return f'{spark}(source.{col})', ''
+
+    # CALCULATE(SUM(t[col]), t[dim] = <value>) → conditional aggregation.
+    # Single equality filter only; anything more complex falls through to LLM.
+    def _match_calculate_equality_filter(self, dax: str, name: str) -> dict | None:
+        cleaned = self._strip_return(self._strip_var_block(dax)).strip()
+        if 'CALCULATE' not in cleaned.upper() or 'FILTER(' in cleaned.upper():
+            return None
+        m = re.fullmatch(
+            r'\s*CALCULATE\s*\(\s*'
+            r'(SUM|AVERAGE|COUNT|MIN|MAX)\s*\(\s*(\w+)\[(\w+)\]\s*\)\s*,\s*'
+            r'(\w+)\[(\w+)\]\s*=\s*("[^"]*"|\'[^\']*\'|-?\d+(?:\.\d+)?|TRUE\s*\(\s*\)|FALSE\s*\(\s*\))'
+            r'\s*\)\s*',
+            cleaned, re.IGNORECASE,
+        )
+        if not m:
+            return None
+        return {
+            'agg': m.group(1).upper(), 'agg_col': m.group(3),
+            'filter_col': m.group(5), 'value': m.group(6).strip(),
+        }
+
+    def _translate_calculate_equality_filter(self, match: dict, dax: str, table_key: str) -> tuple[str | None, str]:
+        spark = {'SUM': 'SUM', 'AVERAGE': 'AVG', 'COUNT': 'COUNT', 'MIN': 'MIN', 'MAX': 'MAX'}[match['agg']]
+        val = match['value']
+        up = val.upper().replace(' ', '')
+        if up in ('TRUE()', 'FALSE()'):
+            val = 'TRUE' if up == 'TRUE()' else 'FALSE'
+        elif val.startswith("'"):
+            val = '"' + val[1:-1] + '"'
+        cond = f'source.{match["filter_col"]} = {val}'
+        return f'{spark}(CASE WHEN {cond} THEN source.{match["agg_col"]} END)', ''
 
     def _match_calc_sumx_vars_divide(self, dax: str, name: str) -> dict | None:
         cleaned = self._strip_var_block(dax)
