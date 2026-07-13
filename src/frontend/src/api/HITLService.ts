@@ -177,11 +177,20 @@ export class HITLService {
 
   /**
    * Get a specific HITL approval by ID.
+   *
+   * @param view Pass 'ui' to strip downstream-handoff arrays
+   *   (measures_json/mquery_json/relationships_json) from previous_crew_output —
+   *   shrinks an ~810 KB config-gen output to ~300 KB for the gate UI, which
+   *   only renders proposed_config. Omit for the full output.
    */
-  static async getApproval(approvalId: number): Promise<HITLApprovalResponse> {
-    const response = await apiClient.get<HITLApprovalResponse>(
-      `/hitl/approvals/${approvalId}`
-    );
+  static async getApproval(
+    approvalId: number,
+    view?: 'ui'
+  ): Promise<HITLApprovalResponse> {
+    const url = `/hitl/approvals/${approvalId}`;
+    const response = view
+      ? await apiClient.get<HITLApprovalResponse>(url, { params: { view } })
+      : await apiClient.get<HITLApprovalResponse>(url);
     return response.data;
   }
 
