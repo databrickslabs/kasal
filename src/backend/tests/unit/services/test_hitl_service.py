@@ -764,6 +764,10 @@ class TestGetPendingApprovals:
         assert len(result.items) == 2
         assert result.limit == 50
         assert result.offset == 0
+        # The list response also omits the heavy output (lazy-loaded on demand)
+        # but flags that it exists.
+        assert all(item.previous_crew_output is None for item in result.items)
+        assert all(item.has_previous_crew_output for item in result.items)
 
         mock_approval_repository.get_pending_for_group.assert_called_once_with(
             group_id="group-123",
@@ -857,6 +861,32 @@ class TestGetExecutionHITLStatus:
         assert result.pending_approval.id == 2
         assert result.total_gates_passed == 1
         assert len(result.approval_history) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_execution_hitl_status_omits_heavy_output(
+        self,
+        hitl_service,
+        mock_approval_repository
+    ):
+        """The status response must OMIT previous_crew_output (it can be ~1 MB and
+        made the config-gen gate slow to open) but flag that output exists + its
+        size so the client lazy-loads it via GET /approvals/{id}."""
+        big = "x" * 900_000
+        approvals = [
+            MockHITLApproval(id=2, status=HITLApprovalStatus.PENDING,
+                             previous_crew_output=big),
+        ]
+        mock_approval_repository.get_all_for_execution.return_value = approvals
+
+        result = await hitl_service.get_execution_hitl_status(
+            execution_id="exec-123", group_id="group-123"
+        )
+
+        pa = result.pending_approval
+        assert pa is not None
+        assert pa.previous_crew_output is None          # omitted
+        assert pa.has_previous_crew_output is True       # but flagged
+        assert pa.previous_crew_output_size == len(big)  # with size
 
     @pytest.mark.asyncio
     async def test_get_execution_hitl_status_no_pending(
