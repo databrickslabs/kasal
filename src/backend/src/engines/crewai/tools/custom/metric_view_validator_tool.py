@@ -279,13 +279,37 @@ class MetricViewValidatorTool(BaseTool):
                 total_review += review
                 total_invalid += invalid
 
+                # Surface the SKIPPED measures too (with a reason), so the UI
+                # breakdown shows EVERY measure — not just the evaluated ones —
+                # and the reviewer understands why the rest weren't compared.
+                # These do NOT count toward evaluated/valid/etc. The validation
+                # pipeline buckets a skipped measure as either 'simple' (a
+                # trivial FUNC(table.col) aggregation — correct by construction,
+                # nothing to compare) or 'unmatched' (no source DAX measure to
+                # compare against).
+                skipped_details = []
+                for m in result.get('skipped', []):
+                    kind = m.get('measure_eval')  # 'simple' | 'unmatched'
+                    reason = (
+                        "Trivial aggregation — nothing to compare (correct by construction)"
+                        if kind == 'simple'
+                        else "No source DAX measure to compare against"
+                    )
+                    skipped_details.append({
+                        "measure_name": m.get('measure_name'),
+                        "measure_eval_result": {"status": "skipped", "reason": reason},
+                    })
+
                 results[table_key] = {
                     "evaluated": len(evaluated),
                     "valid": valid,
                     "equivalent": equivalent,
                     "review": review,
                     "invalid": invalid,
-                    "details": evaluated,
+                    # total = evaluated + skipped, so the UI can show "N of M".
+                    "total_measures": len(evaluated) + len(skipped_details),
+                    # evaluated (with verdicts) FIRST, then skipped (with reasons).
+                    "details": evaluated + skipped_details,
                 }
 
             except Exception as e:
@@ -329,15 +353,20 @@ class MetricViewValidatorTool(BaseTool):
             for m in r.get("details", []):
                 mer = m.get("measure_eval_result", {}) or {}
                 status = mer.get("status")
-                reason = (mer.get("similarities") or mer.get("differences") or [])
+                # A skipped measure carries a plain 'reason' string; an evaluated
+                # one carries similarities/differences arrays. Keep one short line
+                # either way (tiny in tokens).
+                if mer.get("reason"):
+                    reason_line = str(mer["reason"])[:160]
+                else:
+                    arr = (mer.get("similarities") or mer.get("differences") or [])
+                    reason_line = arr[0][:120] if arr else ""
                 slim_details.append({
                     "measure_name": m.get("measure_name"),
                     # keep the nested shape the viewer already reads
                     "measure_eval_result": {
                         "status": status,
-                        # one short reason line, truncated — enough for the row,
-                        # tiny in tokens
-                        "similarities": [reason[0][:120]] if reason else [],
+                        "similarities": [reason_line] if reason_line else [],
                     },
                 })
                 # Also surface the actionable ones in the top-level attention list.
@@ -354,6 +383,7 @@ class MetricViewValidatorTool(BaseTool):
                 "equivalent": r.get("equivalent", 0),
                 "review": r.get("review", 0),
                 "invalid": r.get("invalid", 0),
+                "total_measures": r.get("total_measures", r.get("evaluated", 0)),
                 "details": slim_details,
             }
 

@@ -364,8 +364,11 @@ class TestCompactAgentReturn:
     def test_return_size_bounded(self):
         ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
         data = self._run_with_fake_pipeline(ucmv, evaluated)
-        # The whole agent-facing return must be small even for 28 tables.
-        assert len(json.dumps(data)) < 60_000
+        # The whole agent-facing return must stay small even for 28 tables — well
+        # under any model context limit (the old full-detail blob was ~149 KB and
+        # overflowed opus). ~60-70 KB here includes the slim per-measure list +
+        # yaml; the heavy diff/dax/sql arrays stay in the trace.
+        assert len(json.dumps(data)) < 100_000
 
     def test_small_input_still_reports(self):
         ucmv, evaluated = self._big_ucmv(n_tables=1, per_table=2)
@@ -373,3 +376,60 @@ class TestCompactAgentReturn:
         assert data["summary"]["tables_validated"] == 1
         assert data["summary"]["total_evaluated"] == 2
         assert data["attention_truncated"] is False
+
+    def test_skipped_measures_shown_with_reason_but_not_counted(self):
+        """The breakdown lists EVERY measure — evaluated (counted) + skipped
+        (with a reason, not counted). Regression: the tool discarded the skipped
+        bucket, so the UI showed only a few 'validated' measures with no
+        explanation for the rest."""
+        import os as _os
+        ucmv = json.dumps({
+            "yaml": {"fact_x": "version: '1.1'\nmeasures:\n  - name: a\n    expr: MEASURE(b)/MEASURE(c)\n"},
+            "resolved_measures_by_table": {
+                "fact_x": [{"measure_name": "a", "original_name": "A",
+                            "sql_expr": "x", "dax_expression": "y",
+                            "proposed_allocation": "fact_x", "table_name": "fact_x"}]
+            },
+            "measures_with_dax": [],
+        })
+
+        class _MixedPipeline:
+            def __init__(self, *a, **k): pass
+            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+                return {
+                    "evaluated": [
+                        {"measure_name": "a", "measure_eval_result": {"status": "EQUIVALENT",
+                                                                      "similarities": ["match"]}},
+                    ],
+                    "skipped": [
+                        {"measure_eval": "simple", "measure_name": "total_sales"},
+                        {"measure_eval": "simple", "measure_name": "total_cost"},
+                        {"measure_eval": "unmatched", "measure_name": "weird_ref"},
+                    ],
+                }
+
+        tool = MetricViewValidatorTool()
+        with patch(
+            "src.engines.crewai.tools.custom.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+            _MixedPipeline,
+        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
+           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
+           patch.object(_os.path, "exists", return_value=False):
+            data = json.loads(tool._run(ucmv_output=ucmv))
+
+        tbl = data["per_table_summary"]["fact_x"]
+        # counts reflect ONLY the evaluated measure
+        assert tbl["evaluated"] == 1
+        assert tbl["equivalent"] == 1
+        # total_measures = evaluated + skipped
+        assert tbl["total_measures"] == 4
+        # details list ALL four measures
+        assert len(tbl["details"]) == 4
+        statuses = {d["measure_name"]: d["measure_eval_result"]["status"] for d in tbl["details"]}
+        assert statuses["a"] == "EQUIVALENT"
+        assert statuses["total_sales"] == "skipped"
+        assert statuses["weird_ref"] == "skipped"
+        # skipped rows carry a human reason
+        skipped_row = next(d for d in tbl["details"] if d["measure_name"] == "weird_ref")
+        assert skipped_row["measure_eval_result"]["similarities"]  # non-empty reason

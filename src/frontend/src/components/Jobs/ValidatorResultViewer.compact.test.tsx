@@ -19,11 +19,15 @@ const COMPACT = {
   },
   per_table_summary: {
     C_Banner: {
-      evaluated: 5, valid: 0, equivalent: 5, review: 0, invalid: 0,
-      // slim per-measure list drives the expandable breakdown
+      evaluated: 2, valid: 0, equivalent: 2, review: 0, invalid: 0,
+      total_measures: 4,
+      // slim per-measure list drives the expandable breakdown: evaluated ones
+      // with a verdict + skipped ones with a reason (not counted).
       details: [
         { measure_name: 'sales', measure_eval_result: { status: 'EQUIVALENT', similarities: ['SUM match'] } },
         { measure_name: 'margin', measure_eval_result: { status: 'EQUIVALENT', similarities: [] } },
+        { measure_name: 'trivial_sum', measure_eval_result: { status: 'skipped', similarities: ['Trivial aggregation — nothing to compare (correct by construction)'] } },
+        { measure_name: 'orphan', measure_eval_result: { status: 'skipped', similarities: ['No source DAX measure to compare against'] } },
       ],
     },
     fact_pe004: { evaluated: 2, valid: 0, equivalent: 0, review: 1, invalid: 1 },
@@ -69,6 +73,19 @@ describe('ValidatorResultViewer — compact shape', () => {
     expect(screen.getByText('margin')).toBeInTheDocument();
     // status chip shown for the equivalent measures
     expect(screen.getAllByText('EQUIVALENT').length).toBeGreaterThan(0);
+  });
+
+  it('shows skipped measures with a reason in the breakdown (not counted)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(<ValidatorResultViewer result={COMPACT} />);
+    await userEvent.click(screen.getByText('C_Banner'));
+    // The two skipped measures appear alongside the evaluated ones...
+    expect(screen.getByText('trivial_sum')).toBeInTheDocument();
+    expect(screen.getByText('orphan')).toBeInTheDocument();
+    // ...with a 'skipped' chip and a human reason.
+    expect(screen.getAllByText('skipped').length).toBe(2);
+    expect(screen.getByText(/Trivial aggregation/i)).toBeInTheDocument();
+    expect(screen.getByText(/No source DAX measure/i)).toBeInTheDocument();
   });
 
   it('shows YAML download controls when the compact result carries yaml', () => {
