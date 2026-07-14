@@ -351,9 +351,13 @@ class MetricViewValidatorTool(BaseTool):
             # Only measures needing human attention (REVIEW/INVALID), capped.
             "attention": attention[:_ATTENTION_CAP],
             "attention_truncated": attention_truncated,
-            # Full per-measure details and the generated YAML are persisted to the
-            # execution trace / DB — not returned here to keep the agent's context
-            # within model limits.
+            # The generated YAML IS included — it's small (~11 KB even for 28
+            # views) and the UI needs it for the 1:1 metric-view downloads. It was
+            # NOT the source of the context overflow; the per-measure `details`
+            # (~110 KB) were, and those stay stripped (only `attention` +
+            # `per_table_summary` counts represent them). Full per-measure detail
+            # remains queryable in the execution trace.
+            "yaml": yaml_tables,
             "full_detail_in_trace": True,
         }
 
