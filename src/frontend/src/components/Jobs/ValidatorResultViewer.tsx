@@ -47,6 +47,8 @@ interface ValidatorPerTable {
   equivalent?: number;
   review?: number;
   invalid?: number;
+  // Total measures in the view = evaluated + skipped (shown as "N of M").
+  total_measures?: number;
   measures?: number;
   base?: number;
   dax?: number;
@@ -368,7 +370,9 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
           {tableEntries.map(({ name, data, status, stat }) => {
             const evaluated = data.evaluated || 0;
             const valid = (data.valid || 0) + (data.equivalent || 0);
-            const measures = stat?.translated || data.measures || 0;
+            // Prefer the validator's total_measures (evaluated + skipped) so the
+            // "Measures" column shows the full denominator, not just evaluated.
+            const measures = data.total_measures || stat?.translated || data.measures || 0;
             const untranslatable = stat?.untranslatable || data.untranslatable || 0;
 
             return (
@@ -454,8 +458,11 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
                               {data.details.map((d, i) => {
                                 const mStatus = d.measure_eval_result?.status || d.measure_eval || 'unknown';
                                 const isGood = mStatus === 'VALID' || mStatus === 'EQUIVALENT' || mStatus === 'simple';
+                                // 'skipped' = not compared (trivial aggregation or no
+                                // source DAX). Neutral grey — NOT a pass or a failure.
+                                const isSkipped = mStatus === 'skipped';
                                 return (
-                                  <TableRow key={i}>
+                                  <TableRow key={i} sx={isSkipped ? { opacity: 0.7 } : undefined}>
                                     <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
                                       {d.measure_name || '—'}
                                     </TableCell>
@@ -463,8 +470,8 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
                                       <Chip
                                         size="small"
                                         label={mStatus}
-                                        color={isGood ? 'success' : mStatus === 'REVIEW' ? 'warning' : mStatus === 'matched' ? 'info' : 'default'}
-                                        variant="outlined"
+                                        color={isSkipped ? 'default' : isGood ? 'success' : mStatus === 'REVIEW' ? 'warning' : mStatus === 'matched' ? 'info' : 'default'}
+                                        variant={isSkipped ? 'filled' : 'outlined'}
                                         sx={{ fontSize: '0.65rem' }}
                                       />
                                     </TableCell>
