@@ -52,4 +52,18 @@ describe('ValidatorResultViewer — compact shape', () => {
     // The trace notice is shown (full detail lives in the trace)
     expect(screen.getByText(/full per-measure detail/i)).toBeInTheDocument();
   });
+
+  it('shows YAML download controls when the compact result carries yaml', () => {
+    // The validator return keeps `yaml` (small, ~11 KB) so the 1:1 metric-view
+    // downloads work even though per-measure details were stripped.
+    const withYaml = {
+      ...COMPACT,
+      yaml: {
+        C_Banner: "version: '1.1'\nsource: cat.sch.c_banner\n",
+        fact_pe004: "version: '1.1'\nsource: cat.sch.fact_pe004\n",
+      },
+    };
+    render(<ValidatorResultViewer result={withYaml} />);
+    expect(screen.getByText(/Download All YAMLs/i)).toBeInTheDocument();
+  });
 });

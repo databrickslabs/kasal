@@ -330,7 +330,7 @@ class TestCompactAgentReturn:
         return json.dumps({"yaml": yaml, "resolved_measures_by_table": rmbt,
                            "measures_with_dax": []}), evaluated
 
-    def test_return_is_compact_and_has_no_full_yaml(self):
+    def test_return_is_compact_but_keeps_yaml(self):
         ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
         data = self._run_with_fake_pipeline(ucmv, evaluated)
         # Summary totals present and correct.
@@ -339,7 +339,9 @@ class TestCompactAgentReturn:
         # Compact shape: per_table_summary (counts only), no full per-measure details.
         assert "per_table_summary" in data
         assert "per_table" not in data
-        assert "yaml" not in data              # the biggest contributor is dropped
+        # yaml IS kept (small ~11 KB; the UI needs it for 1:1 downloads). The
+        # heavy per-measure `details` (~110 KB) are what stay stripped.
+        assert "yaml" in data and len(data["yaml"]) == 28
         sample = next(iter(data["per_table_summary"].values()))
         assert set(sample) == {"evaluated", "valid", "equivalent", "review", "invalid"}
         assert "details" not in sample
