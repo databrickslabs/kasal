@@ -319,23 +319,43 @@ class MetricViewValidatorTool(BaseTool):
             if 'skipped' in r or 'error' in r:
                 per_table_summary[table_key] = r
                 continue
+            # SLIM per-measure list for the UI's expandable breakdown: measure
+            # name + status (+ a short reason), NOT the heavy differences/
+            # similarities/dax/sql comparison arrays. This restores the "every
+            # measure and whether it's EQUIVALENT/VALID/…" dropdown at ~11 KB for
+            # 28 tables (the full comparison text was the ~110 KB overflow and
+            # stays in the trace only).
+            slim_details = []
+            for m in r.get("details", []):
+                mer = m.get("measure_eval_result", {}) or {}
+                status = mer.get("status")
+                reason = (mer.get("similarities") or mer.get("differences") or [])
+                slim_details.append({
+                    "measure_name": m.get("measure_name"),
+                    # keep the nested shape the viewer already reads
+                    "measure_eval_result": {
+                        "status": status,
+                        # one short reason line, truncated — enough for the row,
+                        # tiny in tokens
+                        "similarities": [reason[0][:120]] if reason else [],
+                    },
+                })
+                # Also surface the actionable ones in the top-level attention list.
+                if status in ("REVIEW", "INVALID"):
+                    attention.append({
+                        "table": table_key,
+                        "measure_name": m.get("measure_name"),
+                        "status": status,
+                        "detail": mer,
+                    })
             per_table_summary[table_key] = {
                 "evaluated": r.get("evaluated", 0),
                 "valid": r.get("valid", 0),
                 "equivalent": r.get("equivalent", 0),
                 "review": r.get("review", 0),
                 "invalid": r.get("invalid", 0),
+                "details": slim_details,
             }
-            # Collect only the actionable (REVIEW / INVALID) measures.
-            for m in r.get("details", []):
-                status = (m.get("measure_eval_result", {}) or {}).get("status")
-                if status in ("REVIEW", "INVALID"):
-                    attention.append({
-                        "table": table_key,
-                        "measure_name": m.get("measure_name"),
-                        "status": status,
-                        "detail": m.get("measure_eval_result"),
-                    })
 
         attention_truncated = len(attention) > _ATTENTION_CAP
         output = {

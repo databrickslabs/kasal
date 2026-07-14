@@ -179,13 +179,18 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
     if (result.per_table && Object.keys(result.per_table).length > 0) {
       return result.per_table;
     }
+    // Compact shape: per_table_summary now carries a SLIM per-measure `details`
+    // list (name + status + short reason) for the expandable breakdown. If a
+    // table has no details (older payloads), fall back to folding in the
+    // top-level `attention` (REVIEW/INVALID) so those still expand.
     const base: Record<string, ValidatorPerTable> = {
       ...(result.per_table_summary || {}),
     };
     for (const item of result.attention || []) {
       const tbl = item.table;
       if (!tbl || !base[tbl]) continue;
-      if (!base[tbl].details) base[tbl] = { ...base[tbl], details: [] };
+      if (base[tbl].details && base[tbl].details!.length > 0) continue; // already have slim details
+      base[tbl] = { ...base[tbl], details: [] };
       base[tbl].details!.push({
         measure_name: item.measure_name,
         measure_eval_result: item.detail || { status: item.status },

@@ -343,8 +343,15 @@ class TestCompactAgentReturn:
         # heavy per-measure `details` (~110 KB) are what stay stripped.
         assert "yaml" in data and len(data["yaml"]) == 28
         sample = next(iter(data["per_table_summary"].values()))
-        assert set(sample) == {"evaluated", "valid", "equivalent", "review", "invalid"}
-        assert "details" not in sample
+        # counts + a SLIM per-measure details list (name + status + short reason)
+        assert {"evaluated", "valid", "equivalent", "review", "invalid", "details"} <= set(sample)
+        # every measure is listed (breakdown dropdown), each with a status but
+        # WITHOUT the heavy differences/dax/sql comparison arrays.
+        assert len(sample["details"]) == 5
+        d0 = sample["details"][0]
+        assert "measure_name" in d0 and d0["measure_eval_result"].get("status")
+        assert "differences" not in d0["measure_eval_result"]
+        assert "dax" not in d0["measure_eval_result"]
 
     def test_attention_only_review_invalid_and_capped(self):
         ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
