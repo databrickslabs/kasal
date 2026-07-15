@@ -147,3 +147,35 @@ carrying full DAX, vs. those emitted.
 > handoff — DAX may not be arriving") is **resolved** — the DAX arrives. The real
 > top lever is Prior-Year time-intelligence + the dependency cascade, both
 > downstream.
+
+## SECOND diagnostic (deeper) — most of the gap is EXTRACTION, not translation
+
+Fixing the dependency cascade (Fix #2, shipped) recovered the "received but
+dropped" measures. But a per-measure received-vs-GT reconciliation shows that is
+the *small* slice. The dominant gap is measures that **never reached the
+generator at all** (verified with fuzzy KPI-stem matching, so it is not a naming
+artifact):
+
+| Table | GT total | never received | received (anywhere) |
+|-------|---------:|---------------:|--------------------:|
+| ft_qse | 51 | **48** | 3 |
+| ft_bpc003 | 151 | **109** | 42 |
+| ft_bpc003_losses | 57 | **52** | 5 |
+| fact_pe002 | 44 | **37** | 7 |
+| fact_sc | 11 | **11** | 0 |
+
+The generator *did* receive measures for these tables (FT_QSE got 28 with full
+DAX), but they are **largely different measures than GT's** — extraction/config-gen
+pulled a smaller, different subset than the dashboard actually uses. `fact_iom06`
+isn't even a distinct allocation; its composite ratios (`DIF %`, `OTD %`) never
+arrived. `FT_BPC003` received 60 measures, **0** of them the `DIVIDE([measure])`
+composites GT has.
+
+**Reframing (corrects the priority order above):**
+- **The dominant lever is EXTRACTION (was ranked #6, lowest).** ~90% of the gap
+  is measures never extracted — no transpiler fix can recover them. This is the
+  next thing to chase.
+- The transpiler-side fixes (#1 PY time-intel, #3 MEASURE-composition, #4
+  join-alias filter) only address the ~10% "received but dropped" slice. Still
+  worth doing, but they are not what closes the coverage gap.
+- Fix #2 (dependency cascade, shipped) was the largest *transpiler-side* win.
