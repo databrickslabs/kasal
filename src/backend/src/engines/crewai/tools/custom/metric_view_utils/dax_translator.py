@@ -28,6 +28,7 @@ class DaxTranslator:
         self._dim_alias_map: dict[str, str] = cfg.get('dim_alias_map', {})
         self._cwc_filter_column: str = cfg.get('cwc_filter_column', '')
         self._fact_joins: list[dict] = []
+        self._source_col_map: dict[str, str] = {}
         self._patterns: list[tuple[str, Callable, Callable]] = []
         self._register_patterns()
 
@@ -66,6 +67,15 @@ class DaxTranslator:
     def set_fact_joins(self, fact_joins: list[dict]):
         """Set current fact joins for cross-table resolution."""
         self._fact_joins = fact_joins
+
+    def set_source_col_map(self, col_map: dict[str, str]):
+        """Map a same-fact physical column to the source SELECT's OUTPUT column.
+
+        A pre-aggregating source (``SUM(kbi_value) AS value``) exposes the column
+        under its alias (``value``), so a measure that would emit ``source.kbi_value``
+        must instead emit ``source.value`` to resolve. Keyed physical→alias.
+        """
+        self._source_col_map = col_map or {}
 
     # In llm_first mode, only these patterns run as the regex fast-path (Step 3.8):
     # display-artifact rejects + the trivial single-column, high-confidence
@@ -911,7 +921,10 @@ class DaxTranslator:
     def _resolve_table_alias(self, table_ref: str, table_key: str) -> tuple[str, dict]:
         """Resolve DAX table reference to SQL alias and column map."""
         if table_ref == table_key or table_ref not in self._fact_join_map_cfg:
-            return 'source', {}
+            # Same-fact reference → alias 'source', remapping physical column names
+            # to the source SELECT's output aliases (e.g. kbi_value → value) so
+            # SUM(source.col) references a column the source actually exposes.
+            return 'source', self._source_col_map
         fj = self._fact_join_map_cfg[table_ref]
         alias = _sanitize_alias(fj.get('alias', table_ref.lower()))
         col_map = fj.get('column_map', {})
