@@ -86,6 +86,28 @@ Rules for this shape (apply to BOTH forms):
 - `DIVIDE(num, den)` → `num / NULLIF(den, 0)`. Wrap a multi-term numerator/denominator in parentheses.
 - **Every term MUST appear.** Emitting only the first block (`SUM(...) FILTER(...)` for `a` alone) when the DAX says `a - b` is WRONG and will be rejected — the `- b` term is silently missing and the number is wrong. This applies whether or not there is a DIVIDE.
 - Discard slicer-scalar vars that don't feed the result (e.g. `var std = CALCULATE([F_Start_date])`, `var etd = CALCULATE([F_End_date])`).
+- **Filters on a JOINED dimension keep the join alias — do NOT rewrite to `source.`.**
+  When the `FILTER` targets a *different table* than the aggregated fact —
+  `SUMX(fact_pe002, fact_pe002[epl]), FILTER(Dim_wkctr, Dim_wkctr[bic_cwc_type] IN {…})`
+  — the aggregate is on `source` but the predicate is on the joined dim, so the
+  filter column stays qualified by the dim's join alias:
+
+  ```
+  DAX:  var a = CALCULATE(SUMX(fact_pe002, fact_pe002[epl]),
+                          FILTER(Dim_wkctr, Dim_wkctr[bic_cwc_type] IN {"APET","CAN","PET"}))
+        var b = CALCULATE(SUMX(fact_pe002, fact_pe002[paid_hours]),
+                          FILTER(Dim_wkctr, Dim_wkctr[bic_cwc_type] IN {"APET","CAN","PET"}))
+        return DIVIDE(a, b)
+
+  YAML: expr: |
+          SUM(source.epl)        FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET','CAN','PET'))
+          / NULLIF(
+              SUM(source.paid_hours) FILTER (WHERE dim_wkctr.bic_cwc_type IN ('APET','CAN','PET')),
+              0)
+  ```
+
+  The join to `dim_wkctr` must exist in the view's `joins:`. `Dim_wkctr[CWC_Filter]=1`
+  → `dim_wkctr.cwc_filter = 1` likewise. Only fact-column filters map to `source.`.
 
 ## 3. CALCULATE with FILTER
 
