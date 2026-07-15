@@ -178,6 +178,20 @@ def process_table(
     source_table = table_info.source_table
 
     # ── Step 1: Auto-generate base measures from MQuery SUM columns ───
+    # Build a DAX-column → source-output-column map so BOTH base and derived
+    # measures reference the column the emitted `source:` SELECT actually exposes.
+    # A pre-aggregating source (SELECT ..., SUM(kbi_value) AS value ...) outputs
+    # the column under its ALIAS (`name`='value'), not the inner physical name
+    # (`source_col`='kbi_value'). Referencing source_col then fails (column not
+    # found). We normalize measures to the alias the source emits.
+    _src_alias_map: dict[str, str] = {}
+    for _c in table_info.aggregate_columns:
+        _sc = _c.get('source_col')
+        _nm = _c.get('name')
+        if _sc and _nm and _sc != _nm:
+            _src_alias_map[_sc] = _nm       # kbi_value -> value (source output col)
+    ctx.translator.set_source_col_map(_src_alias_map)
+
     base_measures: list[TranslationResult] = []
     base_names: set[str] = set()
     for col in table_info.aggregate_columns:
@@ -185,7 +199,9 @@ def process_table(
         if 'expr' in col:
             expr = col['expr']
         else:
-            expr = f"SUM(source.{col['source_col']})"
+            # Reference the source's OUTPUT column (`name`), which is what the
+            # emitted source SELECT exposes — not the inner `source_col`.
+            expr = f"SUM(source.{name})"
         base_measures.append(TranslationResult(
             measure_name=name,
             original_name=name,
