@@ -634,6 +634,95 @@ def _extract_switch_branches(dax: str) -> list[dict]:
     return branches
 
 
+def _calculate_branch_bodies(text: str) -> list[str]:
+    """Return the balanced inner text of every top-level ``CALCULATE( ... )``."""
+    bodies: list[str] = []
+    for m in re.finditer(r'CALCULATE\s*\(', text, re.IGNORECASE):
+        start = m.end()
+        depth = 1
+        pos = start
+        while pos < len(text) and depth > 0:
+            if text[pos] == '(':
+                depth += 1
+            elif text[pos] == ')':
+                depth -= 1
+                if depth == 0:
+                    bodies.append(text[start:pos])
+                    break
+            pos += 1
+    return bodies
+
+
+def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
+    """Detect plant/company geo-selector SWITCH measures and emit BOTH branches.
+
+    Shape (no SELECTEDVALUE — that's the parameterized case handled elsewhere):
+        SWITCH(TRUE(),
+               Or(ISFILTERED(dim[plant_desc]), HASONEVALUE(dim[plant])),
+               CALCULATE(<agg>, … creg_type="Plant"),      -- branch A (plant)
+               CALCULATE(<agg>, … creg_type="Company Code"))-- branch B (company)
+
+    A UC metric view has no slicer context, so the single PBI SWITCH measure must
+    become TWO static measures — ``plant_<base>`` and ``company_<base>`` — matching
+    the ground truth. Each branch is resolved to real SQL via the same
+    ``_resolve_referenced_measure_dax`` used for measure-refs, so downstream
+    dependents (which reference the parent by name) still resolve, and the second
+    (company) variant — previously dropped entirely — is now emitted.
+
+    Returns ``{table: [ {name, raw_expr, comment}, ... ]}`` list-format entries
+    (real SQL, not skeletons), mergeable into ``switch_decompositions``.
+    """
+    out: dict[str, list[dict]] = defaultdict(list)
+
+    for m in measures:
+        dax = m.get("expression", "") or ""
+        name = m.get("original_name") or m.get("measure_name", "")
+        table = m.get("table_name", "") or m.get("proposed_allocation", "")
+        if not dax or not name:
+            continue
+        du = dax.upper()
+        # geo-selector: SWITCH(TRUE(), …) whose condition tests plant filter state
+        if not re.search(r'SWITCH\s*\(\s*TRUE\s*\(\s*\)', du):
+            continue
+        if not re.search(r'ISFILTERED|HASONEVALUE', du):
+            continue
+        # Strip var…return scaffolding so the branch CALCULATEs are the ones found.
+        body = dax
+        _ret = re.search(r'\breturn\b\s*(.+)$', body, re.IGNORECASE | re.DOTALL)
+        if _ret and re.match(r'(?is)^\s*var\s+', body):
+            body = _ret.group(1)
+        branches = _calculate_branch_bodies(body)
+        if len(branches) < 2:
+            continue  # need at least a plant + company branch
+
+        # Base measure name → strip a leading Plant_Comp / Plant_Company token and
+        # the geo word, so `Plant_Comp KBI_Value_Actual` → `kbi_value_actual`.
+        base = re.sub(r'(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*', '', name).strip()
+        base_snake = to_snake_case(base) or to_snake_case(name)
+
+        emitted = []
+        for label, branch in (('plant', branches[0]), ('company', branches[1])):
+            resolved = _resolve_referenced_measure_dax(f"CALCULATE({branch})")
+            if not resolved:
+                continue
+            base_expr = resolved["base_expr"]
+            filters = resolved["base_filters"]
+            sql = base_expr
+            if filters:
+                sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"
+            emitted.append({
+                "name": f"{label}_{base_snake}",
+                "raw_expr": sql,
+                "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
+            })
+        # Only emit when BOTH branches resolved — a half-decomposition would be
+        # worse than leaving the parent measure to the normal path.
+        if len(emitted) == 2:
+            out[table].extend(emitted)
+
+    return dict(out)
+
+
 def derive_filter_sets(
     measures: list[dict],
     switch_decomps: dict[str, list[dict]],
@@ -1707,6 +1796,12 @@ def build_config(
 
     # 4. filter_sets
     switch_decomps = derive_switch_decompositions(measures)
+    # Merge geo-selector (plant/company) SWITCH decompositions — these emit BOTH
+    # branches as real-SQL measures (plant_<base> + company_<base>), recovering
+    # the company variant the single PBI SWITCH measure would otherwise collapse.
+    geo_decomps = derive_geo_switch_decompositions(measures)
+    for _tbl, _entries in geo_decomps.items():
+        switch_decomps.setdefault(_tbl, []).extend(_entries)
     config["filter_sets"] = derive_filter_sets(measures, switch_decomps)
 
     # 5. switch_decompositions
