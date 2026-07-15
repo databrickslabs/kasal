@@ -125,6 +125,39 @@ carrying full DAX, vs. those emitted.
   config-gen selected a subset). That is upstream of the generator, distinct from
   both the handoff and the transpiler.
 
+## Fix session outcome (2026-07-15) — what shipped vs. what's rescoped
+
+Worked the landscape piece by piece; the diagnostics repeatedly shrank or
+rescoped the "quick fixes":
+
+- **Fix #2 (dependency cascade) — SHIPPED.** `_resolve_referenced_measure_dax`
+  now strips `var…return` scaffolding and handles `SUMX(FILTER(fact,pred),col)`,
+  so geo-selector base measures resolve to their plant branch. Recovers the ~15
+  cascade-dropped FT_QSE dependents + the FT_BPC003/losses PY-scaffolded bases.
+  Largest transpiler-side win. 1224 tests green.
+- **Fix #3 (MEASURE-composition) — NOT APPLICABLE as scoped.** The composite
+  ratios GT has (ft_bpc003 ×99, iom06) were **never received** by the generator
+  (0 DIVIDE([measure]) composites in FT_BPC003's 60 received) — an extraction
+  matter, not a transpiler one. No code change.
+- **Fix #6 (extraction subset) — DIAGNOSED, plant branch recovered via #2;
+  company-variant is a scoped follow-up** (see the SWITCH-decomposition section).
+- **Fix #4 (join-alias FILTER) — RESCOPED, deferred.** The real `fact_pe002`
+  misses are **not** simple join-alias filters: e.g. `Total_SLE_Actual` is a
+  **cross-fact** composite (`fact_pe002` + `fact_scorecard_Actuals_wc`), with a
+  `var wct = {…}` value list applied via `FILTER(Dim_wkctr, … in wct)` to both,
+  then `DIVIDE(a+a1, b+b1)`. This needs var-list resolution + cross-fact
+  aggregation + join-alias filtering + multi-term ratio — a feature, not a fix.
+- **Fix #1 (Prior-Year) — customer-input-gated.** Correctly skipped-with-TODO
+  today; the calendar `date_py` workaround is documented in the corpus but the
+  PY calendar column is a customer input.
+- **Fix #5 (iom35 curation) — lowest priority, cosmetic** (over-broad, not wrong).
+
+**Honest takeaway:** the coverage gap is real but the *fixable-in-Kasal-quickly*
+portion was Fix #2 (shipped). The rest is either genuinely large features
+(cross-fact composites, geo-SWITCH double-emission) or customer-input-gated (PY
+calendar, correct source tables) — each deserving its own scoped effort, not a
+superficial patch.
+
 ## Next actions (by leverage) — REVISED after the diagnostic
 
 1. **Prior-Year time-intelligence** (largest single bucket, spans FT_BPC003,
