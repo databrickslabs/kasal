@@ -68,10 +68,20 @@ measures each side · miss-cause = shape of the GT complex measures Kasal omitte
    Kasal emitted the 21 base measures but every measure whose filter references a
    join alias was dropped. Distinct from cause #1 (source-column filters).
 
-**One anomaly:** `fact_iom35` is *inverted* — 159 Kasal measures vs 22 GT, only 3
-name-matched. Kasal massively over-generated here (or GT is a curated subset).
-Not a coverage gap — a precision/naming question worth a look (are the 159 valid,
-or is it emitting noise?).
+**Anomaly resolved — `fact_iom35` over-generation is NOT noise.** 159 Kasal vs 22
+GT, but investigated: no duplicate names, only 20 same-body redundancies. The 159
+= **92 base measures** (every aggregatable source column — uncurated dumping, vs
+GT's curated 22) + **67 complex**, and the complex set is a **variant
+cross-product**: `_py` ×22, `_pct` ×21, `_pct_py` ×20 (each KPI emitted in
+base/PY/%/%+PY forms). The strict "3 name-matched" was a **naming artifact** —
+GT `case_fill_rate_pct_new` vs Kasal `kbi_case_fill_rate_pct`. On a fuzzy
+KPI-stem match, **16 of 21 GT KPIs are present** under different names; the 5
+missing (`OTIF %`, `OT %`, `DIFOT+ %`, on-time/total deliveries) are the same
+MEASURE()-composition gap. So iom35 is the **inverse failure mode**: over-broad
+(correct KPIs buried in ~130 extra variants + raw columns), not under-emitting.
+Fix is **curation** (emit the used variants, not the full cross-product) —
+distinct from the coverage fixes below, and lower priority (correct-but-noisy
+beats missing).
 
 ## Assessment
 
