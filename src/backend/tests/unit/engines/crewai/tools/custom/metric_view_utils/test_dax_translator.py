@@ -157,6 +157,57 @@ class TestDivideThirdArg:
         assert den == 'NULLIF(SUM(b),0)'  # inner comma not mistaken for arg separator
 
 
+class TestMeasureRefRatioFilters:
+    """Bug B: DIVIDE(CALCULATE([M], pred_num), CALCULATE([M], pred_den)) must
+    preserve DIFFERENT per-side filter predicates — not collapse to num==denom.
+
+    Two sub-bugs were fixed:
+      1. parenthesized predicates `([col] in {...})` failed the anchored regex
+         → filters parsed as [] → both sides identical.
+      2. single-line `var num = ... var denom = ... return DIVIDE(...)` parsing
+         captured only the first var → expression collapsed.
+    """
+
+    def _t(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        t = DaxTranslator()
+        t._measure_resolutions = {
+            'Base_KBI': {'base_expr': 'SUM(source.kbi_value)',
+                         'base_filters': ["bic_chversion = '0000'"]},
+        }
+        return t
+
+    def test_var_chain_ratio_keeps_distinct_filters(self):
+        t = self._t()
+        dax = ('var num = CALCULATE([Base_KBI], (FT_QSE[bic_csubkbi] in {"A1","A2"})) '
+               'var denom = CALCULATE([Base_KBI], (FT_QSE[bic_csubkbi] in {"B1","B2"})) '
+               'return DIVIDE(num, denom)')
+        m = t._match_divide_calculate_measure_ref(dax, 'x')
+        sql, _ = t._translate_divide_calculate_measure_ref(m, dax, 'FT_QSE')
+        assert sql is not None
+        assert "IN ('A1', 'A2')" in sql   # numerator predicate preserved
+        assert "IN ('B1', 'B2')" in sql   # denominator predicate preserved
+        # and the two sides are NOT identical (no 1.0 collapse)
+        import re
+        num, den = re.split(r'/\s*NULLIF', sql, maxsplit=1)
+        assert num.strip() != den.strip()
+
+    def test_inline_divide_ratio_keeps_distinct_filters(self):
+        t = self._t()
+        dax = ('DIVIDE(CALCULATE([Base_KBI], FT_QSE[bic_csubkbi] in {"A1","A2"}),'
+               'CALCULATE([Base_KBI], FT_QSE[bic_csubkbi] in {"B1","B2"}))')
+        m = t._match_divide_calculate_measure_ref(dax, 'x')
+        sql, _ = t._translate_divide_calculate_measure_ref(m, dax, 'FT_QSE')
+        assert sql is not None
+        assert "IN ('A1', 'A2')" in sql and "IN ('B1', 'B2')" in sql
+
+    def test_parenthesized_predicate_parsed(self):
+        # The core sub-bug: a wrapped `(table[col] in {...})` predicate must parse.
+        t = self._t()
+        parsed = t._parse_calculate_filters('(FT_QSE[bic_csubkbi] in {"A1","A2"})', 'FT_QSE')
+        assert parsed == ["source.bic_csubkbi IN ('A1', 'A2')"]
+
+
 class TestPrecleanDax:
     """PROP-6: strip DAX comments + normalize inline BLANK() before translation."""
 

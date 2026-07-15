@@ -47,9 +47,11 @@ YAML: expr: |
 
 `DIVIDE` returns the alternate result (3rd argument, default BLANK) when the denominator is zero. Map to `CASE WHEN`.
 
-### 2b. Var-chain DIVIDE with filtered aggregates (INLINE every var)
+### 2b. Var-chain filtered aggregates — INLINE every var (ratio OR plain arithmetic)
 
-The most common real-world ratio: `var`s each bind a `CALCULATE(SUMX(FILTER(fact, <pred>), fact[col]))`, and the `RETURN` is `DIVIDE(<num expr>, <den expr>)` where the operands do arithmetic on those vars (e.g. `b - c`). **Inline each var's aggregate into the DIVIDE — never emit a bare `a`/`b`/`c` identifier, and never drop the denominator.**
+The most common real-world shape: `var`s each bind a `CALCULATE(SUMX(FILTER(fact, <pred>), fact[col]))` (or `CALCULATE([Measure], <pred>)`), and the `RETURN` combines those vars with arithmetic. This covers **both** a `DIVIDE(...)` ratio **and** a plain `a - b` / `a + b` / `(a + b) / c` expression with no DIVIDE at all. **Inline each var's aggregate into the RETURN expression — never emit a bare `a`/`b`/`c` identifier, and never drop a term.**
+
+**Ratio form (`return DIVIDE(a, b - c)`):**
 
 ```
 DAX:  var a = CALCULATE(SUMX(FILTER(fact_pe005, fact_pe005[matl_group] IN {"1003005","1003014"}), fact_pe005[target_value]))
@@ -65,12 +67,25 @@ YAML: expr: |
           0)
 ```
 
-Rules for this shape:
+**Plain-arithmetic form (`return a - b`, NO DIVIDE) — this is just as common and MUST keep every term:**
+
+```
+DAX:  var std = CALCULATE([F_Start_date])
+      var a = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" && FT_BPC003[fis_code_parent] IN {"DCD2","DHF2"}), FT_BPC003[value]))
+      var b = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" && FT_BPC003[fis_code_parent] IN {"DHHX"}), FT_BPC003[value]))
+      return a - b
+
+YAML: expr: |
+        SUM(source.value) FILTER (WHERE bic_chversion = '0000' AND fis_code_parent IN ('DCD2','DHF2'))
+      - SUM(source.value) FILTER (WHERE bic_chversion = '0000' AND fis_code_parent IN ('DHHX'))
+```
+
+Rules for this shape (apply to BOTH forms):
 - Each `var = CALCULATE(SUMX(FILTER(fact, <pred>), fact[col]))` → `SUM(source.col) FILTER (WHERE <pred>)`.
-- Substitute every var into the `DIVIDE` numerator/denominator expression, preserving the arithmetic (`b - c` stays a subtraction of two filtered SUMs).
+- Substitute **every** var into the `RETURN` expression, preserving **all** arithmetic operators (`a - b` stays a subtraction of two filtered SUMs; `a + b` a sum; `(a+b)/c` the full ratio).
 - `DIVIDE(num, den)` → `num / NULLIF(den, 0)`. Wrap a multi-term numerator/denominator in parentheses.
-- **The denominator (`b - c` here) MUST appear** — a bare numerator (`SUM(target_value) FILTER(...)`) with no `/ NULLIF(...)` is WRONG and will be rejected.
-- Discard slicer-scalar vars that don't feed the result (e.g. `var std = CALCULATE([F_Start_date])`).
+- **Every term MUST appear.** Emitting only the first block (`SUM(...) FILTER(...)` for `a` alone) when the DAX says `a - b` is WRONG and will be rejected — the `- b` term is silently missing and the number is wrong. This applies whether or not there is a DIVIDE.
+- Discard slicer-scalar vars that don't feed the result (e.g. `var std = CALCULATE([F_Start_date])`, `var etd = CALCULATE([F_End_date])`).
 
 ## 3. CALCULATE with FILTER
 

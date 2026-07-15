@@ -775,19 +775,31 @@ class DaxTranslator:
             if not sql:
                 return None, f'Cannot resolve [{r["ref_name"]}]'
             result = result[:r['start']] + f'({sql})' + result[r['end']:]
+        # Split `var NAME = VALUE ... var NAME2 = VALUE2 ... return EXPR` into a
+        # var map + the return expression. Must work whether the vars are on
+        # separate lines OR collapsed onto one line (they are single-line after
+        # measure-ref substitution above) — a line-based split captures only the
+        # first var and drops the rest, collapsing num==denom on ratios.
         var_map: dict[str, str] = {}
-        expr_lines: list[str] = []
-        for line in result.split('\n'):
-            s = line.strip()
-            vm = re.match(r'var\s+(\w+)\s*=\s*(.+)', s, re.IGNORECASE)
-            if vm and vm.group(2).strip():
-                var_map[vm.group(1)] = vm.group(2).strip()
-                continue
-            if s.lower().startswith('return '):
-                s = s[7:]
-            if s:
-                expr_lines.append(s)
-        expr = ' '.join(expr_lines).strip()
+        # Tokenize on `var <name> =` and `return` boundaries across the whole text.
+        boundary = re.compile(r'\bvar\s+(\w+)\s*=\s*|\breturn\b', re.IGNORECASE)
+        marks = list(boundary.finditer(result))
+        expr = ''
+        if marks:
+            for i, mk in enumerate(marks):
+                seg_start = mk.end()
+                seg_end = marks[i + 1].start() if i + 1 < len(marks) else len(result)
+                segment = result[seg_start:seg_end].strip()
+                if mk.group(1):  # a `var NAME =` boundary
+                    if segment:
+                        var_map[mk.group(1)] = segment
+                else:  # the `return` boundary
+                    expr = segment
+            if not expr:
+                # No explicit return — the last var IS the result (rare).
+                expr = list(var_map.values())[-1] if var_map else result.strip()
+        else:
+            expr = result.strip()
         for vn in sorted(var_map.keys(), key=len, reverse=True):
             expr = re.sub(rf'\b{re.escape(vn)}\b', var_map[vn], expr)
         expr = self._strip_bare_calculate(expr)
@@ -1087,6 +1099,26 @@ class DaxTranslator:
     def _translate_single_condition(self, cond: str, table_key: str) -> str | None:
         """Translate a single DAX condition to SQL."""
         cond = cond.strip()
+
+        # Strip a single layer of wrapping parens: CALCULATE([M], (table[col] in {...}))
+        # delivers the predicate parenthesized, and every branch below uses an
+        # anchored re.match — a leading '(' makes them ALL miss, silently dropping
+        # the filter (the num==denom collapse bug on measure-ref ratios). Only
+        # strip when the parens wrap the WHOLE condition (balanced at the ends).
+        while len(cond) >= 2 and cond[0] == '(' and cond[-1] == ')':
+            depth = 0
+            wraps_all = True
+            for i, ch in enumerate(cond):
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth == 0 and i != len(cond) - 1:
+                        wraps_all = False
+                        break
+            if not wraps_all:
+                break
+            cond = cond[1:-1].strip()
 
         # Handle OR conditions (|| → OR): split, translate each side, join with OR
         if '||' in cond:
