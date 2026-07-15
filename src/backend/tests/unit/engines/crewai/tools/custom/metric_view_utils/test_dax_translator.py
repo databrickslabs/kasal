@@ -296,7 +296,7 @@ class TestSameMeasureRatioKeepsPerSideFilters:
 
 class TestDateWindowScaffoldingStrip:
     """Strip slicer-scalar var std/etd = CALCULATE([F_Start_date]) so the ratio
-    underneath becomes translatable (was blocking ~36 CCHBC ratios)."""
+    underneath becomes translatable (was blocking ~36 reference ratios)."""
 
     def _P(self, dax):
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator

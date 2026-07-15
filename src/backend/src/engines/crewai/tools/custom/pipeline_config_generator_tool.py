@@ -586,7 +586,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         ``table_name`` is the PBI table it is *defined* on — often a measure-holder
         table with no data. Left as-is, ``proposed_allocation`` points at the
         holder, the holder is skipped as a non-fact, and the measure's KPI is
-        dropped (this is what happened to 11/12 CCHBC tables). Here we resolve the
+        dropped (this is what happened to 11/12 tables in the reference set). Here we resolve the
         fact table(s) the measure's DAX actually references and emit
         ``all_allocations`` so the UCMV pipeline places the measure on every fact
         it draws from. ``proposed_allocation`` is kept (set to the primary
