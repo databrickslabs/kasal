@@ -1,5 +1,49 @@
 # CCHBC UCMV Output Analysis — post-fix run (2026-07-15)
 
+> ## ⚠️ SUPERSEDED — read this first (update 2026-07-15, later run)
+>
+> **The root cause below ("~90% upstream extraction gap / needs CCHBC domain
+> input") was WRONG. The real cause was a missing `report_id`.**
+>
+> The run analysed in the body of this doc was executed **without a `report_id`**.
+> Without it, config-gen falls back to a degraded measure source that returns
+> **bare column names** (`bic_csubkbi`) instead of the measure bodies — which is
+> why so many measures looked like un-translatable "bare columns."
+>
+> Re-running **with `report_id` set** (Pipeline Config Generator → "Optional:
+> Report Metadata" accordion; for the local test model the report is
+> `SC - Total Supply Chain No RLS`) changed everything, verified from the run's
+> own `measures_with_dax` + `resolved_measures_by_table` artifact:
+>
+> | metric | without report_id | **with report_id** |
+> |---|---|---|
+> | measures with real-formula DAX | ~93 / 470 | **454 / 470** |
+> | DAX-translated (26 views) | 82 | **228** |
+> | real-aggregate measures emitted | ~16 | **~298** |
+> | untranslatable | 109 | **32** |
+>
+> Crucially, KPIs I had labelled **"needs CCHBC domain input, unfixable by
+> tooling" — the `fis_code` cost-code lists, KBI codes — were in the DAX all
+> along.** Example now generated correctly (matches ground truth):
+> `supply_chain_cost_excl_env_fees_taxes_bpc = SUM(kbi_value) FILTER (WHERE
+> bic_chversion='0000' AND fis_code IN ('DCC3','DCC1','DCCE',...))`.
+> `FT_BPC003` went from 1 measure → **61 correct filtered KPIs**.
+>
+> **Action items from this correction:**
+> 1. `report_id` must be standard/required in the flow — running without it
+>    silently halves output quality (it's currently an optional hidden accordion).
+> 2. Residual real bugs (small, well-defined) in the good run: ~10 malformed
+>    (`/ NULLIF(, 0)` empty ratio on pe002 CIP/EPL/OPL; leaked cross-table DAX
+>    ref `EDGE_Measure[...]` on QSE DPMO), plus 43 TODO (mostly the
+>    `F_Start_date`/`F_End_date` date-window family + prior-year + distinctcount).
+> 3. The per-measure semantic-correctness verdict (good run vs ground truth) is
+>    appended at the bottom of this doc under "Good-run verification".
+>
+> Everything BELOW this box describes the earlier (no-report_id) run and is kept
+> for history — treat its "upstream/unfixable" conclusions as OUTDATED.
+
+---
+
 _Detailed cross-check of the new `~/Downloads/export/` UCMVs (26 files) against the
 original 470 PBI measures (`original_dax_measures.json`) and the human ground-truth
 (`tsc_ucm (1)/`, 16 comparable tables). Four parallel reviewers, one per table
@@ -188,3 +232,78 @@ P3 scan-path flag · dim/measure collision drop · `#(lf)`/doubled-quote normali
 5. Dimension-table UCMV guard (don't emit a view whose only measures are bare cols).
 6. `dim_wkctr` CONCAT key; unaliased-aggregate guard; percentage-column SUM guard;
    drop `*_test` junk measures.
+
+---
+
+# Good-run verification (report_id set) — per-measure correctness
+
+_Added 2026-07-15. Two parallel reviewers compared the good run's generated SQL
+against the original PBI DAX (now full, via report_id) and the human ground truth.
+265 measures reviewed across 14 fact tables._
+
+## Combined verdict
+
+| Verdict | Count | % |
+|---|---|---|
+| CORRECT | 188 | 71% |
+| CLOSE (minor: NULLIF/COALESCE/×100/sign) | 8 | 3% |
+| WRONG | 37 | 14% |
+| TODO / untranslatable | 32 | 12% |
+
+**Trust is bimodal and the boundary is crisp:**
+- ✅ **Self-contained `SUM(FILTER(version + code-list))` measures translate faithfully.**
+  Every base additive measure (~90 `SUM(COALESCE(col,0))`) is perfect, and the
+  filtered cost KPIs reproduce their `fis_code` / `func_area` / KBI code-lists
+  **exactly** vs ground truth (FT_BPC003 core, both losses tables, CO012_REBP,
+  iom05 base, pe004). This is the big win the report_id unlocked.
+- ❌ **Anything requiring cross-measure resolution, prior-year, percentages, or a
+  compound DIVIDE denominator is unreliable** (~45% failure rate on non-trivial
+  derived measures).
+
+Per-table: iom05 STRONG, iom06 STRONG(shallow), pe004 STRONG, CO012_REBP STRONG,
+losses/losses_RE STRONG, BPC003 MIXED(strong core), CO012_Actuals MIXED, HR_A MIXED,
+HR_B MIXED, pe002 MIXED, pe005 WEAK, scorecard_BP WEAK, FT_QSE WEAK.
+
+## Residual defects — ranked by blast radius (all fixable, well-defined)
+
+1. **Unresolved DAX measure-to-measure references → `TODO: fill SQL expression`
+   (30 measures — the single highest-value fix).** The engine doesn't resolve
+   `[MeasureName]` refs to other measures. Two culprits dominate:
+   `[Plant_Comp KBI_Value_Actual]/[_BP]` (23 QSE measures) and
+   `[AVG_KBI_Div_Factor]` (6 HR_A + 1 HR_B). GT shows both are trivially
+   resolvable — the KBI base is `SUM(kbi_value) FILTER (version + creg_type)`, and
+   the AVG factor is the constant `1` (`/ NULLIF(1,0)`). Fixing these two moves
+   FT_QSE from WEAK to strong and clears most of the 32 TODOs.
+2. **Prior-year (`SAMEPERIODLASTYEAR`) silently dropped (16 measures WRONG).** PY
+   measures emit SQL byte-identical to their current-period sibling — a dangerous
+   *silent* error (runs, wrong number). BPC003 (13) + losses (3). Must either model
+   the time-shift or emit a TODO instead of a wrong value.
+3. **Dropped ratio denominator → silent bare numerator (pe005 all 7 yields, +others).**
+   `DIVIDE(a, b-c)` emits only numerator `a`; the `(issued-received)` denominator +
+   plant/comp exclusions vanish. Most dangerous class — valid SQL, wrong number.
+4. **Dangling DAX var tokens / empty `/ NULLIF(, 0)` (pe002 CIP/EPL/OPL, scorecard,
+   QSE).** Multi-var DAX whose RETURN combines vars (`a+a1`, `res1+…`) emits bare
+   `a`/`b` as undefined identifiers, or collapses to an empty ratio — invalid SQL.
+5. **UNRESOLVED `[val]` + scrambled DIVIDE→NULLIF arg-mapping (all 4 scorecard_BP
+   ratios).** Quoted-table+bracket refs (`'fact_x'[val]`) not recognized; raw
+   SUMX/FILTER left in place; DIVIDE's 3 args mis-slotted into NULLIF.
+6. **Malformed 3-arg NULLIF (QSE ratios).** DAX `DIVIDE(n,d,0)`'s alternate-result
+   3rd arg leaks in as `NULLIF(d, 0, 0)` — invalid SQL. The alt_result must be
+   consumed, not forwarded to NULLIF.
+7. **Missing ×100 on percentage measures (HR turnover/absence-rate, 3 CLOSE).** GT
+   multiplies by 100 + sets `format: percentage`; both omitted.
+8. **View-level exclusion filters not emitted.** The comp_code exclusions
+   (`0403/0550/0307`) that GT applies are ABSENT from generated iom05 (no `filter:`
+   block at all). CFR ratios therefore include companies GT excludes → wrong totals.
+   (Reviewer initially over-credited these as correct; verified false.)
+9. **Minor:** DAX comment leakage (`-- Denominator` into SQL), `BLANK()` emitted
+   literally, missing COALESCE guards on subtractions, cross-fact refs to un-joined
+   tables (HR_A → CO012), dropped subtraction terms (BPC003 Cost-to-Supply PY).
+
+## Bottom line
+The report_id fix took the tool from "mostly broken" to **"~71% correct, with a
+sharply-defined ~30% residual of well-understood, fixable defects."** The residual
+is NOT domain-knowledge gaps (those turned out to be in the DAX) — it's a short list
+of transpiler features: measure-ref resolution (#1), prior-year (#2), compound-DIVIDE
+denominators (#3-4), and a few SQL-syntax bugs (#5-6). #1 alone is the highest
+leverage. This is a tractable engineering backlog, not a fundamental limitation.
