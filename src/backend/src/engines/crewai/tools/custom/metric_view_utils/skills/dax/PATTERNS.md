@@ -47,6 +47,31 @@ YAML: expr: |
 
 `DIVIDE` returns the alternate result (3rd argument, default BLANK) when the denominator is zero. Map to `CASE WHEN`.
 
+### 2b. Var-chain DIVIDE with filtered aggregates (INLINE every var)
+
+The most common real-world ratio: `var`s each bind a `CALCULATE(SUMX(FILTER(fact, <pred>), fact[col]))`, and the `RETURN` is `DIVIDE(<num expr>, <den expr>)` where the operands do arithmetic on those vars (e.g. `b - c`). **Inline each var's aggregate into the DIVIDE — never emit a bare `a`/`b`/`c` identifier, and never drop the denominator.**
+
+```
+DAX:  var a = CALCULATE(SUMX(FILTER(fact_pe005, fact_pe005[matl_group] IN {"1003005","1003014"}), fact_pe005[target_value]))
+      var b = CALCULATE(SUMX(FILTER(fact_pe005, fact_pe005[matl_group] IN {"1003005","1003014"}), fact_pe005[issued_value]))
+      var c = CALCULATE(SUMX(FILTER(fact_pe005, fact_pe005[matl_group] IN {"1003005","1003014"}), fact_pe005[received_value]))
+      return DIVIDE(a, b - c)
+
+YAML: expr: |
+        SUM(source.target_value)   FILTER (WHERE source.matl_group IN ('1003005','1003014'))
+        / NULLIF(
+            SUM(source.issued_value)   FILTER (WHERE source.matl_group IN ('1003005','1003014'))
+          - SUM(source.received_value) FILTER (WHERE source.matl_group IN ('1003005','1003014')),
+          0)
+```
+
+Rules for this shape:
+- Each `var = CALCULATE(SUMX(FILTER(fact, <pred>), fact[col]))` → `SUM(source.col) FILTER (WHERE <pred>)`.
+- Substitute every var into the `DIVIDE` numerator/denominator expression, preserving the arithmetic (`b - c` stays a subtraction of two filtered SUMs).
+- `DIVIDE(num, den)` → `num / NULLIF(den, 0)`. Wrap a multi-term numerator/denominator in parentheses.
+- **The denominator (`b - c` here) MUST appear** — a bare numerator (`SUM(target_value) FILTER(...)`) with no `/ NULLIF(...)` is WRONG and will be rejected.
+- Discard slicer-scalar vars that don't feed the result (e.g. `var std = CALCULATE([F_Start_date])`).
+
 ## 3. CALCULATE with FILTER
 
 ```
