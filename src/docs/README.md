@@ -48,7 +48,7 @@ Understand why Kasal is built the way it is.
 
 - [Why Kasal](./WHY_KASAL.md): the problems Kasal solves and who it's for on Databricks.
 - [Solution architecture](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
-- [PBI / UCMV roadmap and architecture assessment](./README_ARCHITECTURE_PBI_UCMV_ROADMAP.md): assessment of the Power BI to UCMV/Genie tooling with a prioritized next-release plan.
+- [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of how a Power BI model becomes UC Metric Views — extraction, config generation, the M-query path, and the LLM-first DAX translation with skill files, with the code location of each stage.
 - [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md): the restructure of `src/engines/crewai` into path, kernel, and infra packages, with the dead-code audit and migration log.
 
 ## Power BI to Unity Catalog migration
