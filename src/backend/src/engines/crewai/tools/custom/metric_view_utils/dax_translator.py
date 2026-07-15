@@ -446,7 +446,12 @@ class DaxTranslator:
                 'table': m.group(1), 'condition': m.group(2),
                 'filter_table': m.group(1), 'column': m.group(4),
             }
-        return {'reason': 'SAMEPERIODLASTYEAR (prior-year, requires window function)'}
+        return {'reason': (
+            'TODO prior-year (SAMEPERIODLASTYEAR): needs a calendar self-join or '
+            'LAG window over the period dim (e.g. join c_dim_calendar on date_py, '
+            'or LAG(value) OVER (ORDER BY fiscper) for a 1-period offset). Supply '
+            'the calendar date_py column to enable.'
+        )}
 
     def _match_selectedvalue_switch(self, dax: str, name: str) -> dict | None:
         dax_up = dax.upper()

@@ -384,7 +384,7 @@ class MetricViewPipeline:
             filter_warnings=self._filter_warnings,
             limitations=self._limitations,
         )
-        return process_table(
+        spec = process_table(
             table_key, table_info, dax_measures, ctx,
             build_switch_measure_fn=self._build_switch_measure,
             resolve_var_chain_fn=MetricViewPipeline._resolve_var_chain,
@@ -392,6 +392,24 @@ class MetricViewPipeline:
             clean_unresolved_vars_fn=MetricViewPipeline._clean_unresolved_vars,
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
+        self._sanitize_spec_measures(spec)
+        return spec
+
+    def _sanitize_spec_measures(self, spec) -> None:
+        """P5 correctness batch: apply the SQL measure sanitizer to every measure
+        in the spec (no-op divisions, self-divisions, NULL-safe base aggregates)."""
+        from .sql_measure_sanitizer import sanitize_measure_sql
+        for m in getattr(spec, 'measures', None) or []:
+            is_base = getattr(m, 'category', '') == 'base'
+            new_sql, note = sanitize_measure_sql(m.sql_expr, is_base=is_base)
+            m.sql_expr = new_sql
+            if note:
+                # Preserve the original reason but append the sanitizer marker so
+                # reviewers see why a ratio collapsed. Non-fatal — value still emits.
+                _reason = getattr(m, 'skip_reason', '') or ''
+                if 'self-division' not in _reason:
+                    m.skip_reason = (f'{_reason} [{note}]').strip()
+                self._filter_warnings.append(f'{spec.fact_table_key}: {m.measure_name}: {note}')
 
     # ── Delegates to artifact_cascade module ─────────────────────────
 
@@ -718,10 +736,28 @@ class MetricViewPipeline:
             limitations=self._limitations)
         return results
 
+    @staticmethod
+    def _resolve_placeholders_in_spec(spec, catalog: str, schema: str) -> None:
+        """Substitute any surviving {catalog}/{schema} tokens in a spec's join
+        sources + source table. Idempotent, mutates in place. Belt-and-suspenders
+        net at the single emit choke point where catalog/schema are known —
+        covers API/self-extract mode and externally-supplied configs, not just the
+        config-gen path (which also resolves them at build_config time)."""
+        def _sub(val):
+            if isinstance(val, str) and ('{catalog}' in val or '{schema}' in val):
+                return val.replace('{catalog}', catalog).replace('{schema}', schema)
+            return val
+        if getattr(spec, 'source_table', None):
+            spec.source_table = _sub(spec.source_table)
+        for j in getattr(spec, 'joins', None) or []:
+            if 'source' in j:
+                j['source'] = _sub(j['source'])
+
     def emit_all_yaml(self, catalog: str = 'main', schema: str = 'default') -> dict[str, str]:
         """Emit YAML for all specs. Returns dict[table_key -> yaml_string]."""
         result = {}
         for table_key, spec in self.all_specs.items():
+            self._resolve_placeholders_in_spec(spec, catalog, schema)
             dim_meta = self._dimension_metadata.get(table_key, {})
             meas_meta = self._measure_metadata.get(table_key, {})
             dim_order = self.metadata_gen.get_dimension_order(table_key)
@@ -742,5 +778,6 @@ class MetricViewPipeline:
         """Emit deploy SQL for all specs. Returns dict[table_key -> sql_string]."""
         result = {}
         for table_key, spec in self.all_specs.items():
+            self._resolve_placeholders_in_spec(spec, catalog, schema)
             result[table_key] = emit_deploy_sql(spec, catalog=catalog, schema=schema)
         return result

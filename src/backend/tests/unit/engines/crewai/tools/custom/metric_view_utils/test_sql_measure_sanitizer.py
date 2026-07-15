@@ -1,0 +1,69 @@
+"""Tests for the P5 SQL measure sanitizer."""
+from src.engines.crewai.tools.custom.metric_view_utils.sql_measure_sanitizer import (
+    sanitize_measure_sql, strip_nullif_one, detect_self_division, coalesce_wrap_base,
+)
+
+
+class TestStripNullifOne:
+    def test_removes_noop_division(self):
+        assert strip_nullif_one("SUM(source.x) / NULLIF(1, 0)") == "SUM(source.x)"
+
+    def test_leaves_real_denominator(self):
+        s = "SUM(source.a) / NULLIF(SUM(source.b), 0)"
+        assert strip_nullif_one(s) == s
+
+    def test_none_safe(self):
+        assert strip_nullif_one(None) is None
+
+
+class TestSelfDivision:
+    def test_detects_self_division(self):
+        assert detect_self_division("SUM(source.x) / NULLIF(SUM(source.x), 0)")
+
+    def test_detects_when_numerator_parenthesized(self):
+        assert detect_self_division("(SUM(source.x)) / NULLIF(SUM(source.x), 0)")
+
+    def test_real_ratio_not_flagged(self):
+        assert not detect_self_division("SUM(source.a) / NULLIF(SUM(source.b), 0)")
+
+    def test_no_ratio_not_flagged(self):
+        assert not detect_self_division("SUM(source.x)")
+
+
+class TestCoalesceWrap:
+    def test_wraps_bare_sum(self):
+        assert coalesce_wrap_base("SUM(source.sales)") == "SUM(COALESCE(source.sales, 0))"
+
+    def test_skips_already_wrapped(self):
+        s = "SUM(COALESCE(source.sales, 0))"
+        assert coalesce_wrap_base(s) == s
+
+    def test_wraps_multiple(self):
+        out = coalesce_wrap_base("SUM(source.a) - SUM(source.b)")
+        assert out == "SUM(COALESCE(source.a, 0)) - SUM(COALESCE(source.b, 0))"
+
+
+class TestSanitizeMeasureSql:
+    def test_base_measure_coalesce_and_noop_strip(self):
+        sql, note = sanitize_measure_sql("SUM(source.sales) / NULLIF(1, 0)", is_base=True)
+        assert sql == "SUM(COALESCE(source.sales, 0))"
+        assert note is None
+
+    def test_self_division_flagged(self):
+        sql, note = sanitize_measure_sql(
+            "SUM(source.x) / NULLIF(SUM(source.x), 0)", is_base=False)
+        assert note and "self-division" in note
+
+    def test_non_base_not_coalesced(self):
+        sql, _ = sanitize_measure_sql(
+            "SUM(source.a) / NULLIF(SUM(source.b), 0)", is_base=False)
+        assert "COALESCE" not in sql
+
+    def test_none_safe(self):
+        assert sanitize_measure_sql(None, is_base=True) == (None, None)
+
+    def test_idempotent(self):
+        s = "SUM(source.sales)"
+        once, _ = sanitize_measure_sql(s, is_base=True)
+        twice, _ = sanitize_measure_sql(once, is_base=True)
+        assert once == twice

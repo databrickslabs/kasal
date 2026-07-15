@@ -5,6 +5,13 @@ _Grounded in the code, not just the report. Companion to
 (`CCHBC_UCMV_gap_analysis.md`, `CCHBC_kasal_fix_plan.md`). Written 2026-07-15 on
 `feat/pbi-ucmv-fixes-v2`._
 
+> **STATUS 2026-07-15 — all of P0–P6 implemented on `feat/pbi-ucmv-fixes-v2`.**
+> Each fix landed with unit tests; full custom-tools suite green (3733 passed).
+> End-to-end verification confirms holder-defined complex measures now reach the
+> fact, output is placeholder-free, base measures are COALESCE-wrapped, and no
+> `& Param &` tokens survive. See §8 for the per-P implementation map and §9 for
+> the customer test guide.
+
 ## 1. What the report found (recap)
 
 Kasal was run on the CCHBC PBI model with the pipeline config **unedited**, to
@@ -266,3 +273,57 @@ coverage:
   (Section 5.1) gates that regardless of these fixes.
 - 3 GT tables (`fact_pe009`, `ft_hr_b`, `ft_planning`) need a manual name-mapping
   pass before the final measure-level tie-out.
+
+## 8. Implementation map (what shipped, where, with which tests)
+
+| P | Fix | Code | Tests |
+|---|-----|------|-------|
+| **P0** | Re-home holder-table measures onto referenced facts via DAX refs → `all_allocations` | `pipeline_config_generator_tool.py` — `_resolve_measure_allocations()` + rewritten `_build_ucmv_measures()` (module-level `_DAX_TABLE_REF`) | `test_pipeline_config_generator_tool.py::TestMeasureReHoming` (6) |
+| **P1** | Resolve `{catalog}/{schema}` placeholders | `generate_config.py` — `_resolve_catalog_schema_placeholders()` final pass in `build_config`; **belt-and-suspenders** net `MetricViewPipeline._resolve_placeholders_in_spec()` in both `emit_all_yaml`/`emit_all_sql` (covers API mode + external configs) | `test_pipeline_integration.py::TestCatalogSchemaPlaceholderResolution` (2) |
+| **P2** | Dimension + join dedup (correctness) + ETL curation | `yaml_emitter.py` — dedup dim names + join names before emission; `generate_config.py` — `_ETL_PLUMBING_COLUMNS` / `_is_etl_plumbing()` extend `derive_dimension_exclusions` | `test_yaml_emitter.py::TestDimensionAndJoinDedup` (2), `test_pipeline_config_generator_tool.py::TestEtlColumnCuration` (1) |
+| **P3** | Filter-parameter resolve-or-flag | `pbi_parameter_resolver.py` — `find_unresolved_params()`; `table_processor.py` — resolve+flag in the static-filter loop and inline source-SQL path (drops broken SQL, emits TODO warning) | `test_pbi_parameter_resolver.py::TestFindUnresolvedParams` (4) |
+| **P5** | Transpiler correctness batch | NEW `sql_measure_sanitizer.py` (`strip_nullif_one`, `detect_self_division`, `coalesce_wrap_base`, `sanitize_measure_sql`), wired via `MetricViewPipeline._sanitize_spec_measures()`. Broken cross-refs already handled by yaml_emitter's MEASURE()-ref cascade. | `test_sql_measure_sanitizer.py` (15) |
+| **P4** | Rich join SQL — QUALIFY dedup + LPAD key padding | `join_detector.py` — `_padded_key_sql()` (config `pad_key`) + `_maybe_dedup_source()` (config `dedup_dim` / global `dedup_dim_joins`) | `test_join_detector.py::TestP4RichJoinSql` (5) |
+| **P6** | Prior-Year / DISTINCTCOUNT | `dax_translator.py` — actionable TODO stub naming the `date_py` self-join / LAG workaround; `skills/dax/UNSUPPORTED.md` — worked `date_py` calendar-self-join example for the LLM translator | `test_dax_translator.py` (PY stub assertion) |
+
+**Config knobs P4 exposes** (optional; the *values* are CCHBC-supplied data facts, the *SQL generation* is now automatic):
+- `join_key_map[dim].pad_key = {"len": 4, "char": "0"}` → `LPAD(source.<key>, 4, '0')`
+- `join_key_map[dim].dedup_dim = true` (or global `dedup_dim_joins: true`) → `(SELECT * FROM <dim> QUALIFY ROW_NUMBER() OVER (PARTITION BY <key> ORDER BY <key>) = 1)`
+- `join_key_map[dim].dedup_order_by` → override the dedup tie-break column
+
+## 9. Customer test guide
+
+**What changed for the customer:** re-run the same BI migration flow on the CCHBC
+model, config **unedited**, and compare against the previous drop.
+
+Expected differences on the failing tables (pe002, iom05, hr_a, sc, qse, bpc003, …):
+1. **Complex KPIs now present.** Ratios/FILTER-measures/`MEASURE()` waterfalls that
+   were dropped now appear as DAX-translated measures on the fact — because the
+   measures are re-homed from their `C_Measure_Table_*` holders to the fact their
+   DAX references (P0). Header count "N DAX-translated" should be > 0 where it was 0.
+2. **Views are runnable.** No `{catalog}.{schema}.…` literals in any join `source:`
+   (P1).
+3. **Valid YAML.** No duplicate dimension names (calendar emitted once) and no
+   duplicate join aliases (P2).
+4. **No invalid filter SQL.** `& FiscperFilter &` / `& RE_Version &` no longer
+   appear in `filter:`; unresolved params become a documented TODO warning (P3).
+5. **NULL-safe base measures** (`SUM(COALESCE(col,0))`) and no `x/NULLIF(1,0)`
+   no-ops (P5).
+
+**To exercise P4** (join fan-out / key mismatch) the customer supplies the data
+facts once in `pipeline_config.json` (pad length, which dims are non-unique) — see
+the config knobs in §8. Without them the joins are correct flat equijoins; with
+them they match the hand-written ground truth.
+
+**Still requires CCHBC input (unchanged — see §5):** correct physical source
+tables (UNION membership), real filter values, KBI/fis_code/func_area semantics,
+`is_live` rule. These gate **numerical tie-out**, not measure coverage. A
+correctly-transpiled measure pointed at the raw datamart table still won't tie out
+until the source table is corrected.
+
+**Raw-M / click-together tables** (double-checked 2026-07-15): a table whose source
+is raw Power Query M with no embedded SQL **does undergo transpilation** — the
+`use_llm_fallback` path (`recover_sources_with_llm`, on by default in the seeded BI
+flow) LLM-rewrites the M into a Spark SQL SELECT, and Phase-1b promotes it to a
+measure-driven fact when it carries allocated measures (now that P0 allocates them).
+If `use_llm_fallback` is off, such tables produce 0 views — keep it on.

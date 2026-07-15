@@ -129,3 +129,6 @@ class TestSameperiodlastyear:
             'fact_test')
         assert result.is_translatable is False
         assert 'SAMEPERIODLASTYEAR' in result.skip_reason
+        # P6: the stub must be actionable (names the date_py / window workaround)
+        assert 'TODO' in result.skip_reason
+        assert 'date_py' in result.skip_reason or 'window' in result.skip_reason.lower()

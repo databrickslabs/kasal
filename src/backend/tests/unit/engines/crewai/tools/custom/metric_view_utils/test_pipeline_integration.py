@@ -483,3 +483,34 @@ class TestMeasureDrivenFacts:
         pipe.run()
         y = pipe.emit_all_yaml(catalog='main', schema='m')
         assert 'T' not in y
+
+
+class TestCatalogSchemaPlaceholderResolution:
+    """P1: no {catalog}/{schema} literal may survive into emitted join sources."""
+
+    def _spec(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            source_table="{catalog}.{schema}.fact_x",
+            joins=[
+                {"name": "dim_calendar", "source": "{catalog}.{schema}.c_dim_calendar",
+                 "on": "source.d = dim_calendar.d"},
+                {"name": "dim_real", "source": "dc_prod.idor.ca_dim_plant",
+                 "on": "source.p = dim_real.p"},
+            ],
+        )
+
+    def test_placeholders_substituted(self):
+        spec = self._spec()
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
+        assert spec.source_table == "dc_prod.idor.fact_x"
+        assert spec.joins[0]["source"] == "dc_prod.idor.c_dim_calendar"
+        # already-resolved sources untouched
+        assert spec.joins[1]["source"] == "dc_prod.idor.ca_dim_plant"
+
+    def test_idempotent(self):
+        spec = self._spec()
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
+        assert "{catalog}" not in spec.joins[0]["source"]
+        assert "{schema}" not in spec.joins[0]["source"]

@@ -18,6 +18,12 @@ from src.engines.crewai.tools.custom.metric_view_utils.utils import run_async as
 
 logger = logging.getLogger(__name__)
 
+# DAX ``Table[Column]`` reference (the table half is what we allocate on).
+# Matches bare ``Table[Col]`` and quoted ``'Table Name'[Col]``. Module-level
+# because BaseTool is a Pydantic model — a class attribute would be treated as
+# a model field.
+_DAX_TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
+
 
 class PipelineConfigGeneratorSchema(BaseModel):
     """Input schema — drives the Kasal UI form."""
@@ -369,7 +375,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             # UCMV.measures_json / UCMV.mquery_json. Without this the UCMV crew
             # receives only `proposed_config` → empty mapping → 0 views, even
             # though config extraction (measures + DAX) fully succeeded.
-            ucmv_measures = self._build_ucmv_measures(measures)
+            ucmv_measures = self._build_ucmv_measures(
+                measures, admin_tables=admin_tables, config=config)
             ucmv_mquery = self._build_ucmv_mquery(admin_tables)
 
             # ── Measure usage ranking (reviewer prioritization) ──────────────
@@ -441,7 +448,50 @@ class PipelineConfigGeneratorTool(BaseTool):
             return json.dumps({"error": str(e)})
 
     @staticmethod
-    def _build_ucmv_measures(measures: list[dict]) -> list[dict]:
+    def _resolve_measure_allocations(
+        dax: str,
+        home_table: str,
+        fact_tables: set,
+        table_lookup: dict,
+    ) -> list[dict]:
+        """Resolve which FACT tables a measure's DAX draws its columns from.
+
+        PBI measures are defined on a *home* table (``table_name``) which — in the
+        common measure-holder pattern (``C_Measure_Table_*``) — is NOT a fact and
+        carries no data. The measure's real inputs are the ``Table[Column]``
+        references in its DAX. This walks those references, keeps the ones that
+        resolve to a known fact table, and returns them as ``all_allocations``:
+            [{'table': <fact>, 'role': 'primary'|'secondary'}, ...]
+        The first referenced fact is primary; the rest secondary. Returns ``[]``
+        when nothing resolves (caller then falls back to the home table).
+        """
+        if not dax:
+            return []
+        seen: list = []
+        for m in _DAX_TABLE_REF.finditer(dax):
+            raw = (m.group(1) or m.group(2) or "").strip()
+            if not raw:
+                continue
+            # Resolve the referenced name to a canonical fact-table key.
+            resolved = table_lookup.get(raw) or table_lookup.get(raw.lower())
+            if resolved and resolved in fact_tables and resolved not in seen:
+                seen.append(resolved)
+        # A measure whose home table is itself a fact stays primary on its home.
+        if home_table in fact_tables and home_table not in seen:
+            seen.insert(0, home_table)
+        if not seen:
+            return []
+        return [
+            {"table": t, "role": "primary" if i == 0 else "secondary"}
+            for i, t in enumerate(seen)
+        ]
+
+    @staticmethod
+    def _build_ucmv_measures(
+        measures: list[dict],
+        admin_tables: dict = None,
+        config: dict = None,
+    ) -> list[dict]:
         """Convert config-gen measures into the UCMV `measures_json` shape.
 
         Config-gen stores measures as
@@ -451,8 +501,32 @@ class PipelineConfigGeneratorTool(BaseTool):
             {measure_name, original_name, dax_expression, proposed_allocation}
         — identical to what UCMV's own PBI-API path emits. Normalise here so the
         handoff is a drop-in for JSON mode.
+
+        **Measure re-homing (the fix for holder-pattern models):** a measure's
+        ``table_name`` is the PBI table it is *defined* on — often a measure-holder
+        table with no data. Left as-is, ``proposed_allocation`` points at the
+        holder, the holder is skipped as a non-fact, and the measure's KPI is
+        dropped (this is what happened to 11/12 CCHBC tables). Here we resolve the
+        fact table(s) the measure's DAX actually references and emit
+        ``all_allocations`` so the UCMV pipeline places the measure on every fact
+        it draws from. ``proposed_allocation`` is kept (set to the primary
+        allocation) as the single-table fallback for older consumers.
         """
+        # Build the fact-table set + a name→canonical-key lookup so DAX refs
+        # (which use the raw PBI table name) resolve to mquery/admin keys.
+        fact_tables: set = set((config or {}).get("fact_join_map", {}).keys())
+        table_lookup: dict = {}
+        for key in (admin_tables or {}):
+            table_lookup[key] = key
+            table_lookup[key.lower()] = key
+        # fact_join_map keys are authoritative facts even if absent from admin_tables.
+        for key in fact_tables:
+            table_lookup.setdefault(key, key)
+            table_lookup.setdefault(key.lower(), key)
+
         out: list[dict] = []
+        rehomed = 0
+        orphaned = 0
         for m in measures or []:
             if not isinstance(m, dict):
                 continue
@@ -460,19 +534,50 @@ class PipelineConfigGeneratorTool(BaseTool):
             if not name:
                 continue
             dax = m.get("dax_expression") or m.get("expression") or ""
-            allocation = (
+            home_table = (
                 m.get("proposed_allocation")
                 or m.get("table_name")
                 or m.get("table")
+                or ""
+            )
+
+            # Prefer an allocation the measure already carries; otherwise resolve
+            # from the DAX references against the known fact tables.
+            all_allocations = m.get("all_allocations") or []
+            if not all_allocations and fact_tables:
+                all_allocations = PipelineConfigGeneratorTool._resolve_measure_allocations(
+                    dax, home_table, fact_tables, table_lookup)
+                if all_allocations:
+                    primary = all_allocations[0]["table"]
+                    if primary != home_table:
+                        rehomed += 1
+                elif home_table and home_table not in fact_tables:
+                    # DAX referenced no known fact → cannot re-home. Left on its
+                    # home table (base-only). Counted so it is visible, not silent.
+                    orphaned += 1
+
+            allocation = (
+                (all_allocations[0]["table"] if all_allocations else None)
+                or home_table
                 or "__unassigned__"
             )
-            out.append({
+            entry = {
                 "measure_name": name,
                 "original_name": m.get("original_name") or name,
                 "dax_expression": dax,
                 "proposed_allocation": allocation,
                 "table_refs": m.get("table_refs") or [],
-            })
+            }
+            if all_allocations:
+                entry["all_allocations"] = all_allocations
+            out.append(entry)
+
+        if rehomed or orphaned:
+            logger.info(
+                f"[PipelineConfigGen] Measure allocation: {rehomed} re-homed to "
+                f"referenced fact(s) via DAX, {orphaned} left on home table "
+                f"(no known fact referenced)"
+            )
         return out
 
     @staticmethod

@@ -31,12 +31,28 @@ class PbiParameterResolver:
         """RE_Version CASE expression — overridable via config."""
         return self._defaults.get('RE_Version_CASE', self._RE_VERSION_CASE)
 
+    # Unresolved Power BI parameter interpolation, e.g.  " & FiscperFilter & "
+    # or  '${FiscperFilter}' , left over after the known-param resolvers ran.
+    # Emitting these into SQL produces invalid output (the report's pe002 case).
+    _UNRESOLVED_PARAM = re.compile(
+        r"""['"]*\s*&\s*(\w+)\s*&\s*['"]*|'\$\{(\w+)\}'""")
+
     def resolve(self, sql: str) -> str:
         """Apply all PBI parameter resolutions to SQL."""
         sql = self._resolve_fiscper_filter(sql)
         sql = self._resolve_re_version(sql)
         sql = self._resolve_currency_filter(sql)
         return sql
+
+    def find_unresolved_params(self, sql: str) -> list[str]:
+        """Return the names of any PBI parameters still interpolated in ``sql``
+        after ``resolve()``. Empty list means the SQL is parameter-clean."""
+        names: list[str] = []
+        for m in self._UNRESOLVED_PARAM.finditer(sql or ""):
+            name = m.group(1) or m.group(2)
+            if name and name not in names:
+                names.append(name)
+        return names
 
     def _resolve_fiscper_filter(self, sql: str) -> str:
         """Collapse FiscperFilter CASE expressions.

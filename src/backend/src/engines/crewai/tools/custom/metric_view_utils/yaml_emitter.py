@@ -237,13 +237,20 @@ def emit_yaml(spec: MetricViewSpec,
     # Measures that reference dropped join aliases will be caught later.
     if spec.joins:
         _dropped_join_aliases: set[str] = set()
+        _seen_join_names: set[str] = set()
         valid_joins = []
         for j in spec.joins:
             tbl_short = j['source'].split('.')[-1] if '.' in j['source'] else j['source']
             if tbl_short in _KNOWN_MISSING_TABLES:
                 _dropped_join_aliases.add(j['name'])
-            else:
-                valid_joins.append(j)
+                continue
+            # Drop duplicate join names (CORRECTNESS: a repeated join alias is
+            # invalid YAML — e.g. dim_plant emitted twice from two detectors).
+            # Keep the first; later same-name joins are the redundant repeats.
+            if j['name'] in _seen_join_names:
+                continue
+            _seen_join_names.add(j['name'])
+            valid_joins.append(j)
         spec.joins = valid_joins
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
@@ -550,6 +557,23 @@ def emit_yaml(spec: MetricViewSpec,
 
     # Filter out empty/phantom dimensions before emission
     spec.dimensions = [d for d in spec.dimensions if d.get('name') and d.get('expr') and d['expr'] != 'source.']
+
+    # Deduplicate dimensions by name (CORRECTNESS: duplicate dimension names are
+    # invalid UCMV YAML — a metric view rejects repeated dimension names). This
+    # happens when the same calendar/plant table is reached via several join
+    # aliases (e.g. dim_calendar + dim_calendar_dummy + c_dim_calendar all map to
+    # a `date`/`fiscper` dimension). Keep the FIRST occurrence (richest metadata /
+    # earliest join precedence); drop later same-name repeats.
+    if spec.dimensions:
+        _seen_dim_names: set[str] = set()
+        _deduped_dims = []
+        for d in spec.dimensions:
+            nm = d['name']
+            if nm in _seen_dim_names:
+                continue
+            _seen_dim_names.add(nm)
+            _deduped_dims.append(d)
+        spec.dimensions = _deduped_dims
 
     # Dimensions
     if spec.dimensions:
