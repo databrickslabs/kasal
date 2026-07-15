@@ -29,15 +29,22 @@
 > bic_chversion='0000' AND fis_code IN ('DCC3','DCC1','DCCE',...))`.
 > `FT_BPC003` went from 1 measure → **61 correct filtered KPIs**.
 >
+> **Verified correctness (2 parallel reviewers, 265 measures vs original DAX + GT):**
+> **71% CORRECT · 3% CLOSE · 14% WRONG · 12% TODO.** Trust is bimodal — base and
+> single-var `SUM(FILTER(version+code-list))` measures are faithful; the ~30%
+> residual is a well-defined, fixable transpiler backlog (NOT domain-knowledge
+> gaps). Full per-measure breakdown + ranked defect list: "Good-run verification"
+> section at the bottom of this doc.
+>
 > **Action items from this correction:**
 > 1. `report_id` must be standard/required in the flow — running without it
 >    silently halves output quality (it's currently an optional hidden accordion).
-> 2. Residual real bugs (small, well-defined) in the good run: ~10 malformed
->    (`/ NULLIF(, 0)` empty ratio on pe002 CIP/EPL/OPL; leaked cross-table DAX
->    ref `EDGE_Measure[...]` on QSE DPMO), plus 43 TODO (mostly the
->    `F_Start_date`/`F_End_date` date-window family + prior-year + distinctcount).
-> 3. The per-measure semantic-correctness verdict (good run vs ground truth) is
->    appended at the bottom of this doc under "Good-run verification".
+> 2. Highest-leverage residual fix: **DAX measure-to-measure reference resolution**
+>    (`[Plant_Comp KBI_Value_Actual]`, `[AVG_KBI_Div_Factor]`) — 30 measures stuck
+>    on `TODO: fill SQL expression`; both are trivially resolvable. Then prior-year
+>    handling (16 silently-wrong) and the compound-DIVIDE/NULLIF syntax bugs.
+> 3. See the "Pipeline-quality improvement proposals" section (bottom) for the
+>    concrete, code-located fixes we own.
 >
 > Everything BELOW this box describes the earlier (no-report_id) run and is kept
 > for history — treat its "upstream/unfixable" conclusions as OUTDATED.
@@ -307,3 +314,116 @@ is NOT domain-knowledge gaps (those turned out to be in the DAX) — it's a shor
 of transpiler features: measure-ref resolution (#1), prior-year (#2), compound-DIVIDE
 denominators (#3-4), and a few SQL-syntax bugs (#5-6). #1 alone is the highest
 leverage. This is a tractable engineering backlog, not a fundamental limitation.
+
+---
+
+# Pipeline-quality improvement proposals (things WE own)
+
+_Each proposal is code-located and independently shippable with unit tests. Ordered
+by leverage (impact ÷ effort). "Impact" = measures moved from WRONG/TODO → CORRECT
+on the CCHBC good run._
+
+## PROP-1 — Resolve DAX measure-to-measure references (HIGHEST leverage)
+- **Impact:** ~30 measures currently emit the literal `TODO: fill SQL expression`
+  (23 QSE via `[Plant_Comp KBI_Value_Actual]`, 6 HR_A + 1 HR_B via
+  `[AVG_KBI_Div_Factor]`). Fixing this alone moves FT_QSE WEAK→STRONG.
+- **Root cause (found):** `generate_config.py::derive_measure_resolutions` (line
+  647) already finds the referenced measure AND captures its DAX (`matched_dax`),
+  but hard-codes `"base_expr": "TODO: fill SQL expression"` instead of translating
+  it. That literal then flows verbatim into SQL via
+  `dax_translator._resolve_measure_ref` (line 1252) and `_resolve_remaining_dax`
+  (line 1283) — neither of which can do anything but read `base_expr`.
+- **Fix:** in `derive_measure_resolutions`, when the referenced measure's DAX is a
+  self-contained aggregate (`SUMX(FILTER(...))` / `CALCULATE(SUM(...), filter)` /
+  bare `SUM`), transpile it (reuse the same `DaxTranslator` trivial path) and put
+  the resulting `SUM(source.col) [FILTER ...]` into `base_expr` + `base_filters`.
+  For the constant case (`[AVG_KBI_Div_Factor]` → `1`), emit `base_expr: "1"`.
+  Leave the `TODO` only when the referenced DAX is itself untranslatable.
+- **Effort:** medium. **Test:** a measure `CALCULATE([BaseKBI], x=1)` where BaseKBI
+  = `SUMX(FILTER(t, ver="0000"), kbi_value)` resolves to
+  `SUM(source.kbi_value) FILTER (WHERE ver='0000' AND x=1)` — no TODO literal.
+
+## PROP-2 — Fix DIVIDE 3rd-argument → malformed `NULLIF(d, 0, 0)` (cheap, high-confidence)
+- **Impact:** the QSE ratio measures (APMK_Act, Carbon Emission, Total Water Ratio)
+  emit invalid 3-arg NULLIF; any DAX `DIVIDE(n, d, alt)` is affected.
+- **Root cause (found):** `dax_translator._extract_divide_args` (line 1152) splits
+  on the FIRST top-level comma only and returns everything up to the close paren as
+  the denominator — so `DIVIDE(n, d, 0)` yields denominator = `"d, 0"`, which then
+  becomes `NULLIF(d, 0, 0)`.
+- **Fix:** track the SECOND top-level comma; return `(num, den)` = args 1 and 2,
+  discard the `alt_result` (its DAX intent — "return 0 on blank" — is already
+  covered by the `NULLIF(...)=NULL` semantics, or can map to a `COALESCE(..., alt)`
+  wrapper). ~10 lines in one function.
+- **Effort:** small. **Test:** `DIVIDE(SUM(a), SUM(b), 0)` →
+  `SUM(source.a) / NULLIF(SUM(source.b), 0)` (exactly 2 NULLIF args).
+
+## PROP-3 — Prior-year (`SAMEPERIODLASTYEAR`): stop silently emitting the current-period value
+- **Impact:** 16 measures WRONG (BPC003 ×13, losses ×3) — generated SQL is
+  byte-identical to the non-PY sibling; a **silent** wrong number, the most
+  dangerous class. Also CO012 PY.
+- **Root cause (found):** `_match_sameperiodlastyear` (line 423) only matches a
+  narrow `CALCULATE(SUMX(FILTER...), SAMEPERIODLASTYEAR(...))` shape; when the outer
+  wrapper differs, the `SAMEPERIODLASTYEAR(...)` is dropped by later cleanup and the
+  base aggregate survives unshifted.
+- **Fix (two tiers):** (a) SAFE now — when `SAMEPERIODLASTYEAR`/`DATEADD` survives
+  into a measure that otherwise translated, force it **untranslatable with a clear
+  TODO** rather than emitting the unshifted value (never ship a silent wrong
+  number). (b) LATER — real support via a calendar self-join on the `date_py`
+  column (which exists in the dim) or a `LAG(...) OVER (ORDER BY fiscper)` window.
+- **Effort:** tier-a small (a guard); tier-b large. **Test:** a PY measure emits a
+  TODO comment, never SQL identical to its non-PY sibling.
+
+## PROP-4 — Multi-var DAX: inline `var` bodies instead of leaking bare identifiers
+- **Impact:** pe002 (Total_SLE, Asset_Capacity, CIP/EPL/OPL), pe004 (Prod_Perf),
+  pe005 yields — dangling `a`/`b`/`res1` identifiers or empty `/ NULLIF(, 0)`.
+- **Root cause:** `var a = CALCULATE(SUMX(...), FILTER(<other_table>, ...))` chains
+  where the FILTER targets a *different* table defeat `_substitute_vars` /
+  `_translate_calc_sumx_vars_divide` — the var resolves to empty, so the RETURN
+  expression emits the bare var name or an empty ratio.
+- **Fix:** (a) never emit an empty numerator/denominator — if a var didn't resolve,
+  route the whole measure to untranslatable-with-TODO (same "no silent junk" rule as
+  PROP-3); (b) extend var resolution to handle FILTER-over-dim by mapping the dim
+  filter to the joined alias. (a) is the safety net, (b) is the real fix.
+- **Effort:** (a) small; (b) medium. **Test:** an unresolved-var DIVIDE yields a TODO,
+  never `/ NULLIF(, 0)` or a bare `a`.
+
+## PROP-5 — Emit view-level exclusion filters from DAX (correctness, silent-wrong)
+- **Impact:** the comp_code exclusions (`0403/0550/0307`), plant exclusions, and
+  Belarus/Russia/Multon country exclusions that appear in DAX FILTERs are dropped —
+  generated iom05 has **no `filter:` block at all**, so CFR ratios include companies
+  GT excludes. Silent wrong totals.
+- **Fix:** detect recurring `NOT <col> IN {...}` / `<col> <> '...'` exclusion
+  predicates shared across a table's measures and emit them once as the view-level
+  `filter:` (or per-measure FILTER). The values ARE in the DAX now (report_id) — no
+  domain input needed.
+- **Effort:** medium. **Test:** iom05 emits `filter:` excluding comp_code
+  0403/0550/0307.
+
+## PROP-6 — Small hygiene batch (each tiny, unit-testable)
+- **Strip DAX comments** before translation (`-- Denominator` leaked into SQL and
+  would comment out the line). — `dax_translator` pre-clean.
+- **Translate `BLANK()` → NULL** (currently emitted literally).
+- **Missing `×100` on percentage measures** — detect `format: percentage` / rate
+  measures and multiply (HR turnover/absence-rate; matches GT).
+- **COALESCE-guard subtraction operands** — `a - b` on filtered aggregates should be
+  `COALESCE(a,0) - COALESCE(b,0)` (GT convention; avoids NULL propagation).
+
+## PROP-7 — Make `report_id` first-class (process, not code-quality, but #1 operationally)
+- Running without it silently halves quality (proven). Options: (a) surface the
+  field prominently (out of the collapsed accordion) with a "strongly recommended"
+  note; (b) auto-discover the report bound to the dataset (the PBI REST
+  `GET /groups/{ws}/reports` filtered by `datasetId` gives it — that's exactly how we
+  found `SC - Total Supply Chain No RLS`); (c) warn loudly in the migration report
+  when a run completes with no report_id ("measure DAX may be degraded").
+- **Effort:** (a) tiny UI change; (b) small (one API call in config-gen); (c) tiny.
+  **Recommend (b)+(c)** — auto-discovery removes the footgun entirely.
+
+## Suggested sequencing
+1. **PROP-7b/c** (auto-discover report_id + warn) — removes the silent-degradation
+   footgun; tiny effort, protects every future run.
+2. **PROP-1** (measure-ref resolution) — biggest correctness lever (~30 measures).
+3. **PROP-2** (DIVIDE 3-arg) + **PROP-3a/PROP-4a** (never emit silent-wrong / empty)
+   — cheap safety nets that convert dangerous silent errors into honest TODOs.
+4. **PROP-5** (exclusion filters) + **PROP-6** (hygiene batch).
+5. **PROP-3b/PROP-4b** (real prior-year + cross-table var resolution) — largest,
+   lowest urgency; TODO stubs are an acceptable interim.
