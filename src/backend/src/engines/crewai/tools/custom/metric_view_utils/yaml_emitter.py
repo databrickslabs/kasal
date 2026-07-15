@@ -810,6 +810,15 @@ def emit_yaml(spec: MetricViewSpec,
             lines.append(f'  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}')
             for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
                 lines.append(f'  #   - {m.original_name}{_usage_suffix(m.referenced_by)}')
+                # Preserve the full original DAX so a reviewer can hand-translate
+                # without re-opening the PBIX. Each DAX line is emitted as its own
+                # comment line (multi-line DAX would otherwise break YAML). Indented
+                # under the measure name for readability.
+                dax = (getattr(m, 'dax_expression', '') or '').strip()
+                if dax:
+                    lines.append(f'  #       DAX:')
+                    for dax_line in dax.split('\n'):
+                        lines.append(f'  #         {dax_line}')
 
     lines.append('')
     return '\n'.join(lines)
