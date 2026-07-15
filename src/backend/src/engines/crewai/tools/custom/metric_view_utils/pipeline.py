@@ -405,7 +405,9 @@ class MetricViewPipeline:
         untranslatable — an honest TODO comment beats a number that is quietly
         wrong or SQL that won't run.
         """
-        from .sql_measure_sanitizer import sanitize_measure_sql, detect_silent_wrong
+        from .sql_measure_sanitizer import (
+            sanitize_measure_sql, detect_silent_wrong, detect_lost_dax_component,
+        )
         kept = []
         demoted = []
         for m in getattr(spec, 'measures', None) or []:
@@ -418,7 +420,13 @@ class MetricViewPipeline:
                     m.skip_reason = (f'{_reason} [{note}]').strip()
                 self._filter_warnings.append(f'{spec.fact_table_key}: {m.measure_name}: {note}')
             # Base measures are simple SUM(COALESCE(...)) and are never demoted.
-            bad = None if is_base else detect_silent_wrong(new_sql)
+            # Two silent-wrong checks: (a) malformed/invalid SQL markers, and
+            # (b) a DAX component (ratio denom, prior-year, exclusion) that the
+            # SQL silently dropped — the latter needs the ORIGINAL dax to compare.
+            bad = None
+            if not is_base:
+                bad = (detect_silent_wrong(new_sql)
+                       or detect_lost_dax_component(getattr(m, 'dax_expression', '') or '', new_sql))
             if bad:
                 m.is_translatable = False
                 m.sql_expr = None

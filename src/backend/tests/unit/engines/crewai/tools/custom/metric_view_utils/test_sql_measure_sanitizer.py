@@ -113,3 +113,64 @@ class TestDetectSilentWrong:
     def test_measure_composition_ok(self):
         assert self._D(
             "MEASURE(rpet_flake_gram) * MEASURE(sales_pet) / 1000000") is None
+
+
+class TestLostDaxComponent:
+    """Detect DAX components silently dropped from otherwise-clean SQL."""
+
+    def _L(self, dax, sql):
+        from src.engines.crewai.tools.custom.metric_view_utils.sql_measure_sanitizer import (
+            detect_lost_dax_component,
+        )
+        return detect_lost_dax_component(dax, sql)
+
+    def test_prior_year_dropped_flagged(self):
+        dax = 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))'
+        sql = "SUM(source.nsr) FILTER (WHERE bic_chversion = '0000')"
+        assert self._L(dax, sql)  # PY shift not in SQL -> flagged
+
+    def test_prior_year_with_window_not_flagged(self):
+        dax = 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))'
+        sql = "SUM(source.nsr) OVER (ORDER BY fiscper)"
+        assert self._L(dax, sql) is None  # has a window -> faithful enough
+
+    def test_ratio_denominator_dropped_flagged(self):
+        dax = 'DIVIDE(SUMX(FILTER(f, f[mg] in {"1"}), f[target]), issued - received)'
+        sql = "SUM(source.target_value) FILTER (WHERE matl_group IN ('1'))"
+        assert self._L(dax, sql)  # DIVIDE in DAX, no / in SQL
+
+    def test_ratio_present_not_flagged(self):
+        dax = 'DIVIDE(SUM(t[a]), SUM(t[b]))'
+        sql = "SUM(source.a) / NULLIF(SUM(source.b), 0)"
+        assert self._L(dax, sql) is None
+
+    def test_exclusion_dropped_flagged(self):
+        dax = 'DIVIDE(SUM(t[a]), SUM(t[b]) FILTER(geo[company_code] <> "0307"))'
+        sql = "SUM(source.a) / NULLIF(SUM(source.b), 0)"
+        assert self._L(dax, sql)  # <> exclusion in DAX, none in SQL
+
+    def test_exclusion_present_not_flagged(self):
+        dax = 'CALCULATE(SUM(t[a]), t[comp_code] <> "0307")'
+        sql = "SUM(source.a) FILTER (WHERE comp_code <> '0307')"
+        assert self._L(dax, sql) is None
+
+    def test_clean_filtered_aggregate_never_flagged(self):
+        dax = 'CALCULATE(SUM(t[kbi_value]), t[fis_code] IN {"DCC3"})'
+        sql = "SUM(source.kbi_value) FILTER (WHERE fis_code IN ('DCC3'))"
+        assert self._L(dax, sql) is None
+
+
+class TestDanglingMultiLetterVar:
+    """detect_silent_wrong catches dangling res1/res2/std var names."""
+
+    def _S(self, sql):
+        from src.engines.crewai.tools.custom.metric_view_utils.sql_measure_sanitizer import (
+            detect_silent_wrong,
+        )
+        return detect_silent_wrong(sql)
+
+    def test_res1_flagged(self):
+        assert self._S("(res1+SUM(fact.val) FILTER (WHERE x = 1)) / NULLIF(res2, 0)")
+
+    def test_clean_not_flagged(self):
+        assert self._S("SUM(source.a) / NULLIF(SUM(source.b), 0)") is None
