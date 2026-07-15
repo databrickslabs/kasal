@@ -87,15 +87,53 @@ or is it emitting noise?).
   plan's P0 flagged. The transpiler-side causes (#2 MEASURE-composition, #3
   join-alias filters) are narrower and cleanly fixable.
 
-## Next actions (by leverage)
+## Handoff diagnostic (run 47916 = source of this export) — RESULT
 
-1. **Diagnose the handoff per table** (P0 from the prior plan, still the top item):
-   for `ft_qse`, `ft_bpc003_losses`, `fact_sc`, count how many measures reached
-   the generator carrying DAX. Low name-match + missing source-filter measures ⇒
-   the DAX didn't arrive, so no transpiler fix would recover them.
-2. **MEASURE()-composition** — teach/verify the ratio-composition layer
-   (`ft_bpc003` ×99 alone would move the total materially).
-3. **Join-alias FILTER support** — `fact_pe002`'s 23 misses; a bounded transpiler
-   gap (filters on join columns, not just `source.`).
-4. **Numerical tie-out** — once coverage is closed, execute against the warehouse;
-   still gated by the customer-input source-table mapping.
+Queried the run's `execution_trace`: per fact table, measures received vs. those
+carrying full DAX, vs. those emitted.
+
+- **The DAX arrived — the handoff is NOT the bottleneck.** Every table received
+  its measures with full DAX (FT_QSE 28/28, FT_BPC003 60/60, ft_bpc003_losses
+  9/9). The prior run's root cause (DAX never reached the generator) is **fixed**.
+- **The gap moved downstream.** FT_QSE received 28 → emitted 13; FT_BPC003
+  60 → 48. The dropped measures are lost in translation/emission, not handoff.
+- **Every dropped measure references another `[measure]`** (FT_BPC003 13/13,
+  ft_bpc003_losses 3/3, FT_QSE 15/15). Two sub-causes:
+  1. **Prior-Year time-intelligence (largest bucket):** `*_PY` / `*_BP`-on-PY
+     measures built on `CALCULATE([PY_Start_date])` / `[PY_End_date]` date-window
+     scaffolding. Period-shift isn't expressible without a calendar `date_py`
+     column → correctly skipped, but it's a large share of the miss count. Needs
+     the calendar-column workaround (already documented in `UNSUPPORTED.md`),
+     which is partly a **[customer-input]** item (supply/confirm the PY calendar).
+  2. **Dependency cascade:** a measure whose referenced base measure was itself
+     dropped (e.g. every FT_QSE `*_BP` composes on `[Plant_Comp KBI_Value_BP]`, a
+     `SWITCH(TRUE())` display-layer measure that's correctly skipped — so all 12
+     `_BP` dependents cascade out). The `_Actual` twins survived because their
+     base resolved.
+- **Separate upstream item:** FT_QSE has 51 measures in GT but the generator
+  only *received* 28 — ~23 GT measures never entered the pipeline (extraction /
+  config-gen selected a subset). That is upstream of the generator, distinct from
+  both the handoff and the transpiler.
+
+## Next actions (by leverage) — REVISED after the diagnostic
+
+1. **Prior-Year time-intelligence** (largest single bucket, spans FT_BPC003,
+   ft_bpc003_losses, and the `_BP`/`_PY` families). Two parts: (a) implement the
+   calendar-`date_py` self-join / window translation the corpus already
+   documents; (b) flag the calendar-column dependency as a customer input.
+2. **Dependency-cascade handling.** When a referenced base measure is dropped
+   (display-layer `SWITCH`, or unresolved), decide per case: resolve the base
+   (e.g. decompose `Plant_Comp KBI_Value_*` KBI-selectors) so dependents survive,
+   or drop dependents with an explicit "base measure not emitted" reason instead
+   of silently. Recovering `Plant_Comp KBI_Value_BP` alone recovers ~12 FT_QSE.
+3. **MEASURE()-composition** — `ft_bpc003` ×99, `fact_iom06` ×7: base measures
+   exist, the ratio-on-top isn't assembled.
+4. **Join-alias FILTER support** — `fact_pe002`'s 23 (`FILTER (WHERE dim.col …)`).
+5. **Extraction subset** (FT_QSE 51→28 received) — why fewer measures than GT
+   entered the pipeline; upstream of the generator.
+6. **Numerical tie-out** — after coverage; gated by the customer source-table map.
+
+> **Correction to the pre-diagnostic plan:** the earlier top item ("diagnose the
+> handoff — DAX may not be arriving") is **resolved** — the DAX arrives. The real
+> top lever is Prior-Year time-intelligence + the dependency cascade, both
+> downstream.
