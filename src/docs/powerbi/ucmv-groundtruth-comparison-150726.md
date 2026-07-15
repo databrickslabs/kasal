@@ -179,3 +179,33 @@ composites GT has.
   join-alias filter) only address the ~10% "received but dropped" slice. Still
   worth doing, but they are not what closes the coverage gap.
 - Fix #2 (dependency cascade, shipped) was the largest *transpiler-side* win.
+
+## THIRD diagnostic — the "extraction gap" is mostly SWITCH-decomposition, not missing measures
+
+Traced FT_QSE end-to-end (config-gen 47859 → generator 47916). Config-gen
+extracted **28** FT_QSE measures; only **3 of GT's 51 names** appear anywhere in
+config-gen's full 470-measure set. But comparing the actual measures shows this
+is **not** measures being dropped — it is a **modeling difference**:
+
+- **Kasal extracted the PBI report's real measures** — e.g.
+  `Plant_Comp KBI_Value_Actual`, a **single measure** whose body is
+  `SWITCH(TRUE(), Or(ISFILTERED/HASONEVALUE plant), <plant branch>, <company branch>)`
+  — one measure that dynamically returns the plant *or* company value by slicer
+  context.
+- **GT split each into two static measures** — `plant_kbi_value_actual` **and**
+  `company_kbi_value_actual`. A UC metric view has no slicer context, so the human
+  **materialized both branches of the SWITCH as separate measures.**
+
+So the ~51-vs-28 gap is largely **one PBI SWITCH measure → two GT measures**
+(plant + company), ×~28 QSE measures ≈ 51. Kasal has the *source* measures; it
+just isn't **decomposing the plant/company SWITCH selector into its two branches**.
+
+**This is a real, fixable Kasal capability** (SWITCH-geo-selector decomposition),
+same family as the Fix #2 dependency work — NOT a customer-data problem and NOT
+lost extraction. It reclassifies the bulk of the FT_QSE / QSE-family gap from
+"[customer-input]" to **"[fix-in-kasal]: decompose the plant/company selector."**
+Likely applies wherever a `Plant_Comp`/geo `SWITCH(ISFILTERED…)` selector exists.
+
+> **Net:** the coverage gap is smaller than the raw counts implied — much of it is
+> 1 source measure → 2 emitted measures, recoverable by decomposition rather than
+> by re-extraction.
