@@ -181,3 +181,35 @@ class TestPrecleanDax:
     def test_standalone_blank_preserved_for_reject(self):
         # a pure BLANK() measure must stay BLANK() so quick-reject can drop it
         assert self._P('BLANK()').strip().upper() == 'BLANK()'
+
+
+class TestFragileMatchersRouteToLLM:
+    """The fragile multi-var matchers must NOT be in the llm_first fast-path, so
+    complex ratios route to the LLM instead of being botched by regex."""
+
+    def test_multivar_matchers_excluded_from_fast_path(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        fp = DaxTranslator._TRIVIAL_FAST_PATH
+        for pat in ('calculate_sumx_vars_divide',
+                    'calculate_sumx_filter_inner',
+                    'calculate_sumx_filter_outer'):
+            assert pat not in fp, f"{pat} should route to LLM, not the regex fast-path"
+
+    def test_simple_converters_stay_in_fast_path(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        fp = DaxTranslator._TRIVIAL_FAST_PATH
+        for pat in ('simple_sum', 'divide', 'sumx_filter', 'calculate_equality_filter'):
+            assert pat in fp
+
+    def test_trivial_only_skips_multivar_divide(self):
+        # in trivial_only (llm_first) mode, a multi-var DIVIDE returns untranslatable
+        # (so the caller routes it to the LLM) rather than a botched regex result
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        t = DaxTranslator({})
+        dax = ('var a = CALCULATE(SUMX(FILTER(f, f[mg] in {"1"}), f[target])) '
+               'var b = CALCULATE(SUMX(FILTER(f, f[mg] in {"1"}), f[issued])) '
+               'var c = CALCULATE(SUMX(FILTER(f, f[mg] in {"1"}), f[received])) '
+               'return DIVIDE(a, b-c)')
+        res = t.translate({'measure_name': 'y', 'dax_expression': dax, 'original_name': 'Y'},
+                          'f', trivial_only=True)
+        assert res.is_translatable is False  # -> routed to LLM
