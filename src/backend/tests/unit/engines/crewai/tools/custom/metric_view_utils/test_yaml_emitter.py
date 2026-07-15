@@ -233,6 +233,45 @@ class TestEmitYaml:
         yaml = emit_yaml(spec)
         assert 'Not emitted as measures' in yaml
         assert 'Complex Measure' in yaml
+        # The full original DAX is preserved in the comment block so a reviewer
+        # can hand-translate without re-opening the PBIX.
+        assert 'DAX:' in yaml
+        assert 'CALCULATE(...)' in yaml
+
+    def test_untranslatable_preserves_multiline_dax_as_valid_yaml(self):
+        """Multi-line DAX is emitted as one comment line each, keeping the YAML
+        parseable (a raw newline in a comment would otherwise break it)."""
+        import yaml as _yaml
+        multiline_dax = 'IF([Same Month Flag]="N",\n   MONTH(source.a),\n   MONTH(source.b))'
+        spec = MetricViewSpec(
+            fact_table_key='fact',
+            source_table='cat.sch.tbl',
+            view_name='test_view',
+            comment='Test',
+            joins=[],
+            dimensions=[],
+            measures=[
+                TranslationResult(
+                    measure_name='val', original_name='Val',
+                    sql_expr='SUM(source.val)', is_translatable=True,
+                    skip_reason='', dax_expression='', confidence='high', category='base',
+                ),
+            ],
+            untranslatable=[
+                TranslationResult(
+                    measure_name='cur_yr', original_name='Cur Yr',
+                    sql_expr=None, is_translatable=False,
+                    skip_reason='complex', dax_expression=multiline_dax,
+                    confidence='none', category='cross_table',
+                ),
+            ],
+        )
+        yaml_out = emit_yaml(spec)
+        # Every DAX line is present as its own comment line
+        assert 'MONTH(source.a),' in yaml_out
+        assert 'MONTH(source.b))' in yaml_out
+        # And the document still parses (no bare newline leaked out of a comment)
+        assert _yaml.safe_load(yaml_out) is not None
 
 
 class TestMeasureUsageSurfacing:
