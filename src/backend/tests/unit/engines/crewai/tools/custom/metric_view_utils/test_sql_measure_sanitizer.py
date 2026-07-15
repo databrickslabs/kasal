@@ -159,6 +159,46 @@ class TestLostDaxComponent:
         sql = "SUM(source.kbi_value) FILTER (WHERE fis_code IN ('DCC3'))"
         assert self._L(dax, sql) is None
 
+    # ── Additive multi-block collapse (a - b / a + b outside DIVIDE) ──────────
+
+    def test_additive_subtraction_collapse_flagged(self):
+        # cost_to_supply: DAX is `a - b` (two CALCULATE blocks), SQL emitted only a.
+        dax = (
+            'var std = CALCULATE([F_Start_date]) '
+            'var a = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" '
+            '&& FT_BPC003[fis_code_parent] IN {"DCD2","DHF2"}), FT_BPC003[value])) '
+            'var b = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" '
+            '&& FT_BPC003[fis_code_parent] IN {"DHHX"}), FT_BPC003[value])) '
+            'return a - b'
+        )
+        sql = "SUM(source.value) FILTER (WHERE bic_chversion = '0000' AND fis_code_parent IN ('DCD2', 'DHF2'))"
+        assert self._L(dax, sql)  # -b term dropped -> flagged
+
+    def test_additive_sum_collapse_flagged(self):
+        # total_nsr: DAX is `a + b`, SQL emitted only a.
+        dax = (
+            'var a = CALCULATE(SUMX(FILTER(Fact_CO012, Fact_CO012[bic_chversion]="0000"), Fact_CO012[net_sales_revenue])) '
+            'var b = CALCULATE(SUMX(FILTER(Fact_CO012, Fact_CO012[bic_chversion]="0000"), Fact_CO012[other])) '
+            'return a + b'
+        )
+        sql = "SUM(source.net_sales_revenue) FILTER (WHERE bic_chversion = '0000')"
+        assert self._L(dax, sql)  # +b term dropped -> flagged
+
+    def test_additive_both_terms_emitted_not_flagged(self):
+        # Faithful a - b: both filtered SUMs present -> not flagged.
+        dax = (
+            'var a = CALCULATE(SUMX(FILTER(t, t[x]="0000"), t[v])) '
+            'var b = CALCULATE(SUMX(FILTER(t, t[x]="DHHX"), t[v])) return a - b'
+        )
+        sql = "SUM(source.v) FILTER (WHERE x = '0000') - SUM(source.v) FILTER (WHERE x = 'DHHX')"
+        assert self._L(dax, sql) is None
+
+    def test_single_block_filtered_aggregate_not_flagged_by_additive(self):
+        # Single CALCULATE block, no arithmetic -> additive check must not fire.
+        dax = 'var a = CALCULATE(SUMX(FILTER(t, t[x]="RE" && t[fis_code] IN {"DHG2"}), t[v])) return a'
+        sql = "SUM(source.value) FILTER (WHERE bic_chversion = 'RE' AND fis_code IN ('DHG2'))"
+        assert self._L(dax, sql) is None
+
 
 class TestDanglingMultiLetterVar:
     """detect_silent_wrong catches dangling res1/res2/std var names."""

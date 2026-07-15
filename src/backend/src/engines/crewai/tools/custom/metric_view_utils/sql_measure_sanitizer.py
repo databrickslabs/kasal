@@ -166,6 +166,28 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
             return ('exclusion filter dropped — DAX excludes values (<> / NOT IN) '
                     'but SQL has no exclusion (totals will include excluded rows)')
 
+    # 4. Multi-block arithmetic collapse: the DAX binds >=2 aggregate blocks to
+    #    vars and the RETURN combines them with + / - (NOT inside a DIVIDE), but
+    #    the SQL emitted a single aggregate term — i.e. only the first block (`a`)
+    #    survived and the `- b` / `+ b` was dropped. Produces clean-looking SQL
+    #    that is silently wrong (e.g. cost_to_supply = a - b emitted as just a).
+    #    Only fires on the non-ratio case (the DIVIDE case is covered by check 2).
+    if '/' not in sql and 'DIVIDE' not in du:
+        # Count aggregate blocks the DAX evaluates (CALCULATE/SUMX wrappers).
+        agg_blocks = len(re.findall(r'\bCALCULATE\s*\(|\bSUMX\s*\(', du))
+        # The RETURN (or whole expr) combines vars/terms with + or - at the top.
+        ret_m = re.search(r'\bRETURN\b(.+)$', dax, re.I | re.S)
+        ret_expr = ret_m.group(1) if ret_m else dax
+        combines_terms = re.search(r'\b\w+\s*[-+]\s*\w+', ret_expr) is not None
+        # The SQL has a single aggregate term: one FILTER (or none) and no top-level
+        # + / - joining two aggregates.
+        sql_agg_terms = len(re.findall(r'\bFILTER\b', su)) or su.count('SUM(')
+        sql_combines = re.search(r'\)\s*[-+]\s*(?:\(|SUM|COUNT|AVG|MIN|MAX)', su) is not None
+        if agg_blocks >= 2 and combines_terms and sql_agg_terms <= 1 and not sql_combines:
+            return ('additive term dropped — DAX combines multiple aggregate blocks '
+                    'with + / - (e.g. a - b) but SQL emitted a single term '
+                    '(the other term was silently dropped)')
+
     return None
 
 
