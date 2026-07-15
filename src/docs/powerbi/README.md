@@ -33,6 +33,7 @@ The tables below map common goals to the tools and guide that cover them.
 
 ### Case studies and examples
 
+- [CCHBC UCMV output analysis (2026-07-15)](./cchbc-ucmv-output-analysis-2026-07-15.md): real-model quality assessment — why `report_id` is the key quality lever, verified per-measure correctness, and the 7 shipped pipeline-quality fixes (PROP-1..7)
 - [Power BI analytics Q&A full case study](./powerbi-analytics-qa-case-study.md): 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
 - [Example crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json): import-ready, credentials scrubbed
 - [Context enrichment config example](../powerbi-context-enrichment-example.json): copy-paste reference for all 6 enrichment fields
@@ -91,6 +92,10 @@ MIGRATION PATH (move PBI semantic model to Databricks UC Metric Views)
       |
   PHASE 2: Propose Config
     Tool 90 (live PBI API to full config)  OR  Tool 89 (from extracted JSON)
+    NOTE: provide report_id to Tool 90 — it is strongly recommended, not just
+          "metadata": without it, measure DAX is fetched in a degraded form
+          (bare column names, ~half the measures translatable). Tool 90 now
+          auto-discovers the report bound to the dataset if you leave it blank.
       |
   PHASE 3: Human Review (about 2-3h first time, 30min repeat)
       |
