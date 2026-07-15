@@ -250,6 +250,37 @@ def _check_response(resp, context: str = "") -> None:
         )
 
 
+def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | None:
+    """PROP-7: find the report bound to ``dataset_id`` in the workspace.
+
+    Running the pipeline WITHOUT a report_id silently degrades measure DAX (the
+    report's visual bindings carry the full measure expressions). When the caller
+    did not supply one, auto-discover it: list the workspace reports and return the
+    first whose ``datasetId`` matches. Returns None (fail-open) if none match or the
+    API call fails — the caller then proceeds report-less with a loud warning.
+    """
+    try:
+        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
+        resp = requests.get(url, headers=_headers(token), timeout=30)
+        if resp.status_code != 200:
+            return None
+        reports = resp.json().get("value", [])
+        matches = [
+            r for r in reports
+            if str(r.get("datasetId", "")).lower() == str(dataset_id).lower()
+        ]
+        if not matches:
+            return None
+        # Prefer a real report over an auto-generated/usage one; else first match.
+        matches.sort(key=lambda r: (
+            "usage metrics" in str(r.get("name", "")).lower(),
+            "auto" in str(r.get("name", "")).lower(),
+        ))
+        return matches[0].get("id")
+    except Exception:
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
@@ -644,6 +675,94 @@ def derive_filter_sets(
     return filter_sets
 
 
+def _resolve_referenced_measure_dax(dax: str) -> dict | None:
+    """PROP-1: transpile a REFERENCED measure's DAX into a UCMV ``base_expr``
+    (+ ``base_filters``) so ``[MeasureRef]`` resolutions carry real SQL instead of
+    a ``TODO`` placeholder.
+
+    Handles the concrete shapes seen in the CCHBC model (and common elsewhere):
+      * numeric constant                     → base_expr = the number
+      * ``SUM(T[col])`` / ``SUMX(T, T[col])`` → base_expr = ``SUM(source.col)``
+      * ``CALCULATE(SUM(T[col]), T[a]="x", …)`` → base_expr + base_filters
+      * ``SWITCH(TRUE(), <cond>, CALCULATE(...), CALCULATE(...))`` (plant-vs-company
+        selector) → the FIRST CALCULATE branch (the default the GT also picks)
+
+    Returns ``{'base_expr': str, 'base_filters': [str]}`` or ``None`` when the DAX
+    is not one of these self-contained aggregate shapes (caller then keeps a TODO).
+    """
+    if not dax:
+        return None
+    d = dax.strip()
+
+    # Constant (e.g. AVG_KBI_Div_Factor's effective value is 1 in the GT).
+    if re.fullmatch(r'-?\d+(?:\.\d+)?', d):
+        return {"base_expr": d, "base_filters": []}
+
+    def _first_calculate_body(text: str) -> str | None:
+        """Return the balanced inner text of the FIRST ``CALCULATE( ... )``."""
+        cm = re.search(r'CALCULATE\s*\(', text, re.IGNORECASE)
+        if not cm:
+            return None
+        start = cm.end()
+        depth = 1
+        pos = start
+        while pos < len(text) and depth > 0:
+            if text[pos] == '(':
+                depth += 1
+            elif text[pos] == ')':
+                depth -= 1
+                if depth == 0:
+                    return text[start:pos]
+            pos += 1
+        return text[start:pos]
+
+    # If it's a SWITCH selector (or any wrapper containing CALCULATE), resolve to
+    # the FIRST CALCULATE(...) branch — the plant/default branch the ground truth
+    # picks. Bound the parse to that single balanced CALCULATE so a second branch's
+    # filters (e.g. "Company Code") don't leak into this resolution.
+    if re.match(r'(?is)^\s*(?:var\s+.*?return\s+)?switch\s*\(', d) or (
+        'CALCULATE' in d.upper()
+        and not re.match(r'(?is)^\s*CALCULATE\s*\(', d)
+    ):
+        body = _first_calculate_body(d)
+        if body is not None:
+            inner = body
+        else:
+            inner = d
+    else:
+        # CALCULATE(SUM(T[col]), <filter>, ...)  — take its balanced body
+        body = _first_calculate_body(d)
+        inner = body if body is not None else d
+
+    # Aggregate over Table[Column]  →  SUM(source.col)
+    agg = re.search(
+        r'\b(SUM|SUMX|AVERAGE|MIN|MAX|COUNT|DISTINCTCOUNT)\s*\('
+        r'(?:\s*\w+\s*,\s*)?'                    # SUMX(Table, ...) optional table arg
+        r"(?:'[^']+'|\w+)\[(\w+)\]",             # Table[col] / 'Table Name'[col]
+        inner, re.IGNORECASE,
+    )
+    if not agg:
+        return None
+    func = agg.group(1).upper()
+    spark_func = {'SUMX': 'SUM', 'DISTINCTCOUNT': 'COUNT_DISTINCT'}.get(func, func)
+    col = to_snake_case(agg.group(2))
+    base_expr = f"{spark_func}(source.{col})"
+
+    # Extract equality filters  T[a] = "x"  →  a = 'x'
+    filters: list[str] = []
+    for fm in re.finditer(
+        r"""(?:'[^']+'|\w+)\[(\w+)\]\s*=\s*("[^"]*"|'[^']*'|-?\d+(?:\.\d+)?)""",
+        inner,
+    ):
+        fcol = to_snake_case(fm.group(1))
+        val = fm.group(2)
+        if val[0] == '"':
+            val = "'" + val[1:-1] + "'"
+        filters.append(f"{fcol} = {val}")
+
+    return {"base_expr": base_expr, "base_filters": filters}
+
+
 def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
     """Detect [MeasureRef] patterns in expressions → resolution map."""
     resolutions: dict[str, dict] = {}
@@ -666,18 +785,31 @@ def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
 
             matched = measure_by_name.get(ref)
             if matched:
-                # It's a measure reference — add to resolutions
+                # It's a measure reference — try to transpile its DAX into real
+                # SQL (PROP-1). Falls back to a TODO placeholder only when the
+                # referenced DAX is not a self-contained aggregate we can resolve.
                 matched_dax = matched.get("expression", "") or ""
+                resolved = _resolve_referenced_measure_dax(matched_dax)
                 snippet = matched_dax[:150] + ("..." if len(matched_dax) > 150 else "")
-                resolutions[ref] = {
-                    "base_expr": "TODO: fill SQL expression",
-                    "base_filters": [],
-                    "_hint": (
-                        f"Matches measure '{ref}' on table "
-                        f"'{matched.get('table_name', '?')}' — "
-                        f"DAX: {snippet}"
-                    ),
-                }
+                if resolved:
+                    resolutions[ref] = {
+                        "base_expr": resolved["base_expr"],
+                        "base_filters": resolved["base_filters"],
+                        "_hint": (
+                            f"Auto-resolved from measure '{ref}' on table "
+                            f"'{matched.get('table_name', '?')}'"
+                        ),
+                    }
+                else:
+                    resolutions[ref] = {
+                        "base_expr": "TODO: fill SQL expression",
+                        "base_filters": [],
+                        "_hint": (
+                            f"Matches measure '{ref}' on table "
+                            f"'{matched.get('table_name', '?')}' — "
+                            f"DAX: {snippet}"
+                        ),
+                    }
 
     return resolutions
 

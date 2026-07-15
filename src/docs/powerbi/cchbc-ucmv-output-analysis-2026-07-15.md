@@ -427,3 +427,38 @@ on the CCHBC good run._
 4. **PROP-5** (exclusion filters) + **PROP-6** (hygiene batch).
 5. **PROP-3b/PROP-4b** (real prior-year + cross-table var resolution) — largest,
    lowest urgency; TODO stubs are an acceptable interim.
+
+---
+
+# Implementation status (2026-07-15) — PROPs 1,2,3a,4a,5,6,7 shipped; 3b/4b deferred
+
+All proposals implemented with unit tests **except PROP-3b/4b**, which is
+**deliberately deferred** (not skipped):
+
+| PROP | Status | Where |
+|---|---|---|
+| PROP-1 measure-ref resolution | ✅ shipped | `generate_config._resolve_referenced_measure_dax` + `derive_measure_resolutions` |
+| PROP-2 DIVIDE 3rd-arg | ✅ shipped | `dax_translator._extract_divide_args` |
+| PROP-3a/4a silent-wrong guard | ✅ shipped | `sql_measure_sanitizer.detect_silent_wrong` + `pipeline._sanitize_spec_measures` |
+| PROP-5 lift exclusion filters | ✅ shipped | `table_processor._detect_common_exclusions` |
+| PROP-6 comments/BLANK preclean | ✅ shipped | `dax_translator._preclean_dax` |
+| PROP-7 report_id auto-discover + warn | ✅ shipped | `generate_config.discover_report_id` + tool `_run` |
+| PROP-3b real prior-year (calendar self-join) | ⏸ deferred | needs schema-level design |
+| PROP-4b cross-table var resolution | ⏸ deferred | risks new silent-wrong |
+| PROP-6 ×100 / COALESCE-subtraction | ⏸ deferred | needs reliable per-measure format metadata |
+
+**Why 3b/4b are deferred, not done:** the remaining cases (true `SAMEPERIODLASTYEAR`
+via a `date_py` calendar self-join; resolving `var a = CALCULATE(SUMX, FILTER(<un-joined
+dim>))`) cannot be implemented without either new join architecture or inventing
+filter values — both of which risk producing **new silently-wrong numbers**, the exact
+failure class PROP-3a/4a was built to eliminate. With the safety net in place these
+measures now emit an honest `TODO` comment instead of a wrong value, which is the
+correct interim state. Picking them up is a scoped follow-up, not a quick fix.
+
+**Net effect of the shipped PROPs (expected on a report_id run):** measure-ref TODOs
+resolve to real SQL (PROP-1, ~30 measures incl. the QSE KBI base + the AVG factor);
+malformed 3-arg NULLIF gone (PROP-2); any residual silent-wrong/invalid measure is
+demoted to an honest TODO rather than shipped (PROP-3a/4a); recurring comp_code-style
+exclusions lift to the view filter (PROP-5); DAX comments + BLANK() no longer corrupt
+SQL (PROP-6); and no future run silently degrades from a missing report_id (PROP-7).
+Re-run required to quantify the new correctness %.

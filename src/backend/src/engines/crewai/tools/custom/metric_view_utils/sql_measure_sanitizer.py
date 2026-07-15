@@ -91,6 +91,40 @@ def coalesce_wrap_base(sql: str) -> str:
     return _BARE_SUM_SOURCE.sub(_repl, sql)
 
 
+# PROP-3a/4a: markers of a measure that would emit a SILENTLY-WRONG or invalid
+# result. Such a measure must be demoted to untranslatable (an honest TODO) rather
+# than shipped — a wrong number that runs is worse than a documented gap.
+_SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
+    # empty numerator/denominator: "/ NULLIF(, 0)" or leading "/ ..."
+    ("empty ratio operand", re.compile(r"NULLIF\(\s*,|^\s*/\s")),
+    # 3+-arg NULLIF (malformed): NULLIF(x, 0, 0)
+    ("malformed NULLIF (3 args)", re.compile(r"NULLIF\([^()]*,[^()]*,[^()]*\)")),
+    # unresolved DAX measure ref or placeholder left in the SQL
+    ("unresolved DAX measure ref", re.compile(r"\bTODO\b|/\*\s*UNRESOLVED|\b\w+\[[^\]]+\]")),
+    # surviving prior-year time-intel (would silently emit the current-period value)
+    ("prior-year time-intel not applied",
+     re.compile(r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE)),
+    # raw DAX constructs that never got translated
+    ("untranslated DAX (SUMX/FILTER/CALCULATE)",
+     re.compile(r"\b(SUMX|CALCULATE)\s*\(|FILTER\s*\(\s*\w+\s*,", re.IGNORECASE)),
+    # dangling bare single-letter var identifiers (a, b, res1) left in arithmetic
+    ("dangling DAX var identifier",
+     re.compile(r"(?<![\w.])[a-z]\d?(?![\w.(])\s*[-+/*]|[-+/*]\s*(?<![\w.])[a-z]\d?(?![\w.(])")),
+]
+
+
+def detect_silent_wrong(sql: str) -> str | None:
+    """Return a short reason string when ``sql`` would silently produce a wrong or
+    invalid result (see ``_SILENT_WRONG_CHECKS``), else None. Used to demote a
+    measure to untranslatable-with-TODO instead of emitting bad SQL."""
+    if not sql:
+        return None
+    for reason, pat in _SILENT_WRONG_CHECKS:
+        if pat.search(sql):
+            return reason
+    return None
+
+
 def sanitize_measure_sql(sql: str, *, is_base: bool) -> tuple[str | None, str | None]:
     """Apply all P5 sanitizers to a measure's SQL.
 

@@ -67,3 +67,49 @@ class TestSanitizeMeasureSql:
         once, _ = sanitize_measure_sql(s, is_base=True)
         twice, _ = sanitize_measure_sql(once, is_base=True)
         assert once == twice
+
+
+class TestDetectSilentWrong:
+    """PROP-3a/4a: measures that would be silently wrong/invalid are flagged."""
+
+    def _D(self, sql):
+        from src.engines.crewai.tools.custom.metric_view_utils.sql_measure_sanitizer import (
+            detect_silent_wrong,
+        )
+        return detect_silent_wrong(sql)
+
+    def test_empty_ratio_flagged(self):
+        assert self._D("/ NULLIF(, 0)")
+
+    def test_unresolved_measure_ref_flagged(self):
+        assert self._D("SUM(a) / NULLIF(EDGE_Measure[Edge All DPMO], 0)")
+
+    def test_todo_literal_flagged(self):
+        assert self._D("SUM(a) / NULLIF(TODO: fill SQL expression, 0)")
+
+    def test_prior_year_flagged(self):
+        assert self._D("SUM(source.x) FILTER (WHERE SAMEPERIODLASTYEAR(cal))")
+
+    def test_raw_sumx_flagged(self):
+        assert self._D("SUMX(FILTER(fact, fact[x]=1), val)")
+
+    # These MUST stay clean (no false positives on the good run's measures)
+    def test_clean_aggregate_ok(self):
+        assert self._D("SUM(source.kbi_value)") is None
+
+    def test_clean_filtered_aggregate_ok(self):
+        assert self._D(
+            "SUM(source.kbi_value) FILTER (WHERE bic_chversion = '0000' "
+            "AND fis_code IN ('DCC3', 'DCC1', 'DCCE'))") is None
+
+    def test_clean_ratio_ok(self):
+        assert self._D("SUM(source.a) / NULLIF(SUM(source.b), 0)") is None
+
+    def test_clean_subtraction_ok(self):
+        assert self._D(
+            "(SUM(source.value) FILTER (WHERE fis_code_parent IN ('DCD2','DHF2'))) "
+            "- (SUM(source.value) FILTER (WHERE fis_code_parent IN ('DHHX')))") is None
+
+    def test_measure_composition_ok(self):
+        assert self._D(
+            "MEASURE(rpet_flake_gram) * MEASURE(sales_pet) / 1000000") is None

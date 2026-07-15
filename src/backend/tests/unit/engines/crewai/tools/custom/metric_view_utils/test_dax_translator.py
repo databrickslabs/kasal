@@ -132,3 +132,52 @@ class TestSameperiodlastyear:
         # P6: the stub must be actionable (names the date_py / window workaround)
         assert 'TODO' in result.skip_reason
         assert 'date_py' in result.skip_reason or 'window' in result.skip_reason.lower()
+
+
+class TestDivideThirdArg:
+    """PROP-2: DIVIDE(num, den, alt_result) must not leak the 3rd arg into NULLIF."""
+
+    def test_two_arg_divide(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        assert DaxTranslator._extract_divide_args('DIVIDE(SUM(a), SUM(b))') == ('SUM(a)', 'SUM(b)')
+
+    def test_three_arg_divide_drops_alt(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        # denominator must be SUM(b), NOT "SUM(b), 0"
+        assert DaxTranslator._extract_divide_args('DIVIDE(SUM(a), SUM(b), 0)') == ('SUM(a)', 'SUM(b)')
+
+    def test_three_arg_blank_alt(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        assert DaxTranslator._extract_divide_args('DIVIDE([x], [y], BLANK())') == ('[x]', '[y]')
+
+    def test_nested_parens_preserved(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        num, den = DaxTranslator._extract_divide_args('DIVIDE(SUM(a)+SUM(c), NULLIF(SUM(b),0), 0)')
+        assert num == 'SUM(a)+SUM(c)'
+        assert den == 'NULLIF(SUM(b),0)'  # inner comma not mistaken for arg separator
+
+
+class TestPrecleanDax:
+    """PROP-6: strip DAX comments + normalize inline BLANK() before translation."""
+
+    def _P(self, dax):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        return DaxTranslator._preclean_dax(dax)
+
+    def test_strips_double_slash_comment(self):
+        assert '//' not in self._P('SUM(x) // note')
+
+    def test_strips_double_dash_comment(self):
+        # the -- Denominator leak that commented out SQL
+        out = self._P('SUM(a) / NULLIF(SUM(b),0) -- Denominator')
+        assert '--' not in out and 'SUM(a)' in out
+
+    def test_strips_block_comment(self):
+        assert '/*' not in self._P('SUM(/* x */ a)')
+
+    def test_inline_blank_to_null(self):
+        assert self._P('IF(x, BLANK(), y)') == 'IF(x, NULL, y)'
+
+    def test_standalone_blank_preserved_for_reject(self):
+        # a pure BLANK() measure must stay BLANK() so quick-reject can drop it
+        assert self._P('BLANK()').strip().upper() == 'BLANK()'
