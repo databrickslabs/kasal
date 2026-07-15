@@ -48,6 +48,16 @@ def col_to_readable(col_name: str) -> str:
 def spark_sql_compat(expr: str, catalog: str = '', schema: str = '',
                      rewrite_2part_tables: bool = False) -> str:
     """Rewrite T-SQL patterns to Spark SQL equivalents."""
+    # Normalize Power Query M escape tokens that leak into native SQL when a
+    # source query is embedded in an M string literal: #(lf)=newline,
+    # #(tab)=tab, #(cr)=carriage return. Left in place they appear verbatim in
+    # the emitted SQL (e.g. "process_run_id,#(lf) if(...)") → invalid.
+    expr = re.sub(r'#\(lf\)', '\n', expr, flags=re.IGNORECASE)
+    expr = re.sub(r'#\(cr\)', '\r', expr, flags=re.IGNORECASE)
+    expr = re.sub(r'#\(tab\)', '\t', expr, flags=re.IGNORECASE)
+    # Collapse M doubled-quote string literals ("" .. "") to single-quoted SQL
+    # strings ('..') — these come from escaping quotes inside an M string.
+    expr = re.sub(r'""([^"]*)""', r"'\1'", expr)
     # Strip SQL block comments
     expr = re.sub(r'/\*.*?\*/', '', expr, flags=re.DOTALL).strip()
     # GETDATE() → CURRENT_DATE()

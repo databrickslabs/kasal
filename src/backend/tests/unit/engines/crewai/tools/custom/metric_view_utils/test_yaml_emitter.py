@@ -604,3 +604,32 @@ class TestDimensionAndJoinDedup:
         out = emit_yaml(spec)
         assert out.count('- name: dim_plant') == 1
         assert 'cat.sch.plant_a' in out  # first wins
+
+
+class TestDimMeasureNameCollision:
+    """P7: a UCMV cannot have a dimension and a measure with the same name."""
+
+    def test_colliding_dimension_dropped(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact_x',
+            source_table='cat.sch.t',
+            view_name='fact_x_uc_metric_view',
+            comment='c',
+            joins=[],
+            dimensions=[
+                {'name': 'kbi_value', 'expr': 'source.kbi_value'},   # collides with measure
+                {'name': 'region', 'expr': 'dim_geo.region'},         # keep
+            ],
+            measures=[TranslationResult(
+                measure_name='kbi_value', original_name='KBI Value',
+                sql_expr='SUM(source.kbi_value)', is_translatable=True,
+                skip_reason='kbi', dax_expression='SUM(T[kbi_value])',
+                confidence='high', category='base')],
+            untranslatable=[],
+        )
+        out = emit_yaml(spec)
+        # kbi_value appears once, as a measure (SUM), not as a bare dimension
+        assert out.count('- name: kbi_value') == 1
+        assert 'SUM(source.kbi_value)' in out
+        # region dimension survives
+        assert '- name: region' in out

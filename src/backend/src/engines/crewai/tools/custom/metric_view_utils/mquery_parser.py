@@ -125,6 +125,13 @@ class MQueryParser:
 
     def _parse_sql(self, table_name: str, sql: str) -> TableInfo:
         """Parse transpiled SQL to extract structure."""
+        # Normalize Power Query M escape tokens BEFORE parsing so they never leak
+        # into extracted column/dimension names or the source SQL:
+        # #(lf)=newline, #(tab)=tab, #(cr)=CR, and doubled-quote literals ("" .. "").
+        sql = re.sub(r'#\(lf\)', '\n', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'#\(cr\)', ' ', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'#\(tab\)', ' ', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'""([^"]*)""', r"'\1'", sql)
         is_cte = sql.strip().upper().startswith('CREATE') and 'WITH ' in sql.upper()
         main_sql = self._extract_final_select(sql) if is_cte else sql
 
