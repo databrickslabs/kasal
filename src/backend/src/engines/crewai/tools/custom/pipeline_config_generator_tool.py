@@ -329,6 +329,65 @@ class PipelineConfigGeneratorTool(BaseTool):
                         })
                 logger.info(f"[PipelineConfigGen]   → {len(measures)} measures from admin scan")
 
+            # ── DAX-quality guard ────────────────────────────────────────────
+            # The most damaging silent failure: measure extraction "succeeds"
+            # (non-empty list) but the EXPRESSION field is empty/bare for most
+            # measures — e.g. the DMV returned rows but no DAX bodies, or we fell
+            # back to admin-scan measures that only carry a referenced column. The
+            # downstream pipeline then emits plausible-looking bare-column measures
+            # that are silently WRONG (this is what produced the 82/470 degraded
+            # run). Detect it, RETRY via the SP token + the DAX INFO path, and if
+            # still degraded, surface a LOUD warning so the run is never quietly
+            # shipped as good.
+            def _dax_quality(ms: list[dict]) -> tuple[int, int]:
+                total = len(ms)
+                with_real = sum(
+                    1 for m in ms
+                    if len((m.get("expression") or "").strip()) > 20
+                    and not re.fullmatch(r'[\w ]+', (m.get("expression") or "").strip() or "x")
+                )
+                return with_real, total
+
+            with_real, total = _dax_quality(measures)
+            # "degraded" = a real model (many measures) but <25% carry real DAX.
+            if total >= 20 and with_real < max(1, total // 4):
+                logger.warning(
+                    f"[PipelineConfigGen] DAX-quality guard: only {with_real}/{total} "
+                    f"measures have real DAX — attempting re-extraction via SP + DAX INFO path")
+                # Retry with the Service Principal data token (the DMV/Execute
+                # Queries path can return bare DAX for some token types / throttle).
+                retry_tok = _sp_data_token() or token
+                try:
+                    retried = gen.extract_measures(retry_tok, workspace_id, dataset_id)
+                    r_real, r_total = _dax_quality(retried)
+                    if r_real > with_real:
+                        logger.info(
+                            f"[PipelineConfigGen]   → re-extraction improved DAX: "
+                            f"{r_real}/{r_total} (was {with_real}/{total})")
+                        measures = retried
+                        with_real, total = r_real, r_total
+                except Exception as e:
+                    logger.warning(f"[PipelineConfigGen] DAX re-extraction failed: {e}")
+
+            # Final verdict — warn LOUDLY if still degraded (never ship silently).
+            if total >= 20 and with_real < max(1, total // 4):
+                degraded_msg = (
+                    f"DEGRADED MEASURE DAX: only {with_real}/{total} measures have "
+                    f"real DAX expressions — the rest are bare column references. "
+                    f"Generated measures will be largely incorrect. Root cause is "
+                    f"upstream measure extraction (Execute Queries / DMV returned "
+                    f"empty EXPRESSION, or admin-scan fallback). Do NOT treat this "
+                    f"run as production-quality; re-run or check the non-admin SP's "
+                    f"Execute Queries access to this dataset.")
+                logger.error(f"[PipelineConfigGen] {degraded_msg}")
+                warnings.append(degraded_msg)
+                self._dax_degraded = True
+            else:
+                self._dax_degraded = False
+                logger.info(
+                    f"[PipelineConfigGen] DAX-quality OK: {with_real}/{total} "
+                    f"measures carry real DAX")
+
             # API 4: Report Definition.
             # PROP-7: the report's visual bindings carry the full measure DAX —
             # running WITHOUT one silently degrades measure quality. If no
@@ -432,10 +491,13 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "total_todo_markers": config_json.count("TODO"),
                     "relationships_extracted": len(relationships),
                     "measures_extracted": len(measures),
+                    "measures_with_real_dax": with_real,
+                    "dax_degraded": getattr(self, "_dax_degraded", False),
                     "measures_referenced_by_others": len(usage_ranking),
                     "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
                 },
+                "warnings": warnings,
             }
 
             logger.info(

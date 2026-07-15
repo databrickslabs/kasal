@@ -1,5 +1,6 @@
 """Unit tests for PipelineConfigGeneratorTool (Tool 90)."""
 import json
+import re
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -567,7 +568,11 @@ class TestAdminScannerFallbackTrigger:
         # Fallback path must have been taken, and the run must NOT hard-error with 401
         assert calls["fabric"] is True
         assert calls["tmdl"] is True
-        assert "401" not in result
+        # Intent: the run recovered (produced a config), not that the 401 text is
+        # absent — the 401 now legitimately appears in the surfaced warnings[].
+        _res = json.loads(result)
+        assert "error" not in _res
+        assert "proposed_config" in _res
 
 
 class TestServicePrincipalLastResortFallback:
@@ -607,7 +612,11 @@ class TestServicePrincipalLastResortFallback:
             result = tool._run(**kwargs)
 
         assert calls["sp_scan"] == 1  # SP fallback actually retried the scanner
-        assert "401" not in result
+        # Intent: recovered (produced a config), not that the 401 text is absent —
+        # the 401 now legitimately appears in the surfaced warnings[].
+        _res = json.loads(result)
+        assert "error" not in _res
+        assert "proposed_config" in _res
 
     def test_no_sp_fallback_without_secret(self):
         """SA-only (no secret) must NOT attempt the SP fallback."""
@@ -1082,3 +1091,49 @@ class TestReportIdAutoDiscovery:
 
     def test_api_failure_returns_none(self):
         assert self._discover([], status=403) is None
+
+
+class TestDaxQualityGuard:
+    """The DAX-quality guard classifies a run as degraded when few measures carry
+    real DAX. Tested as a focused unit on the quality heuristic (the _run
+    integration uses a dual-import of generate_config that resists mocking)."""
+
+    @staticmethod
+    def _quality(ms):
+        # mirrors the guard's _dax_quality logic
+        total = len(ms)
+        with_real = sum(
+            1 for m in ms
+            if len((m.get("expression") or "").strip()) > 20
+            and not re.fullmatch(r"[\w ]+", (m.get("expression") or "").strip() or "x")
+        )
+        return with_real, total
+
+    @staticmethod
+    def _is_degraded(with_real, total):
+        return total >= 20 and with_real < max(1, total // 4)
+
+    def test_bare_columns_flagged_degraded(self):
+        bare = [{"expression": "bic_csubkbi"} for _ in range(40)]
+        w, t = self._quality(bare)
+        assert w == 0
+        assert self._is_degraded(w, t) is True
+
+    def test_real_dax_not_degraded(self):
+        good = [{"expression": 'CALCULATE(SUM(T[v]), T[ver]="0000")'} for _ in range(40)]
+        w, t = self._quality(good)
+        assert w == 40
+        assert self._is_degraded(w, t) is False
+
+    def test_small_model_not_flagged(self):
+        # <20 measures: never flagged (threshold guards against tiny/edge models)
+        few = [{"expression": "bic_csubkbi"} for _ in range(5)]
+        w, t = self._quality(few)
+        assert self._is_degraded(w, t) is False
+
+    def test_mixed_above_quarter_not_degraded(self):
+        ms = ([{"expression": 'CALCULATE(SUM(T[v]), T[x]="0000")'} for _ in range(15)]
+              + [{"expression": "bic_csubkbi"} for _ in range(25)])
+        w, t = self._quality(ms)
+        assert w == 15 and t == 40
+        assert self._is_degraded(w, t) is False  # 15 >= 40//4 (10)
