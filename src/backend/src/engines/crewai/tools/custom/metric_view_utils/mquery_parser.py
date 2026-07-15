@@ -42,6 +42,54 @@ def looks_like_raw_mquery(sql: str) -> bool:
     return has_m_markers and not has_select
 
 
+def classify_mquery_source(mquery: str) -> tuple[str, str]:
+    """Classify a raw Power Query M source expression that produced no SQL.
+
+    Returns ``(category, human_reason)``. Categories:
+      * ``inline_const``  — hardcoded table (`Table.FromRows(Json.Document(
+        Binary.Decompress(Binary.FromText("…Base64"))))`): a slicer/selector
+        helper. No warehouse source — correctly skipped.
+      * ``dax_calc``      — DAX-defined calculated table (`GENERATESERIES`,
+        `SUMMARIZECOLUMNS`, `VALUES(...)`, `Row(...)`, parameter query): computed
+        in-model, no source SQL exists — correctly skipped.
+      * ``external``      — non-warehouse connector (`Access.Database`,
+        `Excel.Workbook`, `PowerBI.Dataflows`, `AnalysisServices`): source lives
+        outside the lakehouse; needs a customer-supplied mapping.
+      * ``extractable``   — looks like it SHOULD yield SQL (native query /
+        Databricks connector / Sql.Database) but the parser found no source: a
+        real extraction gap worth investigating, not a benign skip.
+      * ``unknown``       — none of the above.
+
+    Used to (a) skip benign non-warehouse tables with a clear reason instead of
+    routing them to M→SQL recovery, and (b) emit the original M-query as a note
+    (mirroring how untranslatable measures are surfaced).
+    """
+    if not mquery or not isinstance(mquery, str):
+        return ('unknown', 'empty source expression')
+    m = mquery
+    mu = m.upper()
+    if re.search(r'Table\.FromRows\s*\(\s*Json\.Document\s*\(\s*Binary\.Decompress', m):
+        return ('inline_const',
+                'inline constant table (slicer/selector helper, base64-embedded) — '
+                'no warehouse source; correctly skipped')
+    if re.search(r'\b(GENERATESERIES|SUMMARIZECOLUMNS|ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(', mu) \
+            or re.match(r'^\s*ROW\s*\(', mu) \
+            or re.search(r'IsParameterQuery\s*=\s*true', m, re.IGNORECASE):
+        return ('dax_calc',
+                'DAX calculated table / parameter query — computed in-model, '
+                'no source SQL exists; correctly skipped')
+    if re.search(r'\b(Access\.Database|Excel\.Workbook|PowerBI\.Dataflows|Dataflows|'
+                 r'AnalysisServices\.Database|SharePoint\.|Web\.Contents|Folder\.Files)\b', m):
+        return ('external',
+                'non-warehouse external source (dataflow / file / AAS) — needs a '
+                'customer-supplied source-table mapping')
+    if re.search(r'\b(Value\.NativeQuery|Sql\.Databases?|Databricks\.\w+|Spark\.)\b', m):
+        return ('extractable',
+                'looks extractable (native query / Databricks connector) but no '
+                'source table was resolved — extraction gap, investigate')
+    return ('unknown', 'unrecognized M source shape')
+
+
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
