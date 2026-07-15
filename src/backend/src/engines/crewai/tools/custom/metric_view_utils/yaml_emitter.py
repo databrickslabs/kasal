@@ -126,6 +126,31 @@ def _categorize_untranslatable(measure) -> tuple[str, str]:
         return ('dynamic KPI selector',
                 'SWITCH(SELECTEDVALUE(...)) picks a KPI by slicer — no static '
                 'metric-view equivalent; expand per-branch or handle in the report')
+    # Construct-specific guidance — state the ACTUAL unlock (or honest skip) so a
+    # reviewer knows the next step, not just "needs manual translation". These run
+    # BEFORE the generic SELECTEDVALUE/scalar catch below because these constructs
+    # frequently co-occur with a SELECTEDVALUE arg (a slicer feeding the pattern),
+    # and the specific construct is the actionable signal, not the SELECTEDVALUE.
+    if 'TREATAS' in du:
+        return ('disconnected-slicer dispatch (TREATAS)',
+                'slicer picks which KPI to show — display-layer, not a metric; '
+                'define each underlying KPI as its own measure, no source-view unlock')
+    if 'LOOKUPVALUE' in du:
+        return ('parameter/label lookup (LOOKUPVALUE)',
+                'builds a display string or reads a slicer parameter table — not a '
+                'metric; a real attribute lookup is a join (RELATED), not this')
+    if 'TOPN' in du:
+        return ('top-N row selection (TOPN)',
+                'ranks-and-slices rows — needs a source-view ROW_NUMBER()/QUALIFY '
+                'precompute; do not approximate with MAX')
+    if 'ALLEXCEPT' in du:
+        return ('fixed-LOD (ALLEXCEPT)',
+                'aggregate at the kept-column grain — 1 kept col → window range:all; '
+                '2+ kept cols → source-view SUM(...) OVER (PARTITION BY ...)')
+    if 'SUMMARIZE' in du or 'CALCULATETABLE' in du or 'ADDCOLUMNS' in du:
+        return ('group-then-aggregate (SUMMARIZE/CALCULATETABLE)',
+                'builds a grouped virtual table — materialize the GROUP BY in the '
+                'source SELECT as an identity dimension, then SUM it')
     if 'SELECTEDVALUE' in du or re.search(r'\bF_(START|END)_DATE\b|CUR_MONTH|CUR_YR', du):
         return ('slicer/scalar helper',
                 'returns a single slicer-driven scalar (e.g. a date picker) — '
@@ -800,7 +825,13 @@ def emit_yaml(spec: MetricViewSpec,
         # Stable, informative order: the "not-a-measure-by-nature" buckets first
         # (expected, no action), then the ones that need work.
         _order = ['display artifact', 'slicer/scalar helper', 'dynamic KPI selector',
+                  'disconnected-slicer dispatch (TREATAS)',
+                  'parameter/label lookup (LOOKUPVALUE)',
                   'prior-year time-intelligence', 'distinct-count pattern',
+                  # translatable-with-source-view-work buckets last (actionable):
+                  'fixed-LOD (ALLEXCEPT)',
+                  'top-N row selection (TOPN)',
+                  'group-then-aggregate (SUMMARIZE/CALCULATETABLE)',
                   'complex DAX \u2014 needs manual translation']
         for cat in _order + [c for c in _by_cat if c not in _order]:
             ms = _by_cat.get(cat)

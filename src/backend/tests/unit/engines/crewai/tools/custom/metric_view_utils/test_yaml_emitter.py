@@ -711,3 +711,36 @@ class TestUntranslatableCategorization:
     def test_complex_dax_bucket(self):
         y = self._emit([self._u('Weird', 'SOMEFUNC(x, y, z)')])
         assert 'needs manual translation' in y
+
+    # ── Construct-specific guidance (Tier 3): honest unlock or honest skip ────
+
+    def test_treatas_dispatch_grouped(self):
+        y = self._emit([self._u('KPI Dispatch',
+            'CALCULATE([M], TREATAS({kbiName}, T[Name]))')])
+        assert '[disconnected-slicer dispatch (TREATAS)]' in y
+        assert 'display-layer' in y and 'no source-view unlock' in y
+
+    def test_lookupvalue_label_grouped(self):
+        y = self._emit([self._u('Title',
+            'LOOKUPVALUE(p[Parameter], p[Field], SELECTEDVALUE(p[Field]))')])
+        assert '[parameter/label lookup (LOOKUPVALUE)]' in y
+        assert 'join (RELATED)' in y
+
+    def test_topn_grouped(self):
+        y = self._emit([self._u('TopPrice',
+            'CALCULATE(SELECTEDVALUE(P[Price]), TOPN(1, SUMMARIZE(P, P[Price], "c", COUNTROWS(P)), [c], DESC))')])
+        # SUMMARIZE also present, but TOPN guidance is what a reviewer needs first
+        assert '[top-N row selection (TOPN)]' in y
+        assert 'ROW_NUMBER' in y
+
+    def test_allexcept_fixed_lod_grouped(self):
+        y = self._emit([self._u('YearWeight',
+            "CALCULATE(SUM(t[weight]), ALLEXCEPT(t, t[Year]))")])
+        assert '[fixed-LOD (ALLEXCEPT)]' in y
+        assert 'kept-column grain' in y
+
+    def test_summarize_group_then_aggregate_grouped(self):
+        y = self._emit([self._u('MatContr',
+            'SUMX(SUMMARIZE(F, F[comp_code], F[material]), [x]*CALCULATE(SUM(F[s])))')])
+        assert '[group-then-aggregate (SUMMARIZE/CALCULATETABLE)]' in y
+        assert 'GROUP BY' in y and 'identity dimension' in y

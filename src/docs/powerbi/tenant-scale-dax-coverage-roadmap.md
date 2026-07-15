@@ -113,11 +113,31 @@ LLM skill corpus (`skills/dax/*.md`). Status legend: 🟢 handled well ·
   share-of-total (DAX has DIVIDE+ALL/ALLSELECTED, SQL has no window and num==denom
   → constant 1.0) and demotes to TODO. Guard catches the collapsed form on
   100% of a 4,000-measure real-corpus sample. Regression tests added.
-- **Tier 3 — categorize, don't chase (~8% combined):** SUMMARIZE, CALCULATETABLE,
-  TREATAS, TOPN, LOOKUPVALUE. Table-valued / virtual-relationship / row-context
-  — most need a **pre-aggregated source view**, not a measure translation. Make
-  the "not emitted" comment state exactly what source-view change unlocks them;
-  do not force a translation.
+- **Tier 3 — categorize, don't chase (~8% combined) — DONE:** SUMMARIZE,
+  CALCULATETABLE, TREATAS, TOPN, LOOKUPVALUE, ALLEXCEPT. Corpus sampling showed
+  these do NOT share one fate — the honest split is:
+  - **Translatable (→ PATTERNS.md):** `SUMX(SUMMARIZE(fact, cols), expr)` →
+    §13 fixed-LOD `GROUP BY` in the source SELECT + identity dimension;
+    `ALLEXCEPT(table, one_col)` → §14 fixed-LOD window (`range: all`) — this is
+    ~63% of ALLEXCEPT (single kept col); 2+ kept cols → source-view PARTITION BY.
+  - **Display-layer, honest skip (→ UNSUPPORTED.md):** TREATAS (disconnected-
+    slicer KPI dispatch — same family as SWITCH), LOOKUPVALUE (builds a display
+    string / reads a parameter table — a real attribute lookup is a join, not
+    this), TOPN (row ranking — needs source-view ROW_NUMBER()/QUALIFY, do not
+    approximate with MAX). These have **no source-view unlock** — advertising one
+    would be wrong.
+  - **Emitter guidance:** `_categorize_untranslatable` now emits a
+    construct-specific category + the actual next step for each (SUMMARIZE →
+    "materialize GROUP BY as identity dimension"; TREATAS → "define each KPI as
+    its own measure, no unlock"; etc.), so the "not emitted" comment is
+    actionable, not a generic "needs manual translation". These construct checks
+    run BEFORE the generic SELECTEDVALUE/scalar catch (they co-occur with a
+    slicer arg; the construct is the actionable signal).
+  Key correction from the original plan: the "for every skip, state the unlock"
+  framing was too optimistic — half of these (TREATAS/LOOKUPVALUE/TOPN) have no
+  unlock and are correctly display-layer skips. A new "special PBI patterns"
+  skillfile was NOT created; the two existing corpus files (PATTERNS/UNSUPPORTED)
+  were enriched instead.
 
 **On regex vs. LLM (adoptability):** the split is right — regex fast-path for the
 deterministic ~80%, LLM+skill-corpus for the flexible tail. The lever for
