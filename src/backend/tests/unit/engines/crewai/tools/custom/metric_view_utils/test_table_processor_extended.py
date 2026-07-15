@@ -1542,3 +1542,45 @@ class TestPromotedConverterEmitterSurvival:
         # Survives emission (not dropped) and uses source. — no raw table alias.
         assert 'eu_amt' in yaml
         assert 'sales.' not in yaml.lower().replace('cat.sch.', '')
+
+
+class TestCommonExclusionLifting:
+    """PROP-5: recurring DAX exclusion predicates on source cols lift to view filter."""
+
+    def _D(self, ms, cols):
+        from src.engines.crewai.tools.custom.metric_view_utils.table_processor import (
+            _detect_common_exclusions,
+        )
+        return _detect_common_exclusions(ms, cols)
+
+    def test_shared_not_equal_lifted(self):
+        ms = [
+            {'dax_expression': 'DIVIDE(SUMX(f,f[a]),FILTER(f,f[comp_code]<>"0307"))'},
+            {'dax_expression': 'DIVIDE(SUMX(f,f[b]),FILTER(f,f[comp_code]<>"0307"))'},
+            {'dax_expression': 'SUM(f[c])'},
+        ]
+        assert self._D(ms, {'comp_code', 'a', 'b', 'c'}) == ["source.comp_code <> '0307'"]
+
+    def test_shared_not_in_lifted(self):
+        ms = [
+            {'dax_expression': 'CALCULATE(SUM(f[x]), NOT f[comp_code] IN {"0403","0550","0307"})'},
+            {'dax_expression': 'CALCULATE(SUM(f[y]), NOT f[comp_code] IN {"0403","0550","0307"})'},
+        ]
+        out = self._D(ms, {'comp_code', 'x', 'y'})
+        assert out == ["source.comp_code NOT IN ('0403', '0550', '0307')"]
+
+    def test_dim_column_not_lifted(self):
+        # column absent from source cols -> never lifted (avoids wrong filter)
+        ms = [
+            {'dax_expression': 'FILTER(f,f[company_code]<>"0307")'},
+            {'dax_expression': 'FILTER(f,f[company_code]<>"0307")'},
+        ]
+        assert self._D(ms, {'a', 'b'}) == []
+
+    def test_one_off_not_lifted(self):
+        ms = [
+            {'dax_expression': 'SUMX(f,f[a]) FILTER(f,f[comp_code]<>"0307")'},
+            {'dax_expression': 'SUM(f[b])'},
+            {'dax_expression': 'SUM(f[c])'},
+        ]
+        assert self._D(ms, {'comp_code', 'a', 'b', 'c'}) == []

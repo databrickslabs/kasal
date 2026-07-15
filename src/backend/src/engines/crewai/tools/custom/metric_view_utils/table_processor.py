@@ -19,6 +19,60 @@ from .utils import to_snake_case, spark_sql_compat, col_to_readable, run_async
 
 logger = logging.getLogger(__name__)
 
+
+def _detect_common_exclusions(dax_measures: list[dict], source_cols: set) -> list[str]:
+    """PROP-5: find exclusion predicates shared across most measures' DAX and
+    return them as SQL filter clauses to lift to the view level.
+
+    Matches ``Table[col] <> <val>`` and ``NOT Table[col] IN {..}`` on a column that
+    is present on the fact source. Only predicates appearing in ≥50% of measures
+    that carry DAX are lifted (a one-off filter belongs on its measure, not the
+    whole view). Values are taken verbatim from the DAX (already customer-supplied).
+    """
+    # col -> set of normalized exclusion predicates -> count
+    counts: dict[str, int] = {}
+    predicate_sql: dict[str, str] = {}
+    n_with_dax = 0
+    _ne = re.compile(
+        r"""(?:'[^']+'|\w+)\[(\w+)\]\s*<>\s*("?[\w./-]+"?|'[^']*')""")
+    _notin = re.compile(
+        r"""NOT\s+(?:'[^']+'|\w+)\[(\w+)\]\s+IN\s*[\{(]([^})]+)[\})]""",
+        re.IGNORECASE)
+    for m in dax_measures:
+        dax = m.get('dax_expression', '') or ''
+        if not dax.strip():
+            continue
+        n_with_dax += 1
+        seen_here: set[str] = set()
+        for fm in _ne.finditer(dax):
+            col = to_snake_case(fm.group(1))
+            if col not in source_cols:
+                continue
+            val = fm.group(2).strip().strip('"')
+            if not (val.startswith("'") and val.endswith("'")):
+                val = f"'{val}'"
+            key = f'{col} <> {val}'
+            predicate_sql[key] = f'source.{col} <> {val}'
+            seen_here.add(key)
+        for fm in _notin.finditer(dax):
+            col = to_snake_case(fm.group(1))
+            if col not in source_cols:
+                continue
+            raw_vals = re.findall(r'"([^"]*)"|\'([^\']*)\'|([\w./-]+)', fm.group(2))
+            vals = [f"'{(a or b or c).strip()}'" for a, b, c in raw_vals if (a or b or c).strip()]
+            if not vals:
+                continue
+            key = f'{col} NOT IN ({",".join(sorted(vals))})'
+            predicate_sql[key] = f'source.{col} NOT IN ({", ".join(vals)})'
+            seen_here.add(key)
+        for k in seen_here:
+            counts[k] = counts.get(k, 0) + 1
+    if n_with_dax == 0:
+        return []
+    threshold = max(2, n_with_dax // 2)  # ≥50% of DAX-carrying measures (min 2)
+    return [predicate_sql[k] for k, c in counts.items() if c >= threshold]
+
+
 def _is_real_switch_decomp(entry) -> bool:
     """True when a config switch_decomposition entry carries REAL SQL.
 
@@ -844,6 +898,24 @@ def process_table(
                 continue
             valid_filters.append(filt)
         source_filter = ' AND '.join(valid_filters)
+
+    # ── PROP-5: lift recurring DAX exclusion predicates to the view filter ──
+    # The GT applies exclusions like comp_code NOT IN ('0403','0550','0307') at the
+    # view level; in the DAX these appear per-measure as FILTER(dim, col<>'0307').
+    # Detect exclusion predicates on a SOURCE column shared across most measures and
+    # add them once to source_filter (default on; disable via lift_common_exclusions).
+    if ctx.config.get('lift_common_exclusions', True) and dax_measures:
+        known_source_cols = set(table_info.group_by_columns)
+        known_source_cols.update(c['name'] for c in table_info.aggregate_columns)
+        known_source_cols.update(
+            c.get('source_col', '') for c in table_info.aggregate_columns)
+        lifted = _detect_common_exclusions(dax_measures, known_source_cols)
+        if lifted:
+            existing = [source_filter] if source_filter else []
+            source_filter = ' AND '.join(existing + lifted)
+            ctx.filter_warnings.append(
+                f'{table_key}: lifted {len(lifted)} common exclusion filter(s) '
+                f'to view level: {lifted}')
 
     # ── Source SQL enrichment: inline SQL from PBI native queries ─────
     source_sql = ''

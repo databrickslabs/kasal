@@ -1000,3 +1000,85 @@ class TestEtlColumnCuration:
         assert "year_card" in excl
         assert "sales_amount" in excl  # hidden
         assert "region" not in excl    # business dimension preserved
+
+
+class TestMeasureRefResolution:
+    """PROP-1: referenced-measure DAX is transpiled into base_expr, not a TODO."""
+
+    def _R(self, dax):
+        from src.engines.crewai.tools.custom.generate_config import (
+            _resolve_referenced_measure_dax,
+        )
+        return _resolve_referenced_measure_dax(dax)
+
+    def test_bare_sum(self):
+        assert self._R('SUM(FT_QSE[kbi_value])') == {
+            'base_expr': 'SUM(source.kbi_value)', 'base_filters': []}
+
+    def test_calculate_with_filters(self):
+        r = self._R('CALCULATE(SUM(T[val]), T[ver]="B000")')
+        assert r['base_expr'] == 'SUM(source.val)'
+        assert r['base_filters'] == ["ver = 'B000'"]
+
+    def test_constant(self):
+        assert self._R('1') == {'base_expr': '1', 'base_filters': []}
+
+    def test_switch_picks_first_calculate_branch_no_leak(self):
+        plant = (
+            'Switch(TRUE(),\n'
+            '  Or(ISFILTERED(C_Dim_Plant[plant_desc]),HASONEVALUE(C_Dim_Plant[plant])),\n'
+            '  CALCULATE(SUM(FT_QSE[kbi_value]), FT_QSE[bic_chversion]="0000", FT_QSE[bic_creg_type]="Plant"),\n'
+            '  CALCULATE(SUM(FT_QSE[kbi_value]), FT_QSE[bic_chversion]="0000", FT_QSE[bic_creg_type]="Company Code"))'
+        )
+        r = self._R(plant)
+        assert r['base_expr'] == 'SUM(source.kbi_value)'
+        # only the FIRST (plant) branch filters — Company Code must NOT leak in
+        assert r['base_filters'] == ["bic_chversion = '0000'", "bic_creg_type = 'Plant'"]
+
+    def test_untranslatable_returns_none(self):
+        assert self._R('var x = SELECTEDVALUE(a) return x + 1') is None
+
+    def test_end_to_end_no_todo_literal(self):
+        from src.engines.crewai.tools.custom.generate_config import (
+            derive_measure_resolutions,
+        )
+        measures = [
+            {'measure_name': 'BaseKBI', 'table_name': 'FT_QSE',
+             'expression': 'CALCULATE(SUM(FT_QSE[kbi_value]), FT_QSE[bic_chversion]="0000")'},
+            {'measure_name': 'CC', 'table_name': 'FT_QSE',
+             'expression': 'CALCULATE([BaseKBI], FT_QSE[bic_csubkbi]="KEMAA0011")'},
+        ]
+        res = derive_measure_resolutions(measures)
+        assert 'BaseKBI' in res
+        assert res['BaseKBI']['base_expr'] == 'SUM(source.kbi_value)'
+        assert 'TODO' not in res['BaseKBI']['base_expr']
+
+
+class TestReportIdAutoDiscovery:
+    """PROP-7: discover the report bound to the dataset when none supplied."""
+
+    def _discover(self, reports, dataset_id="ds1", status=200):
+        from unittest.mock import patch, MagicMock
+        from src.engines.crewai.tools.custom import generate_config as gc
+        resp = MagicMock(status_code=status)
+        resp.json.return_value = {"value": reports}
+        with patch.object(gc, "requests") as rq:
+            rq.get.return_value = resp
+            return gc.discover_report_id("tok", "ws", dataset_id)
+
+    def test_matches_dataset_case_insensitive(self):
+        rid = self._discover([{"id": "r2", "name": "SC Report", "datasetId": "DS1"}])
+        assert rid == "r2"
+
+    def test_prefers_real_report_over_usage(self):
+        rid = self._discover([
+            {"id": "u", "name": "Usage Metrics Report", "datasetId": "ds1"},
+            {"id": "real", "name": "SC - Total Supply Chain", "datasetId": "ds1"},
+        ])
+        assert rid == "real"
+
+    def test_no_match_returns_none(self):
+        assert self._discover([{"id": "x", "datasetId": "other"}]) is None
+
+    def test_api_failure_returns_none(self):
+        assert self._discover([], status=403) is None

@@ -329,8 +329,26 @@ class PipelineConfigGeneratorTool(BaseTool):
                         })
                 logger.info(f"[PipelineConfigGen]   → {len(measures)} measures from admin scan")
 
-            # API 4: Report Definition (optional)
+            # API 4: Report Definition.
+            # PROP-7: the report's visual bindings carry the full measure DAX —
+            # running WITHOUT one silently degrades measure quality. If no
+            # report_id was supplied, auto-discover the report bound to this
+            # dataset; if none is found, proceed but warn loudly.
             report_def = None
+            if not report_id:
+                discovered = gen.discover_report_id(token, workspace_id, dataset_id)
+                if discovered:
+                    report_id = discovered
+                    logger.info(
+                        f"[PipelineConfigGen] Auto-discovered report_id={report_id} "
+                        f"bound to dataset {dataset_id}")
+                else:
+                    msg = ("No report_id supplied and none auto-discovered for this "
+                           "dataset — measure DAX may be degraded (report visual "
+                           "bindings carry full measure expressions). Supply a "
+                           "report_id for best quality.")
+                    logger.warning(f"[PipelineConfigGen] {msg}")
+                    warnings.append(msg)
             if report_id:
                 logger.info("[PipelineConfigGen] API 4: Report Definition...")
                 report_def = gen.extract_report_definition(

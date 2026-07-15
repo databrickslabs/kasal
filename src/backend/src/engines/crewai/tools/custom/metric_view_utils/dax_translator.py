@@ -104,7 +104,7 @@ class DaxTranslator:
         aren't the primary path in llm_first mode.
         """
         name = measure.get('measure_name', '')
-        dax = measure.get('dax_expression', '')
+        dax = self._preclean_dax(measure.get('dax_expression', ''))
         original_name = measure.get('original_name', name)
         snake = to_snake_case(original_name)
 
@@ -1149,15 +1149,52 @@ class DaxTranslator:
                         filter_parts.append(impl_sql)
 
     @staticmethod
+    def _preclean_dax(dax: str) -> str:
+        """PROP-6: strip DAX comments and normalize BLANK() before translation.
+
+        - Remove ``//`` and ``--`` line comments (DAX allows both); left in, an
+          inline ``-- Denominator`` leaks into the emitted SQL and comments out the
+          rest of the line.
+        - Remove ``/* ... */`` block comments.
+        - Replace standalone ``BLANK()`` with ``NULL`` (emitted literally it is not
+          valid Spark SQL).
+        """
+        if not dax:
+            return dax
+        dax = re.sub(r'/\*.*?\*/', ' ', dax, flags=re.DOTALL)
+        cleaned_lines = []
+        for line in dax.split('\n'):
+            line = re.sub(r'//.*$', '', line)
+            line = re.sub(r'--.*$', '', line)
+            cleaned_lines.append(line)
+        dax = '\n'.join(cleaned_lines)
+        # BLANK() → NULL, but ONLY when it's part of a larger expression. A measure
+        # that is *only* BLANK() is a display placeholder — leave it for the
+        # quick-reject matcher to drop (converting it to bare NULL would hide it).
+        if dax.strip().upper() not in ('BLANK()', 'BLANK ()'):
+            dax = re.sub(r'\bBLANK\s*\(\s*\)', 'NULL', dax, flags=re.IGNORECASE)
+        return dax
+
+    @staticmethod
     def _extract_divide_args(text: str) -> tuple[str, str] | None:
-        """Extract numerator and denominator from DIVIDE(a, b)."""
+        """Extract numerator and denominator from DIVIDE(num, den[, alt_result]).
+
+        DAX DIVIDE has an optional THIRD argument (the value returned when the
+        denominator is 0/blank). We must split on BOTH top-level commas and return
+        only args 1 and 2 — otherwise the denominator captures ``den, alt_result``
+        and downstream produces malformed ``NULLIF(den, alt, 0)`` (invalid SQL, 3
+        args). The alt_result is intentionally dropped: our emitted
+        ``x / NULLIF(y, 0)`` already yields NULL on a zero denominator, matching
+        DAX's blank-on-zero semantics closely enough (a non-NULL alt is a rare
+        edge we do not model).
+        """
         m = re.search(r'DIVIDE\s*\(', text, re.IGNORECASE)
         if not m:
             return None
         start = m.end()
         depth = 1
         pos = start
-        comma_pos = None
+        commas: list[int] = []
         while pos < len(text) and depth > 0:
             if text[pos] == '(':
                 depth += 1
@@ -1165,12 +1202,17 @@ class DaxTranslator:
                 depth -= 1
                 if depth == 0:
                     break
-            elif text[pos] == ',' and depth == 1 and comma_pos is None:
-                comma_pos = pos
+            elif text[pos] == ',' and depth == 1:
+                commas.append(pos)
             pos += 1
-        if comma_pos is None:
+        if not commas:
             return None
-        return text[start:comma_pos].strip(), text[comma_pos + 1:pos].strip()
+        num = text[start:commas[0]].strip()
+        # Denominator ends at the 2nd top-level comma if present (alt_result), else
+        # at the closing paren.
+        den_end = commas[1] if len(commas) >= 2 else pos
+        den = text[commas[0] + 1:den_end].strip()
+        return num, den
 
     @staticmethod
     def _substitute_vars(expr: str, var_map: dict[str, str]) -> str | None:

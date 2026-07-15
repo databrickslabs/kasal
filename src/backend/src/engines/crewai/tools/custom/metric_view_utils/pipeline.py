@@ -396,20 +396,47 @@ class MetricViewPipeline:
         return spec
 
     def _sanitize_spec_measures(self, spec) -> None:
-        """P5 correctness batch: apply the SQL measure sanitizer to every measure
-        in the spec (no-op divisions, self-divisions, NULL-safe base aggregates)."""
-        from .sql_measure_sanitizer import sanitize_measure_sql
+        """P5 correctness batch + PROP-3a/4a silent-wrong guard.
+
+        First applies the SQL sanitizer (no-op divisions, self-divisions, NULL-safe
+        base aggregates). Then demotes any measure whose SQL would silently produce
+        a WRONG or invalid result (empty ratio, malformed NULLIF, unresolved DAX
+        ref, un-applied prior-year, untranslated SUMX/CALCULATE, dangling var) to
+        untranslatable — an honest TODO comment beats a number that is quietly
+        wrong or SQL that won't run.
+        """
+        from .sql_measure_sanitizer import sanitize_measure_sql, detect_silent_wrong
+        kept = []
+        demoted = []
         for m in getattr(spec, 'measures', None) or []:
             is_base = getattr(m, 'category', '') == 'base'
             new_sql, note = sanitize_measure_sql(m.sql_expr, is_base=is_base)
             m.sql_expr = new_sql
             if note:
-                # Preserve the original reason but append the sanitizer marker so
-                # reviewers see why a ratio collapsed. Non-fatal — value still emits.
                 _reason = getattr(m, 'skip_reason', '') or ''
                 if 'self-division' not in _reason:
                     m.skip_reason = (f'{_reason} [{note}]').strip()
                 self._filter_warnings.append(f'{spec.fact_table_key}: {m.measure_name}: {note}')
+            # Base measures are simple SUM(COALESCE(...)) and are never demoted.
+            bad = None if is_base else detect_silent_wrong(new_sql)
+            if bad:
+                m.is_translatable = False
+                m.sql_expr = None
+                m.skip_reason = (
+                    f'TODO — not emitted (would be silently wrong/invalid: {bad}). '
+                    f'Original DAX needs manual translation.')
+                demoted.append(m)
+                self._filter_warnings.append(
+                    f'{spec.fact_table_key}: {m.measure_name}: demoted to TODO ({bad})')
+            else:
+                kept.append(m)
+        if demoted:
+            spec.measures = kept
+            existing = getattr(spec, 'untranslatable', None)
+            if existing is None:
+                spec.untranslatable = demoted
+            else:
+                existing.extend(demoted)
 
     # ── Delegates to artifact_cascade module ─────────────────────────
 
