@@ -694,6 +694,18 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
         return None
     d = dax.strip()
 
+    # Strip leading slicer-scalar scaffolding vars before locating the aggregate.
+    # Measures on the _BP/_PY side carry `var std = CALCULATE([F_Start_date]) var
+    # etd = CALCULATE([F_End_date]) return <real expr>` — those date-window vars
+    # are display scaffolding (ignored elsewhere in the pipeline). If we don't
+    # drop them, the FIRST CALCULATE( found is `CALCULATE([F_Start_date])` (the
+    # scaffolding), not the real aggregate branch, and resolution fails — which is
+    # exactly why the _BP twins dropped while the scaffolding-free _Actual twins
+    # resolved. Cut to the RETURN body so the aggregate is the first CALCULATE.
+    _ret = re.search(r'\breturn\b\s*(.+)$', d, re.IGNORECASE | re.DOTALL)
+    if _ret and re.match(r'(?is)^\s*var\s+', d):
+        d = _ret.group(1).strip()
+
     # Constant (e.g. AVG_KBI_Div_Factor's effective value is 1 in the GT).
     if re.fullmatch(r'-?\d+(?:\.\d+)?', d):
         return {"base_expr": d, "base_filters": []}
@@ -742,9 +754,20 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
         inner, re.IGNORECASE,
     )
     if not agg:
-        return None
+        # Also handle the SUMX(FILTER(fact, <pred>), fact[col]) shape, where the
+        # first arg is a FILTER(...) table rather than a bare table — the column
+        # is the FINAL Table[col] argument. (Plant/Company KBI selectors on the
+        # _BP side use this shape, unlike the _Actual side's CALCULATE(SUM,…).)
+        agg = re.search(
+            r'\b(SUMX|COUNTX|AVERAGEX)\s*\(\s*FILTER\s*\(.*\)\s*,\s*'
+            r"(?:'[^']+'|\w+)\[(\w+)\]\s*\)",
+            inner, re.IGNORECASE | re.DOTALL,
+        )
+        if not agg:
+            return None
     func = agg.group(1).upper()
-    spark_func = {'SUMX': 'SUM', 'DISTINCTCOUNT': 'COUNT_DISTINCT'}.get(func, func)
+    spark_func = {'SUMX': 'SUM', 'COUNTX': 'COUNT', 'AVERAGEX': 'AVG',
+                  'DISTINCTCOUNT': 'COUNT_DISTINCT'}.get(func, func)
     col = to_snake_case(agg.group(2))
     base_expr = f"{spark_func}(source.{col})"
 
