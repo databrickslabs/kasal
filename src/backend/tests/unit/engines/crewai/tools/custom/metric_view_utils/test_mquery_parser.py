@@ -100,3 +100,58 @@ class TestMLanguageTokenNormalization:
         sql = 'SELECT a, if(x=1,""yes"",""no"") AS f FROM cat.sch.t'
         info = MQueryParser()._parse_sql('t', sql)
         assert '""' not in (info.full_sql or '')
+
+
+class TestClassifyMquerySource:
+    """classify_mquery_source: route no-SQL M sources to a skip-with-reason
+    category so the report can emit them as a note (mirrors untranslatable
+    measures) instead of routing benign non-facts to broken SQL recovery."""
+
+    def _C(self, m):
+        from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import (
+            classify_mquery_source)
+        return classify_mquery_source(m)
+
+    def test_inline_constant_table(self):
+        m = ('let Source = Table.FromRows(Json.Document(Binary.Decompress('
+             'Binary.FromText("i45W", BinaryEncoding.Base64), Compression.Deflate))) '
+             'in Source')
+        assert self._C(m)[0] == 'inline_const'
+
+    def test_dax_calc_generateseries(self):
+        assert self._C('GENERATESERIES(-5, 20, 5)')[0] == 'dax_calc'
+
+    def test_dax_calc_summarizecolumns(self):
+        assert self._C('SUMMARIZECOLUMNS(Dim_Date[YearMonth])')[0] == 'dax_calc'
+
+    def test_dax_calc_parameter_query(self):
+        assert self._C('"N" meta [IsParameterQuery=true, Type="Text"]')[0] == 'dax_calc'
+
+    def test_external_access_database(self):
+        m = 'let Source = Access.Database(File.Contents("x.accdb")) in Source'
+        assert self._C(m)[0] == 'external'
+
+    def test_extractable_native_query(self):
+        m = 'let Source = Value.NativeQuery(db, "SELECT a FROM t") in Source'
+        assert self._C(m)[0] == 'extractable'
+
+    def test_extractable_databricks_connector(self):
+        m = 'let Source = Databricks.Catalogs("h","p"){[Name="c"]}[Data] in Source'
+        assert self._C(m)[0] == 'extractable'
+
+    def test_unknown_shape(self):
+        assert self._C('let Source = List.Numbers(1,10) in Source')[0] == 'unknown'
+
+    def test_empty_input(self):
+        assert self._C('')[0] == 'unknown'
+        assert self._C(None)[0] == 'unknown'
+
+    def test_reason_is_human_readable(self):
+        cat, reason = self._C('GENERATESERIES(1,10)')
+        assert isinstance(reason, str) and len(reason) > 10
+
+    def test_inline_const_precedence_over_dax(self):
+        # a base64 inline table that also mentions VALUES must classify as inline_const
+        m = ('Table.FromRows(Json.Document(Binary.Decompress('
+             'Binary.FromText("x", BinaryEncoding.Base64))))  // VALUES helper')
+        assert self._C(m)[0] == 'inline_const'

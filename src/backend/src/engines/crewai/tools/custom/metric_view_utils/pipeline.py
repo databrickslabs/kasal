@@ -191,16 +191,31 @@ class MetricViewPipeline:
         # Phase 1: Process all tables and collect specs
         self.all_specs = {}
 
+        from .mquery_parser import classify_mquery_source
+
+        def _skip_stat(tinfo) -> dict:
+            """Build a skip stat that classifies WHY a table produced no view and
+            carries the original M-query so it can be emitted as a note (mirrors
+            how untranslatable measures are surfaced)."""
+            raw = getattr(tinfo, 'raw_transpiled_sql', '') or ''
+            category, reason = classify_mquery_source(raw)
+            return {
+                'total': 0, 'translated': 0, 'untranslatable': 0,
+                'cross_table': 0, 'base': 0, 'dax': 0,
+                'skipped': True, 'skip_reason': reason, 'skip_category': category,
+                # original M-query, capped, for the "not emitted" note in the report
+                'original_mquery': raw[:2000],
+            }
+
         for table_key, table_info in self.mquery_tables.items():
             if not table_info.is_fact:
+                # Non-fact / raw-M tables: record a classified skip (not a silent
+                # drop) so the report can emit the original M-query with a reason.
+                self.stats[table_key] = _skip_stat(table_info)
                 continue
 
             if not table_info.source_table:
-                self.stats[table_key] = {
-                    'total': 0, 'translated': 0, 'untranslatable': 0,
-                    'cross_table': 0, 'base': 0, 'dax': 0,
-                    'skipped': True, 'skip_reason': 'No source table found in SQL',
-                }
+                self.stats[table_key] = _skip_stat(table_info)
                 continue
 
             dax_measures = measure_groups.get(table_key, [])

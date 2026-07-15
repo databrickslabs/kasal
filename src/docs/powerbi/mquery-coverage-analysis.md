@@ -61,3 +61,31 @@ Add an early skip-classifier to the MQuery path:
 This prevents wasted LLM recovery + empty-view emission on ~60% of sources and
 makes the skip reason explicit in the output, consistent with how the DAX side
 now categorizes its skips.
+
+## Shipped (2026-07-15)
+
+The follow-up above is implemented:
+
+1. **`classify_mquery_source(mquery) -> (category, reason)`** in
+   `metric_view_utils/mquery_parser.py`. Categories: `inline_const`, `dax_calc`,
+   `external`, `extractable`, `unknown` (order of checks makes inline-const win
+   over a nested `VALUES`/DAX token). Returns a human-readable reason string.
+2. **`pipeline.py`** — both skip branches (`not is_fact`, `not source_table`)
+   now record a classified skip via `_skip_stat()` carrying `skip_reason`,
+   `skip_category`, and `original_mquery` (raw M, capped at 2000 chars) instead
+   of dropping the table silently.
+3. **`report_emitter.py`** — a new **"## Tables not emitted"** section groups the
+   skipped tables by category (extraction-gap / external first, then the expected
+   inline-const & dax-calc skips) and emits each table's original Power Query M in
+   a ```` ```m ```` fenced block — the table-level analogue of how untranslatable
+   *measures* are surfaced with their original DAX.
+
+Net effect on output: the ~19% genuinely-extractable tables surface as
+**"Extraction gap — INVESTIGATE"** with their M source shown; the ~60% inline/DAX
+scaffolding surfaces as an **expected skip** with a clear reason. No table
+vanishes silently, and no benign constant table gets routed to LLM SQL recovery.
+
+**No skill-corpus (DAX `PATTERNS.md`/`UNSUPPORTED.md`) change was needed** — these
+are *table sources*, handled by the MQuery parser, not DAX measures translated by
+the skill corpus. The "adapt the respective sections" work was therefore in the
+pipeline + report emitter, not the skill files.

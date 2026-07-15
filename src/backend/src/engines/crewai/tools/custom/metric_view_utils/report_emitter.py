@@ -89,6 +89,49 @@ def emit_migration_report(
             f'| {art} | {gaps} | {scope} | {pct}% | MQuery |')
     lines.append('')
 
+    # ── Tables not emitted (with the original M-query as a note) ────────────
+    # Mirrors the measure-level "not emitted" block: a table that produced no
+    # view is surfaced here with WHY (classified) and its original Power Query M
+    # source, so a reviewer can act on it instead of it vanishing silently.
+    skipped = [(k, s) for k, s in sorted(stats.items())
+               if k != '__unassigned__' and s.get('skipped')]
+    if skipped:
+        # group by category so "correctly skipped" (inline/dax) reads apart from
+        # "extraction gap" (extractable) which needs action.
+        _order = ['extractable', 'external', 'unknown', 'dax_calc', 'inline_const']
+        _label = {
+            'extractable': 'Extraction gap — looked extractable but no source resolved (INVESTIGATE)',
+            'external': 'External non-warehouse source — needs a source-table mapping (customer input)',
+            'dax_calc': 'DAX calculated / parameter table — computed in-model, no source SQL (expected skip)',
+            'inline_const': 'Inline constant table (slicer/selector helper) — no warehouse source (expected skip)',
+            'unknown': 'Unrecognized M source shape',
+        }
+        lines.append('## Tables not emitted')
+        lines.append('')
+        lines.append(
+            f'{len(skipped)} table(s) produced no metric view. Grouped by cause; '
+            'the original Power Query M is shown so the source can be supplied or '
+            'the skip confirmed.')
+        lines.append('')
+        by_cat: dict[str, list] = {}
+        for k, s in skipped:
+            by_cat.setdefault(s.get('skip_category', 'unknown'), []).append((k, s))
+        for cat in _order + [c for c in by_cat if c not in _order]:
+            group = by_cat.get(cat)
+            if not group:
+                continue
+            lines.append(f'### {_label.get(cat, cat)}')
+            lines.append('')
+            for k, s in group:
+                lines.append(f'- **{k}** — {s.get("skip_reason", "skipped")}')
+                mq = (s.get('original_mquery') or '').strip()
+                if mq:
+                    lines.append('  ```m')
+                    for ml in mq.split('\n'):
+                        lines.append(f'  {ml}')
+                    lines.append('  ```')
+            lines.append('')
+
     # ── Join Map ───────────────────────────────────────────────────────────
 
     lines.append('## Join Map')
