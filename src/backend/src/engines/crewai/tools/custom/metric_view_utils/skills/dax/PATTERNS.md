@@ -280,3 +280,75 @@ SQL:  COUNT(DISTINCT source.column)
 ```
 
 `VALUES` returns distinct values of a column. In aggregation context, `COUNTROWS(VALUES(...))` is equivalent to `COUNT(DISTINCT ...)`.
+
+## 13. SUMX(SUMMARIZE(...)) — group-then-aggregate (fixed LOD in the source view)
+
+`SUMX(SUMMARIZE(fact, colA, colB), <row expr>)` groups the fact to the
+(`colA`, `colB`) grain, evaluates `<row expr>` **once per group**, then sums the
+results. A metric view cannot build a virtual grouped table inline — but the
+grouped pre-aggregate can be **materialized in the `source:` SELECT** with
+`GROUP BY`, exposed as an identity dimension, and then summed.
+
+```
+DAX:  Mat Contribution :=
+        DIVIDE(
+          SUMX(SUMMARIZE(FT_PE009, FT_PE009[comp_code], FT_PE009[material]),
+               [Mat contr per pack] * CALCULATE(SUM(FT_PE009[sales_metal_hidden]))),
+          1000000)
+
+YAML: version: '1.1'
+      source: |
+        SELECT
+          comp_code, material,
+          -- per-(comp_code, material) group value, computed once per group:
+          SUM(mat_contr_per_pack * sales_metal_hidden) AS grp_mat_contribution
+        FROM <catalog>.<schema>.ft_pe009
+        GROUP BY comp_code, material
+      dimensions:
+        - name: comp_code
+          expr: comp_code
+        - name: material
+          expr: material
+      measures:
+        - name: mat_contribution
+          expr: SUM(source.grp_mat_contribution) / 1000000
+```
+
+Rules:
+- The `SUMMARIZE(fact, colA, colB)` grain → the source `GROUP BY colA, colB`.
+- The per-row expression inside `SUMX` → the aggregate inside the grouped SELECT.
+- The outer `SUMX(...)` → `SUM(source.<grouped_col>)` in the measure.
+- If the row expression itself references OTHER measures with their own filter
+  context (nested CALCULATE beyond a simple SUM), it may not reduce to a single
+  GROUP BY — then treat as UNSUPPORTED (source-view precompute needed, flag it).
+
+## 14. ALLEXCEPT(table, keep_col) — fixed LOD at one grain
+
+`ALLEXCEPT(table, keep_col)` removes ALL filter context on `table` **except**
+`keep_col` — i.e. "aggregate at the `keep_col` grain, ignoring every other
+filter." When exactly ONE column is kept, this is a coarser-LOD window measure
+ordered on the NON-kept dimensions (or, equivalently, a fixed LOD at `keep_col`).
+
+```
+DAX:  Year Weight := CALCULATE(SUM('Face Time'[Weight]), ALLEXCEPT('Face Time', 'Face Time'[Year]))
+
+YAML: version: '1.1'
+      measures:
+        - name: weight
+          expr: SUM(source.weight)
+        - name: weight_by_year        # fixed at the Year grain
+          expr: MEASURE(weight)
+          window:
+            - order: year
+              range: all              # remove all dims EXCEPT the ordering grain
+              semiadditive: last
+```
+
+Rules:
+- **ONE kept column** → the fixed-LOD/window pattern above (the kept col is the
+  retained grain). This is ~63% of real ALLEXCEPT usage.
+- **TWO OR MORE kept columns** → a multi-dimension fixed LOD; not a single
+  window. Precompute in the source view with
+  `SUM(...) OVER (PARTITION BY keep_col1, keep_col2)` as an identity dimension, or
+  flag UNSUPPORTED. Do NOT approximate with a single `range: all` window — it
+  would collapse the wrong dimensions.

@@ -140,3 +140,56 @@ DAX:  IF(ISBLANK(SELECTEDVALUE(dim[col])), BLANK(), [measure])
 Returns BLANK when no single value is selected in a slicer. Display-layer guard logic.
 
 **Action**: Skip the guard. The measure itself is still valid.
+
+## TREATAS (disconnected-slicer dispatch)
+
+```
+DAX:  var kbiName = SELECTEDVALUE(Calculation_Table_Disconnected[Name])
+      return CALCULATE([Cal M vs PY], TREATAS({kbiName}, 'Calculation_Table vs PY'[Name]))
+```
+
+`TREATAS` applies a value list as a virtual relationship onto a table. In the
+wild this is almost always the **disconnected calculation-table pattern**: a
+slicer on a disconnected table picks *which KPI* to show, and `TREATAS` pushes
+that selection onto the real table. This is slicer-driven display dispatch — the
+same family as SWITCH/SELECTEDVALUE (§5) — not a metric definition.
+
+**Action**: Skip. Define each underlying KPI as its own measure and let the
+dashboard's slicer pick between them. Do NOT attempt a virtual relationship;
+metric views have a single fixed join graph. There is **no source-view unlock** —
+this is display logic, not a computation.
+
+## LOOKUPVALUE (parameter-table / label lookup)
+
+```
+DAX:  var category  = SELECTEDVALUE('Mix Analysis Columns'[Parameter Fields])
+      var parameter = LOOKUPVALUE('Mix Analysis Columns'[Parameter],
+                                  'Mix Analysis Columns'[Parameter Fields], category)
+      return "Suggested & Executed Orders By " & parameter
+```
+
+`LOOKUPVALUE` fetches a scalar from another table by key. In practice it is
+dominated by two non-metric uses: (a) building a **display string / dynamic title**
+(as above — the result is text, not a number), and (b) reading a **parameter
+table** driven by a slicer. Neither is an aggregatable measure.
+
+**Action**: Skip. If it is a genuine dimension attribute lookup (not a label),
+that is a **join** (§7 RELATED), not `LOOKUPVALUE`. String/title measures are
+display-layer — no metric-view equivalent.
+
+## TOPN (top-N row selection)
+
+```
+DAX:  CALCULATE(SELECTEDVALUE(PROMO[FinalPrice]),
+        TOPN(1, SUMMARIZE('Promo', PROMO[FinalPrice], "cnt", COUNTROWS(PROMO)), [cnt], DESC))
+```
+
+`TOPN` returns the top-N rows of a table by an ordering expression. It is a
+row-selection over a virtual table — metric views aggregate, they do not rank-
+and-slice rows inline.
+
+**Action**: For the common `TOPN(1, ...)` "pick the top row" case, the only
+faithful route is a **source-view precompute** using
+`ROW_NUMBER() OVER (ORDER BY <expr> DESC)` filtered to `= 1` (or `QUALIFY`), then
+expose the result column. If that precompute is not available, skip and flag —
+do not approximate with a plain MAX/aggregate (it changes the semantics).
