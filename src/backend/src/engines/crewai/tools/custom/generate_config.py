@@ -16,8 +16,8 @@ Usage:
     --client-secret "U5b8Q~..." \
     --admin-client-id 8d8aa6ee-... \
     --admin-client-secret "RXm8Q~..." \
-    --catalog david_test_metrics \
-    --schema cchbc \
+    --catalog my_catalog \
+    --schema my_schema \
     --output proposed_pipeline_config.json
 """
 from __future__ import annotations
@@ -680,7 +680,7 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     (+ ``base_filters``) so ``[MeasureRef]`` resolutions carry real SQL instead of
     a ``TODO`` placeholder.
 
-    Handles the concrete shapes seen in the CCHBC model (and common elsewhere):
+    Handles the concrete shapes seen in the reference model (and common elsewhere):
       * numeric constant                     → base_expr = the number
       * ``SUM(T[col])`` / ``SUMX(T, T[col])`` → base_expr = ``SUM(source.col)``
       * ``CALCULATE(SUM(T[col]), T[a]="x", …)`` → base_expr + base_filters
@@ -1993,8 +1993,8 @@ def main():
             "    --client-secret 'U5b8Q~...' \\\n"
             "    --admin-client-id 8d8aa6ee-... \\\n"
             "    --admin-client-secret 'RXm8Q~...' \\\n"
-            "    --catalog david_test_metrics \\\n"
-            "    --schema cchbc \\\n"
+            "    --catalog my_catalog \\\n"
+            "    --schema my_schema \\\n"
             "    --output proposed_pipeline_config.json"
         ),
     )

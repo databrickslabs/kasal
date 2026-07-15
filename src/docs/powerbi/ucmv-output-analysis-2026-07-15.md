@@ -1,8 +1,8 @@
-# CCHBC UCMV Output Analysis — post-fix run (2026-07-15)
+# the reference tenant UCMV Output Analysis — post-fix run (2026-07-15)
 
 > ## ⚠️ SUPERSEDED — read this first (update 2026-07-15, later run)
 >
-> **The root cause below ("~90% upstream extraction gap / needs CCHBC domain
+> **The root cause below ("~90% upstream extraction gap / needs the reference tenant domain
 > input") was WRONG. The real cause was a missing `report_id`.**
 >
 > The run analysed in the body of this doc was executed **without a `report_id`**.
@@ -22,7 +22,7 @@
 > | real-aggregate measures emitted | ~16 | **~298** |
 > | untranslatable | 109 | **32** |
 >
-> Crucially, KPIs I had labelled **"needs CCHBC domain input, unfixable by
+> Crucially, KPIs I had labelled **"needs the reference tenant domain input, unfixable by
 > tooling" — the `fis_code` cost-code lists, KBI codes — were in the DAX all
 > along.** Example now generated correctly (matches ground truth):
 > `supply_chain_cost_excl_env_fees_taxes_bpc = SUM(kbi_value) FILTER (WHERE
@@ -55,7 +55,7 @@ _Detailed cross-check of the new `~/Downloads/export/` UCMVs (26 files) against 
 original 470 PBI measures (`original_dax_measures.json`) and the human ground-truth
 (`tsc_ucm (1)/`, 16 comparable tables). Four parallel reviewers, one per table
 cluster, then consolidated. Verdict-oriented: what works, what's a tool bug, what's
-upstream, what needs CCHBC input._
+upstream, what needs the reference tenant input._
 
 ## TL;DR
 
@@ -125,7 +125,7 @@ Fixed this session (with tests):
 - **P3 scan-SQL param leak** — `& CurrencyFilter &` / `& RE_Version &` survived into
   `source:` SQL on 7 tables (CO012, Fxn, BPC003). The resolver ran but didn't *flag*
   survivors in the scan-data path. Now flagged as TODO. *(Note: it flags, doesn't
-  invent the value — that's CCHBC input.)*
+  invent the value — that's the reference tenant input.)*
 - **Dimension/measure name collision** — `kbi_value`, `ebit`, `total_taxesfees_in_nsr`,
   `error2`, `error_uc` emitted as BOTH a dimension and a measure (invalid UCMV) in 4
   files. Now the colliding dimension is dropped (measure wins).
@@ -166,7 +166,7 @@ re-homes measures to referenced facts, but it (and the upstream allocator) also 
 non-aggregatable columns/scalars land on dim tables. **Guard needed:** don't emit a
 UCMV for a table whose only "measures" are bare columns / non-aggregates.
 
-### D. NEEDS CCHBC DOMAIN INPUT — unfixable by tooling
+### D. NEEDS the reference tenant DOMAIN INPUT — unfixable by tooling
 Even with perfect extraction, the FILTER *contents* are business definitions:
 - KBI-code IN-lists (`KEMAA0011` = consumer complaints, `KIOM006xx`, `KPE00xxx`)
 - `fis_code` cost-code lists (Sugar=`DCAD`, 25-code input-cost list, …)
@@ -180,7 +180,7 @@ Even with perfect extraction, the FILTER *contents* are business definitions:
 | Check | Result |
 |---|---|
 | `{catalog}`/`{schema}` placeholders | ✅ NONE (P1 holds) |
-| `& Param &` tokens | ⚠️ 7 files (P3 now flags them; value is CCHBC input) |
+| `& Param &` tokens | ⚠️ 7 files (P3 now flags them; value is the reference tenant input) |
 | `/ NULLIF(1,0)` no-ops | ✅ NONE (P5 holds) |
 | duplicate dimension names | ✅ NONE (P2 holds) |
 | duplicate join names | ✅ NONE (P2 holds) |
@@ -216,7 +216,7 @@ Suggested order:
 2. **Fix the open structural bugs (§2.B):** phantom `date_key`/`wkctr` joins
    (18 files), bare-column-as-measure routing, source-column binding, GUID date-table
    join drop, dim-table UCMV guard. These are mechanical and unit-testable.
-3. **Hand CCHBC the domain-input list (§2.D)** — parallel track; they supply code
+3. **Hand the reference tenant the domain-input list (§2.D)** — parallel track; they supply code
    lists, we wire them into config.
 4. Only after 1–3 is a re-run worth tie-out validation.
 
@@ -321,7 +321,7 @@ leverage. This is a tractable engineering backlog, not a fundamental limitation.
 
 _Each proposal is code-located and independently shippable with unit tests. Ordered
 by leverage (impact ÷ effort). "Impact" = measures moved from WRONG/TODO → CORRECT
-on the CCHBC good run._
+on the the reference tenant good run._
 
 ## PROP-1 — Resolve DAX measure-to-measure references (HIGHEST leverage)
 - **Impact:** ~30 measures currently emit the literal `TODO: fill SQL expression`

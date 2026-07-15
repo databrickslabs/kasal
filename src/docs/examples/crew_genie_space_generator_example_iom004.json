@@ -1,30 +1,30 @@
 {
-  "id": "genie-space-cchbc-iom004-crew",
-  "name": "Genie Space Generator — CCHBC IOM004",
+  "id": "genie-space-example-iom004-crew",
+  "name": "Genie Space Generator — Example Corp IOM004",
   "agent_ids": [
-    "genie-space-cchbc-agent-001"
+    "genie-space-example-agent-001"
   ],
   "task_ids": [
-    "genie-space-cchbc-task-001"
+    "genie-space-example-task-001"
   ],
   "nodes": [
     {
-      "id": "agent-genie-space-cchbc-agent-001",
+      "id": "agent-genie-space-example-agent-001",
       "type": "agentNode",
       "position": {
         "x": 118,
         "y": 68
       },
       "data": {
-        "label": "Genie Space Deployment Agent — CCHBC",
+        "label": "Genie Space Deployment Agent — Example Corp",
         "role": "Genie Space Deployer",
-        "goal": "Deploy a Databricks Genie Space for CCHBC DACH order analytics on top of the iom004_cchbc UC Metric View.",
-        "backstory": "You are a Databricks platform engineer deploying a Genie Space for CCHBC. Call the Genie Space Generator tool immediately with the pre-configured settings. Do not ask for additional information — all credentials come from the environment.",
+        "goal": "Deploy a Databricks Genie Space for Example Corp DACH order analytics on top of the iom004_example UC Metric View.",
+        "backstory": "You are a Databricks platform engineer deploying a Genie Space for Example Corp. Call the Genie Space Generator tool immediately with the pre-configured settings. Do not ask for additional information — all credentials come from the environment.",
         "tools": [
           "92"
         ],
         "tool_configs": null,
-        "agentId": "genie-space-cchbc-agent-001",
+        "agentId": "genie-space-example-agent-001",
         "taskId": null,
         "llm": "databricks-claude-sonnet-4",
         "function_calling_llm": null,
@@ -64,14 +64,14 @@
       "style": null
     },
     {
-      "id": "task-genie-space-cchbc-task-001",
+      "id": "task-genie-space-example-task-001",
       "type": "taskNode",
       "position": {
         "x": 368,
         "y": 68
       },
       "data": {
-        "label": "Deploy Genie Space — CCHBC IOM004",
+        "label": "Deploy Genie Space — Example Corp IOM004",
         "role": null,
         "goal": null,
         "backstory": null,
@@ -80,7 +80,7 @@
         ],
         "tool_configs": null,
         "agentId": null,
-        "taskId": "genie-space-cchbc-task-001",
+        "taskId": "genie-space-example-task-001",
         "llm": null,
         "function_calling_llm": null,
         "max_iter": null,
@@ -100,7 +100,7 @@
         "use_system_prompt": null,
         "respect_context_window": null,
         "type": "task",
-        "description": "Deploy a Databricks Genie Space for CCHBC DACH order analytics.\n\n⚠️ CRITICAL INSTRUCTION — READ CAREFULLY:\nCall the Genie Space Generator tool with ZERO arguments. Do NOT generate, invent, or supply ANY tool parameters (no space_title, no catalog, no additional_tables, no join_specs_json, no sample_questions, no sql_expressions_json, no example_sqls_json — nothing). The tool reads ALL configuration from its pre-configured tool settings. Providing arguments will override the correct pre-configured values with hallucinated ones.\n\nBefore running: open the tool config, use 'Load Config from JSON' to upload genie_space_config_cchbc_iom004.json, then set your warehouse_id via the Connection section.\n\nSimply invoke the tool with no parameters and return its full JSON output.",
+        "description": "Deploy a Databricks Genie Space for Example Corp DACH order analytics.\n\n⚠️ CRITICAL INSTRUCTION — READ CAREFULLY:\nCall the Genie Space Generator tool with ZERO arguments. Do NOT generate, invent, or supply ANY tool parameters (no space_title, no catalog, no additional_tables, no join_specs_json, no sample_questions, no sql_expressions_json, no example_sqls_json — nothing). The tool reads ALL configuration from its pre-configured tool settings. Providing arguments will override the correct pre-configured values with hallucinated ones.\n\nBefore running: open the tool config, use 'Load Config from JSON' to upload genie_space_config_example_iom004.json, then set your warehouse_id via the Connection section.\n\nSimply invoke the tool with no parameters and return its full JSON output.",
         "expected_output": "JSON object with:\n- space_id: the Genie Space ID\n- url: direct link to the space in your workspace\n- operation: 'created' or 'updated'\n- table_count: 5 (1 metric view + 4 dim tables)\n- question_count: 10\n\nShare the URL so the user can open the space immediately.",
         "icon": null,
         "advanced_config": null,
@@ -137,8 +137,8 @@
   ],
   "edges": [
     {
-      "source": "agent-genie-space-cchbc-agent-001",
-      "target": "task-genie-space-cchbc-task-001",
+      "source": "agent-genie-space-example-agent-001",
+      "target": "task-genie-space-example-task-001",
       "id": "edge-agent-task",
       "sourceHandle": null,
       "targetHandle": null

@@ -1,8 +1,8 @@
-# CCHBC UCMV Quality — Concrete Fix & Action Plan
+# the reference tenant UCMV Quality — Concrete Fix & Action Plan
 
 _Grounded in the code, not just the report. Companion to
-`~/Downloads/CCHBC_UCMV_Quality_Report.docx` and its two markdown appendices
-(`CCHBC_UCMV_gap_analysis.md`, `CCHBC_kasal_fix_plan.md`). Written 2026-07-15 on
+`~/Downloads/the reference tenant_UCMV_Quality_Report.docx` and its two markdown appendices
+(`the reference tenant_UCMV_gap_analysis.md`, `the reference tenant_kasal_fix_plan.md`). Written 2026-07-15 on
 `feat/pbi-ucmv-fixes-v2`._
 
 > **STATUS 2026-07-15 — all of P0–P6 implemented on `feat/pbi-ucmv-fixes-v2`.**
@@ -14,7 +14,7 @@ _Grounded in the code, not just the report. Companion to
 
 ## 1. What the report found (recap)
 
-Kasal was run on the CCHBC PBI model with the pipeline config **unedited**, to
+Kasal was run on the the reference tenant PBI model with the pipeline config **unedited**, to
 measure raw out-of-the-box quality. Result: base `SUM` measures + a plausible
 join topology are emitted reliably, but **11 of 12 fact tables dropped nearly all
 the business KPIs** (ratios, FILTER-measures, `MEASURE()`-composed waterfalls).
@@ -70,7 +70,7 @@ The chain (verified in code):
                  or "__unassigned__")
    ```
    PBI measures carry `table_name` = the table the measure is **defined on**. In
-   CCHBC's model that is overwhelmingly a **measure-holder table**
+   the reference tenant's model that is overwhelmingly a **measure-holder table**
    (`C_Measure_Table_*`), not the fact — the same measure-table pattern already
    recorded for this customer (model `c915ac4f`: ~434/470 measures live on dummy
    `C_Measure_Table_CL/SL/PE/ET` holders; real data is in ~20 `FT_*`/`fact_*`
@@ -109,7 +109,7 @@ proven (iom35).
 ## 3. Do we need anything from the customer?
 
 **For the P0 diagnosis: no.** The root cause is established from the emitted YAML
-+ the code path. To *confirm* it on the exact CCHBC run before coding (30-min
++ the code path. To *confirm* it on the exact the reference tenant run before coding (30-min
 sanity check, no customer action) we can self-serve from what's already persisted:
 
 - `conversion_history` (`source_format = powerbi_config`) stores
@@ -123,7 +123,7 @@ sanity check, no customer action) we can self-serve from what's already persiste
   `conversion_history` row for this run (or the config-gen tool output JSON with
   the `measures[]` array). Not a new run — just the stored record.
 
-**For the `[CCHBC-ACTION]` items (Section 5): yes, we need input** — but these are
+**For the `[the reference tenant-ACTION]` items (Section 5): yes, we need input** — but these are
 data/semantics no tool can infer, and they are *not* what's blocking measure
 coverage. They gate numerical tie-out, which is a later milestone.
 
@@ -190,7 +190,7 @@ Effort tags are rough. Each has a concrete test.
   **surface it as an explicit `TODO`/needs-input** rather than emitting broken SQL.
 - **Test:** no `& <Param> &` tokens survive into any emitted `filter:`; unresolved
   ones become a documented TODO.
-- **Effort:** medium. (The *values* are `[CCHBC-ACTION]`; the tool's job is
+- **Effort:** medium. (The *values* are `[the reference tenant-ACTION]`; the tool's job is
   resolve-or-flag, not invent.)
 
 ### P4 — Rich join SQL: QUALIFY dedup + key padding
@@ -200,7 +200,7 @@ Effort tags are rough. Each has a concrete test.
 - **Where:** join emission in `join_detector.py` / `table_processor.py`.
   (a) auto-dedup a dim join on its key via QUALIFY when the key isn't unique;
   (b) detect the `co_code_bw`↔`comp_code` length mismatch and pad;
-  (c) leave business exclusion lists to config (`[CCHBC-ACTION]`).
+  (c) leave business exclusion lists to config (`[the reference tenant-ACTION]`).
 - **Validation:** the customer hand-wrote exactly this in `edge_output` — real
   evidence it's the right pattern.
 - **Test:** a dim with a non-unique key emits a QUALIFY-dedup subquery; the geo
@@ -231,7 +231,7 @@ Found even in iom35's good output; fix once, benefits every table after P0:
 - **Effort:** large. A clean `TODO` stub is an acceptable interim; consider a
   `WINDOW`/PY skill-corpus addition over deterministic code.
 
-## 5. Not ours — belongs in the CCHBC customer summary
+## 5. Not ours — belongs in the the reference tenant customer summary
 
 These are inputs no tool can infer; they gate **numerical tie-out**, not measure
 coverage:
@@ -250,7 +250,7 @@ coverage:
 
 > The customer's own hand-edits (`tsc_ucm (1)/`) fixed exactly P4 (QUALIFY-dedup +
 > comp_code padding, in `edge_output`) and P5 (NULLIF safety, in `ft_qse`) — real
-> evidence these are the right generic fixes — layered over the `[CCHBC-ACTION]`
+> evidence these are the right generic fixes — layered over the `[the reference tenant-ACTION]`
 > business rules above.
 
 ## 6. Recommended sequence
@@ -286,14 +286,14 @@ coverage:
 | **P4** | Rich join SQL — QUALIFY dedup + LPAD key padding | `join_detector.py` — `_padded_key_sql()` (config `pad_key`) + `_maybe_dedup_source()` (config `dedup_dim` / global `dedup_dim_joins`) | `test_join_detector.py::TestP4RichJoinSql` (5) |
 | **P6** | Prior-Year / DISTINCTCOUNT | `dax_translator.py` — actionable TODO stub naming the `date_py` self-join / LAG workaround; `skills/dax/UNSUPPORTED.md` — worked `date_py` calendar-self-join example for the LLM translator | `test_dax_translator.py` (PY stub assertion) |
 
-**Config knobs P4 exposes** (optional; the *values* are CCHBC-supplied data facts, the *SQL generation* is now automatic):
+**Config knobs P4 exposes** (optional; the *values* are the reference tenant-supplied data facts, the *SQL generation* is now automatic):
 - `join_key_map[dim].pad_key = {"len": 4, "char": "0"}` → `LPAD(source.<key>, 4, '0')`
 - `join_key_map[dim].dedup_dim = true` (or global `dedup_dim_joins: true`) → `(SELECT * FROM <dim> QUALIFY ROW_NUMBER() OVER (PARTITION BY <key> ORDER BY <key>) = 1)`
 - `join_key_map[dim].dedup_order_by` → override the dedup tie-break column
 
 ## 9. Customer test guide
 
-**What changed for the customer:** re-run the same BI migration flow on the CCHBC
+**What changed for the customer:** re-run the same BI migration flow on the the reference tenant
 model, config **unedited**, and compare against the previous drop.
 
 Expected differences on the failing tables (pe002, iom05, hr_a, sc, qse, bpc003, …):
@@ -315,7 +315,7 @@ facts once in `pipeline_config.json` (pad length, which dims are non-unique) —
 the config knobs in §8. Without them the joins are correct flat equijoins; with
 them they match the hand-written ground truth.
 
-**Still requires CCHBC input (unchanged — see §5):** correct physical source
+**Still requires the reference tenant input (unchanged — see §5):** correct physical source
 tables (UNION membership), real filter values, KBI/fis_code/func_area semantics,
 `is_live` rule. These gate **numerical tie-out**, not measure coverage. A
 correctly-transpiled measure pointed at the raw datamart table still won't tie out

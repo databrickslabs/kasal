@@ -5,7 +5,7 @@ A single post-translation cleanup applied to every translated/base measure's
 the regex fast-path, the LLM translator, or a SWITCH decomposition. Each fix is
 independent, idempotent, and conservative (a no-op when the pattern is absent).
 
-Bugs addressed (from the CCHBC iom35 output review):
+Bugs addressed (from the reference iom35 output review):
   1. ``x / NULLIF(1, 0)``  — a no-op division by a literal 1 (the denominator
      never resolved). Strip it: the value is just ``x``.
   2. ``expr / NULLIF(expr, 0)`` — a self-division that always yields 1 (or NULL).

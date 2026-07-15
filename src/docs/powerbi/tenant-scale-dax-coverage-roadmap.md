@@ -30,7 +30,7 @@ the evidence says," followed by the genuinely-open items.
 **Inputs used:**
 - Tenant export — `New_Query_2026_07_15_16_05_52.csv` (585,955 measures, 142,270
   unique expressions, 5,001 datasets, 4,649 tables; 98.8% carry full DAX).
-- CCHBC single-report comparison — 226 emitted measures vs. original DAX (ground
+- Reference single-report comparison — 226 emitted measures vs. original DAX (ground
   truth from the run's `execution_trace` output).
 - Transpiler surface: `metric_view_utils/dax_translator.py` (fast-path registry),
   `skills/dax/PATTERNS.md` + `UNSUPPORTED.md` (LLM skill corpus),
@@ -76,7 +76,7 @@ expression contains the construct; a measure can hit several):
 | LOOKUPVALUE | 2,641 | 0.5% |
 
 **Headline:** the corpus is dominated by `CALCULATE` (42%), `VAR/RETURN`
-composition (30%), and `DIVIDE` ratios (22%) — the exact family our CCHBC bugs
+composition (30%), and `DIVIDE` ratios (22%) — the exact family the reference bugs
 live in. `SELECTEDVALUE`/`SWITCH` (19%/13%) are largely display-layer
 (skip-by-design). The long tail (`RANKX`, `TOPN`, `SUMMARIZE`, `TREATAS`,
 `LOOKUPVALUE`, `EARLIER`) is individually <5% and mostly not expressible in a
@@ -125,7 +125,7 @@ handled via the LLM corpus, or honestly categorized as display-layer skips.
 **On regex vs. LLM (adoptability):** the split is right — regex fast-path for the
 deterministic tier, LLM + skill-corpus for the flexible tail. The lever for
 adoptability was **not** "more regex"; it was better LLM instructions (a corpus
-rule generalizes across the whole construct family, not just CCHBC) plus guards
+rule generalizes across the whole construct family, not just one report) plus guards
 that convert silent-wrong into honest-TODO. The remaining lever is **model tier**
 (§2c) and **warehouse-verified measurement** (§4), not more corpus.
 
@@ -141,7 +141,7 @@ Coverage is measured, not asserted. Three passes, each answering a different
 question. All "faithful/safe" numbers are **structural fidelity** (filters and
 terms preserved), not numerical proof — no SQL was executed against a warehouse.
 
-### 2a. CCHBC single-report comparison (the original quality baseline)
+### 2a. Reference single-report comparison (the original quality baseline)
 
 226 emitted measures vs. original DAX (of 256 emitted; 30 had no full DAX to diff):
 
@@ -264,7 +264,7 @@ files were enriched instead, because the split is translate-vs-skip, not one buc
 | Item | Why it matters | Notes |
 |------|----------------|-------|
 | **Extraction truncation guard** | 47821-style silent degraded run: when XMLA/Execute-Queries extraction fails, `kpi.formula` returns bare column tokens (`bic_csubkbi`) that the transpiler emits as clean-looking `source.bic_csubkbi` with **no error surfaced**. A whole run can ship ~80% wrong measures silently. | Detect the degraded fingerprint at the extraction boundary (high fraction of single-token "DAX" + all-snake names + missing `all_allocations`) → reject/retry via the TMDL/SP fallback. **Independent of all DAX-translation work; highest-value demo-safety item.** |
-| **Warehouse execution ("did the number match?")** | Every measurement here is *structural* fidelity — it can't catch a wrong-operator translation that preserves all literals. | The only way to close the gap. Needs a Databricks warehouse + the CCHBC data; run emitted SQL and the DAX side-by-side and compare results. |
+| **Warehouse execution ("did the number match?")** | Every measurement here is *structural* fidelity — it can't catch a wrong-operator translation that preserves all literals. | The only way to close the gap. Needs a Databricks warehouse + the reference data; run emitted SQL and the DAX side-by-side and compare results. |
 | **At-scale LLM-tier coverage %** | 2c is a 48-measure sample; a real per-construct LLM number needs the full corpus through the production model. | Blocked on this machine (Databricks concurrency/budget; no Anthropic key + PyPI firewalled). Runnable where either the Batches API or an un-throttled endpoint is reachable. The deterministic harness + structural scorer are recoverable from git history (`4ad8cca5`). |
 | **Second-order generalization** (lower priority) | Nested-CALCULATE sub-patterns beyond Bug A (~14% touch ≥2 CALCULATE), DISTINCTCOUNT `noblank` verification, confirming SWITCH decomposition emits per-branch measures. | Sample from the corpus per construct once a real measurement loop exists; don't invest ahead of the data. |
 

@@ -100,7 +100,7 @@ The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and e
   "Dim_wkctr": {
     "alias": "dim_wkctr",
     "join_key": "plant_workcenter_key",
-    "source_table": "dc_datalake_prod_001.udm_cchbc_md.ca_dim_workcenter",
+    "source_table": "dc_datalake_prod_001.udm_example_md.ca_dim_workcenter",
     "dim_columns": ["bic_cwc_type", "workcenter_txtmd"]
   }
 }
@@ -108,7 +108,7 @@ The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and e
 
 **Why it can't be automated**: The PBI Admin Scanner API returns table metadata with M expressions (Power Query), not physical table names. M expressions reference data sources using connection strings, database names, and schema paths that may not directly map to the 3-level UC table name. The translation requires knowing:
 
-- How the data lake is organized (e.g., `dc_datalake_prod_001.udm_cchbc_md` prefix convention).
+- How the data lake is organized (e.g., `dc_datalake_prod_001.udm_example_md` prefix convention).
 - Whether the table was imported, DirectQuery, or uses a gateway; each has a different M expression format.
 - Whether table names were flattened (e.g., `schema__table` vs. `schema.table`).
 

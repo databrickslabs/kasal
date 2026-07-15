@@ -32,10 +32,10 @@ class TestSafeFolderName:
         assert _safe_folder_name("Supply Chain Analytics") == "supply_chain_analytics"
 
     def test_special_chars_replaced(self):
-        result = _safe_folder_name("CCHBC Order Analytics – IOM004")
+        result = _safe_folder_name("Example Order Analytics – IOM004")
         assert " " not in result
         assert "–" not in result
-        assert result.startswith("cchbc")
+        assert result.startswith("example")
 
     def test_already_safe(self):
         assert _safe_folder_name("my_dashboard") == "my_dashboard"
@@ -121,7 +121,7 @@ def _make_dashboard(**overrides) -> dict:
     """Minimal valid Lakeview dashboard API response."""
     base = {
         "dashboard_id": "dash_abc123",
-        "display_name": "CCHBC Order Analytics",
+        "display_name": "Example Order Analytics",
         "warehouse_id": "wh_xyz",
         "parent_path": "/Workspace/Shared/Demo",
         "serialized_dashboard": json.dumps({
@@ -145,7 +145,7 @@ def _make_dashboard(**overrides) -> dict:
                         {
                             "widget": {
                                 "name": "title_text",
-                                "multilineTextboxSpec": {"lines": ["## CCHBC Analytics\n"]},
+                                "multilineTextboxSpec": {"lines": ["## Example Analytics\n"]},
                             },
                             "position": {"x": 0, "y": 0, "width": 6, "height": 1},
                         },
@@ -285,7 +285,7 @@ class TestDashboardToFiles:
         assert data["apiVersion"] == "lakeview/v1"
         assert data["kind"] == "Dashboard"
         assert data["metadata"]["dashboard_id"] == "dash_abc123"
-        assert data["spec"]["title"] == "CCHBC Order Analytics"
+        assert data["spec"]["title"] == "Example Order Analytics"
         assert data["spec"]["warehouse_id"] == "wh_xyz"
         assert data["spec"]["parent_path"] == "/Workspace/Shared/Demo"
         assert data["spec"]["publish"] is True
@@ -332,7 +332,7 @@ class TestDashboardToFiles:
         files = {f.path: f for f in _dashboard_to_files(_make_dashboard())}
         data = yaml.safe_load(files["pages.yaml"].content)
         text_w = next(w for w in data["pages"][0]["widgets"] if w["type"] == "text")
-        assert "CCHBC Analytics" in text_w["content"]
+        assert "Example Analytics" in text_w["content"]
         assert text_w["position"]["width"] == 6
 
     def test_counter_widget_converted_correctly(self):
@@ -583,8 +583,8 @@ class TestAnalyticsExportService:
             result = await service.export_dashboard("dash_abc123")
 
         assert result["dashboard_id"] == "dash_abc123"
-        assert result["dashboard_name"] == "CCHBC Order Analytics"
-        assert result["folder_name"] == "cchbc_order_analytics"
+        assert result["dashboard_name"] == "Example Order Analytics"
+        assert result["folder_name"] == "example_order_analytics"
         assert len(result["files"]) == 3
 
     @pytest.mark.asyncio

@@ -98,7 +98,7 @@ class DaxTranslator:
          'sumx_filter', 'countx_filter', 'averagex_filter'}
         # DELIBERATELY NOT in the fast-path (route to the skill-corpus LLM):
         #   calculate_sumx_vars_divide, calculate_sumx_filter_inner/outer.
-        # The CCHBC benchmark proved these regex matchers claim complex multi-var
+        # The reference benchmark proved these regex matchers claim complex multi-var
         # DAX (var a=CALCULATE(SUMX(FILTER..)); DIVIDE(a, b-c)) but silently DROP
         # the denominator / leave dangling `res1`/`b` identifiers — producing
         # clean-looking but WRONG SQL, and (worse) blocking the LLM that CAN
@@ -1239,7 +1239,7 @@ class DaxTranslator:
         if dax.strip().upper() not in ('BLANK()', 'BLANK ()'):
             dax = re.sub(r'\bBLANK\s*\(\s*\)', 'NULL', dax, flags=re.IGNORECASE)
 
-        # Strip slicer-scalar date-window scaffolding vars. Many CCHBC ratio
+        # Strip slicer-scalar date-window scaffolding vars. Many real-world ratio
         # measures prefix the real formula with:
         #     var std = CALCULATE([F_Start_date])
         #     var etd = CALCULATE([F_End_date])

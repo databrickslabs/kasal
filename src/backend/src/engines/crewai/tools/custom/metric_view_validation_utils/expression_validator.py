@@ -87,7 +87,7 @@ class ExpressionValidator:
             # DAX measure, so there is nothing to diff). They MUST be caught here,
             # before the simple_pattern branch, otherwise they fall into
             # `simple`/`unmatched` and get SKIPPED — which understated headline
-            # quality by ~140 measures on the CCHBC set. Count them EVALUATED/VALID.
+            # quality by ~140 measures on the reference set. Count them EVALUATED/VALID.
             if _is_base_measure_expr(expr):
                 matched_measures.append(
                     {

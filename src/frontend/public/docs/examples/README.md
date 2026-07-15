@@ -66,7 +66,7 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 | File | Purpose |
 |------|---------|
 | `pbi_report_references_pe002_demo.json` | Sample report references output (PE002 dataset) |
-| `genie_space_config_cchbc_iom004.json` | Sample Genie Space config (CCHBC IOM004 dataset) |
+| `genie_space_config_example_iom004.json` | Sample Genie Space config (example IOM004 dataset) |
 
 ---
 
