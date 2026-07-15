@@ -85,9 +85,15 @@ class DaxTranslator:
          # selectedvalue_switch (noop by design), sameperiodlastyear (narrow
          # conditional window measure — keep its existing path).
          'divide', 'divide_calculate_measure_ref', 'calculate_measure_ref',
-         'sumx_filter', 'countx_filter', 'averagex_filter',
-         'calculate_sumx_vars_divide', 'calculate_sumx_filter_inner',
-         'calculate_sumx_filter_outer'}
+         'sumx_filter', 'countx_filter', 'averagex_filter'}
+        # DELIBERATELY NOT in the fast-path (route to the skill-corpus LLM):
+        #   calculate_sumx_vars_divide, calculate_sumx_filter_inner/outer.
+        # The CCHBC benchmark proved these regex matchers claim complex multi-var
+        # DAX (var a=CALCULATE(SUMX(FILTER..)); DIVIDE(a, b-c)) but silently DROP
+        # the denominator / leave dangling `res1`/`b` identifiers — producing
+        # clean-looking but WRONG SQL, and (worse) blocking the LLM that CAN
+        # translate the full ratio. Excluding them lets llm_first route these to
+        # the LLM; the lost-component guard is the backstop if the LLM also fails.
     )
 
     def translate(self, measure: dict, table_key: str, trivial_only: bool = False) -> TranslationResult:
@@ -114,6 +120,20 @@ class DaxTranslator:
             match = match_fn(dax, name)
             if match is not None:
                 sql, skip_reason = translate_fn(match, dax, table_key)
+                # llm_first: if a fast-path matcher produced SQL that DROPPED a DAX
+                # component (ratio denominator, prior-year shift, exclusion) — i.e.
+                # the regex claimed a measure it can't fully handle — reject it here
+                # so the caller routes it to the skill-corpus LLM (which CAN do the
+                # full ratio) rather than shipping a silently-wrong bare aggregate.
+                if trivial_only and sql:
+                    from .sql_measure_sanitizer import detect_lost_dax_component
+                    if detect_lost_dax_component(dax, sql):
+                        return TranslationResult(
+                            measure_name=snake, original_name=original_name,
+                            sql_expr=None, is_translatable=False,
+                            skip_reason='routed to LLM (fast-path dropped a DAX component)',
+                            dax_expression=dax, confidence='none', category='unassigned',
+                        )
                 window_spec = None
                 if skip_reason == '__SAMEPERIODLASTYEAR__':
                     skip_reason = ''
