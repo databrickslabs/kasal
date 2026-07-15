@@ -81,3 +81,22 @@ class TestGroupByAll:
         gb = tables['test'].group_by_columns
         assert 'region' in gb
         assert 'country' in gb
+
+
+class TestMLanguageTokenNormalization:
+    """M-language escape tokens (#(lf) etc.) must not leak into parsed SQL/columns."""
+
+    def test_lf_token_stripped_from_source(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import MQueryParser
+        sql = ("SELECT a, b,#(lf) c AS flag#(lf) FROM cat.sch.t "
+               "WHERE y = YEAR(CURRENT_DATE)")
+        info = MQueryParser()._parse_sql('t', sql)
+        assert info.source_table == 'cat.sch.t'
+        assert '#(lf)' not in str(info.group_by_columns)
+        assert '#(lf)' not in (info.full_sql or '')
+
+    def test_doubled_quotes_collapsed(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import MQueryParser
+        sql = 'SELECT a, if(x=1,""yes"",""no"") AS f FROM cat.sch.t'
+        info = MQueryParser()._parse_sql('t', sql)
+        assert '""' not in (info.full_sql or '')

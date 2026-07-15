@@ -575,6 +575,18 @@ def emit_yaml(spec: MetricViewSpec,
             _deduped_dims.append(d)
         spec.dimensions = _deduped_dims
 
+    # Drop dimensions that collide by name with an emitted measure (CORRECTNESS:
+    # a UCMV cannot declare a dimension and a measure with the same name — it
+    # fails validation). Seen when a source column (e.g. `kbi_value`, `ebit`) is
+    # both passed through as a dimension and aggregated as a base measure. The
+    # measure is the KPI and wins; the raw column is dropped as a dimension.
+    if spec.dimensions:
+        _measure_names = {m.measure_name for m in
+                          (base_measures + dax_measures + switch_measures)}
+        if _measure_names:
+            spec.dimensions = [d for d in spec.dimensions
+                               if d['name'] not in _measure_names]
+
     # Dimensions
     if spec.dimensions:
         lines.append('')

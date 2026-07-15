@@ -898,6 +898,17 @@ def process_table(
             expand_re_version=bool(ctx.config.get('parameter_defaults', {}).get('RE_Version_ranges')),
         )
         resolved_sql = resolver.resolve(base_sql)
+        # P3: flag PBI params that survived resolution in the scan/native source
+        # SQL (e.g. "& CurrencyFilter &", "& RE_Version &" when no
+        # parameter_defaults value is configured). Emitting them leaves invalid
+        # SQL in `source:` — surface a TODO so the customer supplies the value.
+        _unresolved_scan = resolver.find_unresolved_params(resolved_sql)
+        if _unresolved_scan:
+            ctx.filter_warnings.append(
+                f'{table_key}: TODO unresolved PBI parameter(s) '
+                f'{_unresolved_scan} in native source SQL — supply value(s) via '
+                f'parameter_defaults (CurrencyFilter / RE_Version_ranges); view '
+                f'will not run until resolved')
         resolved_sql = spark_sql_compat(resolved_sql)
 
         # Count UNION arms before folding to detect arm loss
