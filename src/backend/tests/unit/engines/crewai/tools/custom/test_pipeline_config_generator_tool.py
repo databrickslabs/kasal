@@ -1093,6 +1093,73 @@ class TestMeasureRefResolution:
         assert 'TODO' not in res['BaseKBI']['base_expr']
 
 
+class TestGeoSwitchDecomposition:
+    """Geo-selector SWITCH → two static measures (plant_ + company_).
+
+    A UC metric view has no slicer context, so a PBI measure that is
+    SWITCH(TRUE(), Or(ISFILTERED/HASONEVALUE(plant)), plantBranch, companyBranch)
+    must emit BOTH branches. Recovers the company variant the single PBI measure
+    would otherwise collapse."""
+
+    def _G(self, measures):
+        from src.engines.crewai.tools.custom.generate_config import (
+            derive_geo_switch_decompositions,
+        )
+        return derive_geo_switch_decompositions(measures)
+
+    def test_actual_simple_calculate_branches(self):
+        ms = [{
+            'original_name': 'Plant_Comp KBI_Value_Actual', 'table_name': 'FT_QSE',
+            'expression': (
+                'Switch(TRUE(), Or(ISFILTERED(C_Dim_Plant[plant_desc]),'
+                'HASONEVALUE(C_Dim_Plant[plant])), '
+                'CALCULATE(SUM(FT_QSE[kbi_value]), FT_QSE[bic_chversion]="0000", '
+                'FT_QSE[bic_creg_type]="Plant"), '
+                'CALCULATE(SUM(FT_QSE[kbi_value]), FT_QSE[bic_chversion]="0000", '
+                'FT_QSE[bic_creg_type]="Company Code"))'
+            ),
+        }]
+        entries = self._G(ms)['FT_QSE']
+        by = {e['name']: e['raw_expr'] for e in entries}
+        assert by['plant_kbi_value_actual'] == (
+            "SUM(source.kbi_value) FILTER (WHERE bic_chversion = '0000' "
+            "AND bic_creg_type = 'Plant')")
+        assert by['company_kbi_value_actual'] == (
+            "SUM(source.kbi_value) FILTER (WHERE bic_chversion = '0000' "
+            "AND bic_creg_type = 'Company Code')")
+
+    def test_bp_sumx_filter_with_scaffolding(self):
+        ms = [{
+            'original_name': 'Plant_Comp KBI_Value_BP', 'table_name': 'FT_QSE',
+            'expression': (
+                'var std = CALCULATE([F_Start_date]) var etd= CALCULATE([F_End_date]) '
+                'return Switch(TRUE(), Or(ISFILTERED(C_Dim_Plant[plant_desc]),'
+                'HASONEVALUE(C_Dim_Plant[plant])), '
+                'CALCULATE(SUMX(FILTER(FT_QSE, FT_QSE[bic_chversion]="B000" && '
+                'FT_QSE[bic_creg_type]="Plant"),FT_QSE[kbi_value])), '
+                'CALCULATE(SUMX(FILTER(FT_QSE, FT_QSE[bic_chversion]="B000" && '
+                'FT_QSE[bic_creg_type]="Company Code"),FT_QSE[kbi_value])))'
+            ),
+        }]
+        by = {e['name']: e['raw_expr'] for e in self._G(ms)['FT_QSE']}
+        assert "bic_creg_type = 'Plant'" in by['plant_kbi_value_bp']
+        assert "bic_creg_type = 'Company Code'" in by['company_kbi_value_bp']
+
+    def test_non_geo_switch_ignored(self):
+        # A SELECTEDVALUE+SWITCH (parameterized) is NOT a geo selector — skip.
+        ms = [{'original_name': 'Sw', 'table_name': 'T',
+               'expression': 'SWITCH(SELECTEDVALUE(D[k]), "a", [A], "b", [B])'}]
+        assert self._G(ms) == {}
+
+    def test_half_resolving_switch_emits_nothing(self):
+        # If only one branch resolves, emit neither (no half-decomposition).
+        ms = [{'original_name': 'Plant_Comp X', 'table_name': 'T',
+               'expression': (
+                   'SWITCH(TRUE(), ISFILTERED(D[p]), '
+                   'CALCULATE(SUM(T[v]), T[a]="1"), SELECTEDVALUE(D[weird]))')}]
+        assert self._G(ms).get('T', []) == []
+
+
 class TestReportIdAutoDiscovery:
     """PROP-7: discover the report bound to the dataset when none supplied."""
 
