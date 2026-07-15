@@ -107,10 +107,66 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
     # raw DAX constructs that never got translated
     ("untranslated DAX (SUMX/FILTER/CALCULATE)",
      re.compile(r"\b(SUMX|CALCULATE)\s*\(|FILTER\s*\(\s*\w+\s*,", re.IGNORECASE)),
-    # dangling bare single-letter var identifiers (a, b, res1) left in arithmetic
+    # dangling bare single-letter var identifiers (a, b) left in arithmetic
     ("dangling DAX var identifier",
      re.compile(r"(?<![\w.])[a-z]\d?(?![\w.(])\s*[-+/*]|[-+/*]\s*(?<![\w.])[a-z]\d?(?![\w.(])")),
+    # dangling multi-letter DAX var names (res1, res2, std, etd, num, den) — a
+    # var whose CALCULATE body never got inlined, left as a bare identifier
+    # adjacent to arithmetic. Bounded to a small known set to avoid matching real
+    # SQL identifiers/columns.
+    ("dangling DAX var name",
+     re.compile(r"(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])\s*[-+/*]"
+                r"|[-+(]\s*(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])",
+                re.IGNORECASE)),
 ]
+
+
+def detect_lost_dax_component(dax: str, sql: str) -> str | None:
+    """Compare the ORIGINAL DAX against the GENERATED SQL and return a reason when
+    the SQL silently DROPPED a component the DAX clearly had — producing valid
+    SQL that returns a WRONG number.
+
+    This catches the class ``detect_silent_wrong`` cannot: output that *looks*
+    clean (a well-formed ``SUM(...) FILTER(...)``) but is missing a ratio
+    denominator, a prior-year shift, or an exclusion filter that the DAX
+    specified. Conservative by design — each check requires strong evidence the
+    DAX had the feature AND the SQL lacks any trace of it, so faithful
+    translations (the majority) are never flagged.
+    """
+    if not dax or not sql:
+        return None
+    du = dax.upper()
+    su = sql.upper()
+
+    # 1. Prior-year time-intelligence present in DAX but NOT reflected in SQL.
+    #    (A faithful PY translation would carry a window spec, a calendar self-join
+    #    on a *_py column, a LAG(), or a DATE_ADD — none present ⇒ silently emits
+    #    the current-period value, identical to the non-PY sibling.)
+    if re.search(r'SAMEPERIODLASTYEAR|PARALLELPERIOD|PREVIOUSYEAR|DATEADD', du):
+        if not re.search(r'\bLAG\s*\(|\bLEAD\s*\(|DATE_ADD|_PY\b|OVER\s*\(|WINDOW', su):
+            return ('prior-year shift dropped — SQL emits the current-period value '
+                    '(SAMEPERIODLASTYEAR/DATEADD in DAX not reflected in SQL)')
+
+    # 2. DAX is a DIVIDE/ratio but the SQL has no division at all → the whole
+    #    denominator was dropped, leaving a bare numerator.
+    if re.search(r'\bDIVIDE\s*\(', du):
+        if '/' not in sql and 'NULLIF' not in su:
+            return ('ratio denominator dropped — DAX has DIVIDE(...) but SQL has no '
+                    'division (numerator emitted alone)')
+
+    # 3. DAX has an exclusion predicate (<> / != / NOT ... IN) but the SQL carries
+    #    no exclusion of any form → the exclusion was dropped and totals will
+    #    include rows the DAX excludes.
+    dax_has_excl = (
+        '<>' in dax or '!=' in dax
+        or re.search(r'NOT\s+[\w\'.\[\]]+\s+IN', du) is not None
+    )
+    if dax_has_excl:
+        if '<>' not in sql and 'NOT IN' not in su and '!=' not in sql:
+            return ('exclusion filter dropped — DAX excludes values (<> / NOT IN) '
+                    'but SQL has no exclusion (totals will include excluded rows)')
+
+    return None
 
 
 def detect_silent_wrong(sql: str) -> str | None:
