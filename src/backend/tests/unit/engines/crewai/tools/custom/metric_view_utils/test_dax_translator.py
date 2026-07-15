@@ -241,3 +241,45 @@ class TestSameMeasureRatioKeepsPerSideFilters:
         num, den = sql.split('/ NULLIF', 1)
         assert "'A'" in num and "'B'" in den
         assert "bic_chversion = '0000'" in num and "bic_chversion = '0000'" in den
+
+
+class TestDateWindowScaffoldingStrip:
+    """Strip slicer-scalar var std/etd = CALCULATE([F_Start_date]) so the ratio
+    underneath becomes translatable (was blocking ~36 CCHBC ratios)."""
+
+    def _P(self, dax):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        return DaxTranslator._preclean_dax(dax)
+
+    def test_strips_fstart_scaffolding_keeps_ratio(self):
+        dax = ('var std = CALCULATE([F_Start_date])\n'
+               'var etd= CALCULATE([F_End_date])\n'
+               'var a = CALCULATE(SUMX(FILTER(f,f[mg] in {"1"}),f[target]))\n'
+               'var b = CALCULATE(SUMX(FILTER(f,f[mg] in {"1"}),f[issued]))\n'
+               'return DIVIDE(a, b)')
+        out = self._P(dax)
+        assert 'F_Start_date' not in out and 'F_End_date' not in out
+        assert 'DIVIDE' in out
+        assert 'var a =' in out and 'var b =' in out   # real aggregate vars kept
+        # no dangling std/etd tokens
+        import re
+        assert not re.search(r'(?<![\w.])(std|etd)(?![\w.])', out)
+
+    def test_regex_translates_cleaned_ratio(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        t = DaxTranslator({})
+        dax = ('var std = CALCULATE([F_Start_date])\n'
+               'var a = CALCULATE(SUMX(FILTER(f,f[mg] in {"1"}),f[target]))\n'
+               'var b = CALCULATE(SUMX(FILTER(f,f[mg] in {"1"}),f[issued]))\n'
+               'var c = CALCULATE(SUMX(FILTER(f,f[mg] in {"1"}),f[received]))\n'
+               'return DIVIDE(a, b-c)')
+        r = t.translate({'measure_name': 'y', 'original_name': 'Y', 'dax_expression': dax},
+                        'f', trivial_only=False)
+        assert r.is_translatable
+        assert '/ NULLIF(' in r.sql_expr
+        assert 'received' in r.sql_expr  # denominator's c term present
+
+    def test_normal_dax_untouched(self):
+        # a measure WITHOUT the window pickers must be unchanged
+        dax = 'CALCULATE(SUM(f[val]), f[ver]="0000")'
+        assert self._P(dax) == dax
