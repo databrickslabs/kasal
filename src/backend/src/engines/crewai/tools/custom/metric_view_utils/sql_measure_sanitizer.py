@@ -188,6 +188,29 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
                     'with + / - (e.g. a - b) but SQL emitted a single term '
                     '(the other term was silently dropped)')
 
+    # 5. Share-of-total collapse: DAX is a ratio whose denominator removes filter
+    #    context with ALL()/ALLSELECTED (CALCULATE([M], ALL(dim))), but the SQL
+    #    has no coarser-LOD signal (no `window`/`range: all`/`MEASURE(*_all*)`)
+    #    AND its two ratio sides are identical → the "total" side collapsed to the
+    #    same value as the numerator, so the share is a constant 1.0. Only fires
+    #    when the DAX genuinely divides (a share-of-total, not a bare ALL total).
+    dax_has_all_total = re.search(r'\bALL\s*\(|\bALLSELECTED\s*\(', du) is not None
+    if dax_has_all_total and re.search(r'\bDIVIDE\s*\(', du) and '/' in sql:
+        has_lod_signal = (
+            'WINDOW' in su or 'RANGE: ALL' in su or 'RANGE:ALL' in su
+            or re.search(r'MEASURE\s*\(\s*\w*_ALL\w*\s*\)', su) is not None
+        )
+        if not has_lod_signal:
+            # Compare the two sides of the top-level division.
+            sides = re.split(r'/\s*NULLIF|/', sql, maxsplit=1)
+            if len(sides) == 2:
+                norm = lambda s: re.sub(r'[^a-z0-9<>=]', '', s.lower().replace('nullif', '').rstrip(', 0)'))
+                if norm(sides[0]) and norm(sides[0]) == norm(sides[1]):
+                    return ('share-of-total collapsed — DAX removes filter context with '
+                            'ALL()/ALLSELECTED for the denominator but SQL has no coarser-LOD '
+                            'window (range: all); numerator == denominator so the share is a '
+                            'constant 1.0')
+
     return None
 
 

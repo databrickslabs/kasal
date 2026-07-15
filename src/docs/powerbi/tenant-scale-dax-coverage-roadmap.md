@@ -102,10 +102,17 @@ LLM skill corpus (`skills/dax/*.md`). Status legend: 🟢 handled well ·
   is ~2% but silently wrong) and Bug B (measure-ref num/denom). These make the
   *common* patterns trustworthy. Bug A is an LLM-instruction + guard fix (cheap,
   high impact); Bug B is a resolver fix (riskier).
-- **Tier 2 — build (real coverage gap):** `ALL()`/`ALLSELECTED` share-of-total
-  (11.7% combined) — the single biggest *translatable* population with no
-  verified handler. Corpus §4 has the shape; needs a matcher or hardened LLM
-  rule **+ regression tests**.
+- **Tier 2 — build (real coverage gap) — DONE:** `ALL()`/`ALLSELECTED`
+  share-of-total. Corpus sampling (68,087 ALL-family measures) showed the clean
+  translatable target is the **share-of-total ratio** `DIVIDE([M], CALCULATE([M],
+  ALL(dim)))` (`divide_with_all` 32.7% + `allselected_share` 21.3% ≈ 54% of the
+  ALL family). Shipped: (1) rewritten skill corpus §4 — the window-based
+  translation (4a), the ALLSELECTED approximation caveat (4b), and the explicit
+  "NOT a share-of-total" cases (4c: ALLEXCEPT, ALL-as-slicer-reset, ALL(Dates)+
+  time-intel); (2) a `detect_lost_dax_component` check #5 that catches a collapsed
+  share-of-total (DAX has DIVIDE+ALL/ALLSELECTED, SQL has no window and num==denom
+  → constant 1.0) and demotes to TODO. Guard catches the collapsed form on
+  100% of a 4,000-measure real-corpus sample. Regression tests added.
 - **Tier 3 — categorize, don't chase (~8% combined):** SUMMARIZE, CALCULATETABLE,
   TREATAS, TOPN, LOOKUPVALUE. Table-valued / virtual-relationship / row-context
   — most need a **pre-aggregated source view**, not a measure translation. Make

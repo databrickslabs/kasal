@@ -96,27 +96,73 @@ YAML: expr: SUM(source.revenue) FILTER (WHERE source.status = 'Active')
 
 UC metric views support `FILTER (WHERE ...)` on individual aggregate expressions. This is the direct equivalent of `CALCULATE` with a simple `FILTER`.
 
-## 4. CALCULATE with ALL / REMOVEFILTERS
+## 4. CALCULATE with ALL / ALLSELECTED / REMOVEFILTERS (share-of-total)
+
+`ALL(dim)` / `ALLSELECTED(dim)` inside a `CALCULATE` removes filter context from
+`dim`, producing a "total across dim" value. By far the most common real use is a
+**share-of-total ratio**: a measure divided by that same measure evaluated with
+the dimension's filter removed.
+
+### 4a. Share-of-total ratio — `DIVIDE([M], CALCULATE([M], ALL(dim)))`
+
+This is the #1 ALL-family shape in the wild. Translate the "all" side to a
+**coarser-LOD window measure** (`range: all` over the removed dimension), then
+compose the ratio as a NON-window measure via `MEASURE()`.
 
 ```
-DAX:  CALCULATE([Total Revenue], ALL(dim_table))
+DAX:  Category Share := DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))
+
+YAML: version: '1.1'
+      measures:
+        - name: sales
+          expr: SUM(source.amount)
+        - name: sales_all_category           # the ALL(...) side
+          expr: MEASURE(sales)
+          window:
+            - order: category                # the dimension ALL() removed
+              range: all
+              semiadditive: last
+        - name: category_share
+          expr: |
+            CASE WHEN MEASURE(sales_all_category) = 0 THEN NULL
+                 ELSE MEASURE(sales) / MEASURE(sales_all_category) END
 ```
 
-This removes all filter context from `dim_table`. In a metric view, this pattern is typically used for "share of total" calculations. Use **coarser LOD** with window measures:
+Rules:
+- The dimension inside `ALL(...)` becomes the window's `order:` (it must exist as
+  a dimension in the view). `ALL(table)` (whole table, no column) → use the
+  primary grain dimension of that table.
+- The ratio measure MUST be a plain (non-window) measure referencing the base and
+  the `_all_*` window measure via `MEASURE()` — never put `window:` on the ratio.
+- `DIVIDE` → the `CASE WHEN … = 0 THEN NULL ELSE … END` guard (§2), not bare `/`.
 
-```yaml
-measures:
-  - name: total_revenue
-    expr: SUM(source.revenue)
-  - name: total_revenue_all
-    expr: SUM(source.revenue)
-    window:
-      - order: <dimension_to_remove>
-        range: all
-        semiadditive: last
-  - name: share_of_total
-    expr: MEASURE(total_revenue) / MEASURE(total_revenue_all)
+### 4b. ALLSELECTED — same shape, with a fidelity caveat
+
+`ALLSELECTED(dim)` removes the dimension's filter **but respects the outer
+slicer/visual selection** — a concept metric views do not have. Translate it the
+SAME way as `ALL` (a `range: all` window), but this is an **approximation**: it
+computes the total over ALL rows, not "all rows within the current slicer scope."
+
 ```
+DAX:  SS_MS_Actual := DIVIDE([KBI_Actual], CALCULATE([KBI_Actual], ALLSELECTED(Serve[Single/Multi Serve])))
+```
+
+→ same YAML shape as 4a. Add a comment noting the approximation so a reviewer
+knows the slicer-scope nuance was flattened. If the visual scope matters for
+correctness, flag as REVIEW rather than emitting silently.
+
+### 4c. What is NOT a clean share-of-total (do NOT force it)
+
+- **`ALLEXCEPT(table, keep_col, …)`** — keeps some filters, drops the rest. This
+  is a coarser-LOD over *multiple* remaining dimensions; not a single `range: all`
+  window. Leave as a documented TODO unless it reduces to exactly one removed dim.
+- **`ALL(dim)` as a slicer-context reset** next to an equality filter
+  (`CALCULATE([M], Dim_KBI[kbi]="Volume", ALL(Dim_KBI))`) — the `ALL` is undoing a
+  slicer, not building a total. Translate the equality filter as a normal
+  `FILTER (WHERE …)` and drop the `ALL(Dim_KBI)` reset (it has no metric-view
+  meaning). Do NOT emit a window here.
+- **`ALL(Dates)` + DATESINPERIOD / time-intelligence** — that is time-intel
+  (§ time intelligence rules), not share-of-total.
 
 ## 5. SWITCH / SELECTEDVALUE (Slicer Dispatch)
 

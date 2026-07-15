@@ -199,6 +199,32 @@ class TestLostDaxComponent:
         sql = "SUM(source.value) FILTER (WHERE bic_chversion = 'RE' AND fis_code IN ('DHG2'))"
         assert self._L(dax, sql) is None
 
+    # ── Share-of-total collapse (ALL()/ALLSELECTED denominator dropped) ───────
+
+    def test_share_of_total_all_collapsed_flagged(self):
+        # DIVIDE([M], CALCULATE([M], ALL(dim))) with no window -> num==denom -> 1.0
+        dax = 'DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))'
+        sql = "SUM(source.amount) / NULLIF(SUM(source.amount), 0)"
+        assert self._L(dax, sql)
+
+    def test_share_of_total_allselected_collapsed_flagged(self):
+        dax = 'DIVIDE([KBI_Actual], CALCULATE([KBI_Actual], ALLSELECTED(Serve[sms])))'
+        sql = "SUM(source.kbi) FILTER (WHERE x='0000') / NULLIF(SUM(source.kbi) FILTER (WHERE x='0000'), 0)"
+        assert self._L(dax, sql)
+
+    def test_share_of_total_with_window_not_flagged(self):
+        # Correct translation: denominator is a coarser-LOD window measure.
+        dax = 'DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))'
+        sql = "MEASURE(sales) / MEASURE(sales_all_category)"
+        assert self._L(dax, sql) is None
+
+    def test_distinct_filter_ratio_not_flagged_as_share(self):
+        # A legit different-filter ratio (Bug B's correct output) must NOT be
+        # mistaken for a share-of-total collapse — sides differ, no ALL().
+        dax = 'DIVIDE(CALCULATE([M], p1), CALCULATE([M], p2))'
+        sql = "SUM(source.v) FILTER (WHERE x = 'A') / NULLIF(SUM(source.v) FILTER (WHERE x = 'B'), 0)"
+        assert self._L(dax, sql) is None
+
 
 class TestDanglingMultiLetterVar:
     """detect_silent_wrong catches dangling res1/res2/std var names."""
