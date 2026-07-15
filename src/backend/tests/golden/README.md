@@ -5,7 +5,7 @@ end-to-end against real Databricks/PowerBI environments). These files are the pa
 for the WP3 god-tool → domain-service extraction: after migrating a tool, re-run the matching
 flow and compare the structured fields below against these baselines.
 
-See `src/docs/README_ARCHITECTURE_PBI_UCMV_ROADMAP.md` (§7, Phase 0).
+See `src/docs/powerbi/ucmv-pipeline-architecture.md` for the end-to-end stage map.
 
 ## Files and source runs
 

@@ -218,6 +218,6 @@ The HITL review step between Config Proposer and UCMV Generator is where this ma
 
 - [Power BI tools reference](./powerbi/README.md): the tools that extract and translate PBI metadata
 - [Example crews and flows](./examples/README.md): importable UCMV pipeline definitions
-- [PowerBI / UCMV / Genie / dashboard tooling roadmap](./README_ARCHITECTURE_PBI_UCMV_ROADMAP.md): architecture and next-release plan
+- [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of the extraction → config → generation → deploy flow, with the code location of each stage
 
 Back to the [documentation hub](./README.md).

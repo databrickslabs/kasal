@@ -30,10 +30,10 @@ The tables below map common goals to the tools and guide that cover them.
 
 - [Authentication and service principal setup](./01-authentication-setup.md) (start here)
 - [Simple migration story](./02-simple-migration-story.md)
+- [PBI → UCMV pipeline architecture](./ucmv-pipeline-architecture.md): end-to-end walkthrough — extraction → config → M-query path → LLM-first DAX translation with skill files → deploy, with the code location of each stage
 
 ### Case studies and examples
 
-- [UCMV output analysis (2026-07-15)](./ucmv-output-analysis-2026-07-15.md): real-model quality assessment — why `report_id` is the key quality lever, verified per-measure correctness, and the 7 shipped pipeline-quality fixes (PROP-1..7)
 - [Power BI analytics Q&A full case study](./powerbi-analytics-qa-case-study.md): 3-agent crew, context enrichment, business_mappings, field_synonyms, active_filters
 - [Example crew: `crew_pbi_analyst_qa.json`](../examples/crew_pbi_analyst_qa.json): import-ready, credentials scrubbed
 - [Context enrichment config example](../powerbi-context-enrichment-example.json): copy-paste reference for all 6 enrichment fields

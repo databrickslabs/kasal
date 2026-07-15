@@ -30,6 +30,7 @@ The tables below map common goals to the tools and guide that cover them.
 
 - [Authentication and service principal setup](./01-authentication-setup.md) (start here)
 - [Simple migration story](./02-simple-migration-story.md)
+- [PBI → UCMV pipeline architecture](./ucmv-pipeline-architecture.md): end-to-end walkthrough — extraction → config → M-query path → LLM-first DAX translation with skill files → deploy, with the code location of each stage
 
 ### Case studies and examples
 
@@ -91,6 +92,10 @@ MIGRATION PATH (move PBI semantic model to Databricks UC Metric Views)
       |
   PHASE 2: Propose Config
     Tool 90 (live PBI API to full config)  OR  Tool 89 (from extracted JSON)
+    NOTE: provide report_id to Tool 90 — it is strongly recommended, not just
+          "metadata": without it, measure DAX is fetched in a degraded form
+          (bare column names, ~half the measures translatable). Tool 90 now
+          auto-discovers the report bound to the dataset if you leave it blank.
       |
   PHASE 3: Human Review (about 2-3h first time, 30min repeat)
       |
