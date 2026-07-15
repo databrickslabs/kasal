@@ -209,3 +209,18 @@ Likely applies wherever a `Plant_Comp`/geo `SWITCH(ISFILTERED…)` selector exis
 > **Net:** the coverage gap is smaller than the raw counts implied — much of it is
 > 1 source measure → 2 emitted measures, recoverable by decomposition rather than
 > by re-extraction.
+
+**Update — Fix #2 already recovers the plant branch.** Re-running the resolver
+on FT_QSE's 28 extracted measures with the Fix #2 code: **all 4 base measure-refs
+now resolve** (`Plant_Comp KBI_Value_Actual/BP`, `Total_KBI_ Actual/BP`) where
+before they were 0 (all TODO). So on the next run the ~15 cascade-dropped QSE
+dependents come back, resolved to the **plant branch** (the default GT itself
+picks). That is the bulk of the QSE recovery — shipped.
+
+The remaining piece is emitting the **company-branch variant** as a second
+measure (`*_company_*`). That is a genuine but larger feature (it doubles measure
+count for geo-selector measures and needs a naming/allocation convention) —
+scoped as **follow-up**, not bundled into these fixes:
+`derive_switch_decompositions` currently fires only on `SELECTEDVALUE`+SWITCH; it
+would need a `SWITCH(TRUE(), Or(ISFILTERED|HASONEVALUE …), plantBranch,
+companyBranch)` geo-selector case that emits both branches.
