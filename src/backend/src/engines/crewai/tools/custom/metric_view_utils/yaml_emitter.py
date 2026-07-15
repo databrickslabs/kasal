@@ -96,6 +96,45 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     return value
 
 
+def _categorize_untranslatable(measure) -> tuple[str, str]:
+    """Classify an untranslatable measure into a human-readable CATEGORY + why.
+
+    Turns the raw internal skip_reason / DAX shape into one of a few clear buckets
+    so the emitted comment explains to a reviewer WHY a measure was not emitted:
+      - display artifact (color/label/format — not data)
+      - slicer/scalar helper (SELECTEDVALUE date pickers etc. — not aggregatable)
+      - dynamic KPI selector (SWITCH mega-wrapper — picks a KPI by slicer)
+      - prior-year time-intelligence (not expressible in a static metric view)
+      - complex DAX needing manual translation (the residual)
+    Returns (category, explanation).
+    """
+    name = (getattr(measure, 'original_name', '') or '').lower()
+    dax = (getattr(measure, 'dax_expression', '') or '')
+    reason = (getattr(measure, 'skip_reason', '') or '')
+    du = dax.upper()
+
+    if name.endswith('_color') or 'color' in name or 'format' in reason.lower() \
+            or 'display' in reason.lower():
+        return ('display artifact',
+                'formatting/label only — not a data measure')
+    if re.search(r'SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|PREVIOUSYEAR', du) \
+            or 'prior-year' in reason.lower():
+        return ('prior-year time-intelligence',
+                'period-shift not expressible in a static UC metric view '
+                '(supply a calendar date_py column or compute in the source view)')
+    if 'SWITCH' in du and 'SELECTEDVALUE' in du:
+        return ('dynamic KPI selector',
+                'SWITCH(SELECTEDVALUE(...)) picks a KPI by slicer — no static '
+                'metric-view equivalent; expand per-branch or handle in the report')
+    if 'SELECTEDVALUE' in du or re.search(r'\bF_(START|END)_DATE\b|CUR_MONTH|CUR_YR', du):
+        return ('slicer/scalar helper',
+                'returns a single slicer-driven scalar (e.g. a date picker) — '
+                'not an aggregatable measure')
+    if 'DISTINCTCOUNT' in du:
+        return ('distinct-count pattern', reason or 'DISTINCTCOUNT not translated')
+    return ('complex DAX — needs manual translation', reason or 'no matching pattern')
+
+
 def _usage_suffix(referenced_by: int) -> str:
     """Human-readable usage annotation for a measure comment.
 
@@ -748,14 +787,29 @@ def emit_yaml(spec: MetricViewSpec,
     # gaps that block the most downstream measures surface at the top for
     # reviewers with scarce time.
     if spec.untranslatable:
-        lines.append(f'  # \u2500\u2500\u2500 Untranslatable PBI Measures ({len(spec.untranslatable)}, sorted by usage) \u2500\u2500\u2500')
-        _sorted_untrans = sorted(
-            spec.untranslatable, key=lambda m: m.referenced_by, reverse=True)
-        for m in _sorted_untrans:
-            _suffix = f' (referenced by {m.referenced_by}'\
-                      f' {"measure" if m.referenced_by == 1 else "measures"})' \
-                      if m.referenced_by else ''
-            lines.append(f'  # {m.original_name}: {m.skip_reason}{_suffix}')
+        lines.append(f'  # \u2500\u2500\u2500 Not emitted as measures ({len(spec.untranslatable)}) \u2014 grouped by reason \u2500\u2500\u2500')
+        # Group by human category so a reviewer sees WHY each measure was skipped
+        # (display artifact / slicer-scalar / dynamic selector / prior-year /
+        # complex-DAX-needs-manual). Within a group, highest-usage first.
+        _by_cat: dict[str, list] = {}
+        _cat_why: dict[str, str] = {}
+        for m in spec.untranslatable:
+            cat, why = _categorize_untranslatable(m)
+            _by_cat.setdefault(cat, []).append(m)
+            _cat_why.setdefault(cat, why)
+        # Stable, informative order: the "not-a-measure-by-nature" buckets first
+        # (expected, no action), then the ones that need work.
+        _order = ['display artifact', 'slicer/scalar helper', 'dynamic KPI selector',
+                  'prior-year time-intelligence', 'distinct-count pattern',
+                  'complex DAX \u2014 needs manual translation']
+        for cat in _order + [c for c in _by_cat if c not in _order]:
+            ms = _by_cat.get(cat)
+            if not ms:
+                continue
+            lines.append(f'  #')
+            lines.append(f'  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}')
+            for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
+                lines.append(f'  #   - {m.original_name}{_usage_suffix(m.referenced_by)}')
 
     lines.append('')
     return '\n'.join(lines)

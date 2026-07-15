@@ -213,3 +213,31 @@ class TestFragileMatchersRouteToLLM:
         res = t.translate({'measure_name': 'y', 'dax_expression': dax, 'original_name': 'Y'},
                           'f', trivial_only=True)
         assert res.is_translatable is False  # -> routed to LLM
+
+
+class TestSameMeasureRatioKeepsPerSideFilters:
+    """DIVIDE(CALCULATE([base], A), CALCULATE([base], B)) must keep the DIFFERENT
+    per-side filters (A in num, B in denom) — not collapse to num==denom==1.0."""
+
+    def _t(self, base_filters):
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        return DaxTranslator({'measure_resolutions': {
+            'Base': {'base_expr': 'SUM(source.kbi_value)', 'base_filters': base_filters}}})
+
+    def _sql(self, t):
+        dax = ('DIVIDE(CALCULATE([Base], T[csubkbi] in {"A"}), '
+               'CALCULATE([Base], T[csubkbi] in {"B"}))')
+        return t.translate({'measure_name': 'r', 'original_name': 'R',
+                            'dax_expression': dax}, 'T').sql_expr
+
+    def test_per_side_filters_preserved_no_base_filter(self):
+        sql = self._sql(self._t([]))
+        num, den = sql.split('/ NULLIF', 1)
+        assert "'A'" in num and "'B'" in den    # different per side
+        assert num.strip() != den.strip()        # NOT num==denom
+
+    def test_per_side_filters_preserved_with_base_filter(self):
+        sql = self._sql(self._t(["bic_chversion = '0000'"]))
+        num, den = sql.split('/ NULLIF', 1)
+        assert "'A'" in num and "'B'" in den
+        assert "bic_chversion = '0000'" in num and "bic_chversion = '0000'" in den

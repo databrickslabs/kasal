@@ -122,10 +122,9 @@ class TestEmitYaml:
         )
         yaml = emit_yaml(spec)
         assert 'safe_val' in yaml
-        # The dangerous measure should NOT appear in the measures section of YAML output
-        # It appears only in the Untranslatable comments section
-        assert 'Untranslatable' in yaml
-        assert '# Evil: Blocked' in yaml
+        # The dangerous measure appears only in the not-emitted comments section
+        assert 'Not emitted as measures' in yaml
+        assert 'Evil' in yaml
 
     def test_dax_measures_emitted(self):
         """DAX-translated measures appear in a separate section."""
@@ -232,8 +231,8 @@ class TestEmitYaml:
             ],
         )
         yaml = emit_yaml(spec)
-        assert 'Untranslatable' in yaml
-        assert '# Complex Measure' in yaml
+        assert 'Not emitted as measures' in yaml
+        assert 'Complex Measure' in yaml
 
 
 class TestMeasureUsageSurfacing:
@@ -633,3 +632,43 @@ class TestDimMeasureNameCollision:
         assert 'SUM(source.kbi_value)' in out
         # region dimension survives
         assert '- name: region' in out
+
+
+class TestUntranslatableCategorization:
+    """Not-emitted measures are grouped by a clear human category + why (PROP #19)."""
+
+    def _emit(self, untranslatable):
+        spec = MetricViewSpec(
+            fact_table_key='f', source_table='c.s.t', view_name='v', comment='c',
+            joins=[], dimensions=[],
+            measures=[TranslationResult(
+                measure_name='base', original_name='base', sql_expr='SUM(source.x)',
+                is_translatable=True, skip_reason='', dax_expression='', confidence='high',
+                category='base')],
+            untranslatable=untranslatable,
+        )
+        return emit_yaml(spec)
+
+    def _u(self, name, dax, reason='no matching pattern'):
+        return TranslationResult(
+            measure_name=name.lower(), original_name=name, sql_expr=None,
+            is_translatable=False, skip_reason=reason, dax_expression=dax,
+            confidence='none', category='unassigned')
+
+    def test_prior_year_grouped_with_reason(self):
+        y = self._emit([self._u('NSR PY', 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[d]))')])
+        assert '[prior-year time-intelligence]' in y
+        assert 'NSR PY' in y
+        assert 'not expressible in a static' in y
+
+    def test_dynamic_selector_grouped(self):
+        y = self._emit([self._u('Mega', 'var x=SELECTEDVALUE(m[k]) return SWITCH(TRUE(), x=1, [A])')])
+        assert '[dynamic KPI selector]' in y
+
+    def test_display_artifact_grouped(self):
+        y = self._emit([self._u('CF_vs_%_Color', 'KBI_Display_calculate')])
+        assert '[display artifact]' in y
+
+    def test_complex_dax_bucket(self):
+        y = self._emit([self._u('Weird', 'SOMEFUNC(x, y, z)')])
+        assert 'needs manual translation' in y
