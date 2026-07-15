@@ -1047,6 +1047,36 @@ class TestMeasureRefResolution:
     def test_untranslatable_returns_none(self):
         assert self._R('var x = SELECTEDVALUE(a) return x + 1') is None
 
+    def test_var_scaffolding_switch_sumx_filter_bp(self):
+        """Dependency-cascade fix: the _BP twin carries `var std/etd` date-window
+        scaffolding AND wraps the aggregate in SUMX(FILTER(...)). Both broke
+        resolution (first CALCULATE found was the scaffolding CALCULATE([F_Start_
+        date]), and the agg regex didn't handle SUMX(FILTER,col)) → the base
+        dropped → all its _BP dependents cascaded out. Must now resolve."""
+        bp = (
+            'var std = CALCULATE([F_Start_date]) var etd= CALCULATE([F_End_date]) '
+            'return Switch(TRUE(), '
+            'Or(ISFILTERED(C_Dim_Plant[plant_desc]),HASONEVALUE(C_Dim_Plant[plant])), '
+            'CALCULATE(SUMX(FILTER(FT_QSE, FT_QSE[bic_chversion] = "B000" && '
+            'FT_QSE[bic_creg_type] = "Plant"),FT_QSE[kbi_value])), '
+            'CALCULATE(SUMX(FILTER(FT_QSE, FT_QSE[bic_chversion] = "B000" && '
+            'FT_QSE[bic_creg_type] = "Company Code"),FT_QSE[kbi_value])) )'
+        )
+        r = self._R(bp)
+        assert r is not None, "BP base measure must resolve (else _BP dependents cascade out)"
+        assert r['base_expr'] == 'SUM(source.kbi_value)'
+        assert r['base_filters'] == ["bic_chversion = 'B000'", "bic_creg_type = 'Plant'"]
+
+    def test_var_scaffolding_plain_sumx_filter(self):
+        totbp = (
+            'var std = CALCULATE([F_Start_date]) var etd= CALCULATE([F_End_date]) '
+            'return CALCULATE(SUMX(FILTER(FT_QSE, FT_QSE[bic_chversion] = "B000" ),'
+            'FT_QSE[kbi_value]))'
+        )
+        r = self._R(totbp)
+        assert r['base_expr'] == 'SUM(source.kbi_value)'
+        assert r['base_filters'] == ["bic_chversion = 'B000'"]
+
     def test_end_to_end_no_todo_literal(self):
         from src.engines.crewai.tools.custom.generate_config import (
             derive_measure_resolutions,
