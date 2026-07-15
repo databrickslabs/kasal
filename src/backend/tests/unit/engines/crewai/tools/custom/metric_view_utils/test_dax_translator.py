@@ -207,6 +207,38 @@ class TestMeasureRefRatioFilters:
         parsed = t._parse_calculate_filters('(FT_QSE[bic_csubkbi] in {"A1","A2"})', 'FT_QSE')
         assert parsed == ["source.bic_csubkbi IN ('A1', 'A2')"]
 
+    def test_scaffolding_refs_not_treated_as_measure_refs(self):
+        """Fix #4: [F_Start_date]/[F_End_date] date-window scaffolding must NOT be
+        picked up as measure-refs. Otherwise a var-chain join-alias DIVIDE (e.g.
+        fact_pe002 EPL_Actual) is claimed by the measure-ref matcher and fails on
+        'Cannot resolve [F_Start_date]' — dropping the measure instead of routing
+        it to the LLM var-chain path."""
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        t = DaxTranslator()
+        dax = (
+            'var std = CALCULATE([F_Start_date]) var etd= CALCULATE([F_End_date]) '
+            'var a = CALCULATE(SUMX(fact_pe002,fact_pe002[epl]),'
+            'FILTER(Dim_wkctr,Dim_wkctr[bic_cwc_type] in {"APET","CAN"})) '
+            'var b = CALCULATE(SUMX(fact_pe002,fact_pe002[paid_hours]),'
+            'FILTER(Dim_wkctr,Dim_wkctr[bic_cwc_type] in {"APET","CAN"})) return DIVIDE(a,b)'
+        )
+        # scaffolding-only refs → matcher declines (falls through to LLM), it must
+        # NOT claim-and-fail
+        assert t._match_divide_calculate_measure_ref(dax, 'epl') is None
+        assert t._match_calculate_measure_ref(dax, 'epl') is None
+        # end-to-end llm_first: untranslatable (routed to LLM), NOT wrong SQL
+        res = t.translate({'measure_name': 'epl', 'original_name': 'EPL_Actual',
+                           'dax_expression': dax}, 'fact_pe002', trivial_only=True)
+        assert res.is_translatable is False
+        assert res.sql_expr is None
+
+    def test_real_measure_ref_still_detected(self):
+        # Regression: a genuine measure-ref (not scaffolding) is still found.
+        from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
+        t = DaxTranslator()
+        refs = t._find_calculate_measure_refs('CALCULATE([Real_Measure], T[a]="1")')
+        assert [r['ref_name'] for r in refs] == ['Real_Measure']
+
 
 class TestPrecleanDax:
     """PROP-6: strip DAX comments + normalize inline BLANK() before translation."""

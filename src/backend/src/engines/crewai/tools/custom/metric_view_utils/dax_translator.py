@@ -1332,11 +1332,24 @@ class DaxTranslator:
         """Strip trailing RETURN keyword."""
         return re.sub(r'\breturn\s*$', '', text, flags=re.IGNORECASE).strip()
 
+    # Slicer-scalar date-window pickers used as scaffolding (var std = CALCULATE
+    # ([F_Start_date]) …). They are NOT real measure-refs — treating them as such
+    # makes the measure-ref matchers claim a var-chain measure and then fail on
+    # "Cannot resolve [F_Start_date]", dropping measures (e.g. the fact_pe002
+    # EPL/CIP join-alias DIVIDE ratios) that the var-chain LLM path handles fine.
+    _SCAFFOLD_REFS = re.compile(r'^(?:F|PY)_(?:START|END)_DATE$', re.IGNORECASE)
+
     def _find_calculate_measure_refs(self, text: str) -> list[dict]:
-        """Find CALCULATE([MeasureRef], filter) patterns in text."""
+        """Find CALCULATE([MeasureRef], filter) patterns in text.
+
+        Scaffolding date-picker refs (``[F_Start_date]`` etc.) are skipped — they
+        are display-window scalars, not measures to resolve.
+        """
         refs = []
         for m in re.finditer(r'CALCULATE\s*\(\s*\[([^\]]+)\]', text, re.IGNORECASE):
             ref_name = m.group(1)
+            if self._SCAFFOLD_REFS.match(ref_name.strip()):
+                continue  # skip slicer-scalar date-window scaffolding
             calc_start = m.start()
             paren_start = text.index('(', m.start()) + 1
             depth = 1
