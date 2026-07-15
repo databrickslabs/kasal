@@ -801,8 +801,23 @@ def process_table(
         for col_m in re.finditer(r'\b(\w+)\s+AS\s+`?(\w+)`?', table_info.full_sql, re.IGNORECASE):
             known_cols.add(col_m.group(2))
         _CTE_ARTIFACT_COLS = {'row_num', 'rn', 'row_number'}
+        _param_resolver = PbiParameterResolver(
+            parameter_defaults=ctx.config.get('parameter_defaults'),
+        )
         valid_filters = []
         for filt in table_info.static_filters:
+            # P3: resolve known PBI params, then flag any that remain. An
+            # unresolved param (e.g. "& FiscperFilter &") must NOT be emitted as
+            # SQL — it's invalid. Drop the filter and surface it as a TODO so the
+            # customer supplies the value, rather than shipping broken SQL.
+            filt = _param_resolver.resolve(filt)
+            _unresolved = _param_resolver.find_unresolved_params(filt)
+            if _unresolved:
+                ctx.filter_warnings.append(
+                    f'{table_key}: TODO unresolved PBI parameter(s) '
+                    f'{_unresolved} in filter "{filt}" — dropped from SQL; '
+                    f'supply value(s) via parameter_defaults to re-enable')
+                continue
             ref_cols = set(re.findall(r'\bsource\.(\w+)', filt))
             bare_cols = set(re.findall(r'\b(\w+)\s*(?:=|<>|!=|IN\b|<|>|<=|>=)', filt))
             all_ref_cols = ref_cols | bare_cols
@@ -849,6 +864,12 @@ def process_table(
                     parameter_defaults=ctx.config.get('parameter_defaults'),
                 )
                 candidate = resolver.resolve(candidate)
+                _unresolved_src = resolver.find_unresolved_params(candidate)
+                if _unresolved_src:
+                    ctx.filter_warnings.append(
+                        f'{table_key}: TODO unresolved PBI parameter(s) '
+                        f'{_unresolved_src} in inline source SQL — supply value(s) '
+                        f'via parameter_defaults; view may not run until resolved')
                 source_sql = candidate
                 source_filter = ''
 

@@ -557,3 +557,50 @@ class TestCleanFilterPrefixes:
         expr = "SUM(source.val)"
         result = _clean_filter_prefixes(expr, fact_table_key='fact')
         assert result == expr
+
+
+class TestDimensionAndJoinDedup:
+    """P2: duplicate dimension/join names are invalid UCMV YAML — must be deduped."""
+
+    def _spec(self, dims, joins):
+        return MetricViewSpec(
+            fact_table_key='fact_test',
+            source_table='cat.sch.test_table',
+            view_name='fact_test_uc_metric_view',
+            comment='c',
+            joins=joins,
+            dimensions=dims,
+            measures=[TranslationResult(
+                measure_name='m', original_name='M', sql_expr='SUM(source.x)',
+                is_translatable=True, skip_reason='m', dax_expression='SUM(T[x])',
+                confidence='high', category='base')],
+            untranslatable=[],
+        )
+
+    def test_duplicate_dimension_names_collapsed(self):
+        # Use join-alias exprs (no source. prefix) so they survive the phantom
+        # dimension validation and we test dedup specifically.
+        dims = [
+            {'name': 'date', 'expr': 'dim_calendar.date', 'comment': 'Date'},
+            {'name': 'date', 'expr': 'dim_calendar_dummy.date', 'comment': 'Dup'},
+            {'name': 'date', 'expr': 'c_dim_calendar.date', 'comment': 'Dup2'},
+            {'name': 'market', 'expr': 'dim_geo.market', 'comment': 'Market'},
+        ]
+        spec = self._spec(dims, [])
+        out = emit_yaml(spec)
+        # 'date' emitted exactly once, market once
+        assert out.count('  - name: date') == 1
+        assert out.count('  - name: market') == 1
+        # first occurrence wins
+        assert 'dim_calendar.date' in out
+        assert 'dim_calendar_dummy.date' not in out
+
+    def test_duplicate_join_names_collapsed(self):
+        joins = [
+            {'name': 'dim_plant', 'source': 'cat.sch.plant_a', 'on': 'source.p = dim_plant.p'},
+            {'name': 'dim_plant', 'source': 'cat.sch.plant_b', 'on': 'source.p = dim_plant.p'},
+        ]
+        spec = self._spec([{'name': 'region', 'expr': 'source.region'}], joins)
+        out = emit_yaml(spec)
+        assert out.count('- name: dim_plant') == 1
+        assert 'cat.sch.plant_a' in out  # first wins

@@ -297,3 +297,74 @@ class TestJoinDetectorFactJoins:
         assert len(joins) == 1
         assert 'source.k1 = oth.k1' in joins[0]['join_on']
         assert 'source.k2 = oth.k2' in joins[0]['join_on']
+
+
+class TestP4RichJoinSql:
+    """P4: config-driven QUALIFY dedup subqueries + zero-pad key alignment."""
+
+    def _detector(self, join_key_map, extra_cfg=None):
+        cfg = {'join_key_map': join_key_map}
+        cfg.update(extra_cfg or {})
+        tables = {'fact': _make_table('fact', 'cat.sch.fact', ['comp_code'])}
+        return JoinDetector(tables, cfg), tables
+
+    def test_pad_key_generates_lpad(self):
+        jkm = {
+            'Dim_Geo': {
+                'alias': 'dim_geo', 'join_key': 'comp_code', 'dim_key': 'comp_code',
+                'source_table': 'cat.sch.dim_geo',
+                'pad_key': {'len': 4, 'char': '0'},
+            }
+        }
+        det, tables = self._detector(jkm)
+        joins = det.detect('fact', [{'dax_expression': 'SUM(Dim_Geo[x])'}], tables['fact'])
+        assert len(joins) == 1
+        assert joins[0]['join_on'] == "LPAD(source.comp_code, 4, '0') = dim_geo.comp_code"
+
+    def test_no_pad_when_not_configured(self):
+        jkm = {
+            'Dim_Geo': {
+                'alias': 'dim_geo', 'join_key': 'comp_code', 'dim_key': 'comp_code',
+                'source_table': 'cat.sch.dim_geo',
+            }
+        }
+        det, tables = self._detector(jkm)
+        joins = det.detect('fact', [{'dax_expression': 'SUM(Dim_Geo[x])'}], tables['fact'])
+        assert joins[0]['join_on'] == "source.comp_code = dim_geo.comp_code"
+        assert 'LPAD' not in joins[0]['join_on']
+
+    def test_dedup_dim_wraps_source_in_qualify_subquery(self):
+        jkm = {
+            'Dim_Geo': {
+                'alias': 'dim_geo', 'join_key': 'comp_code', 'dim_key': 'comp_code',
+                'source_table': 'cat.sch.dim_geo',
+                'dedup_dim': True,
+            }
+        }
+        det, tables = self._detector(jkm)
+        joins = det.detect('fact', [{'dax_expression': 'SUM(Dim_Geo[x])'}], tables['fact'])
+        src = joins[0]['source']
+        assert src.startswith('(SELECT * FROM cat.sch.dim_geo')
+        assert 'QUALIFY ROW_NUMBER() OVER (PARTITION BY comp_code ORDER BY comp_code) = 1' in src
+
+    def test_global_dedup_flag_applies_to_all(self):
+        jkm = {
+            'Dim_Geo': {
+                'alias': 'dim_geo', 'join_key': 'comp_code', 'dim_key': 'comp_code',
+                'source_table': 'cat.sch.dim_geo',
+            }
+        }
+        det, tables = self._detector(jkm, {'dedup_dim_joins': True})
+        joins = det.detect('fact', [{'dax_expression': 'SUM(Dim_Geo[x])'}], tables['fact'])
+        assert 'QUALIFY ROW_NUMBER()' in joins[0]['source']
+
+    def test_no_dedup_by_default(self):
+        jkm = {
+            'Dim_Geo': {
+                'alias': 'dim_geo', 'join_key': 'comp_code', 'dim_key': 'comp_code',
+                'source_table': 'cat.sch.dim_geo',
+            }
+        }
+        det, tables = self._detector(jkm)
+        joins = det.detect('fact', [{'dax_expression': 'SUM(Dim_Geo[x])'}], tables['fact'])
+        assert joins[0]['source'] == 'cat.sch.dim_geo'

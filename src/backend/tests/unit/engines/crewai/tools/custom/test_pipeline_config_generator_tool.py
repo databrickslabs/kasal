@@ -882,3 +882,121 @@ class TestUCMVHandoffPayload:
         )
         # UCMV pipeline iterates mapping expecting these keys
         assert set(out[0]) >= {"measure_name", "dax_expression", "proposed_allocation"}
+
+
+# ---------------------------------------------------------------------------
+# Measure allocation (P0 re-homing: holder-table measures → referenced facts)
+# ---------------------------------------------------------------------------
+
+class TestMeasureReHoming:
+    """A measure defined on a measure-holder table must be allocated to the
+    fact table(s) its DAX references, not left on the (dataless) holder."""
+
+    def _cfg(self, *facts):
+        return {"fact_join_map": {f: {} for f in facts}}
+
+    def test_holder_measure_rehomed_to_referenced_fact(self):
+        measures = [{
+            "measure_name": "CFR %",
+            "table_name": "C_Measure_Table_SL",  # holder, not a fact
+            "expression": "DIVIDE(SUM(fact_iom05[cfr_num]), SUM(fact_iom05[cfr_den]))",
+        }]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            measures,
+            admin_tables={"fact_iom05": {}, "C_Measure_Table_SL": {}},
+            config=self._cfg("fact_iom05"),
+        )
+        assert out[0]["proposed_allocation"] == "fact_iom05"
+        assert out[0]["all_allocations"] == [{"table": "fact_iom05", "role": "primary"}]
+
+    def test_cross_fact_measure_gets_primary_and_secondary(self):
+        measures = [{
+            "measure_name": "Ratio",
+            "table_name": "C_Measure_Table",
+            "expression": "DIVIDE(SUM(Fact_A[x]), SUM(Fact_B[y]))",
+        }]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            measures,
+            admin_tables={"Fact_A": {}, "Fact_B": {}, "C_Measure_Table": {}},
+            config=self._cfg("Fact_A", "Fact_B"),
+        )
+        assert out[0]["all_allocations"] == [
+            {"table": "Fact_A", "role": "primary"},
+            {"table": "Fact_B", "role": "secondary"},
+        ]
+
+    def test_measure_on_own_fact_stays_primary(self):
+        measures = [{
+            "measure_name": "Amount",
+            "table_name": "fact_iom35",
+            "expression": "SUM(fact_iom35[amt])",
+        }]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            measures,
+            admin_tables={"fact_iom35": {}},
+            config=self._cfg("fact_iom35"),
+        )
+        assert out[0]["proposed_allocation"] == "fact_iom35"
+        assert out[0]["all_allocations"] == [{"table": "fact_iom35", "role": "primary"}]
+
+    def test_no_known_fact_referenced_falls_back_to_home(self):
+        measures = [{
+            "measure_name": "Const",
+            "table_name": "C_Measure_Table",
+            "expression": "1 + 1",
+        }]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            measures,
+            admin_tables={"C_Measure_Table": {}},
+            config=self._cfg("fact_iom05"),
+        )
+        # No fact referenced → left on home table, no all_allocations key.
+        assert out[0]["proposed_allocation"] == "C_Measure_Table"
+        assert "all_allocations" not in out[0]
+
+    def test_quoted_table_name_ref_resolves(self):
+        measures = [{
+            "measure_name": "Q",
+            "table_name": "Holder",
+            "expression": "SUM('Fact Sales'[amt])",
+        }]
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            measures,
+            admin_tables={"Fact Sales": {}, "Holder": {}},
+            config=self._cfg("Fact Sales"),
+        )
+        assert out[0]["proposed_allocation"] == "Fact Sales"
+
+    def test_no_config_preserves_legacy_behaviour(self):
+        # Without fact_join_map, no re-homing — original table_name passthrough.
+        out = PipelineConfigGeneratorTool._build_ucmv_measures(
+            [{"measure_name": "m1", "table_name": "F", "expression": "SUM(F[x])"}]
+        )
+        assert out[0]["proposed_allocation"] == "F"
+        assert "all_allocations" not in out[0]
+
+
+class TestEtlColumnCuration:
+    """P2 curation: pure ETL plumbing columns are demoted from dimensions."""
+
+    def test_etl_columns_excluded_business_columns_kept(self):
+        from src.engines.crewai.tools.custom.generate_config import (
+            derive_dimension_exclusions,
+        )
+        admin_tables = {
+            "Fact_X": {"columns": [
+                {"name": "Region"},          # business — keep
+                {"name": "ObjVers"},         # ETL — exclude
+                {"name": "LogSys"},          # ETL — exclude
+                {"name": "process_run_id"},  # ETL — exclude
+                {"name": "YearCard"},        # ETL — exclude
+                {"name": "SalesAmount", "isHidden": True},  # hidden — exclude
+            ]}
+        }
+        excl = derive_dimension_exclusions(admin_tables)["Fact_X"]
+        assert "obj_vers" in excl
+        assert "log_sys" in excl
+        assert "process_run_id" in excl
+        assert "year_card" in excl
+        assert "sales_amount" in excl  # hidden
+        assert "region" not in excl    # business dimension preserved

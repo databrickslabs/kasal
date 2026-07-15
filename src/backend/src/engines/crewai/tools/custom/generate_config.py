@@ -1016,17 +1016,43 @@ def derive_name_prefixes(admin_tables: dict[str, dict]) -> list[str]:
     return sorted(p for p, c in prefix_counts.items() if c >= 3)
 
 
+# Pure ETL / plumbing columns that are never business dimensions. Demoted from
+# the emitted dimension list (conservative curation). Matched on the snake name
+# with underscores stripped (so "obj_vers"/"ObjVers"/"objvers" all collapse to
+# "objvers"), so real business columns are never caught. Extend deliberately.
+_ETL_PLUMBING_COLUMNS = frozenset({
+    "objvers", "logsys", "processrunid", "yearcard", "pastflag",
+    "recordmode", "aedat", "aezet", "erdat", "erzet",
+    "loadtime", "etlloaddate", "etltimestamp", "dwloaddate",
+    "sourcesystem", "batchid", "runid", "loadedat",
+})
+
+
+def _is_etl_plumbing(snake_name: str) -> bool:
+    """True when a snake-cased column name is pure ETL plumbing (underscore-
+    insensitive match against _ETL_PLUMBING_COLUMNS)."""
+    return snake_name.replace("_", "") in _ETL_PLUMBING_COLUMNS
+
+
 def derive_dimension_exclusions(admin_tables: dict[str, dict]) -> dict[str, list[str]]:
-    """Hidden columns per table → dimension_exclusions."""
+    """Hidden + pure-ETL columns per table → dimension_exclusions.
+
+    Two sources: (1) columns PBI marks isHidden, (2) a conservative allow-list of
+    ETL plumbing columns (objvers, logsys, process_run_id, …) that are never
+    business dimensions. Matched by snake-cased name so real business columns are
+    never demoted.
+    """
     exclusions: dict[str, list[str]] = {}
 
     for tbl_name, tbl in admin_tables.items():
-        hidden = []
+        excluded = []
         for col in tbl.get("columns", []):
-            if col.get("isHidden", False):
-                hidden.append(to_snake_case(col["name"]))
-        if hidden:
-            exclusions[tbl_name] = hidden
+            snake = to_snake_case(col["name"])
+            if col.get("isHidden", False) or _is_etl_plumbing(snake):
+                excluded.append(snake)
+        if excluded:
+            # de-dup while preserving order
+            exclusions[tbl_name] = list(dict.fromkeys(excluded))
 
     return exclusions
 
@@ -1632,7 +1658,32 @@ def build_config(
     complex_measures = _find_complex_measures(measures)
     config["manual_overrides"] = _build_manual_overrides_skeleton(complex_measures)
 
+    # ── Final pass: resolve {catalog}/{schema} placeholders ───────────
+    # Several derivers (enrichment join sources, mapping-only source tables)
+    # template dim/source tables as "{catalog}.{schema}.<table>" because they do
+    # not receive the target catalog/schema. Those literals survive into the
+    # emitted join `source:` and make the view non-runnable. build_config DOES
+    # know catalog/schema, so substitute them everywhere in one place — this
+    # catches every current and future placeholder source.
+    config = _resolve_catalog_schema_placeholders(config, catalog, schema)
+
     return config
+
+
+def _resolve_catalog_schema_placeholders(obj: Any, catalog: str, schema: str) -> Any:
+    """Recursively replace ``{catalog}``/``{schema}`` tokens in all config
+    strings with the real target catalog/schema. Leaves everything else
+    untouched. Applied once at the end of build_config."""
+    if isinstance(obj, str):
+        if "{catalog}" in obj or "{schema}" in obj:
+            return obj.replace("{catalog}", catalog).replace("{schema}", schema)
+        return obj
+    if isinstance(obj, dict):
+        return {k: _resolve_catalog_schema_placeholders(v, catalog, schema)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_catalog_schema_placeholders(v, catalog, schema) for v in obj]
+    return obj
 
 
 def _identify_fact_tables(

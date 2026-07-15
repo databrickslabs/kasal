@@ -146,3 +146,27 @@ class TestCombined:
         assert "MONTH(CURRENT_DATE()) >= 10" in result
         assert "${CurrencyFilter}" not in result
         assert "'${RE_Version}' = 'R100'" not in result
+
+
+class TestFindUnresolvedParams:
+    """P3: detect PBI params still interpolated after resolve()."""
+
+    def test_detects_ampersand_param(self):
+        r = PbiParameterResolver()
+        found = r.find_unresolved_params(
+            "source.fiscper = '\"& FiscperFilter &\"'")
+        assert "FiscperFilter" in found
+
+    def test_detects_dollar_brace_param(self):
+        r = PbiParameterResolver()
+        assert "RE_Version" in r.find_unresolved_params("x = '${RE_Version}'")
+
+    def test_clean_sql_returns_empty(self):
+        r = PbiParameterResolver()
+        assert r.find_unresolved_params("source.fiscper >= '2025001'") == []
+
+    def test_multiple_distinct_params(self):
+        r = PbiParameterResolver()
+        found = r.find_unresolved_params(
+            "a = '\"& FiscperFilter &\"' AND b = '${CurrencyFilter}'")
+        assert set(found) == {"FiscperFilter", "CurrencyFilter"}

@@ -30,7 +30,31 @@ PBI supports inactive relationships that can be activated per-measure via `USERE
 DAX:  CALCULATE([Revenue], SAMEPERIODLASTYEAR('Calendar'[Date]))
 ```
 
-**Workaround**: Use window measures with `trailing 1 year` range, or compute in the source view using `DATE_ADD(date, -1, 'YEAR')`.
+**Workaround (preferred order):**
+
+1. **Calendar `date_py` self-join** — when the calendar dimension carries a
+   prior-year column (`date_py`, `fiscper_py`, etc.), join the fact to the
+   calendar on that column and SUM against it. This is exact (no offset guessing):
+
+   ```yaml
+   joins:
+     - name: cal_py
+       source: <catalog>.<schema>.c_dim_calendar
+       on: source.fiscper = cal_py.date_py   # prior-year period lookup
+   measures:
+     - name: revenue_py
+       expr: SUM(source.revenue)             # scoped to cal_py's PY period
+   ```
+
+2. **LAG window** — for a fixed 1-period offset on an ordered period dim:
+   `LAG(SUM(source.revenue)) OVER (ORDER BY fiscper)`. Only valid when the period
+   dim is dense (no gaps).
+
+3. **`trailing 1 year` window measure**, or compute in the source view using
+   `DATE_ADD(date, -1, 'YEAR')`.
+
+If none of the inputs above are available (no `date_py` column, non-dense period),
+leave the measure as a documented TODO — do NOT fabricate an offset.
 
 ### DATESINPERIOD / DATESBETWEEN
 
