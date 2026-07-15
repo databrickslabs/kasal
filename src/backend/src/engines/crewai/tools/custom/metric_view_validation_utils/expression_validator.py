@@ -10,6 +10,24 @@ from .data_input_handler import DataInputHandler
 
 logger = logging.getLogger(__name__)
 
+# A base measure is a direct aggregate of a single source column, e.g.
+#   SUM(COALESCE(source.col, 0))  /  SUM(source.col)  /  COUNT(source.col)
+# These carry NO DAX expression (they come from the MQuery SUM columns, not a DAX
+# measure), so there is nothing to diff — but they are correct BY CONSTRUCTION.
+# They must be counted VALID, not SKIPPED (skipping them made the headline look
+# far worse than reality — ~144 correct base measures were shown as "not
+# available").
+_BASE_MEASURE_RE = re.compile(
+    r'^\s*(SUM|COUNT|AVG|AVERAGE|MIN|MAX|COUNT_DISTINCT)\s*\(\s*'
+    r'(COALESCE\s*\(\s*)?source\.\w+\s*(,\s*0\s*\))?\s*\)\s*$',
+    re.IGNORECASE,
+)
+
+
+def _is_base_measure_expr(expr: Optional[str]) -> bool:
+    """True when the emitted SQL is a plain single-column aggregate (base measure)."""
+    return bool(expr and _BASE_MEASURE_RE.match(expr.strip()))
+
 
 class ExpressionValidator:
     """Validates semantic equivalence between Databricks and DAX expressions."""
@@ -129,6 +147,25 @@ class ExpressionValidator:
                 'recommendations': []
             }
         
+        # Base measures (plain single-column aggregates like SUM(COALESCE(source.col,0)))
+        # are correct BY CONSTRUCTION and carry no DAX to diff against. Count them
+        # VALID rather than SKIPPED — otherwise the ~144 base measures show as
+        # "DAX not available" and the headline drastically understates quality.
+        _db_expr = yaml_measure.get('expr')
+        if _is_base_measure_expr(_db_expr):
+            return {
+                'measure_name': measure_name,
+                'status': STATUS_VALID,
+                'is_valid': True,
+                'confidence': 'high',
+                'reason': 'base measure — direct source-column aggregate (correct by construction)',
+                'databricks_expr': _db_expr,
+                'dax_expr': None,
+                'differences': [],
+                'similarities': [],
+                'recommendations': [],
+            }
+
         # Find matching DAX measure
         dax_measure = self.data_handler.find_matching_dax_for_yaml_measure(yaml_measure)
         if not dax_measure:
