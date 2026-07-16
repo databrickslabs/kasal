@@ -155,3 +155,54 @@ class TestClassifyMquerySource:
         m = ('Table.FromRows(Json.Document(Binary.Decompress('
              'Binary.FromText("x", BinaryEncoding.Base64))))  // VALUES helper')
         assert self._C(m)[0] == 'inline_const'
+
+
+class TestExtractSourceTable:
+    """extract_source_table: parse catalog.schema.table from an *extractable* M
+    source (Databricks connector nav / native query / Sql.Database). Returns None
+    when it can't resolve confidently — never guesses (a wrong source_table would
+    silently wire a bad join)."""
+
+    def _E(self, m):
+        from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import (
+            extract_source_table)
+        return extract_source_table(m)
+
+    def test_databricks_catalogs_navigation_chain(self):
+        m = ('let Source = Databricks.Catalogs("h.databricks.com","/sql/1.0/wh/abc")'
+             '{[Name="dc_datalake_prod_001"]}[Data]{[Name="udm_example_md"]}[Data]'
+             '{[Name="ca_dim_workcenter"]}[Data] in Source')
+        assert self._E(m) == 'dc_datalake_prod_001.udm_example_md.ca_dim_workcenter'
+
+    def test_databricks_keyed_navigation(self):
+        m = ('Databricks.Catalogs(){[Catalog="c1"]}[Data]{[Schema="s1"]}[Data]'
+             '{[Item="t1"]}[Data]')
+        assert self._E(m) == 'c1.s1.t1'
+
+    def test_native_query_from_clause(self):
+        m = 'let Source = Value.NativeQuery(db, "SELECT a, b FROM cat_x.sch_y.tbl_z WHERE 1=1") in Source'
+        assert self._E(m) == 'cat_x.sch_y.tbl_z'
+
+    def test_sql_database_schema_item(self):
+        m = 'let Source = Sql.Database("myserver","mydb"){[Schema="dbo",Item="Orders"]} in Source'
+        assert self._E(m) == 'mydb.dbo.Orders'
+
+    def test_inline_const_returns_none(self):
+        m = ('let Source = Table.FromRows(Json.Document(Binary.Decompress('
+             'Binary.FromText("i45W",BinaryEncoding.Base64)))) in Source')
+        assert self._E(m) is None
+
+    def test_dax_calc_returns_none(self):
+        assert self._E('GENERATESERIES(-5,20,5)') is None
+
+    def test_external_returns_none(self):
+        assert self._E('let Source = Access.Database(File.Contents("x.accdb")) in Source') is None
+
+    def test_incomplete_databricks_chain_returns_none(self):
+        # only one [Name=…] segment — not enough to form a 3-level name
+        m = 'let Source = Databricks.Catalogs("h","p"){[Name="onlycat"]}[Data] in Source'
+        assert self._E(m) is None
+
+    def test_none_and_empty_input(self):
+        assert self._E(None) is None
+        assert self._E('') is None

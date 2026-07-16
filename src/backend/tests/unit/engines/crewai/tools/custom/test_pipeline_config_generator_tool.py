@@ -1234,3 +1234,68 @@ class TestDaxQualityGuard:
         w, t = self._quality(ms)
         assert w == 15 and t == 40
         assert self._is_degraded(w, t) is False  # 15 >= 40//4 (10)
+
+
+class TestEnrichSourceTablesFromMquery:
+    """P1: _enrich_source_tables_from_mquery fills join_key_map[dim].source_table
+    from the dimension's connector M-query. Additive-only; returns an audit log."""
+
+    def _tool(self):
+        from src.engines.crewai.tools.custom.pipeline_config_generator_tool import (
+            PipelineConfigGeneratorTool)
+        return PipelineConfigGeneratorTool()
+
+    def test_fills_source_table_from_connector_m(self):
+        tool = self._tool()
+        config = {"join_key_map": {"Dim_wkctr": {
+            "alias": "dim_wkctr", "join_key": "plant_workcenter_key",
+            "dim_columns": ["bic_cwc_type"]}}}
+        admin = {"Dim_wkctr": {"mquery_expression": (
+            'let Source = Databricks.Catalogs("h","p")'
+            '{[Name="cat1"]}[Data]{[Name="sch1"]}[Data]{[Name="ca_dim_workcenter"]}[Data] in Source')}}
+        log = tool._enrich_source_tables_from_mquery(config, admin)
+        assert config["join_key_map"]["Dim_wkctr"]["source_table"] == "cat1.sch1.ca_dim_workcenter"
+        assert any(e["status"] == "filled" and e["target"] == "Dim_wkctr" for e in log)
+
+    def test_does_not_overwrite_existing_value(self):
+        tool = self._tool()
+        config = {"join_key_map": {"Dim_x": {
+            "alias": "dim_x", "join_key": "k",
+            "source_table": "already.set.here"}}}
+        admin = {"Dim_x": {"mquery_expression": (
+            'Databricks.Catalogs(){[Name="a"]}[Data]{[Name="b"]}[Data]{[Name="c"]}[Data]')}}
+        tool._enrich_source_tables_from_mquery(config, admin)
+        assert config["join_key_map"]["Dim_x"]["source_table"] == "already.set.here"
+
+    def test_overwrites_todo_placeholder(self):
+        tool = self._tool()
+        config = {"join_key_map": {"Dim_x": {
+            "alias": "dim_x", "join_key": "k",
+            "source_table": "TODO: physical UC table"}}}
+        admin = {"Dim_x": {"mquery_expression": (
+            'Databricks.Catalogs(){[Name="a"]}[Data]{[Name="b"]}[Data]{[Name="c"]}[Data]')}}
+        tool._enrich_source_tables_from_mquery(config, admin)
+        assert config["join_key_map"]["Dim_x"]["source_table"] == "a.b.c"
+
+    def test_unresolvable_m_logs_skip_with_reason(self):
+        tool = self._tool()
+        config = {"join_key_map": {"Selector": {"alias": "sel", "join_key": "k"}}}
+        admin = {"Selector": {"mquery_expression": (
+            'let Source = Table.FromRows(Json.Document(Binary.Decompress('
+            'Binary.FromText("x",BinaryEncoding.Base64)))) in Source')}}
+        log = tool._enrich_source_tables_from_mquery(config, admin)
+        assert "source_table" not in config["join_key_map"]["Selector"]
+        skip = [e for e in log if e["target"] == "Selector"][0]
+        assert skip["status"] == "skipped"
+        assert "inline constant" in skip["detail"]
+
+    def test_missing_admin_entry_logs_skip(self):
+        tool = self._tool()
+        config = {"join_key_map": {"Dim_orphan": {"alias": "o", "join_key": "k"}}}
+        log = tool._enrich_source_tables_from_mquery(config, {})
+        assert config["join_key_map"]["Dim_orphan"].get("source_table") is None
+        assert any(e["status"] == "skipped" for e in log)
+
+    def test_empty_join_key_map_returns_empty_log(self):
+        tool = self._tool()
+        assert tool._enrich_source_tables_from_mquery({}, {}) == []

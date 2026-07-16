@@ -90,6 +90,74 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     return ('unknown', 'unrecognized M source shape')
 
 
+# 3-level UC name: catalog.schema.table (identifiers, optionally back-quoted).
+_FQN_RE = re.compile(r'([A-Za-z_][\w]*|`[^`]+`)\.'
+                     r'([A-Za-z_][\w]*|`[^`]+`)\.'
+                     r'([A-Za-z_][\w]*|`[^`]+`)')
+
+
+def _unquote(ident: str) -> str:
+    """Strip back-quotes/brackets from a single M identifier."""
+    return ident.strip().strip('`').strip('[]').strip('"')
+
+
+def extract_source_table(mquery: str) -> str | None:
+    """Parse a physical ``catalog.schema.table`` out of an *extractable* M source.
+
+    Only runs for sources ``classify_mquery_source`` tags ``extractable`` (Databricks
+    connector navigation, ``Sql.Database`` table nav, ``Value.NativeQuery`` with an
+    embedded ``FROM``). Returns the fully-qualified 3-level name, or ``None`` when it
+    cannot resolve one confidently — it never guesses (a wrong ``source_table`` would
+    silently wire a bad join). Used to fill ``join_key_map[dim].source_table`` during
+    config-generation enrichment.
+    """
+    if not mquery or not isinstance(mquery, str):
+        return None
+    category, _ = classify_mquery_source(mquery)
+    if category != 'extractable':
+        return None
+    m = mquery
+
+    # 1. Databricks.Catalogs(...){[Name="cat"]}[Data]{[Name="sch"]}[Data]{[Name="tbl"]}[Data]
+    #    — walk the ordered [Name="…"] navigation chain (catalog, schema, table).
+    if re.search(r'\bDatabricks\.\w+', m):
+        names = re.findall(r'\[\s*Name\s*=\s*"([^"]+)"', m)
+        if len(names) >= 3:
+            return f'{names[0]}.{names[1]}.{names[2]}'
+        # Some connectors expose a Catalog/Schema/Table keyed nav instead.
+        cat = re.search(r'\[\s*Catalog\s*=\s*"([^"]+)"', m)
+        sch = re.search(r'\[\s*(?:Schema|Database)\s*=\s*"([^"]+)"', m)
+        tbl = re.search(r'\[\s*(?:Item|Table)\s*=\s*"([^"]+)"', m)
+        if cat and sch and tbl:
+            return f'{cat.group(1)}.{sch.group(1)}.{tbl.group(1)}'
+
+    # 2. Value.NativeQuery(<src>, "… FROM cat.sch.tbl …") — pull the first FROM target.
+    if re.search(r'\bValue\.NativeQuery\b', m):
+        fm = re.search(r'\bFROM\s+((?:`[^`]+`|[A-Za-z_]\w*)'
+                       r'(?:\.(?:`[^`]+`|[A-Za-z_]\w*)){2})', m, re.IGNORECASE)
+        if fm:
+            parts = _FQN_RE.match(fm.group(1))
+            if parts:
+                return '.'.join(_unquote(p) for p in parts.groups())
+
+    # 3. Sql.Database(server, db){[Schema="s", Item="t"]} — db.schema.table.
+    #    Schema/Item can sit anywhere in the record (after `[` or a comma), so the
+    #    key regexes must not require a leading bracket.
+    if re.search(r'\bSql\.Databases?\b', m):
+        db = re.search(r'Sql\.Databases?\s*\(\s*"[^"]*"\s*,\s*"([^"]+)"', m)
+        sch = re.search(r'\bSchema\s*=\s*"([^"]+)"', m)
+        tbl = re.search(r'\bItem\s*=\s*"([^"]+)"', m)
+        if db and sch and tbl:
+            return f'{db.group(1)}.{sch.group(1)}.{tbl.group(1)}'
+
+    # 4. Last resort: a bare qualified 3-level name literal anywhere in the M.
+    bare = _FQN_RE.search(m)
+    if bare:
+        return '.'.join(_unquote(p) for p in bare.groups())
+
+    return None
+
+
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
