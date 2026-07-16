@@ -1299,3 +1299,100 @@ class TestEnrichSourceTablesFromMquery:
     def test_empty_join_key_map_returns_empty_log(self):
         tool = self._tool()
         assert tool._enrich_source_tables_from_mquery({}, {}) == []
+
+
+class TestEnrichFilterSetsFromWarehouse:
+    """P2: _enrich_filter_sets_from_warehouse resolves flag-column filter_sets via
+    a warehouse SELECT DISTINCT. Gated on warehouse_id; additive-only."""
+
+    def _tool(self):
+        from src.engines.crewai.tools.custom.pipeline_config_generator_tool import (
+            PipelineConfigGeneratorTool)
+        return PipelineConfigGeneratorTool()
+
+    def _config(self):
+        # a dim whose source_table is resolved (by P1) and whose columns include
+        # both the flag and a business value column
+        return {"join_key_map": {"Dim_wkctr": {
+            "alias": "dim_wkctr", "join_key": "k",
+            "source_table": "cat.sch.dim_workcenter",
+            "dim_columns": ["cwc_filter", "bic_cwc_type"]}}}
+
+    @pytest.mark.asyncio
+    async def test_fills_filter_set_from_warehouse(self):
+        import asyncio  # noqa
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = self._config()
+        measures = [{"expression": "CALCULATE(SUM(f[v]), dim[cwc_filter]=1)"}]
+        admin = {"Dim_wkctr": {}}
+        with patch("src.engines.crewai.tools.custom.generate_config._detect_cwc_filter_column",
+                   return_value="cwc_filter"), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.select_distinct",
+                   new=AsyncMock(return_value={"success": True, "values": ["APET", "CAN", "PET"]})):
+            log = await tool._enrich_filter_sets_from_warehouse(
+                config, admin, measures, "wh", None)
+        assert config["filter_sets"]["CWC_FILTER"] == ["APET", "CAN", "PET"]
+        assert any(e["status"] == "filled" and e["key"] == "filter_sets" for e in log)
+
+    @pytest.mark.asyncio
+    async def test_no_flag_column_skips(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = self._config()
+        with patch("src.engines.crewai.tools.custom.generate_config._detect_cwc_filter_column",
+                   return_value="TODO: CWC filter column if applicable"), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.select_distinct",
+                   new=AsyncMock()) as mock_sd:
+            log = await tool._enrich_filter_sets_from_warehouse(config, {}, [], "wh", None)
+        mock_sd.assert_not_awaited()  # no warehouse query when no flag detected
+        assert log[0]["status"] == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_no_resolved_source_table_skips(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        # source_table still a TODO → P2 cannot query
+        config = {"join_key_map": {"Dim_x": {
+            "alias": "d", "join_key": "k", "source_table": "TODO: fill",
+            "dim_columns": ["cwc_filter", "bic_cwc_type"]}}}
+        with patch("src.engines.crewai.tools.custom.generate_config._detect_cwc_filter_column",
+                   return_value="cwc_filter"), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.select_distinct",
+                   new=AsyncMock()) as mock_sd:
+            log = await tool._enrich_filter_sets_from_warehouse(config, {}, [], "wh", None)
+        mock_sd.assert_not_awaited()
+        assert log[0]["status"] == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_existing_filter_set_not_overwritten(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = self._config()
+        config["filter_sets"] = {"CWC_FILTER": ["EXISTING"]}
+        with patch("src.engines.crewai.tools.custom.generate_config._detect_cwc_filter_column",
+                   return_value="cwc_filter"), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.select_distinct",
+                   new=AsyncMock(return_value={"success": True, "values": ["NEW"]})):
+            log = await tool._enrich_filter_sets_from_warehouse(config, {}, [], "wh", None)
+        assert config["filter_sets"]["CWC_FILTER"] == ["EXISTING"]  # untouched
+        assert any(e["status"] == "skipped" for e in log)
+
+    @pytest.mark.asyncio
+    async def test_query_error_becomes_log_note(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = self._config()
+        with patch("src.engines.crewai.tools.custom.generate_config._detect_cwc_filter_column",
+                   return_value="cwc_filter"), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.select_distinct",
+                   new=AsyncMock(return_value={"success": False, "error": "perm denied"})):
+            log = await tool._enrich_filter_sets_from_warehouse(config, {}, [], "wh", None)
+        assert "filter_sets" not in config or "CWC_FILTER" not in config.get("filter_sets", {})
+        assert any(e["status"] == "error" for e in log)
