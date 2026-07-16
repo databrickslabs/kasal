@@ -149,3 +149,44 @@ class TestResolveWarehouse:
              patch("httpx.AsyncClient", return_value=cm):
             ws, wid, _ = await U.resolve_workspace_and_warehouse()
         assert wid == "run1"
+
+
+class TestObOTokenFromContext:
+    """_auth_headers fetches the OBO token from UserContext so warehouse queries
+    authenticate on-behalf-of the user (get_auth_context skips OBO when token=None)."""
+
+    @pytest.mark.asyncio
+    async def test_uses_user_context_token(self):
+        captured = {}
+
+        async def fake_gac(user_token=None, **kw):
+            captured["user_token"] = user_token
+            m = MagicMock()
+            m.workspace_url = "https://x.cloud.databricks.com"
+            m.get_headers = MagicMock(return_value={"Authorization": "Bearer y"})
+            return m
+
+        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac), \
+             patch("src.utils.user_context.UserContext.get_user_token", return_value="obo-xyz"):
+            ws, headers = await U._auth_headers()
+        assert captured["user_token"] == "obo-xyz"
+        assert ws == "https://x.cloud.databricks.com"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_group_context_token(self):
+        captured = {}
+
+        async def fake_gac(user_token=None, **kw):
+            captured["user_token"] = user_token
+            m = MagicMock()
+            m.workspace_url = "https://x.cloud.databricks.com"
+            m.get_headers = MagicMock(return_value={})
+            return m
+
+        gc = MagicMock()
+        gc.access_token = "grp-token"
+        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac), \
+             patch("src.utils.user_context.UserContext.get_user_token", return_value=None), \
+             patch("src.utils.user_context.UserContext.get_group_context", return_value=gc):
+            await U._auth_headers()
+        assert captured["user_token"] == "grp-token"
