@@ -433,6 +433,14 @@ class PipelineConfigGeneratorTool(BaseTool):
                     f"{len(config.get('measure_resolutions', {}))} measure resolutions"
                 )
 
+            # ── Additive enrichment post-pass (P1 always; P2/P3 need a warehouse) ──
+            # Fills keys the PBI APIs can't supply. Strictly additive: only writes a
+            # slot that is absent/empty/TODO, never overwrites a human/derived value.
+            # P1 (below) is deterministic — no warehouse, no LLM. P2/P3 are gated on
+            # `warehouse_id` and added in later phases.
+            enrichment_log: list[dict] = []
+            enrichment_log += self._enrich_source_tables_from_mquery(config, admin_tables)
+
             # Summary stats
             config_json = json.dumps(config, default=str)
             auto_count = 0
@@ -498,6 +506,10 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "admin_tables_scanned": len(admin_tables),
                 },
                 "warnings": warnings,
+                # Additive-enrichment audit trail (source_table parse, warehouse
+                # filter_sets, cross-fact drafts). Surfaced in the Config Editor so
+                # a reviewer sees WHAT was auto-filled and what still needs review.
+                "enrichment_log": enrichment_log,
             }
 
             logger.info(
@@ -762,6 +774,48 @@ class PipelineConfigGeneratorTool(BaseTool):
                 )
         except Exception as e:
             logger.warning(f"[PipelineConfigGen] Failed to save conversion_history (non-fatal): {e}")
+
+    @staticmethod
+    def _enrich_source_tables_from_mquery(config: dict, admin_tables: dict) -> list[dict]:
+        """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
+        Power Query M source (deterministic — no warehouse, no LLM).
+
+        A dimension's physical UC table name isn't in the PBI APIs, but a
+        Databricks-connector / native-query M source spells it out. For each join
+        entry lacking a ``source_table`` (or holding a ``TODO:`` placeholder), parse
+        it from ``admin_tables[dim]["mquery_expression"]``. Strictly additive: an
+        existing non-TODO value is never overwritten. Returns an audit log of what
+        was filled vs. skipped (and why), for the Config Editor.
+        """
+        from src.engines.crewai.tools.custom.metric_view_utils.mquery_parser import (
+            classify_mquery_source, extract_source_table,
+        )
+        log: list[dict] = []
+        join_key_map = config.get("join_key_map", {}) or {}
+        for dim, entry in join_key_map.items():
+            if not isinstance(entry, dict):
+                continue
+            existing = entry.get("source_table")
+            if existing and not str(existing).startswith("TODO"):
+                continue  # human/derived value — never overwrite
+            tinfo = admin_tables.get(dim) or {}
+            mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
+            resolved = extract_source_table(mquery) if mquery else None
+            if resolved:
+                entry["source_table"] = resolved
+                log.append({
+                    "tier": "P1", "key": "join_key_map", "target": dim,
+                    "status": "filled", "value": resolved,
+                    "detail": "parsed from connector M-query",
+                })
+            else:
+                _, reason = classify_mquery_source(mquery) if mquery else (
+                    "unknown", "no M source expression available")
+                log.append({
+                    "tier": "P1", "key": "join_key_map", "target": dim,
+                    "status": "skipped", "detail": reason,
+                })
+        return log
 
     @staticmethod
     def _enrich_config_from_dax(config: dict, measures: list[dict]) -> bool:
