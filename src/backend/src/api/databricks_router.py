@@ -47,11 +47,13 @@ def get_databricks_service(
     Returns:
         Initialized DatabricksService with all dependencies
     """
-    # Get group_id from context
+    # Get group_id + the forwarded user token (OBO) from context
     group_id = group_context.primary_group_id if group_context else None
+    user_token = group_context.access_token if group_context else None
 
-    # Create service with session and group context
-    service = DatabricksService(session, group_id=group_id)
+    # Create service with session, group context, and the OBO token so
+    # warehouse/catalog/schema listing authenticates on-behalf-of the user.
+    service = DatabricksService(session, group_id=group_id, user_token=user_token)
 
     # Set the API keys service
     service.secrets_service.set_api_keys_service(api_keys_service)

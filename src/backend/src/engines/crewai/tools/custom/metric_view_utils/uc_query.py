@@ -49,7 +49,20 @@ async def _auth_headers(host_override: Optional[str] = None) -> tuple[str, dict]
     untrusted host.
     """
     from src.utils.databricks_auth import get_auth_context
-    auth = await get_auth_context()
+    # Fetch the OBO token from the execution context (get_auth_context SKIPS OBO
+    # when user_token is None). Tools run inside crew/flow execution where the
+    # engine populates UserContext; fall back to the group context's forwarded
+    # token. Mirrors how GenieTool / AgentBricksTool obtain OBO in tool_factory.
+    user_token = None
+    try:
+        from src.utils.user_context import UserContext
+        user_token = UserContext.get_user_token()
+        if not user_token:
+            gc = UserContext.get_group_context()
+            user_token = getattr(gc, 'access_token', None) if gc else None
+    except Exception:  # noqa: BLE001 — context may be absent (e.g. unit tests)
+        user_token = None
+    auth = await get_auth_context(user_token=user_token)
     if auth is None:
         raise UCQueryError('authentication failed (no AuthContext)')
     if host_override:
