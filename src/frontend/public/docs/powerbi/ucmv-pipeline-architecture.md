@@ -88,6 +88,29 @@ config-gen doesn't emit these two keys, the UCMV crew produces **zero views**.
   validation_passed}`. Facts need **transpiled SQL** here, not raw M, and
   `validation_passed` must start with `'Yes'` or `mquery_parser` drops the row.
 
+### Optional warehouse + LLM enrichment (additive post-pass)
+
+By default config-gen is deterministic and LLM-free. When the user supplies a
+`warehouse_id` (via the "Warehouse + LLM enrichment" toggle on the tool), an
+**additive** post-pass runs after `build_config` and before the output is
+returned, filling keys the PBI APIs can't supply — never overwriting a
+human/derived value, recording each action in an `enrichment_log`:
+
+- **P1** — `join_key_map[dim].source_table` parsed from the connector M-query
+  (`mquery_parser.extract_source_table`). Deterministic; runs even without a
+  warehouse.
+- **P2** — flag-column `filter_sets` via a warehouse `SELECT DISTINCT`
+  (`metric_view_utils/uc_query.py` — auth + SSRF allowlist + row-returning query).
+  Needs the dim's `source_table` (from P1) + a detected flag column.
+- **P3** — `fact_join_map` join strategy: warehouse grain probes + **one** LLM
+  call, doubly gated behind `_detect_cross_fact_merge` (≥2 facts sharing a
+  conformed dim). Drafts carry a `TODO: verify` suffix — a human confirms.
+
+Warehouse queries use OBO (the signed-in user's token, via
+`UserContext.get_user_token()`); failures degrade to a skip note, never abort
+config-gen. Full details + the UI walkthrough in
+[UCMV_PIPELINE_CONFIG_GUIDE.md](../UCMV_PIPELINE_CONFIG_GUIDE.md).
+
 See [UCMV_PIPELINE_CONFIG_GUIDE.md](../UCMV_PIPELINE_CONFIG_GUIDE.md) for the
 full config schema.
 
