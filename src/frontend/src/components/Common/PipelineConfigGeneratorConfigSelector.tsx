@@ -6,7 +6,7 @@
  * Requires two Service Principals: non-admin (Execute Queries) and admin (Admin Scanner).
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
@@ -16,9 +16,20 @@ import {
   AccordionSummary,
   AccordionDetails,
   ToggleButtonGroup,
-  ToggleButton
+  ToggleButton,
+  Switch,
+  FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Button,
+  CircularProgress
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { DatabricksService } from '../../api/DatabricksService';
+
+interface WarehouseOption { id: string; name: string; state: string; }
 
 export type PipelineAuthMethod = 'service_principal' | 'service_account';
 
@@ -44,8 +55,14 @@ export interface PipelineConfigGeneratorConfig {
   // Target
   catalog?: string;
   schema_name?: string;
-  // Index signature for compatibility
-  [key: string]: string | undefined;
+  // Optional warehouse + LLM enrichment (opt-in). When enabled + a warehouse is
+  // chosen, config-gen runs SELECT DISTINCT to fill flag-column filter_sets and,
+  // for cross-fact merges, one LLM call to draft fact_join_map. Slower / tokens.
+  enable_enrichment?: boolean;
+  warehouse_id?: string;
+  databricks_host?: string;
+  // Index signature for compatibility (boolean added for enable_enrichment)
+  [key: string]: string | boolean | undefined;
 }
 
 interface PipelineConfigGeneratorConfigSelectorProps {
@@ -88,6 +105,35 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
     // admin_client_secret — they remain an optional SP fallback (the backend
     // uses SP if provided when an SA can't reach an API).
     onChange(updated);
+  };
+
+  // ── Optional warehouse + LLM enrichment ──
+  const enrichEnabled = value.enable_enrichment === true;
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [connectLoading, setConnectLoading] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const handleEnrichmentToggle = (_e: React.ChangeEvent<HTMLInputElement>, checked: boolean) => {
+    const updated: PipelineConfigGeneratorConfig = { ...value, enable_enrichment: checked };
+    if (!checked) {
+      // Turning enrichment off clears the warehouse so a stale id can't trigger
+      // the backend warehouse/LLM pass (defense-in-depth alongside the backend gate).
+      updated.warehouse_id = undefined;
+    }
+    onChange(updated);
+  };
+
+  const handleConnect = async () => {
+    setConnectLoading(true);
+    setConnectError(null);
+    const host = value.databricks_host || undefined;
+    try {
+      setWarehouses(await DatabricksService.listWarehouses(host));
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Connection failed');
+    } finally {
+      setConnectLoading(false);
+    }
   };
 
   return (
@@ -319,6 +365,74 @@ export const PipelineConfigGeneratorConfigSelector: React.FC<PipelineConfigGener
           helperText="UC Schema name (default: default)"
         />
       </Box>
+
+      {/* Optional: Warehouse + LLM enrichment */}
+      <FormControlLabel
+        sx={{ mt: 1 }}
+        control={
+          <Switch
+            checked={enrichEnabled}
+            onChange={handleEnrichmentToggle}
+            disabled={disabled}
+            color="warning"
+          />
+        }
+        label={
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Warehouse + LLM enrichment (optional)
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Runs SQL against your warehouse to resolve flag-column filter values and, for
+              cross-fact merges, one LLM call to draft join strategy. Slower and consumes tokens.
+              Leave off for the fast, deterministic, LLM-free default.
+            </Typography>
+          </Box>
+        }
+      />
+      {enrichEnabled && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pl: 4 }}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <TextField
+              label="Workspace Host (optional)"
+              value={value.databricks_host || ''}
+              onChange={(e) => handleFieldChange('databricks_host', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="Defaults to the authenticated workspace"
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleConnect}
+              disabled={disabled || connectLoading}
+              sx={{ mt: 0.5, whiteSpace: 'nowrap' }}
+            >
+              {connectLoading ? <CircularProgress size={18} /> : 'Connect'}
+            </Button>
+          </Box>
+          <FormControl fullWidth size="small">
+            <InputLabel>SQL Warehouse</InputLabel>
+            <Select
+              label="SQL Warehouse"
+              value={value.warehouse_id || ''}
+              onChange={(e) => handleFieldChange('warehouse_id', e.target.value)}
+              disabled={disabled}
+            >
+              {warehouses.length === 0 && value.warehouse_id && (
+                <MenuItem value={value.warehouse_id}>{value.warehouse_id}</MenuItem>
+              )}
+              {warehouses.map((w) => (
+                <MenuItem key={w.id} value={w.id}>{w.name} ({w.id})</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {connectError && (
+            <Alert severity="error" variant="outlined">{connectError}</Alert>
+          )}
+        </Box>
+      )}
 
       {/* Optional: Report ID */}
       <Accordion sx={{ mt: 1 }}>

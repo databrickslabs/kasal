@@ -73,6 +73,18 @@ class PipelineConfigGeneratorSchema(BaseModel):
     schema_name: Optional[str] = Field(
         None, description="[Target] UC Schema name (default: default)")
 
+    # ── Optional warehouse + LLM enrichment ──
+    warehouse_id: Optional[str] = Field(
+        None,
+        description="[Enrichment, optional] Databricks SQL warehouse id (or SQL "
+        "endpoint URL). When set, config-gen runs SELECT DISTINCT to resolve "
+        "flag-column filter_sets and (for cross-fact merges) one LLM call to draft "
+        "fact_join_map. Slower and consumes tokens. Omit to keep the fast, "
+        "deterministic, LLM-free default.")
+    databricks_host: Optional[str] = Field(
+        None, description="[Enrichment, optional] Workspace host override for the "
+        "warehouse queries (defaults to the authenticated workspace).")
+
 
 class PipelineConfigGeneratorTool(BaseTool):
     """Generate pipeline_config.json by calling 4 PBI APIs directly."""
@@ -102,6 +114,10 @@ class PipelineConfigGeneratorTool(BaseTool):
             "admin_client_id", "admin_client_secret",
             "admin_username", "admin_password",
             "catalog", "schema_name",
+            # Optional warehouse-enrichment (P2/P3): when a warehouse_id is
+            # supplied, config-gen runs SELECT DISTINCT / cross-fact probes to fill
+            # keys the PBI APIs can't (filter-set values, fact-join strategy).
+            "warehouse_id", "databricks_host",
         )
         default_config = {}
         for key in config_keys:
@@ -142,6 +158,8 @@ class PipelineConfigGeneratorTool(BaseTool):
         admin_password = _get("admin_password")
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
+        warehouse_id = _get("warehouse_id")      # None → enrichment stays P1-only
+        databricks_host = _get("databricks_host")  # optional host override
 
         # A credential set is valid as a Service Principal (client_id +
         # client_secret), a Service Account (client_id + username + password),
@@ -440,6 +458,25 @@ class PipelineConfigGeneratorTool(BaseTool):
             # `warehouse_id` and added in later phases.
             enrichment_log: list[dict] = []
             enrichment_log += self._enrich_source_tables_from_mquery(config, admin_tables)
+
+            # P2 (warehouse): resolve flag-column filter_sets whose values live in
+            # DB rows, not DAX. Gated on warehouse_id; uses run_async_with_context so
+            # group_id/OBO propagate into the warehouse call.
+            if warehouse_id:
+                from src.engines.crewai.tools.async_bridge import run_async_with_context
+                try:
+                    enrichment_log += run_async_with_context(
+                        self._enrich_filter_sets_from_warehouse(
+                            config, admin_tables, measures,
+                            warehouse_id, databricks_host),
+                        timeout=300,
+                    )
+                except Exception as e:  # noqa: BLE001 — enrichment must never abort config-gen
+                    logger.warning(f"[PipelineConfigGen] Warehouse filter_sets enrichment failed: {e}")
+                    enrichment_log.append({
+                        "tier": "P2", "key": "filter_sets", "status": "error",
+                        "detail": f"warehouse enrichment failed: {e}",
+                    })
 
             # Summary stats
             config_json = json.dumps(config, default=str)
@@ -815,6 +852,90 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "tier": "P1", "key": "join_key_map", "target": dim,
                     "status": "skipped", "detail": reason,
                 })
+        return log
+
+    @staticmethod
+    async def _enrich_filter_sets_from_warehouse(
+        config: dict, admin_tables: dict, measures: list[dict],
+        warehouse_id: str, host_override: Optional[str] = None,
+    ) -> list[dict]:
+        """P2 enrichment: resolve flag-column ``filter_sets`` by querying the
+        warehouse (values live in DB rows, not the DAX).
+
+        A DAX filter like ``Table[cwc_filter] = 1`` names a boolean flag column; the
+        actual category values it selects (``APET``, ``CAN``, …) are only in the
+        dimension rows. Detect the flag column (``generate_config._detect_cwc_filter_
+        column``), find its dimension's physical ``source_table`` (filled by P1) and
+        the value column, then ``SELECT DISTINCT value_col WHERE flag=1``. Strictly
+        additive — only writes a ``filter_sets`` key that's absent. Returns an audit
+        log. Never raises (failures become skip notes).
+        """
+        from src.engines.crewai.tools.custom.metric_view_utils import uc_query
+        from src.engines.crewai.tools.custom import generate_config as _gc
+
+        log: list[dict] = []
+        flag_col = _gc._detect_cwc_filter_column(measures, admin_tables)
+        if not flag_col or str(flag_col).startswith("TODO"):
+            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
+                        "detail": "no boolean flag column detected in DAX"})
+            return log
+
+        # Find the dimension that owns the flag column + its resolved source_table.
+        # The flag lives on a dim; its value column is the dim's business column.
+        join_key_map = config.get("join_key_map", {}) or {}
+        target = None
+        for dim, entry in join_key_map.items():
+            if not isinstance(entry, dict):
+                continue
+            src = entry.get("source_table")
+            cols = entry.get("dim_columns") or []
+            if src and not str(src).startswith("TODO") and flag_col in cols:
+                # value_col = first business column that isn't the flag itself
+                value_col = next((c for c in cols if c != flag_col), None)
+                if value_col:
+                    target = (dim, src, value_col)
+                    break
+        if not target:
+            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
+                        "detail": f"flag column '{flag_col}' has no resolved dimension "
+                                  "source_table + value column (run P1 / set source_table)"})
+            return log
+
+        dim, source_table, value_col = target
+        # Resolve warehouse once, reuse for the query.
+        try:
+            resolved = await uc_query.resolve_workspace_and_warehouse(
+                warehouse_id, host_override)
+        except Exception as e:  # noqa: BLE001
+            log.append({"tier": "P2", "key": "filter_sets", "status": "error",
+                        "detail": f"warehouse resolve failed: {e}"})
+            return log
+
+        res = await uc_query.select_distinct(
+            source_table, value_col, where=f"{value_col} IS NOT NULL AND {flag_col} = 1",
+            _resolved=resolved)
+        if not res.get("success"):
+            log.append({"tier": "P2", "key": "filter_sets", "status": "error",
+                        "detail": f"query failed: {res.get('error')}"})
+            return log
+
+        values = sorted(set(res.get("values", [])))
+        if not values:
+            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
+                        "detail": f"{flag_col}=1 returned no values"})
+            return log
+
+        set_key = _gc.to_snake_case(flag_col).upper()
+        filter_sets = config.setdefault("filter_sets", {})
+        if set_key in filter_sets:
+            log.append({"tier": "P2", "key": "filter_sets", "target": set_key,
+                        "status": "skipped", "detail": "filter set already present (not overwritten)"})
+        else:
+            filter_sets[set_key] = values
+            log.append({"tier": "P2", "key": "filter_sets", "target": set_key,
+                        "status": "filled", "value": values,
+                        "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "
+                                  f"WHERE {flag_col}=1 ({len(values)} values)"})
         return log
 
     @staticmethod
