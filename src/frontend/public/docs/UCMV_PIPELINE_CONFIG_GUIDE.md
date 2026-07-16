@@ -229,25 +229,31 @@ equivalent SQL using `source.column`, `FILTER (WHERE ...)`, and `MEASURE()` refe
 | `filter_sets` | **Mostly** (auto-derived) | Low | Only boolean-flag columns |
 | `switch_join_alias/col` | Partial | Low | Identify the SWITCH dimension |
 | `manual_overrides` | No (smaller set now) | Medium | SQL for the hardest measures only |
-| `join_key_map.source_table` | No | Medium | Look up UC table names |
-| `fact_join_map` | No | High | Requires data-architecture knowledge |
+| `join_key_map.source_table` | **Yes** with enrichment (else manual) | Low | Auto-parsed from connector M-query |
+| `filter_sets` (boolean-flag cols) | **Yes** with enrichment (else manual) | Low | Auto-resolved by a warehouse `SELECT DISTINCT` |
+| `fact_join_map` | **Drafted** with enrichment (else manual) | Medium | LLM draft for cross-fact merges; human verifies |
 
-The HITL review step between Config Proposer and UCMV Generator is where this
-enrichment happens. The Config Proposer fills what it can and marks unresolved
-spots with a `TODO` marker; the human fills in the remaining gaps in the UI.
+The HITL review step between Config Proposer and UCMV Generator is where any
+remaining enrichment happens. The Config Proposer fills what it can and marks
+unresolved spots with a `TODO` marker; the human fills the rest in the UI.
 
-### The irreducible manual core
+### The irreducible manual core — now shrunk by the enrichment mode
 
-After the recent automation, the keys that genuinely **cannot** come from the PBI
-APIs — because they encode physical data-layout and cross-fact architecture, not
-model metadata — are:
+The keys that the PBI APIs alone cannot supply used to all be manual. The **opt-in
+"warehouse + LLM enrichment"** mode (see below) now auto-fills or drafts three of
+the four:
 
-1. **`join_key_map.*.source_table`** — the physical 3-level UC table name per dimension.
-2. **`fact_join_map`** — cross-fact union/join + pivot strategy.
-3. **`filter_sets` for boolean-flag columns** — the `Flag = 1 → [values]` mapping that lives in DB rows.
-4. **`manual_overrides`** — hand-verified SQL for the hardest business-critical measures.
+1. **`join_key_map.*.source_table`** — the physical 3-level UC table name.
+   → **auto-filled** by parsing the dimension's connector M-query (no warehouse
+   even needed).
+2. **`filter_sets` for boolean-flag columns** — the `Flag = 1 → [values]` mapping
+   that lives in DB rows. → **auto-resolved** by a warehouse `SELECT DISTINCT`.
+3. **`fact_join_map`** — cross-fact union/join strategy. → **LLM-drafted** (marked
+   `TODO: verify`; a human confirms — a wrong join yields silently-wrong numbers).
+4. **`manual_overrides`** — hand-verified SQL for the hardest business-critical
+   measures. → still genuinely manual (business logic, not recoverable from data).
 
-Everything else is auto-filled or auto-derived.
+Without enrichment enabled (the default), these stay `TODO`/manual as before.
 
 ## Recent automation (what changed)
 
@@ -265,6 +271,42 @@ are now auto-derived by the Config Proposer:
   fewer measures fall through to `manual_overrides`.
 
 Treat the summary table above as the current state.
+
+## Optional: Warehouse + LLM enrichment
+
+The Config Proposer is deterministic and LLM-free by default. It also offers an
+**opt-in** mode that auto-fills the keys the PBI APIs can't supply by querying your
+Databricks SQL warehouse (and, for cross-fact merges only, one LLM call).
+
+**Enabling it:** on the Pipeline Config Generator node, toggle **"Warehouse + LLM
+enrichment (optional)"**, click **Connect**, and pick a **SQL Warehouse**. The
+default (toggle off) path is unchanged — fast, deterministic, no warehouse, no
+tokens.
+
+When enabled, an additive post-pass runs after the config is built (it never
+overwrites a human/derived value — only fills a slot that is absent/empty/`TODO`):
+
+| Tier | Fills | How | Needs warehouse? | Needs LLM? |
+|------|-------|-----|:---:|:---:|
+| **P1** | `join_key_map[dim].source_table` | parse the `catalog.schema.table` out of the dimension's connector M-query | no | no |
+| **P2** | flag-column `filter_sets` | `SELECT DISTINCT value_col FROM dim WHERE flag = 1` | yes | no |
+| **P3** | `fact_join_map` join strategy | warehouse grain probes + one LLM call — **only** when ≥2 facts share a conformed dimension | yes | yes (gated) |
+
+- **P1 always runs** (it's deterministic and warehouse-free) — so even without a
+  warehouse you get `source_table` filled for connector-based dimensions.
+- **P3 is doubly gated**: it needs a warehouse *and* a detected cross-fact merge,
+  so the LLM never fires for the common single-fact model. Every P3-drafted join
+  carries a `TODO: verify` suffix — **a human must confirm it before deploy**,
+  because a wrong join produces silently-wrong numbers.
+
+**On failure** (permission denied, warehouse asleep, bad table): the query returns
+an error, the affected key **keeps its existing `TODO`** (never a half-filled or
+wrong value), and config-gen still completes. The reason is recorded in the tool's
+`enrichment_log` output field.
+
+**Auth:** the warehouse queries authenticate on-behalf-of the signed-in user (OBO)
+when running behind the Databricks Apps proxy; locally, configure a
+`DATABRICKS_TOKEN` PAT in the API Keys UI.
 
 ## Entering manual config in the UI
 
