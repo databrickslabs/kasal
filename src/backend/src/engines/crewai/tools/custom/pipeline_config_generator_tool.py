@@ -478,6 +478,30 @@ class PipelineConfigGeneratorTool(BaseTool):
                         "detail": f"warehouse enrichment failed: {e}",
                     })
 
+                # P3 (warehouse + LLM): draft fact_join_map for cross-fact merges.
+                # DOUBLY gated — needs a warehouse (this branch) AND a detected
+                # cross-fact merge; otherwise no LLM call happens (the cost gate).
+                involved = self._detect_cross_fact_merge(relationships)
+                if involved:
+                    from src.engines.crewai.tools.async_bridge import run_async_with_context
+                    try:
+                        enrichment_log += run_async_with_context(
+                            self._enrich_fact_join_map_llm(
+                                config, involved, warehouse_id, databricks_host),
+                            timeout=300,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[PipelineConfigGen] fact_join_map enrichment failed: {e}")
+                        enrichment_log.append({
+                            "tier": "P3", "key": "fact_join_map", "status": "error",
+                            "detail": f"cross-fact enrichment failed: {e}",
+                        })
+                else:
+                    enrichment_log.append({
+                        "tier": "P3", "key": "fact_join_map", "status": "skipped",
+                        "detail": "no cross-fact merge detected (no LLM call)",
+                    })
+
             # Summary stats
             config_json = json.dumps(config, default=str)
             auto_count = 0
@@ -937,6 +961,153 @@ class PipelineConfigGeneratorTool(BaseTool):
                         "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "
                                   f"WHERE {flag_col}=1 ({len(values)} values)"})
         return log
+
+    @staticmethod
+    def _detect_cross_fact_merge(relationships: list) -> list[str]:
+        """P3 gate (deterministic — no warehouse, no LLM): return the fact tables
+        involved in a cross-fact merge, or ``[]`` if none.
+
+        A cross-fact merge is when ≥2 fact tables share a conformed dimension (the
+        signal that the model combines them on a common grain). Reuses the same
+        many-side fact identification + fact→dims mapping as
+        ``generate_config._identify_fact_tables`` / the skeleton builder, so the gate
+        matches how the skeleton is built. When this returns ``[]`` the P3 LLM call is
+        skipped entirely — the cost/value gate.
+        """
+        from src.engines.crewai.tools.custom import generate_config as _gc
+        facts = _gc._identify_fact_tables(relationships, admin_tables={}) if relationships else set()
+        if len(facts) < 2:
+            return []
+        # fact → set(dims), mirroring _build_fact_join_map_skeleton's fact_dims.
+        fact_dims: dict[str, set] = {}
+        for rel in relationships:
+            fc = str(rel.get("from_cardinality", "")).lower()
+            tc = str(rel.get("to_cardinality", "")).lower()
+            if "many" in tc and "one" in fc:
+                fact_dims.setdefault(rel["to_table"], set()).add(rel["from_table"])
+            elif "many" in fc and "one" in tc:
+                fact_dims.setdefault(rel["from_table"], set()).add(rel["to_table"])
+        # any dim shared by ≥2 facts → those facts form a cross-fact merge
+        involved: set[str] = set()
+        fact_list = [f for f in facts if f in fact_dims]
+        for i, a in enumerate(fact_list):
+            for b in fact_list[i + 1:]:
+                if fact_dims[a] & fact_dims[b]:
+                    involved.add(a)
+                    involved.add(b)
+        return sorted(involved)
+
+    @staticmethod
+    async def _enrich_fact_join_map_llm(
+        config: dict, involved_facts: list,
+        warehouse_id: str, host_override: Optional[str] = None,
+    ) -> list[dict]:
+        """P3 enrichment: draft ``fact_join_map`` join strategy for cross-fact merges
+        via deterministic warehouse grain probes + ONE LLM call.
+
+        Only reached when ``_detect_cross_fact_merge`` found involved facts AND a
+        warehouse is available. Additive: replaces only ``TODO:`` ``join_key`` values,
+        keeps human/non-TODO entries, and marks every drafted value with a
+        ``TODO: verify`` suffix (a wrong join produces silently-wrong numbers, so a
+        human must confirm). Returns an audit log. Never raises.
+        """
+        from src.engines.crewai.tools.custom.metric_view_utils import uc_query
+        from src.engines.crewai.tools.custom import generate_config as _gc
+
+        log: list[dict] = []
+        fact_join_map = config.get("fact_join_map", {}) or {}
+
+        # ── Deterministic grain probes (no LLM): per involved fact, resolve row grain.
+        try:
+            resolved = await uc_query.resolve_workspace_and_warehouse(warehouse_id, host_override)
+        except Exception as e:  # noqa: BLE001
+            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
+                        "detail": f"warehouse resolve failed: {e}"})
+            return log
+
+        facts_summary: list[dict] = []
+        for fact in involved_facts:
+            entry = fact_join_map.get(fact, {})
+            src = (config.get("join_key_map", {}).get(fact, {}) or {}).get("source_table")
+            summary = {"fact": fact, "alias": entry.get("alias", _gc.to_snake_case(fact)),
+                       "source_table": src}
+            if src and not str(src).startswith("TODO"):
+                res = await uc_query.run_query(
+                    f"SELECT COUNT(*) AS n FROM {uc_query._quote_ident(src)}",
+                    _resolved=resolved)
+                if res.get("success") and res.get("rows"):
+                    summary["row_count"] = res["rows"][0][0]
+            facts_summary.append(summary)
+
+        # ── ONE LLM call to assemble the merge strategy.
+        try:
+            draft = await PipelineConfigGeneratorTool._call_llm_fact_join_map(facts_summary)
+        except Exception as e:  # noqa: BLE001
+            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
+                        "detail": f"LLM assembly failed: {e}"})
+            return log
+        if not isinstance(draft, dict):
+            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
+                        "detail": "LLM returned no usable draft"})
+            return log
+
+        # ── Merge additively: only replace TODO: join_key values; mark as draft.
+        for fact, drafted in draft.items():
+            entry = fact_join_map.get(fact)
+            if not isinstance(entry, dict):
+                continue
+            jk = entry.get("join_key", "")
+            if not str(jk).startswith("TODO"):
+                log.append({"tier": "P3", "key": "fact_join_map", "target": fact,
+                            "status": "skipped", "detail": "non-TODO value preserved"})
+                continue
+            if not isinstance(drafted, dict) or not drafted.get("join_key"):
+                continue
+            for k, v in drafted.items():
+                entry[k] = v
+            # a drafted join is unverified — force human confirmation
+            entry["join_key"] = f"{drafted['join_key']}  -- TODO: verify (LLM-drafted)"
+            log.append({"tier": "P3", "key": "fact_join_map", "target": fact,
+                        "status": "filled", "value": drafted,
+                        "detail": "LLM-drafted from warehouse grain probes — verify before deploy"})
+        config["fact_join_map"] = fact_join_map
+        return log
+
+    @staticmethod
+    async def _call_llm_fact_join_map(facts_summary: list[dict]) -> dict:
+        """ONE LLM call: given a compact facts-summary (name, alias, source_table,
+        row_count), draft the cross-fact merge strategy as
+        ``{fact: {join_key, union_mode?, ...}}``. group_id/OBO derived from context;
+        never pass them. Returns ``{}`` on any failure."""
+        import json as _json
+        from src.core.llm_manager import LLMManager
+        from src.utils.telemetry import get_user_agent_header, KasalProduct
+
+        prompt = (
+            "You are drafting a cross-fact join strategy for a Databricks UC metric "
+            "view migration. Given these fact tables that share conformed dimensions, "
+            "propose how to combine them. For EACH fact return a JSON object keyed by "
+            "the fact name with fields: join_key (the shared key expression or column), "
+            "and optionally union_mode (true if same grain → UNION, false if JOIN), "
+            "target_fact (the primary fact to merge into). Return ONLY a JSON object, "
+            "no prose.\n\nFacts:\n" + _json.dumps(facts_summary, indent=2)
+        )
+        messages = [{"role": "user", "content": prompt}]
+        headers = get_user_agent_header(KasalProduct.POWERBI)
+        content = await LLMManager.completion(
+            messages=messages, model="databricks-claude-sonnet-4",
+            temperature=0.1, max_tokens=2000, extra_headers=headers)
+        if not content:
+            return {}
+        # Extract the JSON object (LLM may wrap in ```json fences).
+        text = content.strip()
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if not m:
+            return {}
+        try:
+            return _json.loads(m.group(0))
+        except Exception:  # noqa: BLE001
+            return {}
 
     @staticmethod
     def _enrich_config_from_dax(config: dict, measures: list[dict]) -> bool:

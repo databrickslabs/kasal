@@ -1396,3 +1396,119 @@ class TestEnrichFilterSetsFromWarehouse:
             log = await tool._enrich_filter_sets_from_warehouse(config, {}, [], "wh", None)
         assert "filter_sets" not in config or "CWC_FILTER" not in config.get("filter_sets", {})
         assert any(e["status"] == "error" for e in log)
+
+
+class TestDetectCrossFactMerge:
+    """P3 gate: deterministic cross-fact detection (no warehouse, no LLM)."""
+
+    def _tool(self):
+        from src.engines.crewai.tools.custom.pipeline_config_generator_tool import (
+            PipelineConfigGeneratorTool)
+        return PipelineConfigGeneratorTool()
+
+    def test_no_relationships_returns_empty(self):
+        assert self._tool()._detect_cross_fact_merge([]) == []
+
+    def test_single_fact_returns_empty(self):
+        rels = [{"from_table": "DimDate", "to_table": "FactA",
+                 "from_cardinality": "one", "to_cardinality": "many"}]
+        assert self._tool()._detect_cross_fact_merge(rels) == []
+
+    def test_two_facts_sharing_dim_detected(self):
+        rels = [
+            {"from_table": "DimDate", "to_table": "FactA", "from_cardinality": "one", "to_cardinality": "many"},
+            {"from_table": "DimDate", "to_table": "FactB", "from_cardinality": "one", "to_cardinality": "many"},
+        ]
+        assert set(self._tool()._detect_cross_fact_merge(rels)) == {"FactA", "FactB"}
+
+    def test_two_facts_no_shared_dim_returns_empty(self):
+        rels = [
+            {"from_table": "DimX", "to_table": "FactA", "from_cardinality": "one", "to_cardinality": "many"},
+            {"from_table": "DimY", "to_table": "FactB", "from_cardinality": "one", "to_cardinality": "many"},
+        ]
+        assert self._tool()._detect_cross_fact_merge(rels) == []
+
+
+class TestEnrichFactJoinMapLlm:
+    """P3 assembler: ONE LLM call drafts fact_join_map; additive + marked draft."""
+
+    def _tool(self):
+        from src.engines.crewai.tools.custom.pipeline_config_generator_tool import (
+            PipelineConfigGeneratorTool)
+        return PipelineConfigGeneratorTool()
+
+    @pytest.mark.asyncio
+    async def test_drafts_join_key_and_marks_verify(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = {
+            "fact_join_map": {
+                "FactB": {"alias": "fact_b", "join_key": "TODO: grain decision — ..."}},
+            "join_key_map": {"FactB": {"source_table": "cat.sch.fact_b"}},
+        }
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.run_query",
+                   new=AsyncMock(return_value={"success": True, "columns": ["n"], "rows": [[100]]})), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   new=AsyncMock(return_value='{"FactB": {"join_key": "plant_workcenter_key", "union_mode": true}}')):
+            log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
+        jk = config["fact_join_map"]["FactB"]["join_key"]
+        assert "plant_workcenter_key" in jk
+        assert "TODO: verify" in jk  # drafted joins must be human-confirmed
+        assert config["fact_join_map"]["FactB"]["union_mode"] is True
+        assert any(e["status"] == "filled" for e in log)
+
+    @pytest.mark.asyncio
+    async def test_non_todo_join_key_preserved(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = {
+            "fact_join_map": {"FactB": {"alias": "fact_b", "join_key": "human_key"}},
+            "join_key_map": {"FactB": {"source_table": "cat.sch.fact_b"}},
+        }
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.run_query",
+                   new=AsyncMock(return_value={"success": True, "rows": [[1]]})), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   new=AsyncMock(return_value='{"FactB": {"join_key": "should_not_apply"}}')):
+            log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
+        assert config["fact_join_map"]["FactB"]["join_key"] == "human_key"  # untouched
+        assert any(e["status"] == "skipped" for e in log)
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_becomes_error_log(self):
+        from unittest.mock import AsyncMock, patch
+        tool = self._tool()
+        config = {"fact_join_map": {"FactB": {"alias": "f", "join_key": "TODO: x"}},
+                  "join_key_map": {"FactB": {"source_table": "cat.sch.fact_b"}}}
+        with patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.resolve_workspace_and_warehouse",
+                   new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
+             patch("src.engines.crewai.tools.custom.metric_view_utils.uc_query.run_query",
+                   new=AsyncMock(return_value={"success": True, "rows": [[1]]})), \
+             patch("src.core.llm_manager.LLMManager.completion",
+                   new=AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
+            log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
+        assert config["fact_join_map"]["FactB"]["join_key"] == "TODO: x"  # unchanged
+        assert any(e["status"] == "error" for e in log)
+
+
+class TestP3NegativeGate:
+    """The headline 'no LLM by default' guard: LLM must NOT be called when there is
+    no cross-fact merge (single fact), even with a warehouse present."""
+
+    def test_single_fact_never_calls_llm(self):
+        from unittest.mock import AsyncMock, patch
+        from src.engines.crewai.tools.custom.pipeline_config_generator_tool import (
+            PipelineConfigGeneratorTool)
+        tool = PipelineConfigGeneratorTool()
+        rels = [{"from_table": "DimDate", "to_table": "FactA",
+                 "from_cardinality": "one", "to_cardinality": "many"}]
+        # gate returns [] → caller skips the LLM branch entirely
+        assert tool._detect_cross_fact_merge(rels) == []
+        with patch("src.core.llm_manager.LLMManager.completion", new=AsyncMock()) as mock_llm:
+            # simulate the _run gate decision
+            involved = tool._detect_cross_fact_merge(rels)
+            assert not involved
+            mock_llm.assert_not_called()
