@@ -1,9 +1,9 @@
 # Config-automation proposal — reducing HITL in the UCMV pipeline
 
-**Status: PROPOSAL — not yet decided, not yet built.** This is a judgment aid, not
-a plan of record. It defines the concepts, states honestly what could be
-automated vs. what can't, and gives effort/risk so you can decide whether it's
-worth doing at all.
+**Status: SHIPPED (2026-07-16).** Originally a judgment aid; the recommended
+automation was built as an opt-in "warehouse + LLM enrichment" mode on the config
+generator (Tool 90). This doc is retained for the concept definitions and the
+effort/risk reasoning. See the "Shipped" section at the bottom for what landed.
 
 Date: 2026-07-16.
 
@@ -196,6 +196,31 @@ safe, because the failure mode is invisible.
   hard the opt-in fallback matters — I believe it must stay optional.)
 - Appetite for a **confirm UI** in the Config Editor (accept/reject a proposed
   value) vs. keeping proposals as pre-filled `TODO`s the human edits?
+
+## Shipped (2026-07-16)
+
+Delivered as an **opt-in** mode (default path stays deterministic + LLM-free). A
+`warehouse_id` field + "Warehouse + LLM enrichment" toggle on the config-gen
+selector; when enabled, an additive post-pass runs after config build:
+
+- **P1 — `join_key_map.source_table`** (always-on, deterministic, no warehouse):
+  `mquery_parser.extract_source_table` parses `catalog.schema.table` from a
+  connector M-query; `pipeline_config_generator_tool._enrich_source_tables_from_mquery`
+  fills the key. Recommendation item #1.
+- **P2 — flag-column `filter_sets`** (warehouse, deterministic): new
+  `metric_view_utils/uc_query.py` (auth + SSRF allowlist + row-returning
+  `run_query`/`select_distinct`); `_enrich_filter_sets_from_warehouse` runs
+  `SELECT DISTINCT value_col WHERE flag=1`. Recommendation items #2+#3.
+- **P3 — `fact_join_map`** (warehouse + LLM, doubly gated): `_detect_cross_fact_merge`
+  fires only for ≥2 facts sharing a conformed dim; then warehouse grain probes +
+  ONE LLM call draft the strategy, every drafted join marked `TODO: verify`.
+  Recommendation item #5 — built, but stays behind the cross-fact gate so it never
+  runs speculatively.
+
+All enrichment is additive (never overwrites human/derived values), surfaced via
+an `enrichment_log` in the tool output, and each stage is independently gated. The
+"irreducible manual core" reasoning above still holds: P3 drafts, the human
+confirms. Commits on `feat/pbi-ucmv-fixes-v2` (P1/P2/P3, each with tests).
 
 ## See also
 - [UCMV_PIPELINE_CONFIG_GUIDE.md](../UCMV_PIPELINE_CONFIG_GUIDE.md) — current manual keys + UI how-to
