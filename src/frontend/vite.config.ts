@@ -47,11 +47,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      // Default oxc minifier (rolldown-vite): terser exhausts the Databricks
-      // Apps build container's ~2GB Node heap, and rolldown-vite dropped
-      // `transformWithEsbuild` (so a `minify: 'esbuild'` + `esbuild.drop` combo
-      // now fails at build). oxc minifies with a fraction of the memory.
-      minify: true,
+      // Minifier: terser. rolldown-vite's default oxc minifier MIS-MANGLES this
+      // bundle — it emits a duplicate `const n` in one chunk, producing a runtime
+      // "Identifier 'n' has already been declared" SyntaxError that blanks the
+      // app. esbuild is no longer usable (rolldown dropped transformWithEsbuild).
+      // terser mangles correctly; the 4GB NODE_OPTIONS heap (build script) covers
+      // its higher memory use.
+      minify: 'terser',
       // Manual vendor/mui/redux chunk grouping removed: rolldown-vite types
       // reject the object form of manualChunks, and rolldown's default
       // chunking already splits vendors sensibly. Re-add via
