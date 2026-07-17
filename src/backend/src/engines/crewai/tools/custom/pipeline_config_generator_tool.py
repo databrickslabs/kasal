@@ -174,17 +174,27 @@ class PipelineConfigGeneratorTool(BaseTool):
             return json.dumps({"error": "workspace_id and dataset_id are required."})
         if not access_token and not tenant_id:
             return json.dumps({"error": "tenant_id is required (unless a pre-obtained access_token is supplied)."})
+        # If a credential is missing, it may have been BLANKED by a decrypt failure
+        # (encryption key changed across a redeploy) rather than never set — hint at
+        # that so the user re-enters instead of hunting a non-existent config bug.
+        _redeploy_hint = (
+            " If these worked before a redeploy, the stored value may have been "
+            "cleared because the encryption key changed — please re-enter it "
+            "(see docs/deployment/encryption-key-persistence.md)."
+        )
         if not access_token and not _creds_ok(client_id, client_secret, username, password):
             return json.dumps({"error": (
                 "Non-admin credentials required: a Service Principal "
                 "(client_id + client_secret), a Service Account "
                 "(client_id + username + password), or a pre-obtained access_token."
+                + _redeploy_hint
             )})
         if not _creds_ok(admin_client_id, admin_client_secret, admin_username, admin_password):
             return json.dumps({"error": (
                 "Admin credentials required: either a Service Principal "
                 "(admin_client_id + admin_client_secret) or a Service Account "
                 "(admin_client_id + admin_username + admin_password)."
+                + _redeploy_hint
             )})
 
         try:

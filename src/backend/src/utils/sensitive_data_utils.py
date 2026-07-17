@@ -141,7 +141,17 @@ def decrypt_value(encrypted_value: str) -> str:
         encrypted_data = encrypted_value[len(ENCRYPTED_PREFIX):]
         return EncryptionUtils.decrypt_value(encrypted_data)
     except Exception as e:
-        logger.error(f"Failed to decrypt sensitive value: {e}")
+        # Almost always a KEY MISMATCH: the value was encrypted with a different
+        # (e.g. prior ephemeral) key. We blank it so the UI re-prompts — but make
+        # the reason explicit, otherwise a downstream tool sees an empty credential
+        # and reports a misleading "workspace_id missing" error instead of
+        # "please re-enter your credential".
+        logger.warning(
+            f"Could not decrypt a stored credential — the encryption key likely "
+            f"changed (e.g. a redeploy without a stable ENCRYPTION_KEY). Please "
+            f"RE-ENTER this credential. See "
+            f"docs/deployment/encryption-key-persistence.md. ({type(e).__name__})"
+        )
         return ""
 
 
@@ -208,7 +218,16 @@ def decrypt_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Di
                 result[key] = decrypt_value(value)
                 logger.debug(f"Decrypted sensitive field: {key}")
             except Exception as e:
-                logger.error(f"Failed to decrypt field {key}: {e}")
+                # Defensive: decrypt_value already catches + blanks + logs the
+                # actionable "re-enter your credential" warning. This branch only
+                # fires if EncryptionUtils.decrypt_value (the raw path) is used
+                # directly and raises. Blank the value; no marker key (this dict may
+                # be re-persisted and a stray key would pollute tool_configs).
+                logger.warning(
+                    f"Could not decrypt sensitive field '{key}' — encryption key "
+                    f"likely changed; please re-enter this credential. "
+                    f"({type(e).__name__})"
+                )
                 result[key] = ""
         else:
             result[key] = value
