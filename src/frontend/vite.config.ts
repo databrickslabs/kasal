@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
@@ -7,7 +7,7 @@ import path from 'path';
 export default defineConfig(({ mode }) => {
   const analyze = process.env.ANALYZE === 'true';
 
-  return {
+  const config: UserConfig = {
     plugins: [
       react(),
       // NOTE: precompression (gzip/brotli) plugins removed — the app server
@@ -47,11 +47,11 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      // esbuild minifier (not terser): terser exhausts the Databricks Apps
-      // build container's ~2GB Node heap on this bundle. esbuild uses a
-      // fraction of the memory. Console/debugger stripping is preserved via
-      // the top-level `esbuild.drop` option below.
-      minify: 'esbuild',
+      // Default oxc minifier (rolldown-vite): terser exhausts the Databricks
+      // Apps build container's ~2GB Node heap, and rolldown-vite dropped
+      // `transformWithEsbuild` (so a `minify: 'esbuild'` + `esbuild.drop` combo
+      // now fails at build). oxc minifies with a fraction of the memory.
+      minify: true,
       // Manual vendor/mui/redux chunk grouping removed: rolldown-vite types
       // reject the object form of manualChunks, and rolldown's default
       // chunking already splits vendors sensibly. Re-add via
@@ -64,10 +64,14 @@ export default defineConfig(({ mode }) => {
     },
 
     // Strip console.*/debugger from production bundles (previously handled by
-    // terserOptions.compress; esbuild's `drop` is the equivalent).
-    esbuild: {
-      drop: ['console', 'debugger'],
-    },
+    // terserOptions.compress; esbuild's `drop` is the equivalent). The literal
+    // cast is required because rolldown-vite types `drop` as
+    // ('console' | 'debugger')[], and a bare array infers as string[].
+    // NOTE: console/debugger stripping via `esbuild.drop` was removed —
+    // rolldown-vite dropped the esbuild transform (transformWithEsbuild) and the
+    // block broke the build. Stripping is cosmetic (dev-noise only); the default
+    // oxc minifier still fully minifies the bundle. Re-add via oxc minify options
+    // if console removal is required.
 
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-router-dom'],
@@ -78,4 +82,5 @@ export default defineConfig(({ mode }) => {
       'process.env': {},
     },
   };
+  return config;
 });
