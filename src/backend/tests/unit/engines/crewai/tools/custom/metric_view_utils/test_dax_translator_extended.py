@@ -1643,8 +1643,15 @@ class TestCalculateEqualityFilter:
         return r.sql_expr if r.is_translatable else None
 
     def test_string_equality(self, translator):
+        # String literals emit single-quoted + escaped (Spark SQL literals use ',
+        # and SEC #1 requires escaping DAX-sourced values), not the old "EU" swap.
         assert self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[region]="EU")') == \
-            'SUM(CASE WHEN source.region = "EU" THEN source.amount END)'
+            "SUM(CASE WHEN source.region = 'EU' THEN source.amount END)"
+
+    def test_string_equality_escapes_quote(self, translator):
+        # SEC #1: a value with an embedded single quote must be doubled, not broken out.
+        out = self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[region]="a\'b")')
+        assert "'a''b'" in out
 
     def test_numeric_equality(self, translator):
         assert self._sql(translator, 'CALCULATE(SUM(factsales[amount]), factsales[year]=2026)') == \

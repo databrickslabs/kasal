@@ -183,26 +183,33 @@ def _quote_ident(name: str) -> str:
 async def select_distinct(
     table: str,
     value_col: str,
-    where: Optional[str] = None,
+    flag_col: Optional[str] = None,
+    flag_value: int = 1,
     limit: int = 1000,
     warehouse_id: Optional[str] = None,
     host_override: Optional[str] = None,
     _resolved: Optional[tuple[str, str, dict]] = None,
 ) -> dict[str, Any]:
-    """``SELECT DISTINCT <value_col> FROM <table> [WHERE <where>]`` → adds a flat
-    ``values`` list to the ``run_query`` result. Identifiers are validated +
-    back-quoted; ``where`` is caller-supplied (must be a trusted predicate, e.g. a
-    detected flag column ``flag = 1``). Returns ``{success: False, error}`` on
-    failure — never raises.
+    """``SELECT DISTINCT <value_col> FROM <table> [WHERE <value_col> IS NOT NULL
+    AND <flag_col> = <flag_value>]`` → adds a flat ``values`` list to the
+    ``run_query`` result.
+
+    SECURITY: the predicate is built from STRUCTURED params, not a caller-supplied
+    WHERE string. ``table``/``value_col``/``flag_col`` are each identifier-validated
+    + back-quoted via ``_quote_ident`` (they derive from PBI-scan metadata, i.e.
+    attacker-influenceable), and ``flag_value`` is int-coerced. This closes the
+    injection where an unvalidated flag-column name reached the WHERE clause.
+    Returns ``{success: False, error}`` on failure — never raises.
     """
     try:
         tbl = _quote_ident(table)
         col = _quote_ident(value_col)
+        flag = _quote_ident(flag_col) if flag_col else None
     except UCQueryError as e:
         return {'success': False, 'error': str(e)}
     sql = f'SELECT DISTINCT {col} FROM {tbl}'
-    if where:
-        sql += f' WHERE {where}'
+    if flag is not None:
+        sql += f' WHERE {col} IS NOT NULL AND {flag} = {int(flag_value)}'
     sql += f' ORDER BY {col} LIMIT {int(limit)}'
     res = await run_query(sql, warehouse_id, host_override, _resolved=_resolved)
     if res.get('success'):

@@ -944,8 +944,10 @@ class PipelineConfigGeneratorTool(BaseTool):
                         "detail": f"warehouse resolve failed: {e}"})
             return log
 
+        # Structured params (not a raw WHERE string) so uc_query identifier-
+        # validates flag_col — it derives from PBI-scan dim_columns (SEC #2).
         res = await uc_query.select_distinct(
-            source_table, value_col, where=f"{value_col} IS NOT NULL AND {flag_col} = 1",
+            source_table, value_col, flag_col=flag_col, flag_value=1,
             _resolved=resolved)
         if not res.get("success"):
             log.append({"tier": "P2", "key": "filter_sets", "status": "error",
