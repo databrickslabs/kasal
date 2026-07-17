@@ -170,7 +170,7 @@ PIPELINE_CONFIG_AGENT = {
         "Call the Pipeline Config Generator tool with ZERO arguments — all credentials "
         "are pre-configured in the tool task form."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 5,
@@ -259,7 +259,7 @@ UCMV_GEN_AGENT = {
         "into UCMV YAML definitions using the UC Metric View Generator tool. "
         "Call the tool with ZERO arguments — all parameters are pre-configured."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 10,
@@ -354,7 +354,7 @@ UCMV_VAL_AGENT = {
         "You validate each measure's SQL against the source DAX and flag mismatches. "
         "Call the Metric View Validator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 5,
@@ -429,7 +429,7 @@ DEPLOYER_AGENT = {
         "Call the Metric View Deployer tool with ZERO arguments — "
         "ucmv_output is auto-injected from the flow."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 5,
@@ -505,7 +505,7 @@ REFERENCES_AGENT = {
         "using the Power BI Report References Tool. "
         "IMMEDIATELY call the tool with ZERO arguments — all parameters are pre-configured."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 3,
@@ -587,7 +587,7 @@ MAPPER_AGENT = {
         "report_references_json and ucmv_output are pre-configured or auto-injected. "
         "Call the tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 5,
@@ -668,7 +668,7 @@ DASHBOARD_AGENT = {
         "visual_mappings_json is auto-injected from the flow. "
         "Call the Databricks Dashboard Creator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 3,
@@ -749,7 +749,7 @@ GENIE_CFG_AGENT = {
         "ucmv_output is auto-injected from the flow. "
         "Call the UCMV Genie Space Config Generator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 5,
@@ -830,7 +830,7 @@ GENIE_GEN_AGENT = {
         "All parameters are auto-injected or pre-configured. "
         "Call the Genie Space Generator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
+    "llm": "databricks-claude-opus-4-8",
     "tools": [],
     "tool_configs": {},
     "max_iter": 3,
