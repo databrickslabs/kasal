@@ -136,11 +136,21 @@ class EncryptionUtils:
         if not key:
             key = Fernet.generate_key().decode()
             source = "generated (ephemeral)"
+            # Self-contained remediation: `deploy.py` provisions the key
+            # automatically, but if the app was deployed another way (image /
+            # source-path, no deploy.py run) the scope may have no key. Log the
+            # EXACT one-time CLI command so it's fixable without hunting docs.
             logger.warning(
-                "ENCRYPTION_KEY not set and no key found in the secret scope. "
-                "Generated a temporary key — it will NOT persist across restarts, "
-                "so encrypted secrets (client_secret, tokens) will need re-entering "
-                "after a redeploy. See docs/deployment/encryption-key-persistence.md."
+                "ENCRYPTION_KEY not set and no key found in secret scope "
+                f"'{EncryptionUtils.ENCRYPTION_SCOPE}/{EncryptionUtils.ENCRYPTION_KEY_NAME}'. "
+                "Generated a TEMPORARY key — it will NOT persist across restarts, so "
+                "encrypted secrets (client_secret, tokens) will need re-entering after "
+                "a redeploy. To fix once, provision a stable key:\n"
+                "  databricks secrets put-secret "
+                f"{EncryptionUtils.ENCRYPTION_SCOPE} {EncryptionUtils.ENCRYPTION_KEY_NAME} "
+                "--string-value \"$(python -c 'from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())')\"\n"
+                "then grant the app service principal READ on that scope."
             )
         else:
             logger.info(f"Encryption key resolved from {source}.")

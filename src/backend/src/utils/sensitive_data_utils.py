@@ -149,8 +149,7 @@ def decrypt_value(encrypted_value: str) -> str:
         logger.warning(
             f"Could not decrypt a stored credential — the encryption key likely "
             f"changed (e.g. a redeploy without a stable ENCRYPTION_KEY). Please "
-            f"RE-ENTER this credential. See "
-            f"docs/deployment/encryption-key-persistence.md. ({type(e).__name__})"
+            f"RE-ENTER this credential. ({type(e).__name__})"
         )
         return ""
 
