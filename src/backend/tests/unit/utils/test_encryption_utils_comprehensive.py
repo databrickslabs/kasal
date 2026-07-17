@@ -74,20 +74,25 @@ class TestEncryptionUtilsGetEncryptionKey:
     @patch.dict(os.environ, {"ENCRYPTION_KEY": "test_key_base64"}, clear=True)
     def test_get_encryption_key_from_env(self):
         """Test get_encryption_key reads from environment variable"""
+        EncryptionUtils._cached_key = None  # reset process cache
         result = EncryptionUtils.get_encryption_key()
-        
+
         assert result == b"test_key_base64"
+        EncryptionUtils._cached_key = None
 
     @patch.dict(os.environ, {}, clear=True)
+    @patch.object(EncryptionUtils, '_read_key_from_secret_scope', return_value='')
     @patch('src.utils.encryption_utils.Fernet.generate_key')
-    def test_get_encryption_key_generates_new(self, mock_generate_key):
-        """Test get_encryption_key generates new key when env var not set"""
+    def test_get_encryption_key_generates_new(self, mock_generate_key, _mock_scope):
+        """Generates a new key when neither env var nor secret scope provide one."""
+        EncryptionUtils._cached_key = None  # reset process cache
         mock_generate_key.return_value = b"generated_key"
-        
+
         result = EncryptionUtils.get_encryption_key()
-        
+
         assert result == b"generated_key"
         mock_generate_key.assert_called_once()
+        EncryptionUtils._cached_key = None
 
 
 # Removed complex SSH encryption tests that require cryptography mocking
