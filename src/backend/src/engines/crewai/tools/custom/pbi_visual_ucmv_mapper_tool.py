@@ -551,6 +551,21 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
                 llm_model = f"databricks/{llm_model}"
 
             prompt = self._build_prompt(visuals, ucmv_summaries, measures_data, dashboard_title)
+            # SEC #4: the prompt embeds attacker-influenceable PBI visual/measure
+            # metadata. Scan for prompt-injection before the LLM call (fail-open +
+            # log, consistent with the engine's callback scanners).
+            try:
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                _inj = security_scanner.scan_injection(prompt)
+                if getattr(_inj, "detected", False):
+                    logger.warning(
+                        "[PBIVisualMapper] Possible prompt-injection in PBI-sourced "
+                        "mapping input (severity=%s) — proceeding, output SQL is still "
+                        "SELECT-gated. Patterns: %s",
+                        getattr(_inj, "severity", "?"),
+                        getattr(_inj, "patterns_matched", None))
+            except Exception as e:  # noqa: BLE001 — scan is advisory, never blocks
+                logger.debug(f"[PBIVisualMapper] injection scan skipped: {e}")
             logger.info(f"[PBIVisualMapper] Calling LLM ({llm_model}) for {len(visuals)} visuals")
             llm_response = self._call_llm(prompt, llm_model)
             visual_mappings = self._parse_llm_response(llm_response)

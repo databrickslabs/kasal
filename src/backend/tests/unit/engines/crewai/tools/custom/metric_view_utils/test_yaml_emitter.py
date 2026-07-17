@@ -744,3 +744,32 @@ class TestUntranslatableCategorization:
             'SUMX(SUMMARIZE(F, F[comp_code], F[material]), [x]*CALCULATE(SUM(F[s])))')])
         assert '[group-then-aggregate (SUMMARIZE/CALCULATETABLE)]' in y
         assert 'GROUP BY' in y and 'identity dimension' in y
+
+
+class TestSourceSqlDangerousDrop:
+    """SEC #6: a dangerous inline source_sql is dropped at emit (defense-in-depth
+    for non-deployer consumers), falling back to the plain source_table."""
+
+    def _spec(self, source_sql):
+        from src.engines.crewai.tools.custom.metric_view_utils.data_classes import (
+            MetricViewSpec, TranslationResult)
+        return MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='c', joins=[], dimensions=[],
+            measures=[TranslationResult(
+                measure_name='val', original_name='val', sql_expr='SUM(source.val)',
+                is_translatable=True, skip_reason='Val', dax_expression='',
+                confidence='high', category='base')],
+            untranslatable=[], source_sql=source_sql)
+
+    def test_safe_source_sql_kept(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        y = emit_yaml(self._spec('SELECT * FROM cat.sch.tbl WHERE x = 1'))
+        assert 'source: |-' in y and 'SELECT * FROM' in y
+
+    def test_dangerous_source_sql_dropped(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        y = emit_yaml(self._spec('SELECT 1; DROP TABLE x'))
+        # inline SQL dropped → falls back to plain source_table, no DROP in output
+        assert 'DROP TABLE' not in y
+        assert 'source: cat.sch.tbl' in y or 'source: `cat`' in y or 'source:' in y
