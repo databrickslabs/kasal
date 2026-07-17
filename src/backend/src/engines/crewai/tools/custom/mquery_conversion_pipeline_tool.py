@@ -1336,6 +1336,18 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"Return ONLY the corrected SQL SELECT statement that faithfully implements "
                 f"the M-Query transformation. No explanation."
             )
+            # SEC #4: the prompt embeds PBI-sourced M-query text — scan for
+            # prompt-injection before the LLM call (fail-open + log).
+            try:
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                _inj = security_scanner.scan_injection(mquery or "")
+                if getattr(_inj, "detected", False):
+                    logger.warning(
+                        "[Validation] Possible prompt-injection in PBI M-query fed to "
+                        "SQL-correction LLM (severity=%s) — proceeding.",
+                        getattr(_inj, "severity", "?"))
+            except Exception as _e:  # noqa: BLE001 — advisory only
+                logger.debug(f"[Validation] injection scan skipped: {_e}")
             response = await LLMManager.completion(
                 messages=[{"role": "user", "content": prompt}],
                 model=model,

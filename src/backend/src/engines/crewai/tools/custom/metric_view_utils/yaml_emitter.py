@@ -281,6 +281,19 @@ def emit_yaml(spec: MetricViewSpec,
     if spec.source_filter:
         spec.source_filter = spark_sql_compat(spec.source_filter, _cat, _sch)
 
+    # SEC #6: dangerous-SQL check on the inline source_sql BEFORE it is emitted
+    # into the view body (defense-in-depth for non-deployer consumers that render
+    # the YAML without the deployer's whole-document scan). source_sql originates
+    # from transpiled/native-query M — a crafted Value.NativeQuery could embed
+    # DROP/GRANT/stacked statements. On hit, drop the inline SQL (falls back to the
+    # plain source_table below) rather than emit a dangerous body.
+    # NOTE: _check_dangerous_sql returns True when SAFE — drop when NOT safe.
+    if spec.source_sql and not _check_dangerous_sql(spec.source_sql):
+        logger.warning(
+            f"[SECURITY] Dangerous SQL in source_sql for {getattr(spec, 'view_name', '?')} "
+            f"— dropping inline source, falling back to source_table.")
+        spec.source_sql = ''
+
     lines: list[str] = []
     lines.append("version: '1.1'")
     lines.append('')

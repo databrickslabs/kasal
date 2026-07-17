@@ -26,21 +26,23 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# SSRF allowlist — a workspace URL must end with one of these. Enforced here so a
-# caller can never hand us an arbitrary host. Mirrors the deployer's list.
-_ALLOWED_HOST_SUFFIXES = (
-    '.cloud.databricks.com', '.azuredatabricks.net', '.gcp.databricks.com',
-    '.databricks.azure.cn', '.databricksapps.com',
-)
-
-
 class UCQueryError(Exception):
     """Raised for auth/host/execution failures the caller should log + skip on."""
 
 
 def _host_allowed(workspace_url: str) -> bool:
-    host = urllib.parse.urlparse(workspace_url).hostname or ''
-    return any(host.endswith(s) for s in _ALLOWED_HOST_SUFFIXES)
+    """SSRF check before attaching a Databricks credential to an outbound call.
+
+    SEC #5: uses the shared ``url_security.is_trusted_databricks_host`` (single
+    source of truth) instead of a local suffix allowlist, so this can't drift from
+    the deployer / the rest of the codebase. Fails closed if the helper is
+    unavailable rather than trusting an unknown host.
+    """
+    try:
+        from src.utils.url_security import is_trusted_databricks_host
+        return is_trusted_databricks_host(workspace_url)
+    except Exception:  # noqa: BLE001 — no shared helper → do not trust the host
+        return False
 
 
 async def _auth_headers(host_override: Optional[str] = None) -> tuple[str, dict]:

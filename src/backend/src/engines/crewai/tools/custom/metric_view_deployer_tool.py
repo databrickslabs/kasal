@@ -188,13 +188,27 @@ class MetricViewDeployerTool(BaseTool):
             try:
                 remap = json.loads(remap_raw) if isinstance(remap_raw, str) else remap_raw
                 if isinstance(remap, dict):
+                    # SEC #7: validate both sides are plain (optionally dotted)
+                    # identifiers before a blind substring replace into the YAML —
+                    # config/agent-supplied new_cat must not inject arbitrary text.
+                    _ident = _re.compile(r'^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$')
+                    safe_remap = {
+                        old: new for old, new in remap.items()
+                        if isinstance(old, str) and isinstance(new, str)
+                        and _ident.match(old) and _ident.match(new)
+                    }
+                    dropped = set(remap) - set(safe_remap)
+                    if dropped:
+                        logger.warning(
+                            f"[MVDeployer] Ignoring catalog_remap entries with "
+                            f"non-identifier values: {sorted(dropped)}")
                     remapped = {}
                     for k, v in yaml_specs.items():
-                        for old_cat, new_cat in remap.items():
+                        for old_cat, new_cat in safe_remap.items():
                             v = v.replace(old_cat, new_cat)
                         remapped[k] = v
                     yaml_specs = remapped
-                    logger.info(f"[MVDeployer] Applied catalog remap: {remap}")
+                    logger.info(f"[MVDeployer] Applied catalog remap: {safe_remap}")
             except Exception as e:
                 logger.warning(f"[MVDeployer] Could not apply catalog_remap: {e}")
 
@@ -253,11 +267,14 @@ class MetricViewDeployerTool(BaseTool):
                 results[table_key] = {'status': 'error', 'message': 'workspace_url not configured'}
                 continue
 
-            # SSRF check
-            parsed_host = urllib.parse.urlparse(workspace_url)
-            if not parsed_host.hostname or not any(
-                parsed_host.hostname.endswith(s) for s in self._ALLOWED_HOST_SUFFIXES
-            ):
+            # SSRF check — shared source of truth (SEC #5), fails closed.
+            try:
+                from src.utils.url_security import is_trusted_databricks_host
+                _host_ok = is_trusted_databricks_host(workspace_url)
+            except Exception:  # noqa: BLE001 — no helper → do not trust
+                _host_ok = False
+            if not _host_ok:
+                parsed_host = urllib.parse.urlparse(workspace_url)
                 results[table_key] = {'status': 'error', 'message': f'Untrusted host: {parsed_host.hostname}'}
                 continue
 
