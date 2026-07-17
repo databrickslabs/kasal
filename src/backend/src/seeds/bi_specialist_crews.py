@@ -171,7 +171,7 @@ PIPELINE_CONFIG_AGENT = {
         "are pre-configured in the tool task form."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["90"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -260,7 +260,7 @@ UCMV_GEN_AGENT = {
         "Call the tool with ZERO arguments — all parameters are pre-configured."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["86"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 10,
     "max_rpm": 10,
@@ -355,7 +355,7 @@ UCMV_VAL_AGENT = {
         "Call the Metric View Validator tool with ZERO arguments."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["91"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -430,7 +430,7 @@ DEPLOYER_AGENT = {
         "ucmv_output is auto-injected from the flow."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["88"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -506,7 +506,7 @@ REFERENCES_AGENT = {
         "IMMEDIATELY call the tool with ZERO arguments — all parameters are pre-configured."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["78"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,
@@ -588,7 +588,7 @@ MAPPER_AGENT = {
         "Call the tool with ZERO arguments."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["94"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -669,7 +669,7 @@ DASHBOARD_AGENT = {
         "Call the Databricks Dashboard Creator tool with ZERO arguments."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["95"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,
@@ -750,7 +750,7 @@ GENIE_CFG_AGENT = {
         "Call the UCMV Genie Space Config Generator tool with ZERO arguments."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["93"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -831,7 +831,7 @@ GENIE_GEN_AGENT = {
         "Call the Genie Space Generator tool with ZERO arguments."
     ),
     "llm": "databricks-claude-sonnet-4",
-    "tools": ["92"],
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,

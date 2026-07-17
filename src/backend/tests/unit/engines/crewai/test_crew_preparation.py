@@ -1430,3 +1430,129 @@ class TestProcessCrewOutput:
             assert "error" in output
             assert "Failed to process output" in output["error"]
             mock_logger.error.assert_called_once()
+
+class TestDedupeAgentTaskTools:
+    """Tests for _dedupe_agent_task_tools — the agent∩task duplicate-tool fix."""
+
+    def _prep(self, config):
+        return CrewPreparation(config, MagicMock(), MagicMock())
+
+    def test_removes_tool_present_on_both_agent_and_task(self):
+        """A tool on BOTH the agent and its task is dropped from the agent."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "pcg-agent", "role": "Specialist", "tools": ["90"]},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "t1", "agent": "pcg-agent", "tools": ["90"],
+                 "tool_configs": {"Pipeline Config Generator": {"workspace_id": "ws"}}},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == []
+        # Task keeps its tool + config untouched.
+        assert config["tasks"][0]["tools"] == ["90"]
+        assert config["tasks"][0]["tool_configs"]["Pipeline Config Generator"]["workspace_id"] == "ws"
+
+    def test_keeps_agent_only_tool(self):
+        """An agent tool NOT on any of its tasks is preserved."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent", "role": "R", "tools": ["search_tool"]},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "t1", "agent": "agent", "tools": []},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == ["search_tool"]
+
+    def test_partial_overlap_only_removes_duplicate(self):
+        """Only the overlapping tool is removed; agent-only tools stay."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent", "role": "R", "tools": ["90", "extra_tool"]},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "t1", "agent": "agent", "tools": ["90"]},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == ["extra_tool"]
+
+    def test_int_and_string_ids_compared_equal(self):
+        """Config mixes int and str ids — 90 (int) on task removes '90' (str) on agent."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent", "role": "R", "tools": ["90"]},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "t1", "agent": "agent", "tools": [90]},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == []
+
+    def test_agent_referenced_by_role(self):
+        """Task references the agent by role, not name — still de-duped."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent", "role": "Pipeline Specialist", "tools": ["90"]},
+            ],
+            "tasks": [
+                {"id": "t1", "name": "t1", "agent": "Pipeline Specialist", "tools": ["90"]},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == []
+
+    def test_tool_on_different_agents_task_not_removed(self):
+        """A task belonging to ANOTHER agent must not strip this agent's tool."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent1", "role": "R1", "tools": ["90"]},
+                {"id": "a2", "name": "agent2", "role": "R2", "tools": ["other"]},
+            ],
+            "tasks": [
+                {"id": "t2", "name": "t2", "agent": "agent2", "tools": ["90"]},
+            ],
+        }
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        # agent1's tool "90" stays — the task carrying "90" belongs to agent2.
+        assert config["agents"][0]["tools"] == ["90"]
+
+    def test_no_tasks_is_noop(self):
+        config = {"agents": [{"id": "a1", "name": "a", "role": "R", "tools": ["90"]}], "tasks": []}
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()
+        assert config["agents"][0]["tools"] == ["90"]
+
+    def test_no_agents_is_noop(self):
+        config = {"agents": [], "tasks": [{"id": "t", "name": "t", "agent": "x", "tools": ["90"]}]}
+        prep = self._prep(config)
+        prep._dedupe_agent_task_tools()  # must not raise
+
+    def test_inheriting_task_preserves_agent_tool(self):
+        """An agent with a tool-less task (relies on inheritance) is NOT stripped,
+        even if another of its tasks lists the same tool — behavior-preserving."""
+        config = {
+            "agents": [
+                {"id": "a1", "name": "agent", "role": "R", "tools": ["90"]},
+            ],
+            "tasks": [
+                # This task lists the tool...
+                {"id": "t1", "name": "t1", "agent": "agent", "tools": ["90"]},
+                # ...but this one relies on inheriting the agent's tool.
+                {"id": "t2", "name": "t2", "agent": "agent", "tools": []},
+            ],
+        }
+        prep = CrewPreparation(config, MagicMock(), MagicMock())
+        prep._dedupe_agent_task_tools()
+        # Agent keeps its tool so the inheriting task t2 still gets it.
+        assert config["agents"][0]["tools"] == ["90"]

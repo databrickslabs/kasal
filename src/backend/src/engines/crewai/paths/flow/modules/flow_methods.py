@@ -268,6 +268,63 @@ async def configure_flow_crew_memory(
     return crew_kwargs
 
 
+def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> None:
+    """Strip an agent's tool when the SAME tool (by name) is on a task it runs.
+
+    Flow crews are assembled from already-built CrewAI ``Agent``/``Task`` objects,
+    so we de-dupe on the instantiated tools' ``.name`` rather than config ids.
+    For each task with an assigned agent, any agent tool whose name also appears
+    among the task's tools is removed from the agent — the task-level instance is
+    the configured, authoritative one. Best-effort: never raises (a flow must run
+    even if this normalization can't be applied).
+
+    BEHAVIOR-PRESERVING GUARD: CrewAI lets a tool-less task inherit its agent's
+    tools. So an agent that also runs a task with NO tools is skipped entirely —
+    stripping its tools would strand that inheriting task. Identical tool set to
+    before for every crew except the exact duplicate case being fixed.
+    """
+    try:
+        # Agents (by identity) that have at least one tool-less task → skip them.
+        agents_with_inheriting_task = set()
+        for task in task_list:
+            agent = getattr(task, "agent", None)
+            if agent is None:
+                continue
+            if not (getattr(task, "tools", None) or []):
+                agents_with_inheriting_task.add(id(agent))
+
+        for task in task_list:
+            agent = getattr(task, "agent", None)
+            if agent is None:
+                continue
+            if id(agent) in agents_with_inheriting_task:
+                continue
+            task_tools = getattr(task, "tools", None) or []
+            agent_tools = getattr(agent, "tools", None) or []
+            if not task_tools or not agent_tools:
+                continue
+            task_tool_names = {
+                getattr(t, "name", None) for t in task_tools if getattr(t, "name", None)
+            }
+            if not task_tool_names:
+                continue
+            kept = [t for t in agent_tools if getattr(t, "name", None) not in task_tool_names]
+            if len(kept) != len(agent_tools):
+                removed = [
+                    getattr(t, "name", "?") for t in agent_tools
+                    if getattr(t, "name", None) in task_tool_names
+                ]
+                agent.tools = kept
+                agent_role = getattr(agent, "role", "Unknown")
+                logger.info(
+                    f"[FLOW] Agent '{agent_role}': removed tool(s) {removed} also "
+                    f"present on its task — built at task level with the task's "
+                    f"config (avoids an empty-config duplicate tool instance)."
+                )
+    except Exception as e:  # noqa: BLE001 — normalization must never break a flow
+        logger.debug(f"[FLOW] agent∩task tool de-dupe skipped: {e}")
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -325,6 +382,16 @@ class FlowMethodFactory:
                         # Log if agent has no tools
                         if not hasattr(task.agent, 'tools') or not task.agent.tools:
                             logger.info(f"  Agent {agent_role} has no tools assigned but will continue with execution")
+
+            # De-dupe agent∩task tools (flow path): a tool present on BOTH an
+            # agent and a task it runs is built twice — the agent copy carries the
+            # agent-level config (often empty) and the task copy carries the task's
+            # config. CrewAI then shows the LLM two same-named tools and it may pick
+            # the empty one → e.g. "workspace_id ... required". The crew path fixes
+            # this in CrewPreparation, but flow crews bypass that, so apply the
+            # same normalization here on the built Agent/Task objects (match by
+            # tool .name; the task instance is authoritative, so strip the agent's).
+            _dedupe_flow_agent_task_tools(agents, task_list)
 
             logger.info(f"Total unique agents: {len(agents)}")
             logger.info(f"Total tasks: {len(task_list)}")
