@@ -140,6 +140,9 @@ class CrewPreparation:
                 logger.error("Invalid crew configuration")
                 return False
 
+            # Normalize agent/task tool placement BEFORE building anything.
+            self._dedupe_agent_task_tools()
+
             # Create agents
             if not await self._create_agents():
                 logger.error("Failed to create agents")
@@ -211,6 +214,98 @@ class CrewPreparation:
 
         logger.warning(f"Could not find agent for reference: {agent_reference}")
         return None
+
+    def _dedupe_agent_task_tools(self) -> None:
+        """Strip an agent's tool when the SAME tool is also on a task it runs.
+
+        A tool defined at BOTH agent and task level is built twice — once by
+        ``_create_agents`` (using the AGENT's ``tool_configs``) and once by
+        ``_create_tasks`` (using the TASK's ``tool_configs``). CrewAI then exposes
+        two same-named tools to the LLM during that task, and it may pick the
+        agent-level instance — which typically carries an EMPTY config (the UI
+        stores tool configuration on the task node), so a config-driven tool like
+        the Pipeline Config Generator fails with "workspace_id ... required" even
+        though the task is configured correctly.
+
+        The task-level instance is the configured, authoritative one, so we drop
+        the duplicate from the agent. An agent-only tool (no task overrides it) is
+        left untouched — this only removes genuine agent∩task duplicates.
+
+        BEHAVIOR-PRESERVING GUARD: CrewAI lets a task with an EMPTY tools list
+        inherit its agent's tools (task.py check_tools). So if an agent also runs a
+        task that lists NO tools, that task depends on inheriting the agent's tool
+        — stripping it would remove a tool that task needs. We therefore skip
+        de-dupe entirely for any agent that has at least one tool-less task, and
+        only strip tools an agent shares with its OWN tasks. This keeps the tool
+        set the LLM sees identical to before for every crew except the exact
+        duplicate case we're fixing.
+
+        Pure config normalization, no DB access — safe across the subprocess
+        boundary. Ids are compared as strings (the config mixes ints and strings).
+        """
+        agents = self.config.get('agents', [])
+        tasks = self.config.get('tasks', [])
+        if not agents or not tasks:
+            return
+
+        # Map each agent (by every reference form a task might use) → tool ids on
+        # the tasks assigned to it.
+        def _agent_refs(agent_config: Dict[str, Any]) -> set:
+            refs = set()
+            for k in ('id', 'name', 'role'):
+                v = agent_config.get(k)
+                if v:
+                    refs.add(str(v))
+            return refs
+
+        task_tools_by_agent_ref: Dict[str, set] = {}
+        # Agent refs that have a task relying on tool inheritance (task tools empty).
+        agent_refs_with_inheriting_task: set = set()
+        for task_config in tasks:
+            agent_ref = task_config.get('agent')
+            if not agent_ref:
+                continue
+            t_tools = {
+                str(t) for t in (task_config.get('tools') or []) if t is not None
+            }
+            if not t_tools:
+                # This task carries no tools → at runtime it inherits the agent's
+                # tools. Do NOT strip anything from that agent.
+                agent_refs_with_inheriting_task.add(str(agent_ref))
+                continue
+            task_tools_by_agent_ref.setdefault(str(agent_ref), set()).update(t_tools)
+
+        if not task_tools_by_agent_ref:
+            return
+
+        for agent_config in agents:
+            agent_tools = agent_config.get('tools') or []
+            if not agent_tools:
+                continue
+            refs = _agent_refs(agent_config)
+            # Skip agents any of whose tasks rely on tool inheritance.
+            if refs & agent_refs_with_inheriting_task:
+                continue
+            # Union of task tools across every reference form this agent answers to.
+            task_tool_ids: set = set()
+            for ref in refs:
+                task_tool_ids |= task_tools_by_agent_ref.get(ref, set())
+            if not task_tool_ids:
+                continue
+
+            kept = [t for t in agent_tools if str(t) not in task_tool_ids]
+            removed = [t for t in agent_tools if str(t) in task_tool_ids]
+            if removed:
+                agent_name = agent_config.get(
+                    'name', agent_config.get('role', agent_config.get('id', 'unknown'))
+                )
+                logger.info(
+                    f"[CrewPreparation] Agent '{agent_name}': removed tool(s) "
+                    f"{removed} also present on its task(s) — they are built at "
+                    f"task level with the task's configuration (avoids an "
+                    f"empty-config duplicate tool instance)."
+                )
+                agent_config['tools'] = kept
 
     async def _create_agents(self) -> bool:
         """
