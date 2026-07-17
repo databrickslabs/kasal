@@ -16,6 +16,26 @@ from .join_detector import _sanitize_alias
 from .utils import to_snake_case
 
 
+def _sql_str_literal(value: str) -> str:
+    """Return a safe, single-quoted SQL string literal for a DAX-sourced value.
+
+    SECURITY: DAX filter values (measure predicates, IN-lists) are attacker-
+    influenceable (a semantic model author controls them) and get interpolated
+    into generated SQL that is deployed as a UC Metric View. Without escaping, a
+    value like ``x' OR '1'='1`` forges the predicate — and the deployer's
+    dangerous-SQL deny-list does NOT catch quote-breakout. Escape by doubling
+    single quotes (SQL standard) and stripping NULs. Always returns the value
+    wrapped in single quotes.
+    """
+    s = str(value).replace('\x00', '')
+    return "'" + s.replace("'", "''") + "'"
+
+
+def _sql_in_list(values) -> str:
+    """Build a safe ``'a', 'b', 'c'`` IN-list from DAX-sourced values (escaped)."""
+    return ', '.join(_sql_str_literal(v) for v in values)
+
+
 class DaxTranslator:
     """Pattern-based DAX→SQL translator with ordered registry."""
 
@@ -314,8 +334,14 @@ class DaxTranslator:
         up = val.upper().replace(' ', '')
         if up in ('TRUE()', 'FALSE()'):
             val = 'TRUE' if up == 'TRUE()' else 'FALSE'
-        elif val.startswith("'"):
-            val = '"' + val[1:-1] + '"'
+        elif val.startswith("'") or val.startswith('"'):
+            # A string literal — strip the DAX quote and re-emit as a safe,
+            # escaped SQL literal (was an unescaped ' -> " swap; SEC finding #1).
+            val = _sql_str_literal(val[1:-1])
+        elif not re.fullmatch(r'-?\d+(?:\.\d+)?', val):
+            # Not TRUE/FALSE and not a plain number → treat as a string value and
+            # escape it rather than interpolate raw.
+            val = _sql_str_literal(val)
         cond = f'source.{match["filter_col"]} = {val}'
         return f'{spark}(CASE WHEN {cond} THEN source.{match["agg_col"]} END)', ''
 
@@ -962,7 +988,7 @@ class DaxTranslator:
             values = self._resolve_var_filter_set(var_name, dax)
             if values:
                 alias, phys_col = self._resolve_filter_alias(dim_table, dim_col)
-                in_list = ', '.join(f"'{v}'" for v in values)
+                in_list = _sql_in_list(values)
                 return f"{alias}.{phys_col} IN ({in_list})"
 
         # Check for CWC_Filter=1 pattern (only if CWC_FILTER filter set is configured)
@@ -972,7 +998,7 @@ class DaxTranslator:
                 dim_table = cwc_match.group(1)
                 alias = self._dim_table_to_alias(dim_table)
                 cwc_values = self.filter_sets['CWC_FILTER']
-                in_list = ', '.join(f"'{v}'" for v in cwc_values)
+                in_list = _sql_in_list(cwc_values)
                 return f"{alias}.{self._cwc_filter_column} IN ({in_list})"
 
         # Cross-table fact filter
@@ -1048,13 +1074,13 @@ class DaxTranslator:
             m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
             if m:
                 alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
-                sql_parts.append(f"{alias}.{phys_col} {m.group(3)} '{m.group(4)}'")
+                sql_parts.append(f"{alias}.{phys_col} {m.group(3)} {_sql_str_literal(m.group(4))}")
                 continue
             m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', part, re.IGNORECASE)
             if m:
                 alias, phys_col = self._resolve_filter_alias(m.group(1), m.group(2))
                 vals = re.findall(r'"([^"]*)"', m.group(3))
-                in_list = ', '.join(f"'{v}'" for v in vals)
+                in_list = _sql_in_list(vals)
                 sql_parts.append(f"{alias}.{phys_col} IN ({in_list})")
                 continue
             m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', part)
@@ -1075,13 +1101,13 @@ class DaxTranslator:
             m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', part)
             if m:
                 alias = self._dim_table_to_alias(m.group(1))
-                sql_parts.append(f"{alias}.{m.group(2)} {m.group(3)} '{m.group(4)}'")
+                sql_parts.append(f"{alias}.{m.group(2)} {m.group(3)} {_sql_str_literal(m.group(4))}")
                 continue
             m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', part, re.IGNORECASE)
             if m:
                 alias = self._dim_table_to_alias(m.group(1))
                 vals = re.findall(r'"([^"]*)"', m.group(3))
-                in_list = ', '.join(f"'{v}'" for v in vals)
+                in_list = _sql_in_list(vals)
                 sql_parts.append(f"{alias}.{m.group(2)} IN ({in_list})")
                 continue
             m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', part)
@@ -1136,19 +1162,19 @@ class DaxTranslator:
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
             vals = re.findall(r'"([^"]*)"', m.group(3))
-            in_list = ', '.join(f"'{v}'" for v in vals)
+            in_list = _sql_in_list(vals)
             return f"source.{col} NOT IN ({in_list})"
 
         # Table[col] = "val"
         m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
-            return f"source.{col} {m.group(3)} '{m.group(4)}'"
+            return f"source.{col} {m.group(3)} {_sql_str_literal(m.group(4))}"
         # Table[col] = 'val' (single-quoted)
         m = re.match(r"(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
         if m:
             col = self._resolve_column(m.group(1), m.group(2), table_key)
-            return f"source.{col} {m.group(3)} '{m.group(4)}'"
+            return f"source.{col} {m.group(3)} {_sql_str_literal(m.group(4))}"
         # Table[col] in {"a","b","c"}
         m = re.match(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
         if m:
@@ -1156,7 +1182,7 @@ class DaxTranslator:
             vals = re.findall(r'"([^"]*)"', m.group(3))
             if not vals:
                 vals = re.findall(r"'([^']*)'", m.group(3))
-            in_list = ', '.join(f"'{v}'" for v in vals)
+            in_list = _sql_in_list(vals)
             return f"source.{col} IN ({in_list})"
         # Table[col] = 123
         m = re.match(r'(\w+)\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', cond)
@@ -1167,18 +1193,18 @@ class DaxTranslator:
         # ── Bare column patterns (no Table prefix): [col] = "val" ──
         m = re.match(r'\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*"([^"]*)"', cond)
         if m:
-            return f"source.{m.group(1)} {m.group(2)} '{m.group(3)}'"
+            return f"source.{m.group(1)} {m.group(2)} {_sql_str_literal(m.group(3))}"
         # [col] = 'val' (single-quoted)
         m = re.match(r"\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*'([^']*)'", cond)
         if m:
-            return f"source.{m.group(1)} {m.group(2)} '{m.group(3)}'"
+            return f"source.{m.group(1)} {m.group(2)} {_sql_str_literal(m.group(3))}"
         # [col] IN {"a","b"}
         m = re.match(r'\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
         if m:
             vals = re.findall(r'"([^"]*)"', m.group(2))
             if not vals:
                 vals = re.findall(r"'([^']*)'", m.group(2))
-            in_list = ', '.join(f"'{v}'" for v in vals)
+            in_list = _sql_in_list(vals)
             return f"source.{m.group(1)} IN ({in_list})"
         # NOT [col] IN {…}
         m = re.match(r'NOT\s+\[(\w+)\]\s+in\s+\{([^}]+)\}', cond, re.IGNORECASE)
@@ -1186,7 +1212,7 @@ class DaxTranslator:
             vals = re.findall(r'"([^"]*)"', m.group(2))
             if not vals:
                 vals = re.findall(r"'([^']*)'", m.group(2))
-            in_list = ', '.join(f"'{v}'" for v in vals)
+            in_list = _sql_in_list(vals)
             return f"source.{m.group(1)} NOT IN ({in_list})"
         # [col] = 123
         m = re.match(r'\[(\w+)\]\s*(=|<>|<|>|<=|>=)\s*(\d+(?:\.\d+)?)', cond)

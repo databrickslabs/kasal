@@ -50,11 +50,12 @@ class TestSelectDistinctSql:
 
         with patch.object(U, "run_query", side_effect=fake_run_query):
             res = await U.select_distinct(
-                "cat.sch.dim", "bic_cwc_type", where="cwc_filter = 1",
+                "cat.sch.dim", "bic_cwc_type", flag_col="cwc_filter", flag_value=1,
                 _resolved=("https://x.cloud.databricks.com", "wh1", {}))
         assert res["values"] == ["APET", "CAN", "PET"]
         assert "SELECT DISTINCT `bic_cwc_type` FROM `cat`.`sch`.`dim`" in captured["sql"]
-        assert "WHERE cwc_filter = 1" in captured["sql"]
+        # flag column is back-quoted (identifier-validated), value int-coerced
+        assert "WHERE `bic_cwc_type` IS NOT NULL AND `cwc_filter` = 1" in captured["sql"]
         assert "ORDER BY `bic_cwc_type`" in captured["sql"] and "LIMIT" in captured["sql"]
 
     @pytest.mark.asyncio
@@ -62,6 +63,28 @@ class TestSelectDistinctSql:
         res = await U.select_distinct("cat; DROP", "col")
         assert res["success"] is False
         assert "unsafe identifier" in res["error"]
+
+    @pytest.mark.asyncio
+    async def test_unsafe_flag_col_rejected(self):
+        """SEC #2: a malicious flag column name must be rejected, not interpolated."""
+        res = await U.select_distinct(
+            "cat.sch.dim", "col", flag_col="x = 1 OR (SELECT 1)",
+            _resolved=("https://x.cloud.databricks.com", "w", {}))
+        assert res["success"] is False
+        assert "unsafe identifier" in res["error"]
+
+    @pytest.mark.asyncio
+    async def test_no_flag_col_omits_where(self):
+        captured = {}
+
+        async def fake_run_query(sql, warehouse_id=None, host_override=None, _resolved=None):
+            captured["sql"] = sql
+            return {"success": True, "columns": ["c"], "rows": [["v"]]}
+
+        with patch.object(U, "run_query", side_effect=fake_run_query):
+            await U.select_distinct("a.b.c", "col",
+                                    _resolved=("https://x.cloud.databricks.com", "w", {}))
+        assert "WHERE" not in captured["sql"]
 
     @pytest.mark.asyncio
     async def test_query_failure_propagates_without_values(self):
