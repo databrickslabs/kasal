@@ -801,9 +801,10 @@ class ToolFactory:
             # Get base tool config from tool info
             base_config = tool_info.config if hasattr(tool_info, 'config') and tool_info.config is not None else {}
 
-            # Log what we're merging
-            logger.info(f"[ToolFactory] {tool_name} - base_config from tool_info: {base_config}")
-            logger.info(f"[ToolFactory] {tool_name} - tool_config_override received: {tool_config_override}")
+            # Log what we're merging — MASK sensitive fields (client_secret, tokens,
+            # passwords) so they never land in crew.log / flow.log in cleartext.
+            logger.info(f"[ToolFactory] {tool_name} - base_config from tool_info: {mask_sensitive_fields(base_config)}")
+            logger.info(f"[ToolFactory] {tool_name} - tool_config_override received: {mask_sensitive_fields(tool_config_override or {})}")
 
             # Merge with override config if provided
             # The override takes precedence over base_config
