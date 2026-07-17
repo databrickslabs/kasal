@@ -28,6 +28,26 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _sql_lit(value: Any) -> str:
+    """Safe single-quoted SQL string literal for PBI-sourced values.
+
+    SECURITY: field-parameter/calc-group/measure names, labels and table names
+    come from a semantic model an untrusted party may author, and are emitted into
+    CREATE/INSERT DDL the user runs against Databricks. Escape single quotes
+    (doubled) + strip NUL so a crafted label cannot break out of the literal. The
+    markdown output path already did this inline; the SQL path did not (SEC ext-#1).
+    """
+    return "'" + str(value).replace('\x00', '').replace("'", "''") + "'"
+
+
+def _sql_int(value: Any, default: int = 0) -> int:
+    """Coerce a PBI-sourced numeric field to int (it is interpolated UNQUOTED)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     """Input schema for PowerBIFieldParametersCalculationGroupsTool."""
 
@@ -1046,8 +1066,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             for fp in field_parameters:
                 for item in fp['items']:
                     inserts.append(
-                        f"('{fp['name']}', '{item['label']}', '{item['source_table']}', "
-                        f"'{item['source_measure']}', {item['ordinal']})"
+                        f"({_sql_lit(fp['name'])}, {_sql_lit(item['label'])}, "
+                        f"{_sql_lit(item['source_table'])}, "
+                        f"{_sql_lit(item['source_measure'])}, {_sql_int(item['ordinal'])})"
                     )
             sql_lines.append(",\n".join(inserts) + ";")
             sql_lines.append("")
@@ -1071,11 +1092,13 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             inserts = []
             for cg in calculation_groups:
                 for item in cg['items']:
-                    escaped_expr = item['expression'].replace("'", "''").replace('\n', '\\n')
+                    escaped_expr = item['expression'].replace('\n', '\\n')
                     sql_pattern = self._get_sql_pattern_for_calc_item(item['name'])
                     inserts.append(
-                        f"('{cg['name']}', '{item['name']}', '{escaped_expr}', "
-                        f"'{sql_pattern}', {cg['precedence']}, {item['ordinal']})"
+                        f"({_sql_lit(cg['name'])}, {_sql_lit(item['name'])}, "
+                        f"{_sql_lit(escaped_expr)}, "
+                        f"{_sql_lit(sql_pattern)}, {_sql_int(cg['precedence'])}, "
+                        f"{_sql_int(item['ordinal'])})"
                     )
             sql_lines.append(",\n".join(inserts) + ";")
             sql_lines.append("")
@@ -1104,11 +1127,11 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             sql_lines.append("VALUES")
             inserts = []
             for measure in referenced_measures:
-                dax_expr = (measure.get('expression') or '').replace("'", "''").replace('\n', '\\n')
+                dax_expr = (measure.get('expression') or '').replace('\n', '\\n')
                 sql_expr = self._translate_dax_to_sql_simple(measure.get('expression'), measure.get('table'))
                 inserts.append(
-                    f"('{measure['name']}', '{measure.get('table', '')}', "
-                    f"'{dax_expr}', '{sql_expr}')"
+                    f"({_sql_lit(measure['name'])}, {_sql_lit(measure.get('table', ''))}, "
+                    f"{_sql_lit(dax_expr)}, {_sql_lit(sql_expr)})"
                 )
             sql_lines.append(",\n".join(inserts) + ";")
             sql_lines.append("")
@@ -1141,7 +1164,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
-    '{item['label']}' AS kpi_name,
+    {_sql_lit(item['label'])} AS kpi_name,
     {sql_expr} AS kpi_value
 FROM {qualified_table}"""
                     union_parts.append(union_part)
@@ -1182,7 +1205,7 @@ FROM {qualified_table}"""
 
                     # Generate SQL that groups by date dimensions
                     union_part = f"""SELECT
-    '{item['label']}' AS kpi_name,
+    {_sql_lit(item['label'])} AS kpi_name,
     {sql_expr} AS kpi_value,
     -- Update these date expressions to match your actual date column
     DATE_TRUNC('day', CURRENT_DATE()) AS report_date,
@@ -1223,7 +1246,7 @@ FROM {qualified_table}"""
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
-    '{item['label']}' AS kpi_name,
+    {_sql_lit(item['label'])} AS kpi_name,
     'YTD' AS time_period,
     {sql_expr} AS kpi_value
 FROM {qualified_table}
@@ -1248,7 +1271,7 @@ WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
-    '{item['label']}' AS kpi_name,
+    {_sql_lit(item['label'])} AS kpi_name,
     'MTD' AS time_period,
     {sql_expr} AS kpi_value
 FROM {qualified_table}
@@ -1273,7 +1296,7 @@ WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
-    '{item['label']}' AS kpi_name,
+    {_sql_lit(item['label'])} AS kpi_name,
     'PY' AS time_period,
     {sql_expr} AS kpi_value
 FROM {qualified_table}

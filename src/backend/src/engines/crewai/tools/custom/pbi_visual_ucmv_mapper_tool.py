@@ -19,6 +19,44 @@ from pydantic import BaseModel, Field, PrivateAttr
 logger = logging.getLogger(__name__)
 
 
+def _is_safe_select_sql(sql: str) -> bool:
+    """SEC #3: gate LLM-generated dashboard SQL to a single read-only SELECT.
+
+    The mapper's `sql` is authored by an LLM from attacker-influenceable PBI visual
+    metadata, then stored as a Lakeview dataset query that runs against the
+    warehouse when the dashboard opens. Allow only a lone SELECT/WITH; reject
+    dangerous verbs (DROP/DELETE/…/GRANT/EXEC), stacked statements (`;` before the
+    end), and dollar-quote breakout. Reuses the metric-view deny-list where
+    available. Returns True if the SQL is safe to store.
+    """
+    if not sql or not isinstance(sql, str):
+        return False
+    s = sql.strip().rstrip(';').strip()
+    if not s:
+        return False
+    # Must start with SELECT or WITH (read-only shapes only). NOTE: do NOT reuse
+    # metric_view_utils._check_dangerous_sql here — that deny-list is tuned for
+    # *measure expressions* and flags a leading SELECT as dangerous, so it would
+    # reject every legitimate dataset query.
+    if not re.match(r'^\s*(SELECT|WITH)\b', s, re.IGNORECASE):
+        return False
+    # No stacked statements (any ';' after trailing-strip is a second statement).
+    if ';' in s:
+        return False
+    up = s.upper()
+    # Dollar-quote breakout (the metric-view YAML wraps bodies in $$…$$).
+    if '$$' in s:
+        return False
+    # Block DML/DDL/privilege verbs appearing as whole words anywhere.
+    if re.search(r'\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|MERGE|GRANT|'
+                 r'REVOKE|CREATE|EXEC|EXECUTE|CALL|COPY|MSCK|SET|USE)\b', up):
+        return False
+    # Block info-schema / catalog probing via UNION.
+    if re.search(r'\bUNION\b', up) and re.search(r'INFORMATION_SCHEMA|SYSTEM\.', up):
+        return False
+    return True
+
+
 class PBIVisualUCMVMapperSchema(BaseModel):
     """Input schema for PBIVisualUCMVMapperTool."""
     report_references_override: Optional[str] = Field(
@@ -347,22 +385,35 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
         text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
         text = text.strip()
+        result = None
         try:
-            result = json.loads(text)
-            if isinstance(result, list):
-                return result
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                result = parsed
         except json.JSONDecodeError:
             pass
-        # Try to extract JSON array
-        match = re.search(r'\[[\s\S]+\]', text)
-        if match:
-            try:
-                result = json.loads(match.group())
-                if isinstance(result, list):
-                    return result
-            except Exception:
-                pass
-        return []
+        if result is None:
+            # Try to extract JSON array
+            match = re.search(r'\[[\s\S]+\]', text)
+            if match:
+                try:
+                    parsed = json.loads(match.group())
+                    if isinstance(parsed, list):
+                        result = parsed
+                except Exception:
+                    pass
+        if result is None:
+            return []
+        # SEC #3: gate every LLM-produced `sql` to a safe read-only SELECT before it
+        # can become a stored Lakeview dataset query. Unsafe SQL is dropped (set to
+        # None) rather than silently deployed.
+        for m in result:
+            if isinstance(m, dict) and m.get('sql') and not _is_safe_select_sql(m['sql']):
+                logger.warning(
+                    "Dropping unsafe LLM-generated dashboard SQL for visual %s "
+                    "(not a plain read-only SELECT).", m.get('visual_id', '?'))
+                m['sql'] = None
+        return result
 
     def _fallback_mapping(self, visuals: list, ucmv_summaries: list) -> list:
         """Simple structural fallback when LLM is unavailable."""
