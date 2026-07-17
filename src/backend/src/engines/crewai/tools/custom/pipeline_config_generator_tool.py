@@ -179,8 +179,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         # that so the user re-enters instead of hunting a non-existent config bug.
         _redeploy_hint = (
             " If these worked before a redeploy, the stored value may have been "
-            "cleared because the encryption key changed — please re-enter it "
-            "(see docs/deployment/encryption-key-persistence.md)."
+            "cleared because the encryption key changed — please re-enter it."
         )
         if not access_token and not _creds_ok(client_id, client_secret, username, password):
             return json.dumps({"error": (
