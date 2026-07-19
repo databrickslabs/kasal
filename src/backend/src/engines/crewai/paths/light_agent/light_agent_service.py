@@ -850,11 +850,16 @@ class LightAgentService:
                         model=getattr(config, "model", None),
                         group_id=group_id,
                     ),
-                    # The local model needs headroom to emit a full surface (e.g. a
-                    # multi-slide presentation deck) as valid JSON; 30s was too tight
-                    # and silently dropped to plain text. Still bounded so a hung
-                    # compose never wedges the terminal status.
-                    timeout=60,
+                    # The model needs headroom to emit a full surface (e.g. a
+                    # multi-slide presentation deck) as valid JSON; 30s and then 60s
+                    # were too tight and silently dropped to plain text. Reasoning
+                    # models (Kimi K2.7) spend a long thinking pass before the JSON:
+                    # measured ~25-45s for the outline call + ~140s for the deck, so
+                    # 60s timed out EVERY presentation. The prose answer has already
+                    # streamed, so a generous bound only delays the surface, never the
+                    # text. Still bounded so a hung compose can't wedge the terminal
+                    # status; tune with A2UI_COMPOSE_TIMEOUT.
+                    timeout=float(os.getenv("A2UI_COMPOSE_TIMEOUT", "240")),
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}

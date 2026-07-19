@@ -106,19 +106,72 @@ class _VLLMFunctionCallingLLM(LLM):
         params = super()._prepare_completion_params(
             messages, tools=tools, skip_file_processing=skip_file_processing
         )
-        if os.getenv("VLLM_FORCE_TOOL_FIRST_TURN", "true").lower() != "true":
-            return params
-        # Only act when tools are offered this turn and nothing else already pinned
-        # tool_choice (e.g. structured-output / guardrail named-function calls).
-        if params.get("tools") and "tool_choice" not in params:
-            history = params.get("messages") or []
-            already_used_tool = any(
-                isinstance(m, dict) and (m.get("role") == "tool" or m.get("tool_calls"))
-                for m in history
-            )
-            if not already_used_tool:
-                params["tool_choice"] = "required"
+        # Force a tool call on the opening turn (see docstring) — opt out via env.
+        if os.getenv("VLLM_FORCE_TOOL_FIRST_TURN", "true").lower() == "true":
+            # Only act when tools are offered this turn and nothing else already
+            # pinned tool_choice (e.g. structured-output / guardrail calls).
+            if params.get("tools") and "tool_choice" not in params:
+                history = params.get("messages") or []
+                already_used_tool = any(
+                    isinstance(m, dict) and (m.get("role") == "tool" or m.get("tool_calls"))
+                    for m in history
+                )
+                if not already_used_tool:
+                    params["tool_choice"] = "required"
+        self._clamp_output_to_window(params)
         return params
+
+    def _clamp_output_to_window(self, params: dict) -> None:
+        """Reduce ``max_tokens`` so ``prompt_tokens + max_tokens`` fits the model's
+        context window.
+
+        Small self-hosted vLLM models enforce ``prompt + max_tokens <= max-model-len``
+        and return a 400 ("passed N input and requested M output") otherwise. CrewAI/
+        litellm set ``max_tokens`` from the model config's ``max_output_tokens`` without
+        knowing the ACTUAL prompt size, so a large prompt + full output overflows.
+        Shrink the requested output to what still fits (never grow it), leaving a
+        margin. No-op when the window is unknown or the request already fits, so
+        larger models are unaffected.
+        """
+        try:
+            want = params.get("max_tokens")
+            ctx = _context_window_for(self.model)
+            if not want or not ctx:
+                return
+            msgs = params.get("messages") or []
+            try:
+                input_tokens = litellm.token_counter(model=self.model, messages=msgs)
+            except Exception:
+                # Rough char/4 fallback when litellm can't tokenize the model.
+                input_tokens = sum(
+                    len(str(m.get("content", ""))) for m in msgs if isinstance(m, dict)
+                ) // 4
+            # token_counter(messages=...) omits the tools/function schemas, which DO
+            # count toward the server-side prompt — add a rough estimate for them.
+            tools = params.get("tools")
+            if tools:
+                try:
+                    import json as _json
+                    input_tokens += len(_json.dumps(tools, default=str)) // 4
+                except Exception:
+                    pass
+            # litellm's generic tokenizer systematically UNDERCOUNTS a self-hosted
+            # model's real (server-side) token count — observed 1-5% on Qwen, varying
+            # by content — and vLLM 400s on even a 1-token overrun of
+            # prompt+max_tokens<=window. Tight margins (256, then 1024/5%) each came up
+            # ~1 token short, so budget generously: 15% + a 2048 floor comfortably
+            # covers the drift. A small model simply can't do both a huge prompt AND a
+            # huge output; this trades some output headroom for never 400ing.
+            margin = max(2048, int(input_tokens * 0.15))
+            allowed = ctx - input_tokens - margin
+            if allowed < want:
+                params["max_tokens"] = max(256, allowed)
+                logger.warning(
+                    f"[vLLM clamp] model={self.model} input~={input_tokens} + "
+                    f"max_tokens={want} > ctx={ctx}; clamped output to {params['max_tokens']}"
+                )
+        except Exception as clamp_err:  # never fail a completion over budgeting
+            logger.debug(f"[vLLM clamp] skipped: {clamp_err}")
 from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.model_config_service import ModelConfigService
 from src.services.api_keys_service import ApiKeysService
@@ -179,16 +232,63 @@ try:
 
     registered_count = 0
     for model_name, config in MODEL_CONFIGS.items():
-        if config.get('provider') == 'databricks':
-            full_model_name = f"databricks/{model_name}"
-            context_window = config.get('context_window', 128000)
-            LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
-            registered_count += 1
-            logger.debug(f"Registered {full_model_name} with context_window={context_window} in CrewAI")
+        provider = config.get('provider')
+        context_window = config.get('context_window', 128000)
+        # Map each provider to the litellm model id CrewAI looks up. Self-hosted
+        # vLLM (and legacy "airllm") endpoints are OpenAI-compatible → "openai/<name>".
+        # Registering non-databricks models too means CrewAI's respect_context_window
+        # AND our max_tokens clamp use the REAL window instead of the 8192 default —
+        # otherwise a small self-hosted model silently overflows / empties out.
+        if provider == 'databricks':
+            keys = [f"databricks/{model_name}"]
+        elif provider in ('vllm', 'airllm', 'kimi'):
+            # Kimi (Moonshot AI) is also routed through litellm's OpenAI-compatible
+            # path ("openai/<name>"), so register its real window the same way.
+            keys = [f"openai/{model_name}", model_name]
+        else:
+            continue
+        for key in keys:
+            LLM_CONTEXT_WINDOW_SIZES[key] = context_window
+        registered_count += 1
+        logger.debug(f"Registered {keys} with context_window={context_window} in CrewAI")
 
-    logger.info(f"Registered {registered_count} Databricks models with CrewAI for context window management")
+    logger.info(f"Registered {registered_count} models with CrewAI for context window management")
 except Exception as reg_err:
     logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
+
+
+def _context_window_for(model_name: str) -> int:
+    """Best-effort context window for a litellm model id, read from the CrewAI
+    registry populated above (0 when unknown). Used by the vLLM output clamp."""
+    try:
+        from crewai.llm import LLM_CONTEXT_WINDOW_SIZES as _sizes
+        return int(_sizes.get(model_name) or 0)
+    except Exception:
+        return 0
+
+
+# Teach CrewAI to RECOGNIZE a self-hosted vLLM / OpenAI-compatible server's
+# context-overflow error so ``respect_context_window`` (summarize the message
+# history + retry) actually fires for it. CrewAI's CONTEXT_LIMIT_ERRORS list is
+# tuned for OpenAI/Anthropic phrasing; vLLM says "... the model's context length is
+# only N tokens ... maximum input length ... Please reduce the length of the input",
+# which matches NONE of the built-in phrases. Without this, a crew whose sequential
+# -task context grows past the window HARD-FAILS instead of summarizing — the output
+# clamp can't help once the INPUT alone nears the window.
+try:
+    from crewai.utilities.exceptions.context_window_exceeding_exception import (
+        CONTEXT_LIMIT_ERRORS as _CREWAI_CTX_ERRORS,
+    )
+    for _phrase in (
+        "maximum input length",
+        "please reduce the length of the input",
+        "the model's context length is only",
+    ):
+        if _phrase not in _CREWAI_CTX_ERRORS:
+            _CREWAI_CTX_ERRORS.append(_phrase)
+    logger.info("Extended CrewAI CONTEXT_LIMIT_ERRORS with vLLM context-overflow phrasing")
+except Exception as _ctx_patch_err:
+    logger.warning(f"Could not extend CrewAI CONTEXT_LIMIT_ERRORS: {_ctx_patch_err}")
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
@@ -1111,6 +1211,27 @@ class LLMManager:
                     litellm.register_model({prefixed_model: _tool_info, model_name_value: _tool_info})
                 except Exception as reg_err:  # noqa: BLE001 — never block LLM creation
                     logger.debug(f"Could not register vllm function-calling support: {reg_err}")
+        elif provider == ModelProvider.KIMI:
+            # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
+            # native "moonshot" provider, so route via the openai/ prefix with an
+            # explicit api_base, exactly like the self-hosted vLLM path.
+            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            if not api_key:
+                raise ValueError(
+                    f"No Kimi API key found for workspace '{group_id}'. "
+                    f"Add KIMI_API_KEY under Configuration -> API Keys."
+                )
+            api_base = os.getenv("KIMI_ENDPOINT", "https://api.moonshot.ai/v1")
+            prefixed_model = f"openai/{model_name_value}"
+            # These model ids aren't in litellm's registry under the openai/ prefix,
+            # so supports_function_calling() would return False and CrewAI would fall
+            # back to the ReAct text tool protocol. Kimi K2.x supports native tool
+            # calling — register the models so CrewAI sends real `tools=[...]`.
+            try:
+                _tool_info = {"supports_function_calling": True, "litellm_provider": "openai", "mode": "chat"}
+                litellm.register_model({prefixed_model: _tool_info, model_name_value: _tool_info})
+            except Exception as reg_err:  # noqa: BLE001 — never block LLM creation
+                logger.debug(f"Could not register kimi function-calling support: {reg_err}")
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
@@ -1143,7 +1264,26 @@ class LLMManager:
         if temperature is not None:
             llm_params["temperature"] = temperature
             logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
-        
+
+        # Kimi K2.x endpoints 400 on ANY temperature other than 1 ("invalid
+        # temperature: only 1 is allowed for this model"). The seeds pass 0.7 and
+        # the A2UI surface composer passes 0 (deterministic JSON) — both were
+        # rejected, which silently killed surface generation (no presentation/quiz
+        # UI). Drop the param entirely instead of pinning it: omitted = server
+        # default (1). additional_drop_params also strips it if CrewAI re-injects
+        # temperature on a downstream call (global drop_params won't — litellm
+        # considers temperature "supported" by the openai provider).
+        if provider == ModelProvider.KIMI:
+            if llm_params.pop("temperature", None) is not None:
+                logger.info(f"Kimi model {model_name_value} only accepts temperature=1 — dropping temperature")
+            # tool_choice is dropped too: K2.7 thinking cannot be disabled ("invalid
+            # thinking: only type=enabled is allowed") and a FORCED tool_choice 400s
+            # ("tool_choice 'specified' is incompatible with thinking enabled") —
+            # which broke CrewAI memory extraction (3 failed generations per save)
+            # and any planning/instructor call that forces a function. Dropping it
+            # falls back to auto; verified the model still emits the tool call.
+            llm_params["additional_drop_params"] = ["temperature", "tool_choice"]
+
         # GPT-5 doesn't support certain parameters - enable drop_params
         if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
             llm_params["drop_params"] = True

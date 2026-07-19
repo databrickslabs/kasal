@@ -1453,6 +1453,31 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     />
                   </Grid>
 
+                  {/* Ollama server URL — backend falls back to OLLAMA_API_BASE when empty */}
+                  {formData.embedder_config?.provider === 'ollama' && (
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Ollama URL"
+                        value={(formData.embedder_config?.config as Record<string, unknown>)?.url || ''}
+                        onChange={(e) => {
+                          const currentConfig = formData.embedder_config || { provider: 'ollama', config: { model: 'nomic-embed-text' } };
+                          const currentInnerConfig = currentConfig.config || {};
+                          handleInputChange('embedder_config', {
+                            ...currentConfig,
+                            config: {
+                              ...currentInnerConfig,
+                              url: e.target.value
+                            }
+                          });
+                        }}
+                        disabled={!formData.memory}
+                        placeholder="http://localhost:11434"
+                        helperText="Ollama server for embeddings; leave empty to use the backend's OLLAMA_API_BASE"
+                      />
+                    </Grid>
+                  )}
+
                   {/* Memory Storage Backend Info */}
                   <Grid item xs={12}>
                     <Divider sx={{ my: 2 }} />

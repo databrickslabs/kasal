@@ -55,7 +55,8 @@ export const providerToKeyName: ProviderKeyMapping = {
   'deepseek': 'DEEPSEEK_API_KEY',
   'grok': 'GROK_API_KEY',
   'databricks': 'DATABRICKS_API_KEY',
-  'gemini': 'GEMINI_API_KEY'
+  'gemini': 'GEMINI_API_KEY',
+  'kimi': 'KIMI_API_KEY'
 };
 
 /**

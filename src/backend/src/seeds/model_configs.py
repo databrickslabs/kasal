@@ -251,6 +251,47 @@ DEFAULT_MODELS = {
         "context_window": 28672,
         "max_output_tokens": 8192
     },
+    # --- Kimi (Moonshot AI — OpenAI-compatible API at https://api.moonshot.ai/v1,
+    # override with KIMI_ENDPOINT; key = KIMI_API_KEY in the API Keys service) ---
+    "kimi-k2.5": {
+        "name": "kimi-k2.5",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768
+    },
+    "kimi-k2.6": {
+        "name": "kimi-k2.6",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768
+    },
+    "kimi-k2.7-code": {
+        "name": "kimi-k2.7-code",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768
+    },
+    "kimi-k2.7-code-highspeed": {
+        # Same weights as kimi-k2.7-code served on faster infrastructure —
+        # tuned for coding-agent loops (higher throughput, higher per-token cost).
+        "name": "kimi-k2.7-code-highspeed",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768
+    },
+    "kimi-k3": {
+        # K3 flagship (released 2026-07-16): 2.8T-param open MoE, native 1M-token
+        # context (1,048,576), default max output 131,072 per Moonshot docs.
+        "name": "kimi-k3",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 1048576,
+        "max_output_tokens": 131072
+    },
     # --- Databricks (sorted alphabetically) ---
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
@@ -542,7 +583,11 @@ async def seed_async():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data.get("provider") == "databricks")  # Enable only Databricks-provider models by default
+                        # Preserve the operator's enable/disable choice across reseeds.
+                        # Forcing enabled=(provider=="databricks") here disabled any
+                        # self-hosted vllm/ollama model on EVERY restart (they aren't
+                        # "databricks"), silently breaking local setups. New installs
+                        # still get the databricks default via the insert branch below.
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
@@ -650,7 +695,11 @@ def seed_sync():
                         existing_model.context_window = model_data["context_window"]
                         existing_model.max_output_tokens = model_data["max_output_tokens"]
                         existing_model.extended_thinking = model_data.get("extended_thinking", False)
-                        existing_model.enabled = (model_data.get("provider") == "databricks")  # Enable only Databricks-provider models by default
+                        # Preserve the operator's enable/disable choice across reseeds.
+                        # Forcing enabled=(provider=="databricks") here disabled any
+                        # self-hosted vllm/ollama model on EVERY restart (they aren't
+                        # "databricks"), silently breaking local setups. New installs
+                        # still get the databricks default via the insert branch below.
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1

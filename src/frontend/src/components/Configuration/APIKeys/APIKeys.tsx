@@ -95,6 +95,7 @@ function APIKeys(): JSX.Element {
     'DEEPSEEK_API_KEY',
     'GROK_API_KEY',
     'GEMINI_API_KEY',
+    'KIMI_API_KEY',
     'POWERBI_USERNAME',
     'POWERBI_PASSWORD',
     'POWERBI_CLIENT_SECRET'
@@ -109,7 +110,8 @@ function APIKeys(): JSX.Element {
       'qwen': 'QWEN_API_KEY',
       'deepseek': 'DEEPSEEK_API_KEY',
       'grok': 'GROK_API_KEY',
-      'gemini': 'GEMINI_API_KEY'
+      'gemini': 'GEMINI_API_KEY',
+      'kimi': 'KIMI_API_KEY'
     };
     return mapping;
   }, []);

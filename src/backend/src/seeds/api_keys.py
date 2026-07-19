@@ -20,6 +20,7 @@ PLACEHOLDER_API_KEYS: List[Dict[str, str]] = [
     {"name": "ANTHROPIC_API_KEY", "description": "Anthropic API Key"},
     {"name": "DEEPSEEK_API_KEY", "description": "DeepSeek API Key"},
     {"name": "GEMINI_API_KEY", "description": "Google Gemini API Key"},
+    {"name": "KIMI_API_KEY", "description": "Moonshot AI Kimi API Key"},
     {"name": "DATABRICKS_API_KEY", "description": "Databricks personal access token (if used)"},
 ]
 

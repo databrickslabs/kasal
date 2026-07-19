@@ -57,15 +57,24 @@ def _instructor_mode_for_llm(llm):
     validated + retried by instructor, and no ``response_format`` dependency
     (Databricks Claude only accepts ``json_schema``, not ``json_object``).
 
+    Kimi (Moonshot) K2.x models need MD_JSON for a different reason: instructor's
+    TOOLS mode FORCES the schema function via ``tool_choice`` and Moonshot rejects
+    forced tool choice while thinking is on ("tool_choice 'specified' is
+    incompatible with thinking enabled") — and thinking cannot be disabled on
+    these models ("only type=enabled is allowed"). That 400'd every CrewAI
+    memory-extraction / structured-output call 3× per save. MD_JSON avoids the
+    tool channel entirely (verified working against api.moonshot.ai).
+
     Only affects structured-output calls — non-pydantic calls never reach
     instructor. codex never reaches here either (is_litellm=False; it enforces
-    structured output natively via the Responses API). Returns None for
-    non-Databricks litellm models so their instructor behavior is unchanged.
+    structured output natively via the Responses API). Returns None for other
+    litellm models so their instructor behavior is unchanged.
     """
     try:
         if llm is None or isinstance(llm, str) or not getattr(llm, "is_litellm", False):
             return None
-        if "databricks" not in str(getattr(llm, "model", "")).lower():
+        model_str = str(getattr(llm, "model", "")).lower()
+        if "databricks" not in model_str and "kimi" not in model_str:
             return None
         import instructor
 
