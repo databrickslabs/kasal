@@ -298,6 +298,25 @@ async def lifespan(app: FastAPI):
                 system_logger.info(
                     f"Activated Lakebase session factory (instance: {instance_name})"
                 )
+
+                # Self-heal the ACTIVE Lakebase schema. init_db() already ran the
+                # same pass, but against the local/default engine BEFORE this
+                # hot-swap — so it never touched the Lakebase. Re-running it here
+                # (create-missing-tables + add-missing-columns, all idempotent and
+                # NON-DESTRUCTIVE) is the only path that heals a customer's
+                # PRE-EXISTING Lakebase, e.g. adding powerbi_extraction without the
+                # destructive DROP SCHEMA the migrate UI would do. Best-effort.
+                try:
+                    from src.db.session import run_schema_self_heal
+                    async with lb_factory._session_factory() as _heal_session:
+                        conn = await _heal_session.connection()
+                        await run_schema_self_heal(conn)
+                        await _heal_session.commit()
+                    system_logger.info("Lakebase schema self-heal complete")
+                except Exception as _heal_err:
+                    system_logger.warning(
+                        f"Lakebase schema self-heal skipped: {_heal_err}"
+                    )
         except Exception as e:
             system_logger.warning(f"Lakebase activation skipped: {e}")
 

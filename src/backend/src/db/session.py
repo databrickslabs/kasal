@@ -1007,6 +1007,33 @@ async def _ensure_databricks_config_columns(conn) -> None:
         )
 
 
+async def run_schema_self_heal(conn) -> None:
+    """Create missing tables and add missing columns on an existing DB.
+
+    ``create_all`` fully creates a NEW table but never ALTERs an existing one, so
+    DBs provisioned before a table/column was added won't have it. Each ``_ensure_*``
+    helper here is idempotent and NON-DESTRUCTIVE — ``CREATE TABLE IF NOT EXISTS``
+    for tables, ``ADD COLUMN IF NOT EXISTS`` for columns — so this is safe to run
+    on every startup and against any engine's connection.
+
+    Runs against BOTH the local/default engine (in ``init_db``) AND, critically,
+    the active Lakebase engine after the runtime hot-swap (``main.py`` lifespan) —
+    the latter is the only path that heals a customer's PRE-EXISTING Lakebase,
+    which ``init_db`` alone misses because it fires before Lakebase activation.
+    """
+    await _ensure_documentation_embeddings_columns(conn)
+    await _ensure_databricks_config_columns(conn)
+    await _ensure_chat_sessions_table(conn)
+    await _ensure_chat_sessions_columns(conn)
+    await _ensure_crew_feedback_table(conn)
+    await _ensure_powerbi_extraction_table(conn)
+    await _ensure_crew_columns(conn)
+    await _ensure_ui_config_columns(conn)
+    await _ensure_hot_polling_indexes(conn)
+    await _heal_personal_group_names(conn)
+    await _disable_bi_specialist_crew_memory(conn)
+
+
 async def init_db() -> None:
     """Initialize database tables if they don't exist."""
     try:
@@ -1186,27 +1213,16 @@ async def init_db() -> None:
 
             logger.info("Database tables initialized successfully")
 
-        # Self-heal: ensure documentation_embeddings has the group_id/file_path
-        # columns even when the tables already existed (create_all is skipped
-        # then). DBs created before these columns were added would otherwise be
-        # missing them, breaking built-in doc seeding + group-scoped search.
+        # Self-heal: create missing tables and add missing columns even when the
+        # tables already existed (create_all is skipped then). DBs created before
+        # these tables/columns were added would otherwise be missing them.
         try:
             ensure_engine = create_async_engine(
                 str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG
             )
             try:
                 async with ensure_engine.begin() as conn:
-                    await _ensure_documentation_embeddings_columns(conn)
-                    await _ensure_databricks_config_columns(conn)
-                    await _ensure_chat_sessions_table(conn)
-                    await _ensure_chat_sessions_columns(conn)
-                    await _ensure_crew_feedback_table(conn)
-                    await _ensure_powerbi_extraction_table(conn)
-                    await _ensure_crew_columns(conn)
-                    await _ensure_ui_config_columns(conn)
-                    await _ensure_hot_polling_indexes(conn)
-                    await _heal_personal_group_names(conn)
-                    await _disable_bi_specialist_crew_memory(conn)
+                    await run_schema_self_heal(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:
