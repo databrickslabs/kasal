@@ -207,7 +207,7 @@ class PowerBIAnalysisTool(BaseTool):
             "access_token": kwargs.get("access_token"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
-            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
             "include_visual_references": kwargs.get("include_visual_references", True),
             "skip_system_tables": kwargs.get("skip_system_tables", True),
             "max_dax_retries": kwargs.get("max_dax_retries", 5),
@@ -2217,7 +2217,7 @@ class PowerBIAnalysisTool(BaseTool):
 
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
-        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         if not llm_workspace_url or not llm_token:
             # Fallback: Generate simple DAX without LLM
@@ -2674,7 +2674,7 @@ CALCULATETABLE(...)
         """
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
-        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         if not llm_workspace_url or not llm_token:
             return None

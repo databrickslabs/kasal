@@ -600,7 +600,7 @@ def process_table(
                     table_key=table_key,
                     base_names=base_names,
                     original_to_snake=original_to_snake,
-                    model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                    model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4-5'),
                     # Feed the dependency-graph topo order so a dependent measure
                     # lands in a later concurrency chunk than the measure it
                     # references — its MEASURE() ref resolves (Step 3.9).

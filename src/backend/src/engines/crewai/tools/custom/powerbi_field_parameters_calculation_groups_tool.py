@@ -178,7 +178,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # LLM configuration
             "llm_workspace_url": get_filtered_value("llm_workspace_url"),
             "llm_token": get_filtered_value("llm_token"),
-            "llm_model": get_filtered_value("llm_model", "databricks-claude-sonnet-4"),
+            "llm_model": get_filtered_value("llm_model", "databricks-claude-sonnet-4-5"),
             # Feature flags
             "translate_measures": get_filtered_value("translate_measures", True),
             "include_sql_translation": get_filtered_value("include_sql_translation", True),

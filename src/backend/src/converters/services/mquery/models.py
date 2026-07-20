@@ -381,7 +381,7 @@ class MQueryConversionConfig:
     dataset_id: Optional[str] = None  # If None, scan all datasets
 
     # LLM configuration
-    llm_model: str = "databricks-claude-sonnet-4"
+    llm_model: str = "databricks-claude-sonnet-4-5"
     llm_workspace_url: Optional[str] = None
     llm_token: Optional[str] = None
     max_tokens: int = 4000

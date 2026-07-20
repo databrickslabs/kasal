@@ -1198,7 +1198,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         messages = [{"role": "user", "content": prompt}]
         headers = get_user_agent_header(KasalProduct.POWERBI)
         content = await LLMManager.completion(
-            messages=messages, model="databricks-claude-sonnet-4",
+            messages=messages, model="databricks-claude-sonnet-4-5",
             temperature=0.1, max_tokens=2000, extra_headers=headers)
         if not content:
             return {}

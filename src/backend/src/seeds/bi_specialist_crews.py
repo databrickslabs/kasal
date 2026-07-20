@@ -76,7 +76,7 @@ def _agent_node(agent_id: str, agent_data: dict, x: int, y: int) -> dict:
             "tool_configs": agent_data.get("tool_configs"),
             "agentId": agent_id,
             "taskId": None,
-            "llm": agent_data.get("llm", "databricks-claude-sonnet-4"),
+            "llm": agent_data.get("llm", "databricks-claude-sonnet-4-5"),
             "function_calling_llm": None,
             "max_iter": agent_data.get("max_iter", 25),
             "max_rpm": agent_data.get("max_rpm", 10),
@@ -300,7 +300,7 @@ UCMV_GEN_TASK = {
             "catalog": "",
             "schema_name": "",
             "use_llm_fallback": True,
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
             # JSON mode: the flow injects the preceding Pipeline Config crew's
             # output into these fields (config_json ← proposed_config,
             # measures_json/mquery_json ← the handoff arrays it now emits). They
@@ -627,7 +627,7 @@ MAPPER_TASK = {
             "schema_name": "",
             "dashboard_title": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         }
     },
     "config": DEFAULT_TASK_CONFIG,
@@ -789,7 +789,7 @@ GENIE_CFG_TASK = {
             "schema_name": "",
             "warehouse_id": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         }
     },
     "config": DEFAULT_TASK_CONFIG,
@@ -947,7 +947,7 @@ async def _seed_agent(session, data: dict) -> None:
         goal=data["goal"],
         backstory=data.get("backstory", ""),
         group_id=BI_GROUP_ID,
-        llm=data.get("llm", "databricks-claude-sonnet-4"),
+        llm=data.get("llm", "databricks-claude-sonnet-4-5"),
         tools=data.get("tools", []),
         tool_configs=data.get("tool_configs"),
         max_iter=data.get("max_iter", 25),

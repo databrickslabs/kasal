@@ -463,7 +463,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
         schema = _get('schema_name') or 'default'
         dashboard_title = _get('dashboard_title') or 'PBI Dashboard'
         host_override = _get('databricks_host') or None
-        llm_model = _get('llm_model') or 'databricks-claude-sonnet-4'
+        llm_model = _get('llm_model') or 'databricks-claude-sonnet-4-5'
 
         # ── 1. Parse report_references — override wins over flow injection ──
         # Priority: report_references_override > report_references_json > ucmv_output (tool 78 injected)
