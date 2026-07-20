@@ -1438,7 +1438,7 @@ const DatabaseManagement: React.FC = () => {
                           </FormLabel>
                           <RadioGroup
                             value={migrationOption}
-                            onChange={(e) => setMigrationOption(e.target.value as 'recreate' | 'use' | 'schema_only')}
+                            onChange={(e) => setMigrationOption(e.target.value as 'recreate' | 'use' | 'schema_only' | 'use_expand')}
                           >
                             <FormControlLabel
                               value="recreate"
@@ -1472,6 +1472,18 @@ const DatabaseManagement: React.FC = () => {
                                   <Typography variant="body2" fontWeight="bold">Use Existing Data</Typography>
                                   <Typography variant="caption" color="text.secondary">
                                     Instance already has Kasal schema and data — just connect
+                                  </Typography>
+                                </Box>
+                              }
+                            />
+                            <FormControlLabel
+                              value="use_expand"
+                              control={<Radio />}
+                              label={
+                                <Box>
+                                  <Typography variant="body2" fontWeight="bold">Use &amp; Expand Existing Schema &amp; Data</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Connect and add any missing tables/columns — keeps all existing data
                                   </Typography>
                                 </Box>
                               }
@@ -1518,15 +1530,21 @@ const DatabaseManagement: React.FC = () => {
                               const hasSchema = testResponse.data.has_kasal_schema;
                               setSchemaExists(hasSchema);
 
-                              if (migrationOption === 'use') {
+                              if (migrationOption === 'use' || migrationOption === 'use_expand') {
                                 // Use existing — enable directly (schema may not be visible
-                                // to the SPN yet due to permissions, but will work at runtime)
+                                // to the SPN yet due to permissions, but will work at runtime).
+                                // 'use_expand' additionally reconciles the schema
+                                // NON-DESTRUCTIVELY (create missing tables/columns, keep data).
+                                const expandSchema = migrationOption === 'use_expand';
                                 const response = await apiClient.post('/database-management/lakebase/enable', {
                                   instance_name: lakebaseConfig.instance_name,
-                                  endpoint: lakebaseConfig.endpoint
+                                  endpoint: lakebaseConfig.endpoint,
+                                  expand_schema: expandSchema
                                 });
                                 if (response.data.success) {
-                                  setSuccess(`Connected to Lakebase. Using existing schema with ${testResponse.data.table_count} table(s).`);
+                                  setSuccess(expandSchema
+                                    ? `Connected to Lakebase. Existing schema expanded (missing tables/columns created); existing data preserved.`
+                                    : `Connected to Lakebase. Using existing schema with ${testResponse.data.table_count} table(s).`);
                                   // Refresh config and info in background — don't block the button
                                   loadLakebaseConfig().catch(() => {});
                                   loadDatabaseInfo().catch(() => {});
@@ -1549,7 +1567,7 @@ const DatabaseManagement: React.FC = () => {
                           disabled={!lakebaseConfig.instance_name || loading}
                         >
                           {loading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                          {migrationOption === 'use' ? 'Connect' : migrationOption === 'schema_only' ? 'Connect & Create Schema' : 'Connect & Migrate'}
+                          {migrationOption === 'use' ? 'Connect' : migrationOption === 'use_expand' ? 'Connect & Expand Schema' : migrationOption === 'schema_only' ? 'Connect & Create Schema' : 'Connect & Migrate'}
                         </Button>
                       </Grid>
                     </Grid>
@@ -1791,47 +1809,6 @@ const DatabaseManagement: React.FC = () => {
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Connect to the existing kasal schema as-is
-                  </Typography>
-                </Box>
-              </Button>
-            ) : null}
-            {/* Use & Expand: connect + create any missing tables/columns (non-destructive) */}
-            {schemaExists ? (
-              <Button
-                variant="outlined"
-                fullWidth
-                startIcon={<CheckIcon />}
-                onClick={async () => {
-                  setShowMigrationDialog(false);
-                  try {
-                    setLoading(true);
-                    const response = await apiClient.post('/database-management/lakebase/enable', {
-                      instance_name: lakebaseConfig.instance_name,
-                      endpoint: lakebaseConfig.endpoint,
-                      expand_schema: true
-                    });
-                    if (response.data.success) {
-                      setSuccess('Connected to Lakebase. Existing schema expanded (missing tables/columns created).');
-                      await loadLakebaseConfig();
-                      await loadDatabaseInfo();
-                    }
-                  } catch (err: unknown) {
-                    const errorMessage = isErrorWithResponse(err)
-                      ? err.response?.data?.detail || 'Failed to enable Lakebase'
-                      : 'Failed to enable Lakebase';
-                    setError(errorMessage);
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
-              >
-                <Box sx={{ textAlign: 'left' }}>
-                  <Typography variant="body1" fontWeight="bold">
-                    Use &amp; Expand Existing Schema &amp; Data
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Connect and add any missing tables/columns — keeps all existing data
                   </Typography>
                 </Box>
               </Button>
