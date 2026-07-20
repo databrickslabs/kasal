@@ -267,7 +267,7 @@ Rules:
         warehouse_id = _get('warehouse_id') or ''
         databricks_host = _get('databricks_host') or None
         space_title = _get('space_title') or 'Genie Space'
-        llm_model = _get('llm_model') or 'databricks/databricks-claude-sonnet-4'
+        llm_model = _get('llm_model') or 'databricks/databricks-claude-sonnet-4-5'
         genie_config_override = _get('genie_config_override')
 
         # ── 1. Manual override — skip auto-generation ────────────────────────

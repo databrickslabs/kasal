@@ -347,7 +347,7 @@ class MLflowService:
             configured_judge_model: Optional configured judge model key
 
         Returns:
-            Properly formatted model name for LiteLLM (e.g., "databricks/databricks-claude-sonnet-4")
+            Properly formatted model name for LiteLLM (e.g., "databricks/databricks-claude-sonnet-4-5")
         """
         import os
 
@@ -359,9 +359,9 @@ class MLflowService:
         if not configured_judge_model:
             configured_judge_model = os.getenv("MLFLOW_EVAL_JUDGE_MODEL")
 
-        # Default to databricks-claude-sonnet-4 if nothing configured
+        # Default to databricks-claude-sonnet-4-5 if nothing configured
         if not configured_judge_model:
-            configured_judge_model = "databricks-claude-sonnet-4"
+            configured_judge_model = "databricks-claude-sonnet-4-5"
             logger.info(f"[MLflowService] Using default judge model: {configured_judge_model}")
         else:
             logger.info(f"[MLflowService] Using configured judge model: {configured_judge_model}")
@@ -471,7 +471,7 @@ class MLflowService:
         # Run blocking MLflow 3.x evaluation code in a thread to keep API async/non-blocking
         # Resolve judge model using the model configuration system
         judge_model_route = await self._resolve_judge_model()
-        judge_model_defaulted = judge_model_route.endswith("databricks-claude-sonnet-4")
+        judge_model_defaulted = judge_model_route.endswith("databricks-claude-sonnet-4-5")
 
         # Get auth context for evaluation (will be passed to thread)
         # IMPORTANT: Use PAT/SPN auth for MLflow evaluation (skip OBO) to avoid scope issues

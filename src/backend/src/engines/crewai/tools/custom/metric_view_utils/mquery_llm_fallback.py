@@ -133,7 +133,7 @@ async def _call_llm(prompt: str, system_prompt: str, model: str) -> dict:
 async def translate_mquery_to_sql(
     table_name: str,
     mquery: str,
-    model: str = 'databricks-claude-sonnet-4',
+    model: str = 'databricks-claude-sonnet-4-5',
     cache: OrderedDict | None = None,
 ) -> dict:
     """Translate a raw M expression to a Spark SQL source SELECT.
@@ -178,7 +178,7 @@ async def translate_mquery_to_sql(
 
 async def recover_sources_with_llm(
     mquery_entries: list[dict],
-    model: str = 'databricks-claude-sonnet-4',
+    model: str = 'databricks-claude-sonnet-4-5',
 ) -> tuple[list[dict], int]:
     """Best-effort: rewrite raw-M entries' transpiled_sql to a Spark SQL SELECT.
 

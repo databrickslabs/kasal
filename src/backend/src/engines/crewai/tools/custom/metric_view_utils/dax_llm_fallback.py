@@ -266,7 +266,7 @@ async def translate_with_llm(
     table_key: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
-    model: str = 'databricks-claude-sonnet-4',
+    model: str = 'databricks-claude-sonnet-4-5',
     cache: OrderedDict | None = None,
     table_context: str = "",
 ) -> TranslationResult:
@@ -372,7 +372,7 @@ async def translate_batch_with_llm(
     table_key: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
-    model: str = 'databricks-claude-sonnet-4',
+    model: str = 'databricks-claude-sonnet-4-5',
     topo_priority: dict[str, int] | None = None,
     table_context: str = "",
 ) -> list[TranslationResult]:

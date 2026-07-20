@@ -33,7 +33,7 @@ class UCMetricViewGeneratorSchema(BaseModel):
     unflatten_tables: bool = Field(False, description="Unflatten __-separated table names")
     use_llm_fallback: bool = Field(False, description="Enable LLM fallback for unmatched DAX patterns (opt-in)")
     translation_mode: Optional[str] = Field(None, description="'llm_first' (default when LLM enabled — skill-corpus-driven) or 'regex_first' (regex patterns primary)")
-    llm_model: Optional[str] = Field(None, description="LLM model for fallback (default: databricks-claude-sonnet-4)")
+    llm_model: Optional[str] = Field(None, description="LLM model for fallback (default: databricks-claude-sonnet-4-5)")
     llm_workspace_url: Optional[str] = Field(None, description="Databricks workspace URL for LLM endpoint")
     llm_token: Optional[str] = Field(None, description="Databricks token for LLM endpoint")
 
@@ -186,7 +186,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         if use_llm:
             llm_config = {
                 'use_llm_fallback': True,
-                'llm_model': _get('llm_model') or 'databricks-claude-sonnet-4',
+                'llm_model': _get('llm_model') or 'databricks-claude-sonnet-4-5',
                 'llm_workspace_url': _get('llm_workspace_url') or os.environ.get('DATABRICKS_HOST', ''),
                 'llm_token': _get('llm_token') or os.environ.get('DATABRICKS_TOKEN', ''),
                 # LLM-first translation (skill-corpus driven) is the default; the
@@ -233,7 +233,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     logger.info(f"[UCMV] {raw_m_count} raw M-Query table(s) detected; attempting M→SQL LLM recovery")
                     mquery_entries, _recovered = _run_async(recover_sources_with_llm(
                         mquery_entries,
-                        model=(_get('llm_model') or 'databricks-claude-sonnet-4'),
+                        model=(_get('llm_model') or 'databricks-claude-sonnet-4-5'),
                     ))
                     logger.info(f"[UCMV] M→SQL recovery: {_recovered}/{raw_m_count} table(s) recovered")
             except Exception as _m_err:

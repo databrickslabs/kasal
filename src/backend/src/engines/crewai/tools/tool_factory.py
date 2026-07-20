@@ -1665,7 +1665,7 @@ class ToolFactory:
                         # LLM Configuration for DAX generation
                         tool_args["llm_workspace_url"] = tool_config.get("llm_workspace_url")
                         tool_args["llm_token"] = tool_config.get("llm_token")
-                        tool_args["llm_model"] = tool_config.get("llm_model", "databricks-claude-sonnet-4")
+                        tool_args["llm_model"] = tool_config.get("llm_model", "databricks-claude-sonnet-4-5")
 
                         # Options
                         tool_args["include_visual_references"] = tool_config.get("include_visual_references", True)
