@@ -1795,6 +1795,47 @@ const DatabaseManagement: React.FC = () => {
                 </Box>
               </Button>
             ) : null}
+            {/* Use & Expand: connect + create any missing tables/columns (non-destructive) */}
+            {schemaExists ? (
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<CheckIcon />}
+                onClick={async () => {
+                  setShowMigrationDialog(false);
+                  try {
+                    setLoading(true);
+                    const response = await apiClient.post('/database-management/lakebase/enable', {
+                      instance_name: lakebaseConfig.instance_name,
+                      endpoint: lakebaseConfig.endpoint,
+                      expand_schema: true
+                    });
+                    if (response.data.success) {
+                      setSuccess('Connected to Lakebase. Existing schema expanded (missing tables/columns created).');
+                      await loadLakebaseConfig();
+                      await loadDatabaseInfo();
+                    }
+                  } catch (err: unknown) {
+                    const errorMessage = isErrorWithResponse(err)
+                      ? err.response?.data?.detail || 'Failed to enable Lakebase'
+                      : 'Failed to enable Lakebase';
+                    setError(errorMessage);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="body1" fontWeight="bold">
+                    Use &amp; Expand Existing Schema &amp; Data
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Connect and add any missing tables/columns — keeps all existing data
+                  </Typography>
+                </Box>
+              </Button>
+            ) : null}
           </Box>
 
           {schemaExists && (
