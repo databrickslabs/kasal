@@ -1582,14 +1582,47 @@ class LakebaseService(BaseService):
         # Save updated config
         await self.save_config(config)
 
-        # No dispose_engines() here — the database router checks
-        # is_lakebase_enabled() on every request, so the next request
-        # will route to Lakebase automatically after this config is committed.
-        # Calling dispose inside a request handler kills the StaticPool
-        # connection before the DI layer commits, losing the config change.
+        # Reconcile the schema on the target Lakebase, NON-DESTRUCTIVELY, so a
+        # connect to an EXISTING Kasal Lakebase gains any tables/columns added
+        # since it was provisioned (e.g. powerbi_extraction) WITHOUT dropping
+        # anything. This is the runtime-connect counterpart to the boot-time
+        # self-heal in main.py's lifespan: that path only fires when Lakebase is
+        # already enabled at startup, but the common production flow is
+        # SQLite-default → connect here at runtime, which the lifespan misses.
+        #
+        # recreate=False → CREATE SCHEMA IF NOT EXISTS (never DROP), and
+        # create_tables_async uses CREATE TABLE IF NOT EXISTS (checkfirst) — so a
+        # fully-provisioned instance is a cheap no-op and existing data is safe.
+        # Best-effort: a reconcile failure must not block enabling Lakebase.
+        reconcile_status = "skipped"
+        try:
+            cred = await self.connection_service.generate_credentials(instance_name)
+            pg_user = await self.connection_service.get_username()
+            lakebase_engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, pg_user, cred.token
+            )
+            try:
+                await self.schema_service.create_schema_async(
+                    lakebase_engine, pg_user, recreate=False)
+                async with lakebase_engine.begin() as conn:
+                    await self.schema_service.set_search_path_async(conn)
+                await self.schema_service.create_tables_async(lakebase_engine)
+                reconcile_status = "reconciled"
+                logger.info(
+                    "Lakebase schema reconciled on enable (missing tables/columns "
+                    "created non-destructively)"
+                )
+            finally:
+                await lakebase_engine.dispose()
+        except Exception as reconcile_err:  # noqa: BLE001 — never block enable
+            reconcile_status = "skipped"
+            logger.warning(
+                f"Lakebase schema reconcile on enable skipped (non-fatal): {reconcile_err}"
+            )
 
         return {
             "success": True,
             "message": "Lakebase enabled successfully. Next request will use Lakebase.",
-            "config": config
+            "config": config,
+            "schema_reconcile": reconcile_status,
         }
