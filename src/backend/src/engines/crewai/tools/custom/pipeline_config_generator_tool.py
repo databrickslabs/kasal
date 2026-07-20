@@ -603,6 +603,26 @@ class PipelineConfigGeneratorTool(BaseTool):
             except Exception as _hist_err:
                 logger.warning(f"[PipelineConfigGen] conversion_history persistence skipped: {_hist_err}")
 
+            # ── Raw-extraction persistence (powerbi_extraction table) ───────────
+            # Store the FULL raw artifacts (relationship rows, measures+DAX, admin/
+            # TMDL table metadata, report definition, derived config) so they are
+            # SQL-queryable after the run — the conversion_history row only keeps
+            # summaries/counts. Fail-open: never break the run over observability.
+            try:
+                _run_async(self._save_powerbi_extraction(
+                    relationships=relationships,
+                    measures=measures,
+                    admin_tables=admin_tables,
+                    report_def=report_def,
+                    config=config,
+                    warnings=warnings,
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    report_id=report_id,
+                ))
+            except Exception as _ext_err:
+                logger.warning(f"[PipelineConfigGen] powerbi_extraction persistence skipped: {_ext_err}")
+
             return json.dumps(output, indent=2, default=str)
 
         except Exception as e:
@@ -844,6 +864,78 @@ class PipelineConfigGeneratorTool(BaseTool):
                 )
         except Exception as e:
             logger.warning(f"[PipelineConfigGen] Failed to save conversion_history (non-fatal): {e}")
+
+    async def _save_powerbi_extraction(
+        self, relationships, measures, admin_tables, report_def, config, warnings,
+        workspace_id, dataset_id, report_id,
+    ) -> None:
+        """Persist the FULL raw extraction to the powerbi_extraction table (fail-open).
+
+        Unlike conversion_history (which stores summaries/counts), this keeps the
+        complete artifacts — relationship rows, measures with DAX, admin/TMDL table
+        metadata, the report definition and derived config — so they are directly
+        SQL-queryable per run for BI review / debugging / model-graph lineage.
+        """
+        try:
+            from src.engines.crewai.tools.tool_session_provider import ToolSessionProvider
+            from src.schemas.powerbi_extraction import PowerBIExtractionCreate
+            from src.utils.user_context import UserContext
+
+            measures = measures or []
+            relationships = relationships or []
+            admin_tables = admin_tables or {}
+
+            with_dax = sum(
+                1 for m in measures
+                if (m.get("expression") or m.get("dax_expression") or "").strip()
+            )
+            summary = (
+                f"{len(relationships)} relationships, {len(measures)} measures "
+                f"({with_dax} with DAX), {len(admin_tables)} tables"
+            )[:500]
+
+            group_id = None
+            created_by_email = None
+            try:
+                gc = UserContext.get_group_context()
+                if gc:
+                    group_id = getattr(gc, "primary_group_id", None)
+                    created_by_email = getattr(gc, "group_email", None) or getattr(
+                        gc, "email", None)
+            except Exception:
+                pass
+
+            data = PowerBIExtractionCreate(
+                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                workspace_id=workspace_id or None,
+                dataset_id=dataset_id or None,
+                report_id=report_id or None,
+                relationships=relationships,
+                measures=measures,
+                admin_tables=admin_tables,
+                report_definition=report_def or None,
+                proposed_config=config,
+                warnings=warnings or [],
+                relationships_count=len(relationships),
+                measures_count=len(measures),
+                measures_with_dax_count=with_dax,
+                admin_tables_count=len(admin_tables),
+                summary=summary,
+                group_id=group_id,
+                created_by_email=created_by_email,
+            )
+
+            async with ToolSessionProvider.powerbi_extraction_repo() as repo:
+                record = await repo.create(data.model_dump())
+                await repo.session.commit()
+                logger.info(
+                    f"[PipelineConfigGen] Saved powerbi_extraction id={record.id} "
+                    f"({summary})"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[PipelineConfigGen] Failed to save powerbi_extraction (non-fatal): {e}"
+            )
 
     @staticmethod
     def _enrich_source_tables_from_mquery(config: dict, admin_tables: dict) -> list[dict]:

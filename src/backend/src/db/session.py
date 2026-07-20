@@ -956,6 +956,23 @@ async def _ensure_crew_feedback_table(conn) -> None:
         logger.warning(f"Could not ensure crew_feedback table: {e}")
 
 
+async def _ensure_powerbi_extraction_table(conn) -> None:
+    """Idempotently create the powerbi_extraction table (raw Power BI extraction
+    artifacts persisted per Pipeline Config Generator run, for SQL querying).
+    create_all is skipped on existing DBs, so DBs created before this table
+    existed need this self-heal."""
+    try:
+        from src.models.powerbi_extraction import PowerBIExtraction
+
+        def _create_powerbi_extraction_table(sync_conn):
+            PowerBIExtraction.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_powerbi_extraction_table)
+        logger.info("Ensured powerbi_extraction table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure powerbi_extraction table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -1184,6 +1201,7 @@ async def init_db() -> None:
                     await _ensure_chat_sessions_table(conn)
                     await _ensure_chat_sessions_columns(conn)
                     await _ensure_crew_feedback_table(conn)
+                    await _ensure_powerbi_extraction_table(conn)
                     await _ensure_crew_columns(conn)
                     await _ensure_ui_config_columns(conn)
                     await _ensure_hot_polling_indexes(conn)
