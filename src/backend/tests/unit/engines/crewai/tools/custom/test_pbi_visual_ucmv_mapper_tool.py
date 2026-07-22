@@ -518,3 +518,26 @@ class TestParseLLMResponse:
         tool = PBIVisualUCMVMapperTool()
         result = tool._parse_llm_response('{"key": "value"}')
         assert result == []
+
+
+class TestLlmSqlSafetyGate:
+    """SEC #3: LLM-generated dashboard SQL is gated to a read-only SELECT before it
+    can become a stored Lakeview dataset query."""
+
+    def test_safe_select_helper(self):
+        from src.engines.crewai.tools.custom.pbi_visual_ucmv_mapper_tool import _is_safe_select_sql
+        assert _is_safe_select_sql("SELECT a, MEASURE(m) FROM v GROUP BY a") is True
+        assert _is_safe_select_sql("WITH t AS (SELECT 1) SELECT * FROM t") is True
+        assert _is_safe_select_sql("SELECT * FROM v; DROP TABLE x") is False
+        assert _is_safe_select_sql("DROP TABLE x") is False
+        assert _is_safe_select_sql("SELECT * FROM v $$ evil") is False
+        assert _is_safe_select_sql("SELECT * FROM v UNION SELECT * FROM information_schema.tables") is False
+
+    def test_parse_response_nulls_unsafe_sql(self):
+        from src.engines.crewai.tools.custom.pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
+        tool = PBIVisualUCMVMapperTool()
+        payload = ('[{"visual_id": "v1", "sql": "SELECT a FROM view"}, '
+                   '{"visual_id": "v2", "sql": "SELECT * FROM v; DROP TABLE x"}]')
+        result = tool._parse_llm_response(payload)
+        assert result[0]["sql"] == "SELECT a FROM view"   # safe → kept
+        assert result[1]["sql"] is None                    # unsafe → dropped

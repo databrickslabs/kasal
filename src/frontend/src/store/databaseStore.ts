@@ -57,8 +57,8 @@ interface DatabaseStore {
   setShowMigrationDialog: (show: boolean) => void;
 
   // Migration option
-  migrationOption: 'recreate' | 'use' | 'schema_only';
-  setMigrationOption: (option: 'recreate' | 'use' | 'schema_only') => void;
+  migrationOption: 'recreate' | 'use' | 'schema_only' | 'use_expand';
+  setMigrationOption: (option: 'recreate' | 'use' | 'schema_only' | 'use_expand') => void;
 
   // Loading states
   loading: boolean;

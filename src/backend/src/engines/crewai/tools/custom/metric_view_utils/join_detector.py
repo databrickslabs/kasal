@@ -28,6 +28,9 @@ class JoinDetector:
         cfg = config or {}
         self._join_key_map = cfg.get('join_key_map', {})
         self._fact_join_map = cfg.get('fact_join_map', {})
+        # P4a: global opt-in to dedup ALL dim joins with a QUALIFY subquery
+        # (per-dim `dedup_dim` in join_key_map takes precedence / adds to this).
+        self._dedup_all_dim_joins = bool(cfg.get('dedup_dim_joins', False))
 
     def detect(self, fact_table_key: str, measures: list[dict],
                fact_info: TableInfo,
@@ -83,7 +86,13 @@ class JoinDetector:
                        or (not fact_info.group_by_columns
                            and join_key in fact_info.full_sql))
 
-            join_on = f'source.{join_key} = {alias}.{dim_key}'
+            # P4b: zero-pad the fact-side key when the dim key is a fixed-width
+            # code and the fact carries the unpadded form (classic SAP
+            # co_code_bw(3) → comp_code(4)). Config-driven — the pad length is a
+            # data fact the tool can't infer, but once given it generates exactly
+            # the LPAD the customer otherwise hand-writes.
+            fact_key_sql = self._padded_key_sql('source', join_key, jk)
+            join_on = f'{fact_key_sql} = {alias}.{dim_key}'
 
             if not has_key:
                 alt_keys = jk.get('alt_join_keys', [])
@@ -95,9 +104,15 @@ class JoinDetector:
                     join_on = alt_join_on
 
             if has_key:
+                # P4a: dedup a non-unique dim on its key via a QUALIFY subquery
+                # source, so the join can't fan out rows. Opt-in (per-dim
+                # `dedup_dim` flag or global `dedup_dim_joins`) because whether a
+                # dim is non-unique is a data fact; when flagged we generate the
+                # SELECT DISTINCT … QUALIFY ROW_NUMBER() = 1 the GT hand-wrote.
+                join_source = self._maybe_dedup_source(source, dim_key, jk)
                 join_entry = {
                     'name': alias,
-                    'source': source,
+                    'source': join_source,
                     'join_on': join_on,
                 }
                 if inner_dim_joins:
@@ -105,6 +120,35 @@ class JoinDetector:
                 joins.append(join_entry)
 
         return joins
+
+    def _padded_key_sql(self, prefix: str, join_key: str, jk: dict) -> str:
+        """Build the fact-side join-key expression, applying LPAD when the dim
+        config declares a fixed-width padded key (P4b). ``jk['pad_key']`` is
+        ``{'len': int, 'char': str}`` (char defaults to '0'); absent → no padding.
+        """
+        pad = jk.get('pad_key')
+        base = f'{prefix}.{join_key}'
+        if isinstance(pad, dict) and pad.get('len'):
+            char = str(pad.get('char', '0'))[:1] or '0'
+            return f"LPAD({base}, {int(pad['len'])}, '{char}')"
+        return base
+
+    def _maybe_dedup_source(self, source: str, dim_key: str, jk: dict) -> str:
+        """Wrap a dim source in a QUALIFY-dedup subquery when the join is flagged
+        as pointing at a non-unique dim (P4a). Returns ``source`` unchanged when
+        not flagged, or when ``source`` is already a subquery. ``order_by``
+        defaults to the dim key (deterministic pick of the first row per key)."""
+        if not (jk.get('dedup_dim') or self._dedup_all_dim_joins):
+            return source
+        s = source.strip()
+        if s.startswith('('):
+            return source  # already a subquery — don't double-wrap
+        order_by = jk.get('dedup_order_by') or dim_key
+        return (
+            f"(SELECT * FROM {source} "
+            f"QUALIFY ROW_NUMBER() OVER "
+            f"(PARTITION BY {dim_key} ORDER BY {order_by}) = 1)"
+        )
 
     def detect_fact_joins(self, fact_table_key: str, measures: list[dict],
                           fact_info: TableInfo) -> list[dict]:

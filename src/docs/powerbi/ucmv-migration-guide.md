@@ -122,10 +122,21 @@ client_id: NON_ADMIN_SP_client_id
 client_secret: NON_ADMIN_SP_client_secret
 admin_client_id: ADMIN_SP_client_id
 admin_client_secret: ADMIN_SP_client_secret
-report_id: your-report-guid  (optional, adds synonym metadata)
+report_id: your-report-guid  (STRONGLY RECOMMENDED — see note below)
 catalog: my_catalog
 schema_name: metrics
 ```
+
+> **⚠️ `report_id` strongly affects measure quality — do not skip it.**
+> Despite the "Optional: Report Metadata" label in the UI, the report is where the
+> full measure DAX lives (the report's visual bindings carry the real measure
+> expressions). **Without a `report_id`, config-gen falls back to a degraded source
+> that returns bare column names instead of measure bodies — roughly halving the
+> number of translatable measures.** As of the PROP-7 change the tool
+> auto-discovers the report bound to your `dataset_id` when this field is left
+> empty, and warns loudly in the result if none is found. Provide it explicitly
+> when you can; if you don't know it, list the workspace's reports and pick the one
+> whose `datasetId` matches your semantic model.
 
 Download the proposed config from the result. It will have `TODO` markers where human input is needed.
 

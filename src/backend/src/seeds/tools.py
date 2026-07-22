@@ -180,7 +180,7 @@ def get_tool_configs():
             # LLM Configuration (optional)
             "llm_workspace_url": "",
             "llm_token": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
             "use_llm": True,
             # Scan Options
             "include_lineage": True,
@@ -305,7 +305,7 @@ def get_tool_configs():
             "client_secret": "",
             "username": "",
             "password": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
             "max_dax_retries": 5,
             "user_question": "",
             "context_knowledge": "",
@@ -327,7 +327,7 @@ def get_tool_configs():
             "enable_value_normalization": True,
             "dataset_id": "",
             "workspace_id": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         },  # Power BI Metadata Reducer
         "82": {
             "result_as_answer": True,
@@ -356,7 +356,7 @@ def get_tool_configs():
             "inner_dim_joins": False,
             "unflatten_tables": False,
             "use_llm_fallback": False,
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
             "llm_workspace_url": "",
             "llm_token": "",
             # PBI API extraction (alternative to providing pre-extracted JSON)
@@ -439,7 +439,7 @@ def get_tool_configs():
             "schema_name": "",
             "warehouse_id": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         },  # UCMV Genie Space Config Generator
         "94": {
             "result_as_answer": True,
@@ -450,7 +450,7 @@ def get_tool_configs():
             "schema_name": "",
             "dashboard_title": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         },  # PBI Visual-UCMV Mapper
         "95": {
             "result_as_answer": True,

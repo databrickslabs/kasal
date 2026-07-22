@@ -294,13 +294,6 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000
     },
-    "databricks-claude-sonnet-4": {
-        "name": "databricks-claude-sonnet-4",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 200000,
-        "max_output_tokens": 64000
-    },
     "databricks-claude-sonnet-4-5": {
         "name": "databricks-claude-sonnet-4-5",
         "temperature": 0.7,
@@ -461,6 +454,10 @@ REMOVED_MODEL_KEYS = [
     "claude-3-7-sonnet-20250219-thinking",
     "claude-3-opus-20240229",
     "databricks-claude-3-7-sonnet",
+    # Databricks deprecated the sonnet-4 endpoint (returns BAD_REQUEST "This
+    # endpoint databricks-claude-sonnet-4 is deprecated"). Superseded by
+    # sonnet-4-5; all Kasal defaults were repointed there. Prune from seeded DBs.
+    "databricks-claude-sonnet-4",
     # Anthropic suspended Claude Fable 5 on 2026-06-12 (US export-control
     # directive); the endpoint returns TEMPORARILY_UNAVAILABLE for all callers.
     # Prune it from any DB it was seeded/added to so it leaves the model picker.

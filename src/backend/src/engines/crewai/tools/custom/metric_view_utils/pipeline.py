@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dax_translator import DaxTranslator
@@ -190,16 +191,31 @@ class MetricViewPipeline:
         # Phase 1: Process all tables and collect specs
         self.all_specs = {}
 
+        from .mquery_parser import classify_mquery_source
+
+        def _skip_stat(tinfo) -> dict:
+            """Build a skip stat that classifies WHY a table produced no view and
+            carries the original M-query so it can be emitted as a note (mirrors
+            how untranslatable measures are surfaced)."""
+            raw = getattr(tinfo, 'raw_transpiled_sql', '') or ''
+            category, reason = classify_mquery_source(raw)
+            return {
+                'total': 0, 'translated': 0, 'untranslatable': 0,
+                'cross_table': 0, 'base': 0, 'dax': 0,
+                'skipped': True, 'skip_reason': reason, 'skip_category': category,
+                # original M-query, capped, for the "not emitted" note in the report
+                'original_mquery': raw[:2000],
+            }
+
         for table_key, table_info in self.mquery_tables.items():
             if not table_info.is_fact:
+                # Non-fact / raw-M tables: record a classified skip (not a silent
+                # drop) so the report can emit the original M-query with a reason.
+                self.stats[table_key] = _skip_stat(table_info)
                 continue
 
             if not table_info.source_table:
-                self.stats[table_key] = {
-                    'total': 0, 'translated': 0, 'untranslatable': 0,
-                    'cross_table': 0, 'base': 0, 'dax': 0,
-                    'skipped': True, 'skip_reason': 'No source table found in SQL',
-                }
+                self.stats[table_key] = _skip_stat(table_info)
                 continue
 
             dax_measures = measure_groups.get(table_key, [])
@@ -223,6 +239,42 @@ class MetricViewPipeline:
             )
             spec = self._process_table(table_key, stub_info, dax_measures)
             self.all_specs[table_key] = spec
+
+        # Phase 1b: Measure-driven facts ──────────────────────────────────────
+        # A table can parse WITH a source_table yet NOT be detected as a fact
+        # because its M-Query resolved to a plain table read (no aggregate SQL /
+        # GROUP BY) — typical of "click-together" Power Query sources. If such a
+        # table has DAX measures allocated to it, the aggregation lives in the
+        # MEASURES, not the source query, so it IS a fact. Promote it here.
+        #
+        # STRICTLY ADDITIVE + ISOLATED:
+        #   - only touches tables NOT already in all_specs (Phase 1 SQL facts and
+        #     mapping-only facts are never re-processed),
+        #   - only tables the parser gave a real source_table (nothing invented),
+        #   - only tables that actually have measures allocated,
+        #   - gated by allow_measure_driven_facts (default on; set False to get
+        #     the exact prior behaviour).
+        # The only tables it can affect are ones that produce ZERO output today.
+        if self.config.get('allow_measure_driven_facts', True):
+            promoted = 0
+            for table_key, table_info in self.mquery_tables.items():
+                if table_key in self.all_specs:
+                    continue                      # Phase 1 / mapping-only owns it
+                if table_info.is_fact:
+                    continue                      # real SQL fact — not ours
+                if not table_info.source_table:
+                    continue                      # no source to point a view at
+                dax_measures = measure_groups.get(table_key, [])
+                if not dax_measures:
+                    continue                      # no measures → correctly skipped
+                forced_info = replace(table_info, is_fact=True)
+                spec = self._process_table(table_key, forced_info, dax_measures)
+                self.all_specs[table_key] = spec
+                promoted += 1
+            if promoted:
+                logger.info(
+                    "[MetricViewPipeline] Promoted %d measure-driven fact table(s) "
+                    "(plain source + allocated DAX measures, no aggregate SQL)", promoted)
 
         # Handle scan-data-only tables (in PBI scan + have DAX measures, but no MQuery/mapping entry)
         if self.scan_data:
@@ -347,7 +399,7 @@ class MetricViewPipeline:
             filter_warnings=self._filter_warnings,
             limitations=self._limitations,
         )
-        return process_table(
+        spec = process_table(
             table_key, table_info, dax_measures, ctx,
             build_switch_measure_fn=self._build_switch_measure,
             resolve_var_chain_fn=MetricViewPipeline._resolve_var_chain,
@@ -355,6 +407,59 @@ class MetricViewPipeline:
             clean_unresolved_vars_fn=MetricViewPipeline._clean_unresolved_vars,
             validate_filter_consistency_fn=MetricViewPipeline._validate_filter_consistency,
         )
+        self._sanitize_spec_measures(spec)
+        return spec
+
+    def _sanitize_spec_measures(self, spec) -> None:
+        """P5 correctness batch + PROP-3a/4a silent-wrong guard.
+
+        First applies the SQL sanitizer (no-op divisions, self-divisions, NULL-safe
+        base aggregates). Then demotes any measure whose SQL would silently produce
+        a WRONG or invalid result (empty ratio, malformed NULLIF, unresolved DAX
+        ref, un-applied prior-year, untranslated SUMX/CALCULATE, dangling var) to
+        untranslatable — an honest TODO comment beats a number that is quietly
+        wrong or SQL that won't run.
+        """
+        from .sql_measure_sanitizer import (
+            sanitize_measure_sql, detect_silent_wrong, detect_lost_dax_component,
+        )
+        kept = []
+        demoted = []
+        for m in getattr(spec, 'measures', None) or []:
+            is_base = getattr(m, 'category', '') == 'base'
+            new_sql, note = sanitize_measure_sql(m.sql_expr, is_base=is_base)
+            m.sql_expr = new_sql
+            if note:
+                _reason = getattr(m, 'skip_reason', '') or ''
+                if 'self-division' not in _reason:
+                    m.skip_reason = (f'{_reason} [{note}]').strip()
+                self._filter_warnings.append(f'{spec.fact_table_key}: {m.measure_name}: {note}')
+            # Base measures are simple SUM(COALESCE(...)) and are never demoted.
+            # Two silent-wrong checks: (a) malformed/invalid SQL markers, and
+            # (b) a DAX component (ratio denom, prior-year, exclusion) that the
+            # SQL silently dropped — the latter needs the ORIGINAL dax to compare.
+            bad = None
+            if not is_base:
+                bad = (detect_silent_wrong(new_sql)
+                       or detect_lost_dax_component(getattr(m, 'dax_expression', '') or '', new_sql))
+            if bad:
+                m.is_translatable = False
+                m.sql_expr = None
+                m.skip_reason = (
+                    f'TODO — not emitted (would be silently wrong/invalid: {bad}). '
+                    f'Original DAX needs manual translation.')
+                demoted.append(m)
+                self._filter_warnings.append(
+                    f'{spec.fact_table_key}: {m.measure_name}: demoted to TODO ({bad})')
+            else:
+                kept.append(m)
+        if demoted:
+            spec.measures = kept
+            existing = getattr(spec, 'untranslatable', None)
+            if existing is None:
+                spec.untranslatable = demoted
+            else:
+                existing.extend(demoted)
 
     # ── Delegates to artifact_cascade module ─────────────────────────
 
@@ -646,6 +751,9 @@ class MetricViewPipeline:
                         'name': m.measure_name,
                         'original_name': m.original_name,
                         'sql_expr': m.sql_expr,
+                        # dax_expression is the ORIGINAL DAX — the validator needs
+                        # it to compare against the translated SQL (filter/agg check).
+                        'dax_expression': m.dax_expression,
                         'confidence': m.confidence,
                         'category': m.category,
                     }
@@ -678,10 +786,28 @@ class MetricViewPipeline:
             limitations=self._limitations)
         return results
 
+    @staticmethod
+    def _resolve_placeholders_in_spec(spec, catalog: str, schema: str) -> None:
+        """Substitute any surviving {catalog}/{schema} tokens in a spec's join
+        sources + source table. Idempotent, mutates in place. Belt-and-suspenders
+        net at the single emit choke point where catalog/schema are known —
+        covers API/self-extract mode and externally-supplied configs, not just the
+        config-gen path (which also resolves them at build_config time)."""
+        def _sub(val):
+            if isinstance(val, str) and ('{catalog}' in val or '{schema}' in val):
+                return val.replace('{catalog}', catalog).replace('{schema}', schema)
+            return val
+        if getattr(spec, 'source_table', None):
+            spec.source_table = _sub(spec.source_table)
+        for j in getattr(spec, 'joins', None) or []:
+            if 'source' in j:
+                j['source'] = _sub(j['source'])
+
     def emit_all_yaml(self, catalog: str = 'main', schema: str = 'default') -> dict[str, str]:
         """Emit YAML for all specs. Returns dict[table_key -> yaml_string]."""
         result = {}
         for table_key, spec in self.all_specs.items():
+            self._resolve_placeholders_in_spec(spec, catalog, schema)
             dim_meta = self._dimension_metadata.get(table_key, {})
             meas_meta = self._measure_metadata.get(table_key, {})
             dim_order = self.metadata_gen.get_dimension_order(table_key)
@@ -702,5 +828,6 @@ class MetricViewPipeline:
         """Emit deploy SQL for all specs. Returns dict[table_key -> sql_string]."""
         result = {}
         for table_key, spec in self.all_specs.items():
+            self._resolve_placeholders_in_spec(spec, catalog, schema)
             result[table_key] = emit_deploy_sql(spec, catalog=catalog, schema=schema)
         return result

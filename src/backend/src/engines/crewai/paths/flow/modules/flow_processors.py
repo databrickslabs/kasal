@@ -9,6 +9,7 @@ from uuid import UUID
 from crewai.flow.flow import listen, router
 
 from src.core.logger import LoggerManager
+from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 
 def _to_uuid(value) -> UUID:
@@ -326,7 +327,7 @@ class FlowProcessorManager:
                             except Exception as _mcp_rec_err:
                                 logger.warning(f"MCP recovery from current crew task failed: {_mcp_rec_err}")
 
-                        logger.info(f"Task {task_id} effective tool_configs: {effective_tool_configs}")
+                        logger.info(f"Task {task_id} " + safe_log_tool_configs(effective_tool_configs, "effective "))
 
                         # Build CrewAI Agent object using configure_agent_and_tools
                         agent_obj = await AgentConfig.configure_agent_and_tools(
@@ -680,7 +681,7 @@ class FlowProcessorManager:
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
 
-                        logger.info(f"Listener task {task_id} effective tool_configs: {effective_tool_configs}")
+                        logger.info(f"Listener task {task_id} " + safe_log_tool_configs(effective_tool_configs, "effective "))
 
                         # Build CrewAI Agent object
                         agent_obj = await AgentConfig.configure_agent_and_tools(
@@ -967,7 +968,7 @@ class FlowProcessorManager:
                                 if isinstance(task_data.tool_configs, dict):
                                     effective_tool_configs.update(task_data.tool_configs)
 
-                            logger.info(f"Router task {task_id} effective tool_configs: {effective_tool_configs}")
+                            logger.info(f"Router task {task_id} " + safe_log_tool_configs(effective_tool_configs, "effective "))
 
                             # Build CrewAI Agent object using configure_agent_and_tools
                             agent_obj = await AgentConfig.configure_agent_and_tools(

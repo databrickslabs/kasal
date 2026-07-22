@@ -352,6 +352,32 @@ class TestDecryptSensitiveFields:
             result = sensitive_data_utils.decrypt_sensitive_fields({"secret": "ENC:bad_data"})
         assert result["secret"] == ""
 
+    def test_decrypt_error_adds_no_marker_key(self):
+        """On decrypt failure we blank the value but must NOT add a marker key —
+        the dict may be re-persisted, and a stray key would pollute tool_configs."""
+        mock_eu = _make_encryption_utils_mock()
+        mock_eu.decrypt_value.side_effect = Exception("key mismatch")
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
+            from src.utils import sensitive_data_utils
+            result = sensitive_data_utils.decrypt_sensitive_fields({"secret": "ENC:bad_data"})
+        assert result == {"secret": ""}  # exactly one key, blanked — no breadcrumb
+
+    def test_decrypt_error_logs_actionable_warning(self):
+        """decrypt failure logs an actionable 're-enter your credential' warning
+        (not a generic error) so the misleading 'workspace_id missing' downstream
+        error is explained."""
+        mock_eu = _make_encryption_utils_mock()
+        mock_eu.decrypt_value.side_effect = Exception("bad")
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu), \
+             patch("src.utils.sensitive_data_utils.logger") as mock_log:
+            from src.utils import sensitive_data_utils
+            # decrypt_value is where the blanking + message actually happen
+            out = sensitive_data_utils.decrypt_value("ENC:bad")
+        assert out == ""
+        assert mock_log.warning.called
+        msg = mock_log.warning.call_args[0][0]
+        assert "RE-ENTER" in msg.upper()
+
     def test_returns_none_unchanged(self):
         from src.utils.sensitive_data_utils import decrypt_sensitive_fields
         assert decrypt_sensitive_fields(None) is None  # type: ignore[arg-type]

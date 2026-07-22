@@ -34,7 +34,7 @@
             "admin_client_id": "<YOUR_ADMIN_SP_CLIENT_ID>",
             "admin_client_secret": "<YOUR_ADMIN_SP_CLIENT_SECRET>",
             "catalog": "david_test_metrics",
-            "schema_name": "cchbc"
+            "schema_name": "example_schema"
           }
         },
         "agentId": null,

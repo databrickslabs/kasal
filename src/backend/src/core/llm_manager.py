@@ -831,6 +831,85 @@ class LLMManager:
                 raise
 
     @staticmethod
+    async def completion_with_usage(
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Completion that supports Anthropic prompt caching and returns usage.
+
+        Unlike ``completion()`` (which delegates to CrewAI's ``LLM.call()`` and
+        returns only ``str``, discarding ``usage``), this path calls litellm
+        directly with the RESOLVED auth/base/model from ``configure_crewai_llm``,
+        so it can:
+          - pass STRUCTURED content blocks (a ``list`` of ``{type,text,cache_control}``
+            parts) through to the serving endpoint — required to mark a stable
+            skill-corpus prefix with ``cache_control: {"type": "ephemeral"}``;
+          - return the ``usage`` block so callers can observe
+            ``cache_read_input_tokens`` (cache hits are otherwise invisible).
+
+        ``messages`` items may carry either a plain string ``content`` or a list
+        of content-part dicts (litellm/Anthropic structured format).
+
+        Returns ``{"content": str, "usage": dict}``. Reuses the centralized auth,
+        User-Agent telemetry, and MLflow span that ``completion()`` uses.
+        """
+        import litellm
+
+        group_id = LLMManager._get_group_id_from_context(required=True)
+        llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
+
+        # Read the resolved transport params off the configured LLM so we reuse
+        # the exact auth/base/model resolution (OBO/PAT/SPN) without forking it.
+        call_kwargs: Dict[str, Any] = {
+            "model": getattr(llm, "model", None) or model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        for attr in ("api_key", "api_base"):
+            val = getattr(llm, attr, None)
+            if val:
+                call_kwargs[attr] = val
+        # Merge telemetry headers with any caller-supplied ones.
+        headers = dict(getattr(llm, "extra_headers", None) or {})
+        if extra_headers:
+            headers.update(extra_headers)
+        if headers:
+            call_kwargs["extra_headers"] = headers
+        if max_tokens is not None:
+            call_kwargs["max_tokens"] = max_tokens
+        elif getattr(llm, "max_tokens", None):
+            call_kwargs["max_tokens"] = llm.max_tokens
+        elif getattr(llm, "max_completion_tokens", None):
+            call_kwargs["max_completion_tokens"] = llm.max_completion_tokens
+
+        start_time = time.time()
+        resp = await asyncio.to_thread(lambda: litellm.completion(**call_kwargs))
+        duration = time.time() - start_time
+
+        content = ""
+        try:
+            content = resp.choices[0].message.content or ""
+        except Exception:  # noqa: BLE001 — defensive extraction
+            content = ""
+        usage: Dict[str, Any] = {}
+        try:
+            u = getattr(resp, "usage", None)
+            if u is not None:
+                usage = u.model_dump() if hasattr(u, "model_dump") else dict(u)
+        except Exception:  # noqa: BLE001
+            usage = {}
+
+        cache_read = usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens") or 0
+        logger.info(
+            f"LLM completion_with_usage: model={model}, duration={duration:.2f}s, "
+            f"response_length={len(content)}, cache_read_input_tokens={cache_read}"
+        )
+        return {"content": content, "usage": usage}
+
+    @staticmethod
     async def configure_crewai_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.

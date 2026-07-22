@@ -44,7 +44,7 @@ def _make_genie_files(folder="supply_chain"):
     ]
 
 
-def _make_dashboard_files(folder="cchbc_analytics"):
+def _make_dashboard_files(folder="example_analytics"):
     return [
         ExportFile(path="config.yaml", content="apiVersion: lakeview/v1\nkind: Dashboard\n"),
         ExportFile(path="datasets.yaml", content="datasets:\n  - name: ds_1\n    query: SELECT 1\n"),
@@ -61,7 +61,7 @@ def _genie_export_result(space_id="sp123", name="Supply Chain", folder="supply_c
     }
 
 
-def _dashboard_export_result(dash_id="d123", name="CCHBC Analytics", folder="cchbc_analytics"):
+def _dashboard_export_result(dash_id="d123", name="Example Analytics", folder="example_analytics"):
     return {
         "dashboard_id": dash_id,
         "dashboard_name": name,
@@ -377,9 +377,9 @@ class TestDownloadDashboardExport:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             names = zf.namelist()
 
-        assert "cchbc_analytics/config.yaml" in names
-        assert "cchbc_analytics/datasets.yaml" in names
-        assert "cchbc_analytics/pages.yaml" in names
+        assert "example_analytics/config.yaml" in names
+        assert "example_analytics/datasets.yaml" in names
+        assert "example_analytics/pages.yaml" in names
 
     @pytest.mark.asyncio
     async def test_zip_content_is_readable_yaml(self):
@@ -422,7 +422,7 @@ class TestDownloadDashboardExport:
             )
 
         cd = response.headers["Content-Disposition"]
-        assert "cchbc_analytics_dashboard.zip" in cd
+        assert "example_analytics_dashboard.zip" in cd
 
     @pytest.mark.asyncio
     async def test_dashboard_not_found_raises_404(self):
@@ -499,9 +499,9 @@ class TestPreviewDashboardExport:
 
         body = json.loads(response.body)
         paths = [f["path"] for f in body["files"]]
-        assert "cchbc_analytics/config.yaml" in paths
-        assert "cchbc_analytics/datasets.yaml" in paths
-        assert "cchbc_analytics/pages.yaml" in paths
+        assert "example_analytics/config.yaml" in paths
+        assert "example_analytics/datasets.yaml" in paths
+        assert "example_analytics/pages.yaml" in paths
 
     @pytest.mark.asyncio
     async def test_preview_not_found_raises_404(self):

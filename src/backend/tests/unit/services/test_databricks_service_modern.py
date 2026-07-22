@@ -1074,3 +1074,55 @@ class TestApplyAiGatewayEnv:
                 os.environ.pop(env_var, None)
             else:
                 os.environ[env_var] = saved
+
+
+class TestObOTokenThreading:
+    """Regression: warehouse/catalog/schema listing must attempt OBO by passing the
+    user token into get_auth_context. Previously it called get_auth_context() with
+    no token, which SKIPS OBO — breaking the warehouse dropdowns in OBO-only
+    deployments ("No authentication credentials available")."""
+
+    def test_init_stores_user_token(self):
+        svc = DatabricksService(session=MagicMock(), group_id="g", user_token="tok-1")
+        assert svc._user_token == "tok-1"
+
+    def test_init_user_token_defaults_none(self):
+        svc = DatabricksService(session=MagicMock())
+        assert svc._user_token is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_passes_user_token_to_get_auth_context(self):
+        svc = DatabricksService(session=MagicMock(), group_id="g", user_token="tok-abc")
+        cfg = MagicMock()
+        cfg.workspace_url = "https://x.cloud.databricks.com"
+        svc.repository.get_active_config = AsyncMock(return_value=cfg)
+        captured = {}
+
+        async def fake_gac(user_token=None, **kw):
+            captured["user_token"] = user_token
+            m = MagicMock()
+            m.get_headers = MagicMock(return_value={"Authorization": "Bearer x"})
+            return m
+
+        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac):
+            headers, url = await svc._resolve_workspace_url_and_headers()
+        assert captured["user_token"] == "tok-abc"
+        assert url == "https://x.cloud.databricks.com"
+
+    @pytest.mark.asyncio
+    async def test_resolve_without_token_preserves_pat_spn_fallback(self):
+        svc = DatabricksService(session=MagicMock(), group_id="g")  # no token
+        cfg = MagicMock()
+        cfg.workspace_url = "https://x.cloud.databricks.com"
+        svc.repository.get_active_config = AsyncMock(return_value=cfg)
+        captured = {}
+
+        async def fake_gac(user_token=None, **kw):
+            captured["user_token"] = user_token
+            m = MagicMock()
+            m.get_headers = MagicMock(return_value={"Authorization": "Bearer x"})
+            return m
+
+        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac):
+            await svc._resolve_workspace_url_and_headers()
+        assert captured["user_token"] is None  # OBO not forced → PAT/SPN as before

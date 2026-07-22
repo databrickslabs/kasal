@@ -897,6 +897,9 @@ async def enable_lakebase_without_migration(
     """
     instance_name = request.get("instance_name")
     endpoint = request.get("endpoint")
+    # When true, also create any missing tables/columns on the target
+    # (non-destructive) — the "Use & Expand Existing Schema & Data" action.
+    expand_schema = bool(request.get("expand_schema", False))
 
     if not instance_name:
         raise BadRequestError("instance_name is required to enable Lakebase")
@@ -911,7 +914,7 @@ async def enable_lakebase_without_migration(
                 "Provide the endpoint manually or verify the instance exists."
             )
 
-    return await service.enable_lakebase(instance_name, endpoint)
+    return await service.enable_lakebase(instance_name, endpoint, expand_schema=expand_schema)
 
 
 @router.post("/lakebase/test-connection", dependencies=_SYSTEM_ADMIN_ONLY)

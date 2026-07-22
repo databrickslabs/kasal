@@ -42,6 +42,16 @@ def _make_handler(tmp_path) -> DataInputHandler:
     return DataInputHandler(str(yaml_file), str(json_file))
 
 
+def _make_handler_with_yaml(tmp_path, yaml_str, mappings) -> DataInputHandler:
+    """Build a handler from an explicit YAML string + mapping list, for tests
+    that need non-base measures (base measures short-circuit to VALID)."""
+    yaml_file = tmp_path / "mv.yaml"
+    yaml_file.write_text(yaml_str)
+    json_file = tmp_path / "mapping.json"
+    json_file.write_text(json.dumps(mappings))
+    return DataInputHandler(str(yaml_file), str(json_file))
+
+
 # ---------------------------------------------------------------------------
 # Initialisation
 # ---------------------------------------------------------------------------
@@ -360,11 +370,31 @@ class TestValidateMeasureByName:
         assert result["is_valid"] is False
 
     def test_skipped_when_no_dax_match(self, tmp_path):
+        # A NON-base measure (has DAX logic to compare) with no matching DAX
+        # entry must be SKIPPED. Base measures short-circuit to VALID before the
+        # DAX lookup, so this test uses a CASE expression that is not a base
+        # single-column aggregate.
+        yaml_str = textwrap.dedent("""\
+            measures:
+              - name: complex_unmatched
+                expr: "SUM(CASE WHEN source.flag = 1 THEN source.amount END)"
+                comment: ""
+        """)
+        h = _make_handler_with_yaml(tmp_path, yaml_str, [])
+        v = ExpressionValidator(data_handler=h)
+        result = v.validate_measure_by_name("complex_unmatched")
+        assert result["status"] == "SKIPPED"
+
+    def test_base_measure_returns_valid(self, tmp_path):
+        # A plain single-column aggregate (base measure) is correct by
+        # construction — it carries no DAX to diff — so it must be VALID, not
+        # SKIPPED. Regression guard for the ~140 base measures that were wrongly
+        # skipped before the base-measure short-circuit was added.
         h = _make_handler(tmp_path)
         v = ExpressionValidator(data_handler=h)
-        # 'unmatched_measure' has no matching DAX entry
-        result = v.validate_measure_by_name("unmatched_measure")
-        assert result["status"] == "SKIPPED"
+        result = v.validate_measure_by_name("unmatched_measure")  # SUM(source.x)
+        assert result["status"] == "VALID"
+        assert result["is_valid"] is True
 
     def test_valid_measure_returns_valid_status(self, tmp_path):
         h = _make_handler(tmp_path)
@@ -395,19 +425,34 @@ class TestValidateUcmv:
         assert "evaluated" in result
 
     def test_unmatched_measure_in_skipped(self, tmp_path):
-        h = _make_handler(tmp_path)
+        # A NON-base measure with no DAX match lands in skipped/unmatched.
+        yaml_str = textwrap.dedent("""\
+            measures:
+              - name: complex_unmatched
+                expr: "SUM(CASE WHEN source.flag = 1 THEN source.amount END)"
+                comment: ""
+        """)
+        h = _make_handler_with_yaml(tmp_path, yaml_str, [])
         v = ExpressionValidator(data_handler=h)
         result = v.validate_ucmv()
         skipped_names = {m.get("measure_name") for m in result["skipped"]}
-        assert "unmatched_measure" in skipped_names
+        assert "complex_unmatched" in skipped_names
 
-    def test_simple_measure_in_skipped(self, tmp_path):
+    def test_base_measures_are_evaluated_valid(self, tmp_path):
+        # Base measures (SUM(source.col)) must be EVALUATED as VALID, not
+        # skipped. SIMPLE_YAML is all base measures, so evaluated should hold
+        # all three and skipped should be empty.
         h = _make_handler(tmp_path)
         v = ExpressionValidator(data_handler=h)
         result = v.validate_ucmv()
-        # total_sales / simple_ratio match the simple_pattern → should be skipped
-        skipped_evals = {m.get("measure_eval") for m in result["skipped"]}
-        assert "simple" in skipped_evals or "unmatched" in skipped_evals
+        evaluated_names = {m.get("measure_name") for m in result["evaluated"]}
+        assert {"total_sales", "simple_ratio", "unmatched_measure"} <= evaluated_names
+        assert all(
+            m["measure_eval_result"]["status"] == "VALID"
+            for m in result["evaluated"]
+            if m.get("measure_eval") == "base"
+        )
+        assert result["skipped"] == []
 
 
 # ---------------------------------------------------------------------------

@@ -1557,18 +1557,24 @@ class LakebaseService(BaseService):
             "organization_id": str(workspace_id)
         }
 
-    async def enable_lakebase(self, instance_name: str, endpoint: str) -> Dict[str, Any]:
+    async def enable_lakebase(
+        self, instance_name: str, endpoint: str, expand_schema: bool = False
+    ) -> Dict[str, Any]:
         """
         Enable Lakebase without performing data migration.
-        This sets the 'enabled' flag in configuration, allowing connection to Lakebase
-        where schema will be created on first use.
+        This sets the 'enabled' flag in configuration and connects to Lakebase.
 
         Args:
             instance_name: Name of the Lakebase instance
             endpoint: Lakebase connection endpoint
+            expand_schema: When True, additionally run a NON-DESTRUCTIVE schema
+                reconcile on the target — create any missing tables/columns
+                (e.g. powerbi_extraction added since the instance was
+                provisioned) WITHOUT dropping anything. When False (default),
+                connect to the existing schema exactly as-is and create nothing.
 
         Returns:
-            Success status and configuration
+            Success status + config (plus schema_reconcile when expand_schema)
         """
         # Get current config
         config = await self.get_config()
@@ -1582,14 +1588,50 @@ class LakebaseService(BaseService):
         # Save updated config
         await self.save_config(config)
 
-        # No dispose_engines() here — the database router checks
-        # is_lakebase_enabled() on every request, so the next request
-        # will route to Lakebase automatically after this config is committed.
-        # Calling dispose inside a request handler kills the StaticPool
-        # connection before the DI layer commits, losing the config change.
-
-        return {
+        result: Dict[str, Any] = {
             "success": True,
             "message": "Lakebase enabled successfully. Next request will use Lakebase.",
-            "config": config
+            "config": config,
         }
+
+        if not expand_schema:
+            # Plain connect: use the existing schema exactly as-is, create nothing.
+            return result
+
+        # Expand: reconcile the schema NON-DESTRUCTIVELY so an EXISTING Kasal
+        # Lakebase gains any tables/columns added since it was provisioned.
+        # recreate=False → CREATE SCHEMA IF NOT EXISTS (never DROP); and
+        # create_tables_async uses CREATE TABLE IF NOT EXISTS (checkfirst) — a
+        # fully-provisioned instance is a cheap no-op and existing data is safe.
+        # Best-effort: a reconcile failure must not block enabling Lakebase.
+        reconcile_status = "reconciled"
+        try:
+            cred = await self.connection_service.generate_credentials(instance_name)
+            pg_user = await self.connection_service.get_username()
+            lakebase_engine = await self.connection_service.create_lakebase_engine_async(
+                endpoint, pg_user, cred.token
+            )
+            try:
+                await self.schema_service.create_schema_async(
+                    lakebase_engine, pg_user, recreate=False)
+                async with lakebase_engine.begin() as conn:
+                    await self.schema_service.set_search_path_async(conn)
+                await self.schema_service.create_tables_async(lakebase_engine)
+                logger.info(
+                    "Lakebase schema expanded on enable (missing tables/columns "
+                    "created non-destructively)"
+                )
+            finally:
+                await lakebase_engine.dispose()
+        except Exception as reconcile_err:  # noqa: BLE001 — never block enable
+            reconcile_status = "skipped"
+            logger.warning(
+                f"Lakebase schema expand on enable skipped (non-fatal): {reconcile_err}"
+            )
+
+        result["message"] = (
+            "Lakebase enabled and existing schema expanded (missing tables/columns "
+            "created). Next request will use Lakebase."
+        )
+        result["schema_reconcile"] = reconcile_status
+        return result

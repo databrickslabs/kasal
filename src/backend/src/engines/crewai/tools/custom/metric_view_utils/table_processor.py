@@ -19,6 +19,77 @@ from .utils import to_snake_case, spark_sql_compat, col_to_readable, run_async
 
 logger = logging.getLogger(__name__)
 
+
+def _detect_common_exclusions(dax_measures: list[dict], source_cols: set) -> list[str]:
+    """PROP-5: find exclusion predicates shared across most measures' DAX and
+    return them as SQL filter clauses to lift to the view level.
+
+    Matches ``Table[col] <> <val>`` and ``NOT Table[col] IN {..}`` on a column that
+    is present on the fact source. Only predicates appearing in ≥50% of measures
+    that carry DAX are lifted (a one-off filter belongs on its measure, not the
+    whole view). Values are taken verbatim from the DAX (already customer-supplied).
+    """
+    # col -> set of normalized exclusion predicates -> count
+    counts: dict[str, int] = {}
+    predicate_sql: dict[str, str] = {}
+    n_with_dax = 0
+    _ne = re.compile(
+        r"""(?:'[^']+'|\w+)\[(\w+)\]\s*<>\s*("?[\w./-]+"?|'[^']*')""")
+    _notin = re.compile(
+        r"""NOT\s+(?:'[^']+'|\w+)\[(\w+)\]\s+IN\s*[\{(]([^})]+)[\})]""",
+        re.IGNORECASE)
+    for m in dax_measures:
+        dax = m.get('dax_expression', '') or ''
+        if not dax.strip():
+            continue
+        n_with_dax += 1
+        seen_here: set[str] = set()
+        for fm in _ne.finditer(dax):
+            col = to_snake_case(fm.group(1))
+            if col not in source_cols:
+                continue
+            val = fm.group(2).strip().strip('"')
+            if not (val.startswith("'") and val.endswith("'")):
+                val = f"'{val}'"
+            key = f'{col} <> {val}'
+            predicate_sql[key] = f'source.{col} <> {val}'
+            seen_here.add(key)
+        for fm in _notin.finditer(dax):
+            col = to_snake_case(fm.group(1))
+            if col not in source_cols:
+                continue
+            raw_vals = re.findall(r'"([^"]*)"|\'([^\']*)\'|([\w./-]+)', fm.group(2))
+            vals = [f"'{(a or b or c).strip()}'" for a, b, c in raw_vals if (a or b or c).strip()]
+            if not vals:
+                continue
+            key = f'{col} NOT IN ({",".join(sorted(vals))})'
+            predicate_sql[key] = f'source.{col} NOT IN ({", ".join(vals)})'
+            seen_here.add(key)
+        for k in seen_here:
+            counts[k] = counts.get(k, 0) + 1
+    if n_with_dax == 0:
+        return []
+    threshold = max(2, n_with_dax // 2)  # ≥50% of DAX-carrying measures (min 2)
+    return [predicate_sql[k] for k, c in counts.items() if c >= threshold]
+
+
+def _is_real_switch_decomp(entry) -> bool:
+    """True when a config switch_decomposition entry carries REAL SQL.
+
+    `derive_switch_decompositions` emits skeleton entries whose ``raw_expr`` is a
+    literal ``"TODO: SQL expression for SWITCH measure ..."`` placeholder. Those
+    are NOT authoritative and must not suppress the LLM (Step 5d) nor rebuild a
+    TODO stub over an LLM-translated measure (Step 6). Only a structured
+    ``num``/``den`` decomposition or a non-TODO ``raw_expr`` counts as real.
+    """
+    if not isinstance(entry, dict):
+        return False
+    raw = entry.get('raw_expr')
+    if raw is not None:
+        return not str(raw).lstrip().upper().startswith('TODO')
+    return 'num' in entry and 'den' in entry
+
+
 # Keywords that classify a measure as a PBI UI artifact (not a real business measure)
 _ARTIFACT_SKIP_KEYWORDS = (
     'FORMAT', 'Color', 'ISBLANK+BLANK', 'SELECTEDVALUE+SWITCH',
@@ -107,6 +178,20 @@ def process_table(
     source_table = table_info.source_table
 
     # ── Step 1: Auto-generate base measures from MQuery SUM columns ───
+    # Build a DAX-column → source-output-column map so BOTH base and derived
+    # measures reference the column the emitted `source:` SELECT actually exposes.
+    # A pre-aggregating source (SELECT ..., SUM(kbi_value) AS value ...) outputs
+    # the column under its ALIAS (`name`='value'), not the inner physical name
+    # (`source_col`='kbi_value'). Referencing source_col then fails (column not
+    # found). We normalize measures to the alias the source emits.
+    _src_alias_map: dict[str, str] = {}
+    for _c in table_info.aggregate_columns:
+        _sc = _c.get('source_col')
+        _nm = _c.get('name')
+        if _sc and _nm and _sc != _nm:
+            _src_alias_map[_sc] = _nm       # kbi_value -> value (source output col)
+    ctx.translator.set_source_col_map(_src_alias_map)
+
     base_measures: list[TranslationResult] = []
     base_names: set[str] = set()
     for col in table_info.aggregate_columns:
@@ -114,7 +199,9 @@ def process_table(
         if 'expr' in col:
             expr = col['expr']
         else:
-            expr = f"SUM(source.{col['source_col']})"
+            # Reference the source's OUTPUT column (`name`), which is what the
+            # emitted source SELECT exposes — not the inner `source_col`.
+            expr = f"SUM(source.{name})"
         base_measures.append(TranslationResult(
             measure_name=name,
             original_name=name,
@@ -237,8 +324,15 @@ def process_table(
     # Set fact joins on translator for cross-table resolution
     ctx.translator.set_fact_joins(fact_joins)
 
+    # llm_first (default when LLM enabled): regex runs only as a trivial fast-path;
+    # everything non-trivial routes to the skill-corpus LLM translator. Falls back
+    # to full regex-primary when the mode is 'regex_first' or the LLM is disabled.
+    _mode = (ctx.llm_config or {}).get('translation_mode', 'llm_first')
+    _llm_enabled = bool(ctx.llm_config and ctx.llm_config.get('use_llm_fallback'))
+    _trivial_only = _llm_enabled and _mode == 'llm_first'
+
     for m in dax_measures:
-        result = ctx.translator.translate(m, table_key)
+        result = ctx.translator.translate(m, table_key, trivial_only=_trivial_only)
         if result.is_translatable:
             result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
             if result.measure_name not in base_names:
@@ -451,14 +545,69 @@ def process_table(
     # ── Step 5d: LLM fallback for remaining untranslatable measures (opt-in) ──
     if ctx.llm_config and ctx.llm_config.get('use_llm_fallback'):
         from .dax_llm_fallback import translate_batch_with_llm
+
+        # Precedence: if config-gen supplied an AUTHORITATIVE SWITCH decomposition
+        # for a measure (Step 6, real SQL from the $SYSTEM.MDSCHEMA_MEASURES API),
+        # that customer-validated SQL wins over a best-effort LLM attempt — exclude
+        # it from the LLM batch so it isn't preempted.
+        #
+        # BUT `derive_switch_decompositions` also emits SKELETON entries whose
+        # `raw_expr` is a literal "TODO: SQL expression for SWITCH measure ..."
+        # placeholder (no real SQL). Those are NOT authoritative — they're exactly
+        # the measures we want the skill-corpus LLM to translate. So only a
+        # decomposition carrying real SQL (structured num/den, or a raw_expr that
+        # isn't a TODO stub) suppresses the LLM. TODO skeletons fall through.
+        _decomp_entries = ctx.config.get('switch_decompositions', {}).get(table_key, {})
+        _authoritative_names: set[str] = set()
+        if isinstance(_decomp_entries, list):
+            _authoritative_names = {
+                d.get('name', '') for d in _decomp_entries if _is_real_switch_decomp(d)
+            }
+        elif isinstance(_decomp_entries, dict):
+            # dict form: values are per-branch sql_expr maps — treat any present
+            # branch SQL as authoritative (Step 6 emits it directly).
+            _authoritative_names = {
+                k for k, v in _decomp_entries.items() if isinstance(v, dict) and v
+            }
+        _llm_batch = [
+            m for m in untranslatable
+            if m.original_name not in _authoritative_names
+            and to_snake_case(m.original_name) not in _authoritative_names
+        ]
+
+        # Build the fact-table context block ONCE (stable across this table's
+        # measures) so the LLM emits real source columns / join aliases instead
+        # of guessing. Goes in the per-measure user prompt (not the cached prefix).
+        _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
+        _agg_cols = [c.get('source_col') or c.get('name') for c in (table_info.aggregate_columns or [])]
+        _agg_cols = [c for c in _agg_cols if c]
+        if _agg_cols:
+            _ctx_lines.append(f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}")
+        if table_info.group_by_columns:
+            _ctx_lines.append(f"- dimension / group-by columns: {', '.join(table_info.group_by_columns[:60])}")
+        if getattr(table_info, 'dim_source_tables', None):
+            _joins = [f"{alias} → {tbl}" for alias, tbl in table_info.dim_source_tables.items()]
+            if _joins:
+                _ctx_lines.append(f"- joined dimensions (use as alias.<col>): {'; '.join(_joins[:30])}")
+        if getattr(table_info, 'static_filters', None):
+            _ctx_lines.append(f"- table-level filters already applied: {'; '.join(table_info.static_filters[:10])}")
+        _table_context = "\n".join(_ctx_lines)
+
         try:
             llm_results = run_async(
                 translate_batch_with_llm(
-                    measures=untranslatable,
+                    measures=_llm_batch,
                     table_key=table_key,
                     base_names=base_names,
                     original_to_snake=original_to_snake,
-                    model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4'),
+                    model=ctx.llm_config.get('llm_model', 'databricks-claude-sonnet-4-5'),
+                    # Feed the dependency-graph topo order so a dependent measure
+                    # lands in a later concurrency chunk than the measure it
+                    # references — its MEASURE() ref resolves (Step 3.9).
+                    topo_priority=_topo_priority,
+                    # Fact-table schema/join context so the LLM uses real column
+                    # and alias names instead of guessing.
+                    table_context=_table_context,
                 )
             )
             llm_translated = []
@@ -509,7 +658,14 @@ def process_table(
         entries = switch_decomps[table_key]
         # Support both list (original monolith) and dict (Kasal structured) formats
         if isinstance(entries, list):
+            # Names already translated (regex or LLM) as real SQL this run.
+            _real_translated = {m.measure_name for m in translated if m.sql_expr}
             for defn in entries:
+                # A TODO-skeleton decomposition must NOT overwrite a measure the
+                # LLM already translated to real SQL at Step 5d. Only rebuild the
+                # skeleton when the measure isn't already a real translation.
+                if not _is_real_switch_decomp(defn) and defn['name'] in _real_translated:
+                    continue
                 if defn['name'] not in base_names or defn['name'] in dax_translated_names:
                     switch_measures.append(
                         build_switch_measure_fn(defn, filter_sets=ctx.translator.filter_sets)
@@ -715,8 +871,23 @@ def process_table(
         for col_m in re.finditer(r'\b(\w+)\s+AS\s+`?(\w+)`?', table_info.full_sql, re.IGNORECASE):
             known_cols.add(col_m.group(2))
         _CTE_ARTIFACT_COLS = {'row_num', 'rn', 'row_number'}
+        _param_resolver = PbiParameterResolver(
+            parameter_defaults=ctx.config.get('parameter_defaults'),
+        )
         valid_filters = []
         for filt in table_info.static_filters:
+            # P3: resolve known PBI params, then flag any that remain. An
+            # unresolved param (e.g. "& FiscperFilter &") must NOT be emitted as
+            # SQL — it's invalid. Drop the filter and surface it as a TODO so the
+            # customer supplies the value, rather than shipping broken SQL.
+            filt = _param_resolver.resolve(filt)
+            _unresolved = _param_resolver.find_unresolved_params(filt)
+            if _unresolved:
+                ctx.filter_warnings.append(
+                    f'{table_key}: TODO unresolved PBI parameter(s) '
+                    f'{_unresolved} in filter "{filt}" — dropped from SQL; '
+                    f'supply value(s) via parameter_defaults to re-enable')
+                continue
             ref_cols = set(re.findall(r'\bsource\.(\w+)', filt))
             bare_cols = set(re.findall(r'\b(\w+)\s*(?:=|<>|!=|IN\b|<|>|<=|>=)', filt))
             all_ref_cols = ref_cols | bare_cols
@@ -744,6 +915,24 @@ def process_table(
             valid_filters.append(filt)
         source_filter = ' AND '.join(valid_filters)
 
+    # ── PROP-5: lift recurring DAX exclusion predicates to the view filter ──
+    # The GT applies exclusions like comp_code NOT IN ('0403','0550','0307') at the
+    # view level; in the DAX these appear per-measure as FILTER(dim, col<>'0307').
+    # Detect exclusion predicates on a SOURCE column shared across most measures and
+    # add them once to source_filter (default on; disable via lift_common_exclusions).
+    if ctx.config.get('lift_common_exclusions', True) and dax_measures:
+        known_source_cols = set(table_info.group_by_columns)
+        known_source_cols.update(c['name'] for c in table_info.aggregate_columns)
+        known_source_cols.update(
+            c.get('source_col', '') for c in table_info.aggregate_columns)
+        lifted = _detect_common_exclusions(dax_measures, known_source_cols)
+        if lifted:
+            existing = [source_filter] if source_filter else []
+            source_filter = ' AND '.join(existing + lifted)
+            ctx.filter_warnings.append(
+                f'{table_key}: lifted {len(lifted)} common exclusion filter(s) '
+                f'to view level: {lifted}')
+
     # ── Source SQL enrichment: inline SQL from PBI native queries ─────
     source_sql = ''
 
@@ -763,6 +952,12 @@ def process_table(
                     parameter_defaults=ctx.config.get('parameter_defaults'),
                 )
                 candidate = resolver.resolve(candidate)
+                _unresolved_src = resolver.find_unresolved_params(candidate)
+                if _unresolved_src:
+                    ctx.filter_warnings.append(
+                        f'{table_key}: TODO unresolved PBI parameter(s) '
+                        f'{_unresolved_src} in inline source SQL — supply value(s) '
+                        f'via parameter_defaults; view may not run until resolved')
                 source_sql = candidate
                 source_filter = ''
 
@@ -791,6 +986,17 @@ def process_table(
             expand_re_version=bool(ctx.config.get('parameter_defaults', {}).get('RE_Version_ranges')),
         )
         resolved_sql = resolver.resolve(base_sql)
+        # P3: flag PBI params that survived resolution in the scan/native source
+        # SQL (e.g. "& CurrencyFilter &", "& RE_Version &" when no
+        # parameter_defaults value is configured). Emitting them leaves invalid
+        # SQL in `source:` — surface a TODO so the customer supplies the value.
+        _unresolved_scan = resolver.find_unresolved_params(resolved_sql)
+        if _unresolved_scan:
+            ctx.filter_warnings.append(
+                f'{table_key}: TODO unresolved PBI parameter(s) '
+                f'{_unresolved_scan} in native source SQL — supply value(s) via '
+                f'parameter_defaults (CurrencyFilter / RE_Version_ranges); view '
+                f'will not run until resolved')
         resolved_sql = spark_sql_compat(resolved_sql)
 
         # Count UNION arms before folding to detect arm loss
@@ -1006,11 +1212,30 @@ def process_table(
 
     if untranslatable:
         comment_lines.append('')
-        comment_lines.append('Untranslatable:')
-        for r in untranslatable:
-            comment_lines.append(f'  {r.original_name} — {r.skip_reason}')
+        comment_lines.append('Untranslatable (sorted by usage — fix high-impact gaps first):')
+        for r in sorted(untranslatable, key=lambda m: m.referenced_by, reverse=True):
+            _usage = (f' [referenced by {r.referenced_by}'
+                      f' {"measure" if r.referenced_by == 1 else "measures"}]'
+                      if r.referenced_by else '')
+            comment_lines.append(f'  {r.original_name} — {r.skip_reason}{_usage}')
 
     view_name = f'mv_{table_key.lower().replace("ft_", "").replace("fact_", "")}'
+
+    # ── Populate referenced_by (measure→measure in-degree) on every measure ──
+    # Prefer the GLOBAL count from config['measure_usage'] (computed by config-gen
+    # over the full cross-table measure set). Fall back to a LOCAL graph over this
+    # table's measures only when the config key is absent (older config) — note
+    # the local fallback is table-scoped and can undercount cross-table refs.
+    _measure_usage = (ctx.config or {}).get('measure_usage') or {}
+    if not _measure_usage:
+        _local_graph = build_dependency_graph([
+            {'measure_name': m.original_name, 'dax_expression': m.dax_expression}
+            for m in (all_measures + untranslatable)
+        ])
+        _rev = _local_graph.get('reverse_adjacency', {})
+        _measure_usage = {name: len(deps) for name, deps in _rev.items()}
+    for m in all_measures + untranslatable:
+        m.referenced_by = _measure_usage.get(m.original_name, 0)
 
     return MetricViewSpec(
         fact_table_key=table_key,

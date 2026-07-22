@@ -122,10 +122,9 @@ class TestEmitYaml:
         )
         yaml = emit_yaml(spec)
         assert 'safe_val' in yaml
-        # The dangerous measure should NOT appear in the measures section of YAML output
-        # It appears only in the Untranslatable comments section
-        assert 'Untranslatable' in yaml
-        assert '# Evil: Blocked' in yaml
+        # The dangerous measure appears only in the not-emitted comments section
+        assert 'Not emitted as measures' in yaml
+        assert 'Evil' in yaml
 
     def test_dax_measures_emitted(self):
         """DAX-translated measures appear in a separate section."""
@@ -232,8 +231,116 @@ class TestEmitYaml:
             ],
         )
         yaml = emit_yaml(spec)
-        assert 'Untranslatable' in yaml
-        assert '# Complex Measure' in yaml
+        assert 'Not emitted as measures' in yaml
+        assert 'Complex Measure' in yaml
+        # The full original DAX is preserved in the comment block so a reviewer
+        # can hand-translate without re-opening the PBIX.
+        assert 'DAX:' in yaml
+        assert 'CALCULATE(...)' in yaml
+
+    def test_untranslatable_preserves_multiline_dax_as_valid_yaml(self):
+        """Multi-line DAX is emitted as one comment line each, keeping the YAML
+        parseable (a raw newline in a comment would otherwise break it)."""
+        import yaml as _yaml
+        multiline_dax = 'IF([Same Month Flag]="N",\n   MONTH(source.a),\n   MONTH(source.b))'
+        spec = MetricViewSpec(
+            fact_table_key='fact',
+            source_table='cat.sch.tbl',
+            view_name='test_view',
+            comment='Test',
+            joins=[],
+            dimensions=[],
+            measures=[
+                TranslationResult(
+                    measure_name='val', original_name='Val',
+                    sql_expr='SUM(source.val)', is_translatable=True,
+                    skip_reason='', dax_expression='', confidence='high', category='base',
+                ),
+            ],
+            untranslatable=[
+                TranslationResult(
+                    measure_name='cur_yr', original_name='Cur Yr',
+                    sql_expr=None, is_translatable=False,
+                    skip_reason='complex', dax_expression=multiline_dax,
+                    confidence='none', category='cross_table',
+                ),
+            ],
+        )
+        yaml_out = emit_yaml(spec)
+        # Every DAX line is present as its own comment line
+        assert 'MONTH(source.a),' in yaml_out
+        assert 'MONTH(source.b))' in yaml_out
+        # And the document still parses (no bare newline leaked out of a comment)
+        assert _yaml.safe_load(yaml_out) is not None
+
+
+class TestMeasureUsageSurfacing:
+    """referenced_by count surfaced in per-measure comments + sorted TODO block.
+
+    Counts measure→measure references so reviewers prioritize high-impact gaps.
+    """
+
+    def _base(self, name, ref):
+        return TranslationResult(
+            measure_name=name, original_name=name,
+            sql_expr=f'SUM(source.{name})', is_translatable=True,
+            skip_reason='', dax_expression='', confidence='high', category='base',
+            referenced_by=ref,
+        )
+
+    def test_comment_shows_count_when_referenced(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 1)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by 1 measure' in yaml
+        # singular, not "1 measures"
+        assert 'referenced by 1 measures' not in yaml
+
+    def test_plural_wording(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 3)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by 3 measures' in yaml
+
+    def test_no_suffix_at_zero(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('epl', 0)], untranslatable=[],
+        )
+        yaml = emit_yaml(spec)
+        assert 'referenced by' not in yaml
+
+    def test_untranslatable_block_sorted_desc_and_annotated(self):
+        def _todo(name, ref):
+            return TranslationResult(
+                measure_name=name.lower(), original_name=name,
+                sql_expr=None, is_translatable=False,
+                skip_reason='TODO gap', dax_expression='SWITCH(...)',
+                confidence='none', category='unassigned', referenced_by=ref,
+            )
+        spec = MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='Test', joins=[], dimensions=[],
+            measures=[self._base('anchor', 0)],
+            untranslatable=[_todo('LowImpact', 1), _todo('HighImpact', 9),
+                            _todo('MidImpact', 4)],
+        )
+        yaml = emit_yaml(spec)
+        # Annotated with counts
+        assert 'referenced by 9 measures' in yaml
+        assert 'referenced by 1 measure' in yaml
+        # Sorted highest-first: HighImpact appears before MidImpact before LowImpact
+        i_high = yaml.index('HighImpact')
+        i_mid = yaml.index('MidImpact')
+        i_low = yaml.index('LowImpact')
+        assert i_high < i_mid < i_low
 
 
 # ─── _check_dangerous_sql Tests ─────────────────────────────────────────────
@@ -488,3 +595,181 @@ class TestCleanFilterPrefixes:
         expr = "SUM(source.val)"
         result = _clean_filter_prefixes(expr, fact_table_key='fact')
         assert result == expr
+
+
+class TestDimensionAndJoinDedup:
+    """P2: duplicate dimension/join names are invalid UCMV YAML — must be deduped."""
+
+    def _spec(self, dims, joins):
+        return MetricViewSpec(
+            fact_table_key='fact_test',
+            source_table='cat.sch.test_table',
+            view_name='fact_test_uc_metric_view',
+            comment='c',
+            joins=joins,
+            dimensions=dims,
+            measures=[TranslationResult(
+                measure_name='m', original_name='M', sql_expr='SUM(source.x)',
+                is_translatable=True, skip_reason='m', dax_expression='SUM(T[x])',
+                confidence='high', category='base')],
+            untranslatable=[],
+        )
+
+    def test_duplicate_dimension_names_collapsed(self):
+        # Use join-alias exprs (no source. prefix) so they survive the phantom
+        # dimension validation and we test dedup specifically.
+        dims = [
+            {'name': 'date', 'expr': 'dim_calendar.date', 'comment': 'Date'},
+            {'name': 'date', 'expr': 'dim_calendar_dummy.date', 'comment': 'Dup'},
+            {'name': 'date', 'expr': 'c_dim_calendar.date', 'comment': 'Dup2'},
+            {'name': 'market', 'expr': 'dim_geo.market', 'comment': 'Market'},
+        ]
+        spec = self._spec(dims, [])
+        out = emit_yaml(spec)
+        # 'date' emitted exactly once, market once
+        assert out.count('  - name: date') == 1
+        assert out.count('  - name: market') == 1
+        # first occurrence wins
+        assert 'dim_calendar.date' in out
+        assert 'dim_calendar_dummy.date' not in out
+
+    def test_duplicate_join_names_collapsed(self):
+        joins = [
+            {'name': 'dim_plant', 'source': 'cat.sch.plant_a', 'on': 'source.p = dim_plant.p'},
+            {'name': 'dim_plant', 'source': 'cat.sch.plant_b', 'on': 'source.p = dim_plant.p'},
+        ]
+        spec = self._spec([{'name': 'region', 'expr': 'source.region'}], joins)
+        out = emit_yaml(spec)
+        assert out.count('- name: dim_plant') == 1
+        assert 'cat.sch.plant_a' in out  # first wins
+
+
+class TestDimMeasureNameCollision:
+    """P7: a UCMV cannot have a dimension and a measure with the same name."""
+
+    def test_colliding_dimension_dropped(self):
+        spec = MetricViewSpec(
+            fact_table_key='fact_x',
+            source_table='cat.sch.t',
+            view_name='fact_x_uc_metric_view',
+            comment='c',
+            joins=[],
+            dimensions=[
+                {'name': 'kbi_value', 'expr': 'source.kbi_value'},   # collides with measure
+                {'name': 'region', 'expr': 'dim_geo.region'},         # keep
+            ],
+            measures=[TranslationResult(
+                measure_name='kbi_value', original_name='KBI Value',
+                sql_expr='SUM(source.kbi_value)', is_translatable=True,
+                skip_reason='kbi', dax_expression='SUM(T[kbi_value])',
+                confidence='high', category='base')],
+            untranslatable=[],
+        )
+        out = emit_yaml(spec)
+        # kbi_value appears once, as a measure (SUM), not as a bare dimension
+        assert out.count('- name: kbi_value') == 1
+        assert 'SUM(source.kbi_value)' in out
+        # region dimension survives
+        assert '- name: region' in out
+
+
+class TestUntranslatableCategorization:
+    """Not-emitted measures are grouped by a clear human category + why (PROP #19)."""
+
+    def _emit(self, untranslatable):
+        spec = MetricViewSpec(
+            fact_table_key='f', source_table='c.s.t', view_name='v', comment='c',
+            joins=[], dimensions=[],
+            measures=[TranslationResult(
+                measure_name='base', original_name='base', sql_expr='SUM(source.x)',
+                is_translatable=True, skip_reason='', dax_expression='', confidence='high',
+                category='base')],
+            untranslatable=untranslatable,
+        )
+        return emit_yaml(spec)
+
+    def _u(self, name, dax, reason='no matching pattern'):
+        return TranslationResult(
+            measure_name=name.lower(), original_name=name, sql_expr=None,
+            is_translatable=False, skip_reason=reason, dax_expression=dax,
+            confidence='none', category='unassigned')
+
+    def test_prior_year_grouped_with_reason(self):
+        y = self._emit([self._u('NSR PY', 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[d]))')])
+        assert '[prior-year time-intelligence]' in y
+        assert 'NSR PY' in y
+        assert 'not expressible in a static' in y
+
+    def test_dynamic_selector_grouped(self):
+        y = self._emit([self._u('Mega', 'var x=SELECTEDVALUE(m[k]) return SWITCH(TRUE(), x=1, [A])')])
+        assert '[dynamic KPI selector]' in y
+
+    def test_display_artifact_grouped(self):
+        y = self._emit([self._u('CF_vs_%_Color', 'KBI_Display_calculate')])
+        assert '[display artifact]' in y
+
+    def test_complex_dax_bucket(self):
+        y = self._emit([self._u('Weird', 'SOMEFUNC(x, y, z)')])
+        assert 'needs manual translation' in y
+
+    # ── Construct-specific guidance (Tier 3): honest unlock or honest skip ────
+
+    def test_treatas_dispatch_grouped(self):
+        y = self._emit([self._u('KPI Dispatch',
+            'CALCULATE([M], TREATAS({kbiName}, T[Name]))')])
+        assert '[disconnected-slicer dispatch (TREATAS)]' in y
+        assert 'display-layer' in y and 'no source-view unlock' in y
+
+    def test_lookupvalue_label_grouped(self):
+        y = self._emit([self._u('Title',
+            'LOOKUPVALUE(p[Parameter], p[Field], SELECTEDVALUE(p[Field]))')])
+        assert '[parameter/label lookup (LOOKUPVALUE)]' in y
+        assert 'join (RELATED)' in y
+
+    def test_topn_grouped(self):
+        y = self._emit([self._u('TopPrice',
+            'CALCULATE(SELECTEDVALUE(P[Price]), TOPN(1, SUMMARIZE(P, P[Price], "c", COUNTROWS(P)), [c], DESC))')])
+        # SUMMARIZE also present, but TOPN guidance is what a reviewer needs first
+        assert '[top-N row selection (TOPN)]' in y
+        assert 'ROW_NUMBER' in y
+
+    def test_allexcept_fixed_lod_grouped(self):
+        y = self._emit([self._u('YearWeight',
+            "CALCULATE(SUM(t[weight]), ALLEXCEPT(t, t[Year]))")])
+        assert '[fixed-LOD (ALLEXCEPT)]' in y
+        assert 'kept-column grain' in y
+
+    def test_summarize_group_then_aggregate_grouped(self):
+        y = self._emit([self._u('MatContr',
+            'SUMX(SUMMARIZE(F, F[comp_code], F[material]), [x]*CALCULATE(SUM(F[s])))')])
+        assert '[group-then-aggregate (SUMMARIZE/CALCULATETABLE)]' in y
+        assert 'GROUP BY' in y and 'identity dimension' in y
+
+
+class TestSourceSqlDangerousDrop:
+    """SEC #6: a dangerous inline source_sql is dropped at emit (defense-in-depth
+    for non-deployer consumers), falling back to the plain source_table."""
+
+    def _spec(self, source_sql):
+        from src.engines.crewai.tools.custom.metric_view_utils.data_classes import (
+            MetricViewSpec, TranslationResult)
+        return MetricViewSpec(
+            fact_table_key='fact', source_table='cat.sch.tbl', view_name='v',
+            comment='c', joins=[], dimensions=[],
+            measures=[TranslationResult(
+                measure_name='val', original_name='val', sql_expr='SUM(source.val)',
+                is_translatable=True, skip_reason='Val', dax_expression='',
+                confidence='high', category='base')],
+            untranslatable=[], source_sql=source_sql)
+
+    def test_safe_source_sql_kept(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        y = emit_yaml(self._spec('SELECT * FROM cat.sch.tbl WHERE x = 1'))
+        assert 'source: |-' in y and 'SELECT * FROM' in y
+
+    def test_dangerous_source_sql_dropped(self):
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        y = emit_yaml(self._spec('SELECT 1; DROP TABLE x'))
+        # inline SQL dropped → falls back to plain source_table, no DROP in output
+        assert 'DROP TABLE' not in y
+        assert 'source: cat.sch.tbl' in y or 'source: `cat`' in y or 'source:' in y

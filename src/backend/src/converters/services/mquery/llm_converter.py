@@ -39,7 +39,7 @@ class MQueryLLMConverter:
         self,
         workspace_url: Optional[str] = None,
         token: Optional[str] = None,
-        model: str = "databricks-claude-sonnet-4"
+        model: str = "databricks-claude-sonnet-4-5"
     ):
         """
         Initialize the LLM converter.

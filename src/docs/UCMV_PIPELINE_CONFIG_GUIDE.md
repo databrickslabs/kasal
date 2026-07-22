@@ -4,9 +4,9 @@ Reference for every config key in the UCMV pipeline: which keys are auto-extract
 
 ## What gets automated vs. what needs human input
 
-The UCMV pipeline has two phases: **Config Proposer** (automated extraction from PBI APIs) and **UCMV Generator** (metric view generation from config). The Config Proposer auto-fills ~70% of the config. The remaining ~30% requires human domain knowledge and **cannot be fully automated**.
+The UCMV pipeline has two phases: **Config Proposer** (automated extraction from PBI APIs — Tool 90, `pipeline_config_generator_tool`) and **UCMV Generator** (metric view generation from config — Tool 86). The Config Proposer auto-fills the large majority of the config, and now **auto-derives `switch_decompositions` and `filter_sets`** from a DAX scan (see [Recent automation](#recent-automation-what-changed)). What remains is a small set of keys that depend on **physical data-layout and cross-fact architecture knowledge** that simply is not present in the PBI APIs.
 
-This document explains what needs manual configuration, why, and how to fill it in.
+This document explains what still needs manual configuration, why, and — in [Entering manual config in the UI](#entering-manual-config-in-the-ui) — exactly where to type it.
 
 ---
 
@@ -27,7 +27,7 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 
 ## Config keys that cannot be fully automated
 
-### filter_sets
+### filter_sets  *(now mostly auto-derived)*
 
 **What**: Named collections of filter values used in CALCULATE/FILTER expressions.
 
@@ -35,24 +35,33 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 ```json
 {
   "CWC_FILTER": ["APET", "CAN", "HDPE FG", "JUICE-BRICK", "NRGB", "PET", "PMX", "RGB", "TNK"],
-  "WCT_CORE": ["PET", "APET", "RGB", "JUICE-BRICK", "CAN", "HDPE FG", "NRGB", "CHIPS FG"],
-  "WCT_SLE": ["APET", "CAN", "HDPE FG", "PMX", "JUICE-BRICK", "NRGB", "PET", "RGB", "TNK", "CHIPS FG"]
+  "WCT_CORE": ["PET", "APET", "RGB", "JUICE-BRICK", "CAN", "HDPE FG", "NRGB", "CHIPS FG"]
 }
 ```
 
-**Why it can't be automated**: DAX measures reference filter values in two ways:
+**What's automated now**: The Config Proposer scans DAX and auto-populates
+`filter_sets` from both **inline literals** (`CALCULATE(SUM(...), Table[col] = "PET")`)
+and **inline value lists** (`Table[col] IN {"APET","CAN",...}`), *and* it harvests
+the value lists referenced by the auto-derived `switch_decompositions`. Code:
+`pipeline_config_generator_tool._auto_enrich_from_dax` (§1) and
+`generate_config.derive_filter_sets`. In practice most filter sets now arrive pre-filled.
 
-1. **Inline literals**: `CALCULATE(SUM(...), Table[col] = "PET")`. These CAN be extracted automatically.
-2. **Boolean flag columns**: `CALCULATE(SUM(...), Table[CWC_Filter] = 1)`. The flag column `CWC_Filter` is a pre-computed boolean on the dimension table. The actual values it represents (`APET`, `CAN`, `HDPE FG`, ...) live in the **database rows**, not in the DAX expression. You'd need to query the dimension table to resolve `CWC_Filter = 1` into the list of values it maps to.
-3. **Named variable references**: `var CWC_List = {"APET","CAN",...}`. These CAN be extracted when the variable is defined inline in the same DAX expression. But when the variable is defined in a shared measure or parameter table, the reference is opaque.
+**The remaining manual case — boolean flag columns**: When DAX filters on a
+pre-computed flag (`CALCULATE(SUM(...), Table[CWC_Filter] = 1)`), the flag is a
+boolean on the dimension table. The actual values it maps to (`APET`, `CAN`, ...)
+live in the **database rows**, not the DAX, so they cannot be read from the API.
+(A named variable defined in a *shared* measure or parameter table is opaque for
+the same reason — the value list isn't in the referencing expression.)
 
-**What to do**: Identify filter columns in dimension tables that act as boolean flags (e.g., `CWC_Filter`, `CWC_Filter2`). Query the dimension table to find which values each flag maps to, and add them as named filter sets.
+**What to do**: If a flag-based filter set is missing or shows as a `TODO`, query
+the dimension table to find which values the flag maps to and add them as a named set.
 
 ---
 
-### switch_decompositions
+### switch_decompositions  *(now auto-derived)*
 
-**What**: Manual decomposition of `SWITCH(TRUE(), SELECTEDVALUE(...) = "X", expr, ...)` DAX patterns into individual metric view measures.
+**What**: Decomposition of `SWITCH(TRUE(), SELECTEDVALUE(...) = "X", expr, ...)` DAX
+patterns into individual metric view measures (the slicer dropdown becomes N measures).
 
 **Example**:
 ```json
@@ -78,15 +87,18 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 }
 ```
 
-**Why it can't be automated**: SWITCH measures in DAX are **parameterized by slicer context**. The user selects a value from a dropdown (e.g., "Installed Capacity" or "EPL"), and the SWITCH returns a different calculation for each selection. This is a **UI interaction pattern** that has no equivalent in static metric views. To convert it:
+**What's automated now**: This is no longer a hand-authored key. The Config
+Proposer decomposes SELECTEDVALUE+SWITCH measures into individual `{name, num,
+num_fs, den, den_fs}` entries automatically — including the geo/plant/company
+selector variant (`ISFILTERED`/`HASONEVALUE`) — emitting **real SQL branches, not
+skeletons**. Code: `generate_config.derive_switch_decompositions` +
+`derive_geo_switch_decompositions`, plus `_auto_enrich_from_dax` (§ SWITCH).
 
-- Each SWITCH branch must become a **separate measure** with its own name.
-- Each branch's numerator and denominator must be mapped to **physical columns** and **filter sets**.
-- The relationship between branches (e.g., "this is a waterfall where each step decomposes the previous") is **business logic** that only the report author understands.
-
-The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and extract the branch conditions. But it cannot determine: (a) which physical column each branch's `[Measure]` reference maps to, (b) which filter set applies to numerator vs. denominator, or (c) whether the decomposition is a waterfall, a category selector, or a conditional formatter.
-
-**What to do**: For each SELECTEDVALUE+SWITCH measure flagged in the untranslatable report, examine the DAX branches and map each to a `{name, num, num_fs, den, den_fs}` entry. Use `raw_expr` for pre-built SQL when the formula is complex.
+**The residual manual case**: A branch whose `[Measure]` reference the proposer
+can't resolve to a physical column, or a decomposition whose *intent* (waterfall
+vs. category-selector vs. conditional formatter) changes the math, may surface as
+a `TODO`. Review those branches and set `num`/`den`/`*_fs`, or drop in a `raw_expr`
+with pre-built SQL when the formula is complex. Most models need no edits here.
 
 ---
 
@@ -100,7 +112,7 @@ The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and e
   "Dim_wkctr": {
     "alias": "dim_wkctr",
     "join_key": "plant_workcenter_key",
-    "source_table": "dc_datalake_prod_001.udm_cchbc_md.ca_dim_workcenter",
+    "source_table": "dc_datalake_prod_001.udm_example_md.ca_dim_workcenter",
     "dim_columns": ["bic_cwc_type", "workcenter_txtmd"]
   }
 }
@@ -108,7 +120,7 @@ The Config Proposer CAN detect that a `SWITCH(TRUE(), ...)` pattern exists and e
 
 **Why it can't be automated**: The PBI Admin Scanner API returns table metadata with M expressions (Power Query), not physical table names. M expressions reference data sources using connection strings, database names, and schema paths that may not directly map to the 3-level UC table name. The translation requires knowing:
 
-- How the data lake is organized (e.g., `dc_datalake_prod_001.udm_cchbc_md` prefix convention).
+- How the data lake is organized (e.g., `dc_datalake_prod_001.udm_example_md` prefix convention).
 - Whether the table was imported, DirectQuery, or uses a gateway; each has a different M expression format.
 - Whether table names were flattened (e.g., `schema__table` vs. `schema.table`).
 
@@ -174,9 +186,17 @@ The Config Proposer can detect that two fact tables reference the same physical 
 - **Geography-routed logic**: `IF(SELECTEDVALUE(Geo[code]) IN {550, 403}, KBI_path, direct_path)`.
 - **Complex var chains**: Multi-step variable assignments with conditional logic.
 
-The LLM fallback can translate some of these, but for business-critical measures, a human-verified SQL expression is more reliable.
+The translator now runs **LLM-first with a skill corpus** (see the [pipeline
+architecture doc](./powerbi/ucmv-pipeline-architecture.md#3b-the-dax-path-measures--sql--llm-first-with-skill-files))
+plus correctness guards that reject silently-wrong output, so the set of measures
+that land here is **smaller than it used to be** — var-chain ratios, join-alias
+FILTER, share-of-total, ALLEXCEPT and SUMMARIZE-LOD patterns are handled
+automatically. `manual_overrides` is now the fallback for the genuinely hardest,
+business-critical measures where you want a human-verified SQL expression.
 
-**What to do**: Review the untranslatable measures report. For each measure that's important for the dashboard, write the equivalent SQL using `source.column`, `FILTER (WHERE ...)`, and `MEASURE()` references.
+**What to do**: Review the "Untranslatable Measures" section of the migration
+report. For each measure important to the dashboard that's still listed, write the
+equivalent SQL using `source.column`, `FILTER (WHERE ...)`, and `MEASURE()` references.
 
 ---
 
@@ -205,19 +225,164 @@ The LLM fallback can translate some of these, but for business-critical measures
 | `mquery` (SQL) | Yes | None | - |
 | `scan_data` | Yes | None | - |
 | `column_overrides` | Partial | Low | Easy |
-| `join_key_map.source_table` | No | Medium | Look up UC table names |
-| `filter_sets` | Partial | Medium | Query dimension tables for flag values |
-| `switch_decompositions` | No | High | Requires understanding DAX business logic |
-| `fact_join_map` | No | High | Requires data architecture knowledge |
-| `manual_overrides` | No | High | Requires SQL writing skill |
-| `switch_join_alias/col` | No | Low | Identify the SWITCH dimension |
+| `switch_decompositions` | **Yes** (auto-derived) | Rare | Only residual unresolved branches |
+| `filter_sets` | **Mostly** (auto-derived) | Low | Only boolean-flag columns |
+| `switch_join_alias/col` | Partial | Low | Identify the SWITCH dimension |
+| `manual_overrides` | No (smaller set now) | Medium | SQL for the hardest measures only |
+| `join_key_map.source_table` | **Yes** with enrichment (else manual) | Low | Auto-parsed from connector M-query |
+| `filter_sets` (boolean-flag cols) | **Yes** with enrichment (else manual) | Low | Auto-resolved by a warehouse `SELECT DISTINCT` |
+| `fact_join_map` | **Drafted** with enrichment (else manual) | Medium | LLM draft for cross-fact merges; human verifies |
 
-The HITL review step between Config Proposer and UCMV Generator is where this manual enrichment happens. The Config Proposer flags what's missing; the human fills in the gaps.
+The HITL review step between Config Proposer and UCMV Generator is where any
+remaining enrichment happens. The Config Proposer fills what it can and marks
+unresolved spots with a `TODO` marker; the human fills the rest in the UI.
+
+### The irreducible manual core — now shrunk by the enrichment mode
+
+The keys that the PBI APIs alone cannot supply used to all be manual. The **opt-in
+"warehouse + LLM enrichment"** mode (see below) now auto-fills or drafts three of
+the four:
+
+1. **`join_key_map.*.source_table`** — the physical 3-level UC table name.
+   → **auto-filled** by parsing the dimension's connector M-query (no warehouse
+   even needed).
+2. **`filter_sets` for boolean-flag columns** — the `Flag = 1 → [values]` mapping
+   that lives in DB rows. → **auto-resolved** by a warehouse `SELECT DISTINCT`.
+3. **`fact_join_map`** — cross-fact union/join strategy. → **LLM-drafted** (marked
+   `TODO: verify`; a human confirms — a wrong join yields silently-wrong numbers).
+4. **`manual_overrides`** — hand-verified SQL for the hardest business-critical
+   measures. → still genuinely manual (business logic, not recoverable from data).
+
+Without enrichment enabled (the default), these stay `TODO`/manual as before.
+
+## Recent automation (what changed)
+
+Earlier revisions of this guide listed `switch_decompositions` as "High effort,
+manual" and `filter_sets` as broadly manual. That is **no longer accurate** — both
+are now auto-derived by the Config Proposer:
+
+- **`switch_decompositions`** → `generate_config.derive_switch_decompositions` +
+  `derive_geo_switch_decompositions` (plant/company selectors), emitting real SQL
+  branches.
+- **`filter_sets`** → `generate_config.derive_filter_sets` +
+  `pipeline_config_generator_tool._auto_enrich_from_dax`, harvesting inline
+  literals, `IN {…}` lists, and the values used by the switch branches.
+- **DAX translation** is LLM-first with a skill corpus + correctness guards, so
+  fewer measures fall through to `manual_overrides`.
+
+Treat the summary table above as the current state.
+
+## Optional: Warehouse + LLM enrichment
+
+The Config Proposer is deterministic and LLM-free by default. It also offers an
+**opt-in** mode that auto-fills the keys the PBI APIs can't supply by querying your
+Databricks SQL warehouse (and, for cross-fact merges only, one LLM call).
+
+**Enabling it:** on the Pipeline Config Generator node, toggle **"Warehouse + LLM
+enrichment (optional)"**, click **Connect**, and pick a **SQL Warehouse**. The
+default (toggle off) path is unchanged — fast, deterministic, no warehouse, no
+tokens.
+
+When enabled, an additive post-pass runs after the config is built (it never
+overwrites a human/derived value — only fills a slot that is absent/empty/`TODO`):
+
+| Tier | Fills | How | Needs warehouse? | Needs LLM? |
+|------|-------|-----|:---:|:---:|
+| **P1** | `join_key_map[dim].source_table` | parse the `catalog.schema.table` out of the dimension's connector M-query | no | no |
+| **P2** | flag-column `filter_sets` | `SELECT DISTINCT value_col FROM dim WHERE flag = 1` | yes | no |
+| **P3** | `fact_join_map` join strategy | warehouse grain probes + one LLM call — **only** when ≥2 facts share a conformed dimension | yes | yes (gated) |
+
+- **P1 always runs** (it's deterministic and warehouse-free) — so even without a
+  warehouse you get `source_table` filled for connector-based dimensions.
+- **P3 is doubly gated**: it needs a warehouse *and* a detected cross-fact merge,
+  so the LLM never fires for the common single-fact model. Every P3-drafted join
+  carries a `TODO: verify` suffix — **a human must confirm it before deploy**,
+  because a wrong join produces silently-wrong numbers.
+
+**On failure** (permission denied, warehouse asleep, bad table): the query returns
+an error, the affected key **keeps its existing `TODO`** (never a half-filled or
+wrong value), and config-gen still completes. The reason is recorded in the tool's
+`enrichment_log` output field.
+
+**Auth:** the warehouse queries authenticate on-behalf-of the signed-in user (OBO)
+when running behind the Databricks Apps proxy; locally, configure a
+`DATABRICKS_TOKEN` PAT in the API Keys UI.
+
+## Entering manual config in the UI
+
+You do **not** hand-write `pipeline_config.json`. The flow is:
+
+**1. Generate the config (Pipeline Config Generator — Tool 90).**
+In the pipeline/flow, the Pipeline Config Generator node takes only *connection*
+inputs — Workspace ID, Dataset ID, `report_id` (supply it for best measure
+quality — it resolves full-DAX bodies instead of bare columns), and the two
+credential sets. Run it; it calls the PBI APIs and emits the full config with all
+26 keys, auto-deriving `switch_decompositions`/`filter_sets` and marking anything
+unresolved with a `TODO`.
+
+**2. Review and fill gaps in the Config Editor (`/config-editor`).**
+Open the generated config in the Config Editor. The left sidebar lists every key
+with a color-coded status badge (`getKeyStatus` in `types/configEditor.ts`):
+
+| Badge | Meaning |
+|-------|---------|
+| `AUTO` | Filled by the proposer — usually leave as is |
+| `TODO` | Value contains a `TODO` marker — **needs your input** |
+| `EMPTY` | Empty object/list — fill if relevant to your model |
+| `NULL` | Explicitly null — set a value if needed |
+
+Scan for `TODO` and `EMPTY` badges first — that's the irreducible core above.
+Click a key to edit it, either with the per-entry **form view** or the **raw
+JSON** toggle (paste a whole object and click *Apply JSON*). Keys that ship a
+literal `TODO` string when unresolved include `switch_join_alias` /
+`switch_join_col`, `budget_suffix`, a `fact_join_map` grain decision, and any
+measure `base_expr` the proposer couldn't translate.
+
+**3. Example — adding `source_table` to a `join_key_map` entry.**
+The proposer builds each dimension entry with alias/join_key/dim_columns but
+**omits `source_table`** (the physical UC name isn't in the PBI M expression — it
+can't be inferred, so the key is simply left out rather than guessed):
+
+```json
+// BEFORE (as generated — no source_table key)
+"join_key_map": {
+  "Dim_wkctr": {
+    "alias": "dim_wkctr",
+    "join_key": "plant_workcenter_key",
+    "dim_columns": ["bic_cwc_type", "workcenter_txtmd"]
+  }
+}
+```
+
+In the Config Editor, open **Join Key Map**, switch to raw JSON, and add
+`source_table` with the real catalog.schema.table:
+
+```json
+// AFTER (what you type)
+"join_key_map": {
+  "Dim_wkctr": {
+    "alias": "dim_wkctr",
+    "join_key": "plant_workcenter_key",
+    "source_table": "your_catalog.your_schema.dim_workcenter",
+    "dim_columns": ["bic_cwc_type", "workcenter_txtmd"]
+  }
+}
+```
+
+Click *Apply JSON*. Same pattern for a flag-based `filter_sets` entry (add the
+resolved value list), a `switch_join_alias`/`switch_join_col` that shows a `TODO`
+(replace with the real dimension alias/column), or a `manual_overrides` measure
+(add `{name, expr, comment}`). When no `TODO`/`EMPTY` badges remain for keys your
+model uses, download the config.
+
+**4. Feed the reviewed config to the UCMV Generator (Tool 86).**
+In JSON mode, paste the reviewed config into the generator's config input; it
+builds the metric views from `measures_json` + `mquery_json` and your enrichment.
 
 ## See also
 
 - [Power BI tools reference](./powerbi/README.md): the tools that extract and translate PBI metadata
 - [Example crews and flows](./examples/README.md): importable UCMV pipeline definitions
-- [PowerBI / UCMV / Genie / dashboard tooling roadmap](./README_ARCHITECTURE_PBI_UCMV_ROADMAP.md): architecture and next-release plan
+- [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of the extraction → config → generation → deploy flow, with the code location of each stage
 
 Back to the [documentation hub](./README.md).

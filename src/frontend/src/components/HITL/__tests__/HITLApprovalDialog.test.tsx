@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   mockGetExecutionHITLStatus: vi.fn(),
   mockApproveGate: vi.fn(),
   mockRejectGate: vi.fn(),
+  mockGetApproval: vi.fn(),
 }));
 
 // Mock HITLService
@@ -42,6 +43,7 @@ vi.mock('../../../api/HITLService', async (importOriginal) => {
       getExecutionHITLStatus: mocks.mockGetExecutionHITLStatus,
       approveGate: mocks.mockApproveGate,
       rejectGate: mocks.mockRejectGate,
+      getApproval: mocks.mockGetApproval,
     },
   };
 });
@@ -133,6 +135,50 @@ describe('HITLApprovalDialog', () => {
       );
 
       expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Lazy-loaded output', () => {
+    it('fetches the full previous_crew_output on demand when status omits it', async () => {
+      // Status omits the heavy output and flags that it exists.
+      const pending = createMockApproval({
+        previous_crew_output: null,
+        has_previous_crew_output: true,
+        previous_crew_output_size: 900_000,
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(pending));
+      mocks.mockGetApproval.mockResolvedValue(
+        createMockApproval({ previous_crew_output: 'LAZY-LOADED OUTPUT BODY' })
+      );
+
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+
+      // The dialog lazy-loads via getApproval(id), not from the status blob.
+      await waitFor(() => expect(mocks.mockGetApproval).toHaveBeenCalledWith(1, 'ui'));
+      await waitFor(() =>
+        expect(screen.getByText(/LAZY-LOADED OUTPUT BODY/)).toBeInTheDocument()
+      );
+    });
+
+    it('does not call getApproval when there is no output to load', async () => {
+      const pending = createMockApproval({
+        previous_crew_output: null,
+        has_previous_crew_output: false,
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(pending));
+
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+
+      await waitFor(() => expect(mocks.mockGetExecutionHITLStatus).toHaveBeenCalled());
+      expect(mocks.mockGetApproval).not.toHaveBeenCalled();
     });
   });
 

@@ -76,7 +76,7 @@ def _agent_node(agent_id: str, agent_data: dict, x: int, y: int) -> dict:
             "tool_configs": agent_data.get("tool_configs"),
             "agentId": agent_id,
             "taskId": None,
-            "llm": agent_data.get("llm", "databricks-claude-sonnet-4"),
+            "llm": agent_data.get("llm", "databricks-claude-sonnet-4-5"),
             "function_calling_llm": None,
             "max_iter": agent_data.get("max_iter", 25),
             "max_rpm": agent_data.get("max_rpm", 10),
@@ -170,8 +170,8 @@ PIPELINE_CONFIG_AGENT = {
         "Call the Pipeline Config Generator tool with ZERO arguments — all credentials "
         "are pre-configured in the tool task form."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["90"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -179,7 +179,7 @@ PIPELINE_CONFIG_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -227,7 +227,7 @@ PIPELINE_CONFIG_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [PIPELINE_CONFIG_AGENT_ID],
     "task_ids": [PIPELINE_CONFIG_TASK_ID],
@@ -259,8 +259,8 @@ UCMV_GEN_AGENT = {
         "into UCMV YAML definitions using the UC Metric View Generator tool. "
         "Call the tool with ZERO arguments — all parameters are pre-configured."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["86"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 10,
     "max_rpm": 10,
@@ -268,7 +268,7 @@ UCMV_GEN_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -300,8 +300,17 @@ UCMV_GEN_TASK = {
             "catalog": "",
             "schema_name": "",
             "use_llm_fallback": True,
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
+            # JSON mode: the flow injects the preceding Pipeline Config crew's
+            # output into these fields (config_json ← proposed_config,
+            # measures_json/mquery_json ← the handoff arrays it now emits). They
+            # start empty so the injection fills them; UCMV builds views from
+            # measures_json + mquery_json, so both MUST be present for the
+            # handoff to produce any views.
             "config_json": "{}",
+            "measures_json": "[]",
+            "mquery_json": "[]",
+            "relationships_json": "[]",
         }
     },
     "config": DEFAULT_TASK_CONFIG,
@@ -313,7 +322,7 @@ UCMV_GEN_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [UCMV_GEN_AGENT_ID],
     "task_ids": [UCMV_GEN_TASK_ID],
@@ -345,8 +354,8 @@ UCMV_VAL_AGENT = {
         "You validate each measure's SQL against the source DAX and flag mismatches. "
         "Call the Metric View Validator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["91"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -354,7 +363,7 @@ UCMV_VAL_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -391,7 +400,7 @@ UCMV_VAL_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [UCMV_VAL_AGENT_ID],
     "task_ids": [UCMV_VAL_TASK_ID],
@@ -420,8 +429,8 @@ DEPLOYER_AGENT = {
         "Call the Metric View Deployer tool with ZERO arguments — "
         "ucmv_output is auto-injected from the flow."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["88"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -429,7 +438,7 @@ DEPLOYER_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -467,7 +476,7 @@ DEPLOYER_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [DEPLOYER_AGENT_ID],
     "task_ids": [DEPLOYER_TASK_ID],
@@ -496,8 +505,8 @@ REFERENCES_AGENT = {
         "using the Power BI Report References Tool. "
         "IMMEDIATELY call the tool with ZERO arguments — all parameters are pre-configured."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["78"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,
@@ -505,7 +514,7 @@ REFERENCES_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -549,7 +558,7 @@ REFERENCES_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [REFERENCES_AGENT_ID],
     "task_ids": [REFERENCES_TASK_ID],
@@ -578,8 +587,8 @@ MAPPER_AGENT = {
         "report_references_json and ucmv_output are pre-configured or auto-injected. "
         "Call the tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["94"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -587,7 +596,7 @@ MAPPER_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -618,7 +627,7 @@ MAPPER_TASK = {
             "schema_name": "",
             "dashboard_title": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         }
     },
     "config": DEFAULT_TASK_CONFIG,
@@ -630,7 +639,7 @@ MAPPER_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [MAPPER_AGENT_ID],
     "task_ids": [MAPPER_TASK_ID],
@@ -659,8 +668,8 @@ DASHBOARD_AGENT = {
         "visual_mappings_json is auto-injected from the flow. "
         "Call the Databricks Dashboard Creator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["95"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,
@@ -668,7 +677,7 @@ DASHBOARD_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -711,7 +720,7 @@ DASHBOARD_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [DASHBOARD_AGENT_ID],
     "task_ids": [DASHBOARD_TASK_ID],
@@ -740,8 +749,8 @@ GENIE_CFG_AGENT = {
         "ucmv_output is auto-injected from the flow. "
         "Call the UCMV Genie Space Config Generator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["93"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 5,
     "max_rpm": 10,
@@ -749,7 +758,7 @@ GENIE_CFG_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -780,7 +789,7 @@ GENIE_CFG_TASK = {
             "schema_name": "",
             "warehouse_id": "",
             "databricks_host": "",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
         }
     },
     "config": DEFAULT_TASK_CONFIG,
@@ -792,7 +801,7 @@ GENIE_CFG_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [GENIE_CFG_AGENT_ID],
     "task_ids": [GENIE_CFG_TASK_ID],
@@ -821,8 +830,8 @@ GENIE_GEN_AGENT = {
         "All parameters are auto-injected or pre-configured. "
         "Call the Genie Space Generator tool with ZERO arguments."
     ),
-    "llm": "databricks-claude-sonnet-4",
-    "tools": ["92"],
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
     "tool_configs": {},
     "max_iter": 3,
     "max_rpm": 10,
@@ -830,7 +839,7 @@ GENIE_GEN_AGENT = {
     "verbose": True,
     "allow_delegation": False,
     "cache": True,
-    "memory": True,
+    "memory": False,
     "embedder_config": DEFAULT_EMBEDDER,
     "max_retry_limit": 3,
 }
@@ -879,7 +888,7 @@ GENIE_GEN_CREW = {
     "process": "sequential",
     "planning": False,
     "reasoning": False,
-    "memory": True,
+    "memory": False,
     "verbose": True,
     "agent_ids": [GENIE_GEN_AGENT_ID],
     "task_ids": [GENIE_GEN_TASK_ID],
@@ -938,7 +947,7 @@ async def _seed_agent(session, data: dict) -> None:
         goal=data["goal"],
         backstory=data.get("backstory", ""),
         group_id=BI_GROUP_ID,
-        llm=data.get("llm", "databricks-claude-sonnet-4"),
+        llm=data.get("llm", "databricks-claude-sonnet-4-5"),
         tools=data.get("tools", []),
         tool_configs=data.get("tool_configs"),
         max_iter=data.get("max_iter", 25),

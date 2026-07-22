@@ -7,7 +7,7 @@ This module provides utilities for encrypting and decrypting sensitive data.
 import os
 import logging
 import base64
-from typing import Tuple
+from typing import Optional, Tuple
 from pathlib import Path
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
@@ -79,18 +79,84 @@ class EncryptionUtils:
         
         return private_key, public_key
 
+    # Process-lifetime cache for the resolved key, so we don't hit the secrets
+    # API on every encrypt/decrypt. Reset only on restart.
+    _cached_key: Optional[bytes] = None
+
+    # Secret-scope fallback location (matches src/deploy.py provisioning).
+    ENCRYPTION_SCOPE = "kasal"
+    ENCRYPTION_KEY_NAME = "kasal_encryption_key"
+
+    @staticmethod
+    def _read_key_from_secret_scope() -> str:
+        """Read the stable encryption key from the Databricks secret scope.
+
+        Returns the key string, or '' if unavailable (scope/key missing, no
+        permission, not running against Databricks). Best-effort — never raises.
+        The app runs as its service principal, which `deploy.py` grants READ on the
+        scope, so this succeeds in the deployed app without any env-var wiring.
+        """
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            # get_secret returns the base64-encoded bytes value.
+            resp = w.secrets.get_secret(
+                scope=EncryptionUtils.ENCRYPTION_SCOPE,
+                key=EncryptionUtils.ENCRYPTION_KEY_NAME,
+            )
+            raw = getattr(resp, "value", None)
+            if not raw:
+                return ""
+            import base64
+            return base64.b64decode(raw).decode()
+        except Exception as e:  # noqa: BLE001 — fallback path, must never raise
+            logger.debug(f"Could not read encryption key from secret scope: {e}")
+            return ""
+
     @staticmethod
     def get_encryption_key() -> bytes:
-        """Get or generate a Fernet encryption key (for backward compatibility)"""
+        """Resolve the Fernet encryption key, in priority order:
+
+        1. ``ENCRYPTION_KEY`` env var (explicit override / local dev).
+        2. The Databricks secret scope ``kasal/kasal_encryption_key`` (the stable
+           key provisioned by ``deploy.py`` — survives redeploys).
+        3. A freshly-generated key (last resort; NOT persisted — logs a warning,
+           and encrypted secrets will not survive a restart).
+
+        The resolved key is cached for the process lifetime.
+        """
+        if EncryptionUtils._cached_key is not None:
+            return EncryptionUtils._cached_key
+
         key = os.getenv("ENCRYPTION_KEY")
+        source = "ENCRYPTION_KEY env var"
         if not key:
-            # Generate a key and warn that it's not persisted
+            key = EncryptionUtils._read_key_from_secret_scope()
+            source = f"secret scope '{EncryptionUtils.ENCRYPTION_SCOPE}/{EncryptionUtils.ENCRYPTION_KEY_NAME}'"
+        if not key:
             key = Fernet.generate_key().decode()
+            source = "generated (ephemeral)"
+            # Self-contained remediation: `deploy.py` provisions the key
+            # automatically, but if the app was deployed another way (image /
+            # source-path, no deploy.py run) the scope may have no key. Log the
+            # EXACT one-time CLI command so it's fixable without hunting docs.
             logger.warning(
-                "ENCRYPTION_KEY environment variable not set. "
-                "Generated a temporary key. Keys will not persist across restarts."
+                "ENCRYPTION_KEY not set and no key found in secret scope "
+                f"'{EncryptionUtils.ENCRYPTION_SCOPE}/{EncryptionUtils.ENCRYPTION_KEY_NAME}'. "
+                "Generated a TEMPORARY key — it will NOT persist across restarts, so "
+                "encrypted secrets (client_secret, tokens) will need re-entering after "
+                "a redeploy. To fix once, provision a stable key:\n"
+                "  databricks secrets put-secret "
+                f"{EncryptionUtils.ENCRYPTION_SCOPE} {EncryptionUtils.ENCRYPTION_KEY_NAME} "
+                "--string-value \"$(python -c 'from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())')\"\n"
+                "then grant the app service principal READ on that scope."
             )
-        return key.encode() if isinstance(key, str) else key
+        else:
+            logger.info(f"Encryption key resolved from {source}.")
+
+        EncryptionUtils._cached_key = key.encode() if isinstance(key, str) else key
+        return EncryptionUtils._cached_key
 
     @staticmethod
     def encrypt_with_ssh(value: str) -> str:

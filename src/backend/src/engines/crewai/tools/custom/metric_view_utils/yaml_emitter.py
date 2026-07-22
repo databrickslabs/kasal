@@ -96,6 +96,83 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     return value
 
 
+def _categorize_untranslatable(measure) -> tuple[str, str]:
+    """Classify an untranslatable measure into a human-readable CATEGORY + why.
+
+    Turns the raw internal skip_reason / DAX shape into one of a few clear buckets
+    so the emitted comment explains to a reviewer WHY a measure was not emitted:
+      - display artifact (color/label/format — not data)
+      - slicer/scalar helper (SELECTEDVALUE date pickers etc. — not aggregatable)
+      - dynamic KPI selector (SWITCH mega-wrapper — picks a KPI by slicer)
+      - prior-year time-intelligence (not expressible in a static metric view)
+      - complex DAX needing manual translation (the residual)
+    Returns (category, explanation).
+    """
+    name = (getattr(measure, 'original_name', '') or '').lower()
+    dax = (getattr(measure, 'dax_expression', '') or '')
+    reason = (getattr(measure, 'skip_reason', '') or '')
+    du = dax.upper()
+
+    if name.endswith('_color') or 'color' in name or 'format' in reason.lower() \
+            or 'display' in reason.lower():
+        return ('display artifact',
+                'formatting/label only — not a data measure')
+    if re.search(r'SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|PREVIOUSYEAR', du) \
+            or 'prior-year' in reason.lower():
+        return ('prior-year time-intelligence',
+                'period-shift not expressible in a static UC metric view '
+                '(supply a calendar date_py column or compute in the source view)')
+    if 'SWITCH' in du and 'SELECTEDVALUE' in du:
+        return ('dynamic KPI selector',
+                'SWITCH(SELECTEDVALUE(...)) picks a KPI by slicer — no static '
+                'metric-view equivalent; expand per-branch or handle in the report')
+    # Construct-specific guidance — state the ACTUAL unlock (or honest skip) so a
+    # reviewer knows the next step, not just "needs manual translation". These run
+    # BEFORE the generic SELECTEDVALUE/scalar catch below because these constructs
+    # frequently co-occur with a SELECTEDVALUE arg (a slicer feeding the pattern),
+    # and the specific construct is the actionable signal, not the SELECTEDVALUE.
+    if 'TREATAS' in du:
+        return ('disconnected-slicer dispatch (TREATAS)',
+                'slicer picks which KPI to show — display-layer, not a metric; '
+                'define each underlying KPI as its own measure, no source-view unlock')
+    if 'LOOKUPVALUE' in du:
+        return ('parameter/label lookup (LOOKUPVALUE)',
+                'builds a display string or reads a slicer parameter table — not a '
+                'metric; a real attribute lookup is a join (RELATED), not this')
+    if 'TOPN' in du:
+        return ('top-N row selection (TOPN)',
+                'ranks-and-slices rows — needs a source-view ROW_NUMBER()/QUALIFY '
+                'precompute; do not approximate with MAX')
+    if 'ALLEXCEPT' in du:
+        return ('fixed-LOD (ALLEXCEPT)',
+                'aggregate at the kept-column grain — 1 kept col → window range:all; '
+                '2+ kept cols → source-view SUM(...) OVER (PARTITION BY ...)')
+    if 'SUMMARIZE' in du or 'CALCULATETABLE' in du or 'ADDCOLUMNS' in du:
+        return ('group-then-aggregate (SUMMARIZE/CALCULATETABLE)',
+                'builds a grouped virtual table — materialize the GROUP BY in the '
+                'source SELECT as an identity dimension, then SUM it')
+    if 'SELECTEDVALUE' in du or re.search(r'\bF_(START|END)_DATE\b|CUR_MONTH|CUR_YR', du):
+        return ('slicer/scalar helper',
+                'returns a single slicer-driven scalar (e.g. a date picker) — '
+                'not an aggregatable measure')
+    if 'DISTINCTCOUNT' in du:
+        return ('distinct-count pattern', reason or 'DISTINCTCOUNT not translated')
+    return ('complex DAX — needs manual translation', reason or 'no matching pattern')
+
+
+def _usage_suffix(referenced_by: int) -> str:
+    """Human-readable usage annotation for a measure comment.
+
+    Counts measure→measure references only (not dashboard/visual usage), so the
+    wording is deliberately "referenced by N measure(s)". Empty string when the
+    measure is referenced by nothing (avoids noise on the many leaf measures).
+    """
+    if not referenced_by or referenced_by < 1:
+        return ''
+    noun = 'measure' if referenced_by == 1 else 'measures'
+    return f' — referenced by {referenced_by} {noun}'
+
+
 def _yaml_needs_quoting(val: str) -> bool:
     """Check if a YAML scalar value needs quoting."""
     if not val:
@@ -204,6 +281,19 @@ def emit_yaml(spec: MetricViewSpec,
     if spec.source_filter:
         spec.source_filter = spark_sql_compat(spec.source_filter, _cat, _sch)
 
+    # SEC #6: dangerous-SQL check on the inline source_sql BEFORE it is emitted
+    # into the view body (defense-in-depth for non-deployer consumers that render
+    # the YAML without the deployer's whole-document scan). source_sql originates
+    # from transpiled/native-query M — a crafted Value.NativeQuery could embed
+    # DROP/GRANT/stacked statements. On hit, drop the inline SQL (falls back to the
+    # plain source_table below) rather than emit a dangerous body.
+    # NOTE: _check_dangerous_sql returns True when SAFE — drop when NOT safe.
+    if spec.source_sql and not _check_dangerous_sql(spec.source_sql):
+        logger.warning(
+            f"[SECURITY] Dangerous SQL in source_sql for {getattr(spec, 'view_name', '?')} "
+            f"— dropping inline source, falling back to source_table.")
+        spec.source_sql = ''
+
     lines: list[str] = []
     lines.append("version: '1.1'")
     lines.append('')
@@ -224,13 +314,20 @@ def emit_yaml(spec: MetricViewSpec,
     # Measures that reference dropped join aliases will be caught later.
     if spec.joins:
         _dropped_join_aliases: set[str] = set()
+        _seen_join_names: set[str] = set()
         valid_joins = []
         for j in spec.joins:
             tbl_short = j['source'].split('.')[-1] if '.' in j['source'] else j['source']
             if tbl_short in _KNOWN_MISSING_TABLES:
                 _dropped_join_aliases.add(j['name'])
-            else:
-                valid_joins.append(j)
+                continue
+            # Drop duplicate join names (CORRECTNESS: a repeated join alias is
+            # invalid YAML — e.g. dim_plant emitted twice from two detectors).
+            # Keep the first; later same-name joins are the redundant repeats.
+            if j['name'] in _seen_join_names:
+                continue
+            _seen_join_names.add(j['name'])
+            valid_joins.append(j)
         spec.joins = valid_joins
 
     # Build calculated-column expansion map: source.<calc_name> -> actual expression
@@ -538,6 +635,35 @@ def emit_yaml(spec: MetricViewSpec,
     # Filter out empty/phantom dimensions before emission
     spec.dimensions = [d for d in spec.dimensions if d.get('name') and d.get('expr') and d['expr'] != 'source.']
 
+    # Deduplicate dimensions by name (CORRECTNESS: duplicate dimension names are
+    # invalid UCMV YAML — a metric view rejects repeated dimension names). This
+    # happens when the same calendar/plant table is reached via several join
+    # aliases (e.g. dim_calendar + dim_calendar_dummy + c_dim_calendar all map to
+    # a `date`/`fiscper` dimension). Keep the FIRST occurrence (richest metadata /
+    # earliest join precedence); drop later same-name repeats.
+    if spec.dimensions:
+        _seen_dim_names: set[str] = set()
+        _deduped_dims = []
+        for d in spec.dimensions:
+            nm = d['name']
+            if nm in _seen_dim_names:
+                continue
+            _seen_dim_names.add(nm)
+            _deduped_dims.append(d)
+        spec.dimensions = _deduped_dims
+
+    # Drop dimensions that collide by name with an emitted measure (CORRECTNESS:
+    # a UCMV cannot declare a dimension and a measure with the same name — it
+    # fails validation). Seen when a source column (e.g. `kbi_value`, `ebit`) is
+    # both passed through as a dimension and aggregated as a base measure. The
+    # measure is the KPI and wins; the raw column is dropped as a dimension.
+    if spec.dimensions:
+        _measure_names = {m.measure_name for m in
+                          (base_measures + dax_measures + switch_measures)}
+        if _measure_names:
+            spec.dimensions = [d for d in spec.dimensions
+                               if d['name'] not in _measure_names]
+
     # Dimensions
     if spec.dimensions:
         lines.append('')
@@ -573,6 +699,7 @@ def emit_yaml(spec: MetricViewSpec,
             # Use per-table metadata override, fall back to generated
             m_override = _mm.get(m.measure_name, {})
             comment = m_override.get('comment') or m.skip_reason or col_to_readable(m.measure_name)
+            comment += _usage_suffix(m.referenced_by)
             lines.append(f'    comment: {_yaml_val(comment)}')
             m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
             display_name = m_override.get('display_name') or m_meta.get('display_name', '')
@@ -614,8 +741,11 @@ def emit_yaml(spec: MetricViewSpec,
                         break
             if any(c in expr for c in ("'", '"', ':', '#', '{', '}', '[', ']')) or 'FILTER' in expr:
                 if len(expr) > 120 or '\n' in expr or ('"' in expr and "'" in expr):
-                    lines.append('    expr: >-')
-                    lines.append(f'      {expr}')
+                    # Use the shared scalar formatter: multi-line values become a
+                    # properly-indented block scalar (|-). Writing a raw multi-line
+                    # string after 'expr: >-' left continuation lines unindented and
+                    # broke YAML parsing ("while scanning a simple key").
+                    lines.append(f'    expr: {_yaml_scalar(expr, indent=4)}')
                 elif '"' in expr:
                     lines.append(f"    expr: '{expr}'")
                 else:
@@ -632,6 +762,7 @@ def emit_yaml(spec: MetricViewSpec,
             dax_comment = m_override.get('comment', '')
             if not dax_comment and m.original_name != m.measure_name:
                 dax_comment = f'PBI: {m.original_name}'
+            dax_comment += _usage_suffix(m.referenced_by)
             if dax_comment:
                 lines.append(f'    comment: {_yaml_val(dax_comment)}')
             # Display name
@@ -676,9 +807,10 @@ def emit_yaml(spec: MetricViewSpec,
             expr = m.sql_expr
             if expr is None:
                 continue
-            if len(expr) > 120 or 'FILTER' in expr:
-                lines.append('    expr: >-')
-                lines.append(f'      {expr}')
+            if len(expr) > 120 or 'FILTER' in expr or '\n' in expr:
+                # Shared scalar formatter → multi-line becomes an indented block
+                # scalar (|-); avoids the unindented-continuation YAML parse error.
+                lines.append(f'    expr: {_yaml_scalar(expr, indent=4)}')
             else:
                 lines.append(f'    expr: {expr}')
             if m.window_spec:
@@ -686,14 +818,51 @@ def emit_yaml(spec: MetricViewSpec,
                 lines.append(f"      - order: {m.window_spec['order']}")
                 lines.append(f"        range: {m.window_spec['range']}")
                 lines.append(f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}")
-            lines.append(f'    comment: "{m.skip_reason}"')
+            lines.append(f'    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by))}')
             lines.append('')
 
-    # Untranslatable measures as comments
+    # Untranslatable measures as comments \u2014 sorted highest-usage-first so the
+    # gaps that block the most downstream measures surface at the top for
+    # reviewers with scarce time.
     if spec.untranslatable:
-        lines.append(f'  # \u2500\u2500\u2500 Untranslatable PBI Measures ({len(spec.untranslatable)}) \u2500\u2500\u2500')
+        lines.append(f'  # \u2500\u2500\u2500 Not emitted as measures ({len(spec.untranslatable)}) \u2014 grouped by reason \u2500\u2500\u2500')
+        # Group by human category so a reviewer sees WHY each measure was skipped
+        # (display artifact / slicer-scalar / dynamic selector / prior-year /
+        # complex-DAX-needs-manual). Within a group, highest-usage first.
+        _by_cat: dict[str, list] = {}
+        _cat_why: dict[str, str] = {}
         for m in spec.untranslatable:
-            lines.append(f'  # {m.original_name}: {m.skip_reason}')
+            cat, why = _categorize_untranslatable(m)
+            _by_cat.setdefault(cat, []).append(m)
+            _cat_why.setdefault(cat, why)
+        # Stable, informative order: the "not-a-measure-by-nature" buckets first
+        # (expected, no action), then the ones that need work.
+        _order = ['display artifact', 'slicer/scalar helper', 'dynamic KPI selector',
+                  'disconnected-slicer dispatch (TREATAS)',
+                  'parameter/label lookup (LOOKUPVALUE)',
+                  'prior-year time-intelligence', 'distinct-count pattern',
+                  # translatable-with-source-view-work buckets last (actionable):
+                  'fixed-LOD (ALLEXCEPT)',
+                  'top-N row selection (TOPN)',
+                  'group-then-aggregate (SUMMARIZE/CALCULATETABLE)',
+                  'complex DAX \u2014 needs manual translation']
+        for cat in _order + [c for c in _by_cat if c not in _order]:
+            ms = _by_cat.get(cat)
+            if not ms:
+                continue
+            lines.append(f'  #')
+            lines.append(f'  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}')
+            for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
+                lines.append(f'  #   - {m.original_name}{_usage_suffix(m.referenced_by)}')
+                # Preserve the full original DAX so a reviewer can hand-translate
+                # without re-opening the PBIX. Each DAX line is emitted as its own
+                # comment line (multi-line DAX would otherwise break YAML). Indented
+                # under the measure name for readability.
+                dax = (getattr(m, 'dax_expression', '') or '').strip()
+                if dax:
+                    lines.append(f'  #       DAX:')
+                    for dax_line in dax.split('\n'):
+                        lines.append(f'  #         {dax_line}')
 
     lines.append('')
     return '\n'.join(lines)

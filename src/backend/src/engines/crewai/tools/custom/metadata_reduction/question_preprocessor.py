@@ -142,7 +142,7 @@ class QuestionPreprocessor:
         known_measures: Optional[List[str]] = None,
         known_dimensions: Optional[List[str]] = None,
         use_llm: bool = True,
-        llm_model: str = "databricks-claude-sonnet-4",
+        llm_model: str = "databricks-claude-sonnet-4-5",
     ) -> QuestionIntent:
         """Extract structured intent from the user question.
 

@@ -355,6 +355,7 @@ const ConfigEditorPage: React.FC = () => {
                 configKey={selectedKey}
                 value={config[selectedKey]}
                 onChange={handleKeyChange}
+                usage={(config.measure_usage as Record<string, number>) || undefined}
               />
             ) : (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>

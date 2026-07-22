@@ -178,6 +178,28 @@ class MetricViewValidatorTool(BaseTool):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # PREFERRED source: resolved_measures_by_table from the UCMV output. This
+        # is the translated measures paired with their ORIGINAL DAX, keyed by the
+        # FACT TABLE (same key as the YAML). It is the only source with the correct
+        # measure↔fact-table pairing the comparison needs — the raw measures list
+        # is keyed by PBI holder-table and won't line up with the YAML.
+        if not measures or measures == []:
+            if ucmv_raw:
+                try:
+                    ucmv_full = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
+                    if isinstance(ucmv_full, dict) and ucmv_full.get('resolved_measures_by_table'):
+                        flat = []
+                        for _tbl, _rows in ucmv_full['resolved_measures_by_table'].items():
+                            flat.extend(_rows)
+                        if flat:
+                            measures = flat
+                            logger.info(
+                                f"[Validator] Using {len(measures)} resolved measures "
+                                f"(fact-table-keyed, with DAX) from UCMV output"
+                            )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
         # If no measures, try extracting from the UCMV output (measures_with_dax key)
         if not measures or measures == []:
             if ucmv_raw:
@@ -257,13 +279,37 @@ class MetricViewValidatorTool(BaseTool):
                 total_review += review
                 total_invalid += invalid
 
+                # Surface the SKIPPED measures too (with a reason), so the UI
+                # breakdown shows EVERY measure — not just the evaluated ones —
+                # and the reviewer understands why the rest weren't compared.
+                # These do NOT count toward evaluated/valid/etc. The validation
+                # pipeline buckets a skipped measure as either 'simple' (a
+                # trivial FUNC(table.col) aggregation — correct by construction,
+                # nothing to compare) or 'unmatched' (no source DAX measure to
+                # compare against).
+                skipped_details = []
+                for m in result.get('skipped', []):
+                    kind = m.get('measure_eval')  # 'simple' | 'unmatched'
+                    reason = (
+                        "Trivial aggregation — nothing to compare (correct by construction)"
+                        if kind == 'simple'
+                        else "No source DAX measure to compare against"
+                    )
+                    skipped_details.append({
+                        "measure_name": m.get('measure_name'),
+                        "measure_eval_result": {"status": "skipped", "reason": reason},
+                    })
+
                 results[table_key] = {
                     "evaluated": len(evaluated),
                     "valid": valid,
                     "equivalent": equivalent,
                     "review": review,
                     "invalid": invalid,
-                    "details": evaluated,
+                    # total = evaluated + skipped, so the UI can show "N of M".
+                    "total_measures": len(evaluated) + len(skipped_details),
+                    # evaluated (with verdicts) FIRST, then skipped (with reasons).
+                    "details": evaluated + skipped_details,
                 }
 
             except Exception as e:
@@ -277,6 +323,71 @@ class MetricViewValidatorTool(BaseTool):
                     except OSError:
                         pass
 
+        # ── Build a COMPACT agent-facing return ──────────────────────────────
+        # The crew agent ingests this tool result into its LLM context. Returning
+        # the full per-measure `details` for every table PLUS all the YAML docs
+        # overflowed the model's context window on large models (28+ views →
+        # "Context window exceeded", non-retryable). The full detail is already
+        # captured in the execution trace / DB, so the agent only needs:
+        #   - the summary totals,
+        #   - per-table COUNTS (no per-measure detail),
+        #   - the measures that actually need a human (REVIEW/INVALID), capped.
+        # yaml is dropped from the return entirely (agent never needs it back).
+        _ATTENTION_CAP = 50
+        per_table_summary: dict = {}
+        attention: list = []
+        for table_key, r in results.items():
+            if not isinstance(r, dict):
+                per_table_summary[table_key] = r
+                continue
+            if 'skipped' in r or 'error' in r:
+                per_table_summary[table_key] = r
+                continue
+            # SLIM per-measure list for the UI's expandable breakdown: measure
+            # name + status (+ a short reason), NOT the heavy differences/
+            # similarities/dax/sql comparison arrays. This restores the "every
+            # measure and whether it's EQUIVALENT/VALID/…" dropdown at ~11 KB for
+            # 28 tables (the full comparison text was the ~110 KB overflow and
+            # stays in the trace only).
+            slim_details = []
+            for m in r.get("details", []):
+                mer = m.get("measure_eval_result", {}) or {}
+                status = mer.get("status")
+                # A skipped measure carries a plain 'reason' string; an evaluated
+                # one carries similarities/differences arrays. Keep one short line
+                # either way (tiny in tokens).
+                if mer.get("reason"):
+                    reason_line = str(mer["reason"])[:160]
+                else:
+                    arr = (mer.get("similarities") or mer.get("differences") or [])
+                    reason_line = arr[0][:120] if arr else ""
+                slim_details.append({
+                    "measure_name": m.get("measure_name"),
+                    # keep the nested shape the viewer already reads
+                    "measure_eval_result": {
+                        "status": status,
+                        "similarities": [reason_line] if reason_line else [],
+                    },
+                })
+                # Also surface the actionable ones in the top-level attention list.
+                if status in ("REVIEW", "INVALID"):
+                    attention.append({
+                        "table": table_key,
+                        "measure_name": m.get("measure_name"),
+                        "status": status,
+                        "detail": mer,
+                    })
+            per_table_summary[table_key] = {
+                "evaluated": r.get("evaluated", 0),
+                "valid": r.get("valid", 0),
+                "equivalent": r.get("equivalent", 0),
+                "review": r.get("review", 0),
+                "invalid": r.get("invalid", 0),
+                "total_measures": r.get("total_measures", r.get("evaluated", 0)),
+                "details": slim_details,
+            }
+
+        attention_truncated = len(attention) > _ATTENTION_CAP
         output = {
             "summary": {
                 "tables_validated": len(results),
@@ -286,13 +397,25 @@ class MetricViewValidatorTool(BaseTool):
                 "total_review": total_review,
                 "total_invalid": total_invalid,
             },
-            "per_table": results,
+            "per_table_summary": per_table_summary,
+            # Only measures needing human attention (REVIEW/INVALID), capped.
+            "attention": attention[:_ATTENTION_CAP],
+            "attention_truncated": attention_truncated,
+            # The generated YAML IS included — it's small (~11 KB even for 28
+            # views) and the UI needs it for the 1:1 metric-view downloads. It was
+            # NOT the source of the context overflow; the per-measure `details`
+            # (~110 KB) were, and those stay stripped (only `attention` +
+            # `per_table_summary` counts represent them). Full per-measure detail
+            # remains queryable in the execution trace.
             "yaml": yaml_tables,
+            "full_detail_in_trace": True,
         }
 
         logger.info(
             f"[Validator] Done: {total_valid} VALID, {total_equivalent} EQUIVALENT, "
-            f"{total_review} REVIEW, {total_invalid} INVALID out of {total_evaluated}"
+            f"{total_review} REVIEW, {total_invalid} INVALID out of {total_evaluated} "
+            f"({len(attention)} need attention"
+            f"{', capped at %d' % _ATTENTION_CAP if attention_truncated else ''})"
         )
         return json.dumps(output, indent=2, default=str)
 
@@ -322,8 +445,14 @@ class MetricViewValidatorTool(BaseTool):
                 inner = json.loads(content) if isinstance(content, str) else content
                 if not isinstance(inner, dict):
                     return []
-                # Extract measures from the migration_report or stats
-                # First try measures_with_dax (added by UCMV Generator)
+                # PREFERRED: resolved_measures_by_table (fact-table-keyed, with DAX)
+                if inner.get('resolved_measures_by_table'):
+                    flat = []
+                    for _rows in inner['resolved_measures_by_table'].values():
+                        flat.extend(_rows)
+                    if flat:
+                        return flat
+                # Fallback: measures_with_dax (raw, holder-table-keyed)
                 if 'measures_with_dax' in inner and inner['measures_with_dax']:
                     return inner['measures_with_dax']
                 return []
