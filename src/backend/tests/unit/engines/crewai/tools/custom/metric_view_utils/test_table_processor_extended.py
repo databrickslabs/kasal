@@ -7,6 +7,7 @@ from src.engines.crewai.tools.custom.metric_view_utils.table_processor import (
     TableProcessorContext,
     expand_calculation_groups,
     process_table,
+    _is_real_switch_decomp,
 )
 from src.engines.crewai.tools.custom.metric_view_utils.data_classes import (
     MetricViewSpec,
@@ -485,21 +486,41 @@ class TestProcessTablePass2:
 
 class TestProcessTableCascade:
     def test_cascade_reclassifies_divide_over_artifacts(self):
-        """Step 5c: DIVIDE sub-expression referencing artifact measures → reclassified."""
+        """Step 5c: DIVIDE sub-expression referencing artifact measures → reclassified.
+
+        Uses a GENUINE display-only artifact (FORMAT of a literal — not
+        translatable by the deterministic FORMAT converter, which only handles a
+        real column/aggregate inner) so the cascade-reclassification path is
+        still exercised. FORMAT-wrapping-an-aggregate is now translated
+        deterministically and is deliberately no longer an artifact.
+        """
+        ti = _make_table_info()
+        ctx = _make_context()
+        dax = [
+            {'measure_name': 'label', 'original_name': 'Label',
+             'dax_expression': 'FORMAT(TODAY(), "YYYY-MM-DD")'},
+            {'measure_name': 'ratio', 'original_name': 'Ratio',
+             'dax_expression': 'DIVIDE([Label], SUM(T[Y]))'},
+        ]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        all_skip_reasons = [m.skip_reason for m in spec.untranslatable]
+        # The display-only FORMAT (and the DIVIDE referencing it) stay untranslatable.
+        assert len(spec.untranslatable) >= 1
+        assert any(r for r in all_skip_reasons)
+
+    def test_format_wrapping_aggregate_now_translates(self):
+        """Regression: FORMAT wrapping a real aggregate is now translated
+        deterministically (field-eng parity) instead of being an artifact."""
         ti = _make_table_info()
         ctx = _make_context()
         dax = [
             {'measure_name': 'fmt_measure', 'original_name': 'Fmt Measure',
              'dax_expression': 'FORMAT(SUM(T[X]), "#,##0")'},
-            {'measure_name': 'ratio', 'original_name': 'Ratio',
-             'dax_expression': 'DIVIDE([Fmt Measure], SUM(T[Y]))'},
         ]
         spec = _run_process_table('fact_test', ti, dax, ctx)
-        # Either reclassified to PY/DIVIDE artifacts or DIVIDE sub-expression remains
-        all_skip_reasons = [m.skip_reason for m in spec.untranslatable]
-        # Both measures should be untranslatable (FORMAT and DIVIDE referencing it)
-        assert len(spec.untranslatable) >= 1
-        assert any(r for r in all_skip_reasons)
+        fmt = next((m for m in spec.measures if m.original_name == 'Fmt Measure'), None)
+        assert fmt is not None and fmt.is_translatable
+        assert 'format_number' in (fmt.sql_expr or '')
 
 
 # ─── process_table — source SQL enrichment ────────────────────────────────────
@@ -1104,7 +1125,7 @@ class TestProcessTableCrossTableTranslated:
 
         # Create a mock translator that returns a cross_table_translated result
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'cross_measure':
                     result = TranslationResult(
                         measure_name='cross_measure', original_name='Cross',
@@ -1127,7 +1148,7 @@ class TestProcessTableCrossTableTranslated:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'cross':
                     return TranslationResult(
                         measure_name='cross', original_name='Cross',
@@ -1207,7 +1228,7 @@ class TestProcessTablePass2Specific:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class CustomTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'measure_y':
                     return TranslationResult(
                         measure_name='revenue',
@@ -1283,7 +1304,7 @@ class TestProcessTableWindowOrderOverride:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 return TranslationResult(
                     measure_name='py_revenue', original_name='PY Revenue',
                     sql_expr='SUM(source.revenue)', is_translatable=True,
@@ -1317,7 +1338,7 @@ class TestProcessTableSwitchIdentityRatio:
         from src.engines.crewai.tools.custom.metric_view_utils.dax_translator import DaxTranslator
 
         class MockTranslator(DaxTranslator):
-            def translate(self, measure, table_key):
+            def translate(self, measure, table_key, trivial_only=False):
                 if measure.get('measure_name') == 'identity':
                     return TranslationResult(
                         measure_name='identity', original_name='Identity',
@@ -1428,3 +1449,138 @@ class TestProcessTableScanDataDimExclude:
         spec = _run_process_table('fact_test', ti, [], ctx)
         dim_names = [d['name'] for d in spec.dimensions]
         assert 'join_key' not in dim_names
+
+
+class TestIsRealSwitchDecomp:
+    """`_is_real_switch_decomp` gates whether a config switch_decomposition entry
+    is authoritative SQL (suppresses the LLM / wins Step 6) or a TODO skeleton
+    (must fall through to the skill-corpus LLM).
+
+    Regression: `derive_switch_decompositions` emits TODO-`raw_expr` skeletons for
+    SELECTEDVALUE+SWITCH measures. Treating those as authoritative starved the LLM
+    and rebuilt TODO stubs over real translations.
+    """
+
+    def test_todo_raw_expr_is_not_real(self):
+        entry = {'name': 'f_start_date',
+                 'raw_expr': "TODO: SQL expression for SWITCH measure 'F_Start_date' (DAX: ...)",
+                 'comment': 'SWITCH measure from F_Start_date'}
+        assert _is_real_switch_decomp(entry) is False
+
+    def test_todo_case_insensitive_and_leading_ws(self):
+        assert _is_real_switch_decomp({'raw_expr': '   todo: fill me in'}) is False
+
+    def test_real_raw_expr_is_real(self):
+        entry = {'name': 'ratio', 'raw_expr': 'SUM(source.a) / NULLIF(SUM(source.b), 0)'}
+        assert _is_real_switch_decomp(entry) is True
+
+    def test_structured_num_den_is_real(self):
+        entry = {'name': 'ratio', 'num': 'a', 'den': 'b', 'num_fs': None, 'den_fs': None}
+        assert _is_real_switch_decomp(entry) is True
+
+    def test_missing_sql_is_not_real(self):
+        assert _is_real_switch_decomp({'name': 'x', 'comment': 'note'}) is False
+
+    def test_non_dict_is_not_real(self):
+        assert _is_real_switch_decomp('not-a-dict') is False
+        assert _is_real_switch_decomp(None) is False
+
+
+class TestReferencedByPopulation:
+    """process_table populates TranslationResult.referenced_by from config
+    ['measure_usage'] (global) with a local-graph fallback when absent."""
+
+    def test_from_config_measure_usage(self):
+        ti = _make_table_info()
+        ctx = _make_context(config={'measure_usage': {'Total': 5}})
+        dax = [{'measure_name': 'total', 'dax_expression': 'SUM(Sales[amount])',
+                'original_name': 'Total'}]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        by_name = {m.original_name: m for m in spec.measures}
+        assert 'Total' in by_name
+        assert by_name['Total'].referenced_by == 5
+
+    def test_local_fallback_when_config_absent(self):
+        # No measure_usage in config → local graph over this table's measures.
+        # 'Base' is referenced by 'Derived' → Base.referenced_by == 1.
+        ti = _make_table_info()
+        ctx = _make_context(config={})
+        dax = [
+            {'measure_name': 'base', 'dax_expression': 'SUM(Sales[amount])',
+             'original_name': 'Base'},
+            {'measure_name': 'derived', 'dax_expression': '[Base] * 2',
+             'original_name': 'Derived'},
+        ]
+        spec = _run_process_table('fact_test', ti, dax, ctx)
+        by_name = {m.original_name: m for m in (spec.measures + spec.untranslatable)}
+        assert by_name['Base'].referenced_by == 1
+
+
+class TestPromotedConverterEmitterSurvival:
+    """Regression guard for the alias risk: a promoted SUMX-filter measure must
+    survive process_table -> emit_yaml without being dropped by the emitter's
+    undeclared-alias gate, and its FILTER clause must normalize to source.<col>
+    (not a raw DAX table alias like sales.<col>)."""
+
+    def test_sumx_filter_survives_and_uses_source_alias(self):
+        # table_key matches the DAX table name (Sales) — mirrors a real run where
+        # mquery maps the DAX table to the fact source, so a FILTER over the
+        # fact's OWN column resolves to source.<col> (not a raw sales.<col> alias
+        # that the emitter's undeclared-alias gate would drop).
+        from src.engines.crewai.tools.custom.metric_view_utils.yaml_emitter import emit_yaml
+        ti = _make_table_info(
+            source_table='cat.sch.sales',
+            aggregate_columns=[{'name': 'amount', 'source_col': 'amount'}],
+            group_by_columns=['region'],
+        )
+        ti.table_name = 'Sales'
+        ctx = _make_context()
+        dax = [{'measure_name': 'eu_amt', 'original_name': 'EU Amt',
+                'dax_expression': 'SUMX(FILTER(Sales, Sales[region]="EU"), Sales[amount])'}]
+        spec = _run_process_table('Sales', ti, dax, ctx)
+        yaml = emit_yaml(spec)
+        # Survives emission (not dropped) and uses source. — no raw table alias.
+        assert 'eu_amt' in yaml
+        assert 'sales.' not in yaml.lower().replace('cat.sch.', '')
+
+
+class TestCommonExclusionLifting:
+    """PROP-5: recurring DAX exclusion predicates on source cols lift to view filter."""
+
+    def _D(self, ms, cols):
+        from src.engines.crewai.tools.custom.metric_view_utils.table_processor import (
+            _detect_common_exclusions,
+        )
+        return _detect_common_exclusions(ms, cols)
+
+    def test_shared_not_equal_lifted(self):
+        ms = [
+            {'dax_expression': 'DIVIDE(SUMX(f,f[a]),FILTER(f,f[comp_code]<>"0307"))'},
+            {'dax_expression': 'DIVIDE(SUMX(f,f[b]),FILTER(f,f[comp_code]<>"0307"))'},
+            {'dax_expression': 'SUM(f[c])'},
+        ]
+        assert self._D(ms, {'comp_code', 'a', 'b', 'c'}) == ["source.comp_code <> '0307'"]
+
+    def test_shared_not_in_lifted(self):
+        ms = [
+            {'dax_expression': 'CALCULATE(SUM(f[x]), NOT f[comp_code] IN {"0403","0550","0307"})'},
+            {'dax_expression': 'CALCULATE(SUM(f[y]), NOT f[comp_code] IN {"0403","0550","0307"})'},
+        ]
+        out = self._D(ms, {'comp_code', 'x', 'y'})
+        assert out == ["source.comp_code NOT IN ('0403', '0550', '0307')"]
+
+    def test_dim_column_not_lifted(self):
+        # column absent from source cols -> never lifted (avoids wrong filter)
+        ms = [
+            {'dax_expression': 'FILTER(f,f[company_code]<>"0307")'},
+            {'dax_expression': 'FILTER(f,f[company_code]<>"0307")'},
+        ]
+        assert self._D(ms, {'a', 'b'}) == []
+
+    def test_one_off_not_lifted(self):
+        ms = [
+            {'dax_expression': 'SUMX(f,f[a]) FILTER(f,f[comp_code]<>"0307")'},
+            {'dax_expression': 'SUM(f[b])'},
+            {'dax_expression': 'SUM(f[c])'},
+        ]
+        assert self._D(ms, {'comp_code', 'a', 'b', 'c'}) == []

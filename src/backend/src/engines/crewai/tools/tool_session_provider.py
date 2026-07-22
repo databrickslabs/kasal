@@ -87,6 +87,32 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
+    async def powerbi_extraction_repo():
+        """Yield a PowerBIExtractionRepository with scoped session.
+
+        The caller commits via ``repo.session`` (same contract as
+        ``conversion_repo``).
+
+        Usage::
+
+            async with ToolSessionProvider.powerbi_extraction_repo() as repo:
+                record = await repo.create(data)
+                await repo.session.commit()
+        """
+        from src.db.session import async_session_factory
+        from src.repositories.powerbi_extraction_repository import (
+            PowerBIExtractionRepository,
+        )
+
+        async with async_session_factory() as session:
+            try:
+                yield PowerBIExtractionRepository(session)
+            except Exception:
+                await session.rollback()
+                raise
+
+    @staticmethod
+    @asynccontextmanager
     async def knowledge_service(group_id: str = "default", user_token: str = None):
         """Yield a DatabricksKnowledgeService with scoped session.
 

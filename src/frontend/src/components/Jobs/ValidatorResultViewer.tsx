@@ -47,6 +47,8 @@ interface ValidatorPerTable {
   equivalent?: number;
   review?: number;
   invalid?: number;
+  // Total measures in the view = evaluated + skipped (shown as "N of M").
+  total_measures?: number;
   measures?: number;
   base?: number;
   dax?: number;
@@ -77,10 +79,30 @@ interface ValidatorSummary {
   source?: string;
 }
 
+interface ValidatorAttentionItem {
+  table?: string;
+  measure_name?: string;
+  status?: string;
+  detail?: {
+    status?: string;
+    is_valid?: boolean;
+    confidence?: string;
+    differences?: string[];
+    similarities?: string[];
+  };
+}
+
 export interface ValidatorResult {
   summary: ValidatorSummary;
-  per_table: Record<string, ValidatorPerTable>;
+  // Legacy full shape (per-measure details + yaml inline).
+  per_table?: Record<string, ValidatorPerTable>;
   yaml?: Record<string, string>;
+  // Compact shape (agent-context-safe): per-table counts + only the measures
+  // needing attention (REVIEW/INVALID). Full details/yaml live in the trace/DB.
+  per_table_summary?: Record<string, ValidatorPerTable>;
+  attention?: ValidatorAttentionItem[];
+  attention_truncated?: boolean;
+  full_detail_in_trace?: boolean;
   stats?: Record<string, {
     total?: number;
     translated?: number;
@@ -100,13 +122,15 @@ export interface ValidatorResult {
 export function isValidatorResult(value: unknown): value is ValidatorResult {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
-  return (
+  const summaryOk =
     typeof obj.summary === 'object' &&
     obj.summary !== null &&
-    typeof obj.per_table === 'object' &&
-    obj.per_table !== null &&
-    'total_evaluated' in (obj.summary as Record<string, unknown>)
-  );
+    'total_evaluated' in (obj.summary as Record<string, unknown>);
+  // Accept either the legacy `per_table` or the compact `per_table_summary`.
+  const hasTables =
+    (typeof obj.per_table === 'object' && obj.per_table !== null) ||
+    (typeof obj.per_table_summary === 'object' && obj.per_table_summary !== null);
+  return summaryOk && hasTables;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,7 +172,34 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [viewYamlTable, setViewYamlTable] = useState<string | null>(null);
 
-  const { summary, per_table: perTable, stats, yaml: yamlData } = result;
+  const { summary, stats, yaml: yamlData } = result;
+  // Support both shapes: legacy `per_table` (with inline per-measure details) and
+  // the compact `per_table_summary` (counts only). For the compact shape, fold
+  // the top-level `attention` list (REVIEW/INVALID measures) back into each
+  // table's `details` so the expandable rows still show the actionable measures.
+  const perTable = useMemo<Record<string, ValidatorPerTable>>(() => {
+    if (result.per_table && Object.keys(result.per_table).length > 0) {
+      return result.per_table;
+    }
+    // Compact shape: per_table_summary now carries a SLIM per-measure `details`
+    // list (name + status + short reason) for the expandable breakdown. If a
+    // table has no details (older payloads), fall back to folding in the
+    // top-level `attention` (REVIEW/INVALID) so those still expand.
+    const base: Record<string, ValidatorPerTable> = {
+      ...(result.per_table_summary || {}),
+    };
+    for (const item of result.attention || []) {
+      const tbl = item.table;
+      if (!tbl || !base[tbl]) continue;
+      if (base[tbl].details && base[tbl].details!.length > 0) continue; // already have slim details
+      base[tbl] = { ...base[tbl], details: [] };
+      base[tbl].details!.push({
+        measure_name: item.measure_name,
+        measure_eval_result: item.detail || { status: item.status },
+      });
+    }
+    return base;
+  }, [result]);
   const hasYaml = yamlData && Object.keys(yamlData).length > 0;
 
   const handleDownloadYaml = (tableName: string) => {
@@ -164,17 +215,22 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
 
   const handleDownloadAllYamls = () => {
     if (!yamlData) return;
-    const combined = Object.entries(yamlData)
-      .filter(([, v]) => v && v.trim())
-      .map(([k, v]) => `# === ${k} ===\n${v}`)
-      .join('\n\n---\n\n');
-    const blob = new Blob([combined], { type: 'text/yaml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'uc_metric_views_all.yml';
-    a.click();
-    URL.revokeObjectURL(url);
+    // Download each metric view as its OWN .yml file (one per fact table) so
+    // each can be deployed independently — rather than one concatenated file.
+    // Downloads are staggered (~150ms apart) because browsers throttle/deny
+    // rapid back-to-back programmatic downloads.
+    const entries = Object.entries(yamlData).filter(([, v]) => v && v.trim());
+    entries.forEach(([tableName, content], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${tableName}_uc_metric_view.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
   };
 
   // Calculate aggregate stats
@@ -216,6 +272,7 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
               variant="contained"
               startIcon={<DownloadIcon />}
               onClick={handleDownloadAllYamls}
+              title="Downloads each metric view as a separate .yml file"
             >
               Download All YAMLs
             </Button>
@@ -286,6 +343,14 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
         {failCount > 0 && <Chip icon={<ErrorOutlineIcon />} label={`${failCount} failing`} color="error" size="small" />}
       </Box>
 
+      {(result.attention_truncated || result.full_detail_in_trace) && (
+        <Typography variant="caption" color="text.secondary">
+          {result.attention_truncated
+            ? 'Showing the highest-priority measures needing attention; full per-measure detail is in the execution trace.'
+            : 'Per-table counts shown; full per-measure detail and YAML are in the execution trace.'}
+        </Typography>
+      )}
+
       <Divider />
 
       {/* Per-table results */}
@@ -305,7 +370,9 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
           {tableEntries.map(({ name, data, status, stat }) => {
             const evaluated = data.evaluated || 0;
             const valid = (data.valid || 0) + (data.equivalent || 0);
-            const measures = stat?.translated || data.measures || 0;
+            // Prefer the validator's total_measures (evaluated + skipped) so the
+            // "Measures" column shows the full denominator, not just evaluated.
+            const measures = data.total_measures || stat?.translated || data.measures || 0;
             const untranslatable = stat?.untranslatable || data.untranslatable || 0;
 
             return (
@@ -391,8 +458,11 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
                               {data.details.map((d, i) => {
                                 const mStatus = d.measure_eval_result?.status || d.measure_eval || 'unknown';
                                 const isGood = mStatus === 'VALID' || mStatus === 'EQUIVALENT' || mStatus === 'simple';
+                                // 'skipped' = not compared (trivial aggregation or no
+                                // source DAX). Neutral grey — NOT a pass or a failure.
+                                const isSkipped = mStatus === 'skipped';
                                 return (
-                                  <TableRow key={i}>
+                                  <TableRow key={i} sx={isSkipped ? { opacity: 0.7 } : undefined}>
                                     <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
                                       {d.measure_name || '—'}
                                     </TableCell>
@@ -400,8 +470,8 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
                                       <Chip
                                         size="small"
                                         label={mStatus}
-                                        color={isGood ? 'success' : mStatus === 'REVIEW' ? 'warning' : mStatus === 'matched' ? 'info' : 'default'}
-                                        variant="outlined"
+                                        color={isSkipped ? 'default' : isGood ? 'success' : mStatus === 'REVIEW' ? 'warning' : mStatus === 'matched' ? 'info' : 'default'}
+                                        variant={isSkipped ? 'filled' : 'outlined'}
                                         sx={{ fontSize: '0.65rem' }}
                                       />
                                     </TableCell>

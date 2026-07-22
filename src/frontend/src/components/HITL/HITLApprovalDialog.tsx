@@ -78,6 +78,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [outputFullScreen, setOutputFullScreen] = useState(false);
+  // The status endpoint omits the (potentially ~1 MB) previous_crew_output; we
+  // lazy-load it via getApproval(id) so the gate opens instantly.
+  const [outputLoading, setOutputLoading] = useState(false);
 
   // UCMV edit state
   const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
@@ -93,19 +96,39 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     try {
       const status = await HITLService.getExecutionHITLStatus(executionId);
       if (status.pending_approval) {
-        setApproval(status.pending_approval);
-        // Pre-persist UCMV output as soon as the dialog opens so the Validator
-        // can find it even if the user approves immediately without editing.
-        if (status.pending_approval.previous_crew_output) {
-          try {
-            const parsed = JSON.parse(status.pending_approval.previous_crew_output);
-            if (isUCMVResult(parsed)) {
-              runService.updateExecutionResult(
-                status.pending_approval.execution_id,
-                parsed as unknown as Record<string, unknown>
-              ).catch(() => { /* non-blocking */ });
-            }
-          } catch { /* not UCMV, skip */ }
+        const pending = status.pending_approval;
+        // Render the gate shell immediately (status omits the heavy output).
+        setApproval(pending);
+
+        // Lazy-load the full previous_crew_output on demand (it can be ~1 MB and
+        // would make the gate slow to open if shipped in the status response).
+        if (pending.has_previous_crew_output && !pending.previous_crew_output) {
+          setOutputLoading(true);
+          // 'ui' projection strips downstream-handoff arrays (~390 KB) the gate
+          // doesn't render — the flow still injects the full blob downstream.
+          HITLService.getApproval(pending.id, 'ui')
+            .then((full) => {
+              setApproval((prev) =>
+                prev && prev.id === full.id
+                  ? { ...prev, previous_crew_output: full.previous_crew_output }
+                  : prev
+              );
+              // Pre-persist UCMV output so the Validator can find it even if the
+              // user approves immediately without editing.
+              if (full.previous_crew_output) {
+                try {
+                  const parsed = JSON.parse(full.previous_crew_output);
+                  if (isUCMVResult(parsed)) {
+                    runService.updateExecutionResult(
+                      full.execution_id,
+                      parsed as unknown as Record<string, unknown>
+                    ).catch(() => { /* non-blocking */ });
+                  }
+                } catch { /* not UCMV, skip */ }
+              }
+            })
+            .catch(() => { /* leave output empty; gate still actionable */ })
+            .finally(() => setOutputLoading(false));
         }
       } else {
         setApproval(null);
@@ -386,6 +409,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         )}
 
         <Divider sx={{ my: 2 }} />
+
+        {/* Output still lazy-loading (status omits it; fetched via getApproval) */}
+        {outputLoading && !approval.previous_crew_output && (
+          <Box mb={2} display="flex" alignItems="center" gap={1}>
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">
+              Loading output for review
+              {approval.previous_crew_output_size
+                ? ` (${Math.round(approval.previous_crew_output_size / 1024)} KB)…`
+                : '…'}
+            </Typography>
+          </Box>
+        )}
 
         {/* Previous Output */}
         {approval.previous_crew_output && (

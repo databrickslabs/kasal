@@ -208,7 +208,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
         dimensions = mapping.get('dimensions') or []
         measures = mapping.get('measures') or []
 
-        # Build query fields — match your CCHBC script conventions:
+        # Build query fields — match your dashboard script conventions:
         # dimensions: {"name": "col",        "expression": "`col`"}
         # measures:   {"name": "sum(col)",   "expression": "SUM(`col`)"}
         fields = []

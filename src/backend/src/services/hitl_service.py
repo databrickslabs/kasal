@@ -343,6 +343,10 @@ class HITLService:
                 offset=offset
             )
 
+            # Omit the heavy `previous_crew_output` from the LIST response too
+            # (same reason as get_execution_hitl_status — this can be polled and
+            # each row's output can be ~1 MB). Clients fetch the full output via
+            # GET /approvals/{id} on demand.
             items = [
                 HITLApprovalResponse(
                     id=a.id,
@@ -353,7 +357,11 @@ class HITLService:
                     status=HITLApprovalStatusEnum(a.status),
                     gate_config=a.gate_config,
                     previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=a.previous_crew_output,
+                    previous_crew_output=None,  # omitted — lazy-loaded on demand
+                    has_previous_crew_output=bool(a.previous_crew_output),
+                    previous_crew_output_size=(
+                        len(a.previous_crew_output) if a.previous_crew_output else None
+                    ),
                     flow_state_snapshot=a.flow_state_snapshot,
                     responded_by=a.responded_by,
                     responded_at=a.responded_at,
@@ -410,7 +418,14 @@ class HITLService:
                 None
             )
 
-            # Convert to response objects
+            # Convert to response objects.
+            # NOTE: omit the (potentially ~1 MB) `previous_crew_output` here — this
+            # status endpoint is polled to DETECT gates, and shipping the full
+            # output made the config-gen gate slow to open (browser downloads +
+            # JSON.parses ~1 MB). The client lazy-loads the full output via
+            # GET /approvals/{id} only when it renders it. We still signal that
+            # output exists (has_previous_crew_output + size) so the client knows
+            # to fetch it.
             approval_responses = [
                 HITLApprovalResponse(
                     id=a.id,
@@ -421,7 +436,11 @@ class HITLService:
                     status=HITLApprovalStatusEnum(a.status),
                     gate_config=a.gate_config,
                     previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=a.previous_crew_output,
+                    previous_crew_output=None,  # omitted — lazy-loaded on demand
+                    has_previous_crew_output=bool(a.previous_crew_output),
+                    previous_crew_output_size=(
+                        len(a.previous_crew_output) if a.previous_crew_output else None
+                    ),
                     flow_state_snapshot=a.flow_state_snapshot,
                     responded_by=a.responded_by,
                     responded_at=a.responded_at,

@@ -177,3 +177,56 @@ class TestReportAggregationSection:
         assert '**agg_b**' in report
         assert 'Warning A' in report
         assert 'Warning B' in report
+
+
+class TestTablesNotEmitted:
+    """The 'Tables not emitted' section surfaces skipped tables with WHY (by
+    category) + their original Power Query M — the table-level analogue of the
+    measure-level untranslatable note."""
+
+    def _skip(self, cat, mq):
+        return {'total': 0, 'skipped': True,
+                'skip_reason': f'reason for {cat}',
+                'skip_category': cat, 'original_mquery': mq}
+
+    def test_section_absent_when_no_skips(self):
+        report = emit_migration_report({}, {'fact_a': {'total': 5, 'translated': 5}})
+        assert '## Tables not emitted' not in report
+
+    def test_section_present_with_original_mquery(self):
+        stats = {'Selector': self._skip(
+            'inline_const', 'let\n Source = Table.FromRows(...)\nin Source')}
+        report = emit_migration_report({}, stats)
+        assert '## Tables not emitted' in report
+        assert '**Selector**' in report
+        assert '```m' in report
+        assert 'Table.FromRows' in report
+
+    def test_extractable_grouped_before_expected_skips(self):
+        stats = {
+            'Const_Tbl': self._skip('inline_const', 'Table.FromRows(...)'),
+            'Gap_Fact': self._skip('extractable', 'Value.NativeQuery(db,"SELECT 1")'),
+        }
+        report = emit_migration_report({}, stats)
+        # extraction-gap heading must appear before the inline-const heading
+        assert report.index('Extraction gap') < report.index('Inline constant table')
+
+    def test_reason_and_category_label_rendered(self):
+        stats = {'Ext_Tbl': self._skip('external', 'Access.Database(...)')}
+        report = emit_migration_report({}, stats)
+        assert 'External non-warehouse source' in report
+        assert 'reason for external' in report
+
+    def test_skip_without_mquery_still_listed(self):
+        # a skip lacking original_mquery must still be listed (no code fence)
+        stats = {'Bare': {'total': 0, 'skipped': True,
+                          'skip_reason': 'legacy skip', 'skip_category': 'unknown'}}
+        report = emit_migration_report({}, stats)
+        assert '**Bare**' in report
+        assert 'legacy skip' in report
+
+    def test_unknown_category_falls_through(self):
+        # a category not in the label map renders under its raw key, not dropped
+        stats = {'Weird': self._skip('some_new_cat', 'let x = 1 in x')}
+        report = emit_migration_report({}, stats)
+        assert '**Weird**' in report

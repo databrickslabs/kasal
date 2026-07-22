@@ -69,7 +69,10 @@ class TestManualOverrides:
         spec = specs['fact']
         rev_measures = [m for m in spec.measures if m.measure_name == 'revenue']
         assert len(rev_measures) == 1  # Not duplicated
-        assert 'SUM(source.revenue)' in rev_measures[0].sql_expr  # Original, not override
+        # Original base measure kept (not the "* 2" override). The P5 sanitizer
+        # NULL-safe-wraps base aggregates, so the column appears inside COALESCE.
+        assert 'source.revenue' in rev_measures[0].sql_expr  # Original, not override
+        assert '* 2' not in rev_measures[0].sql_expr
 
     def test_manual_override_unlocks_pass2(self):
         """Manual override should register in base_names so Pass 2 measure-refs can resolve."""

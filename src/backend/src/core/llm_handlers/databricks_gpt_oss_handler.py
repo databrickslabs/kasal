@@ -991,48 +991,99 @@ class DatabricksRetryLLM(LLM):
     def _maybe_model_fallback(self, exc, method, call_kwargs):
         """On a model-swappable failure, switch to another enabled model and
         return its result; otherwise return the _NO_FALLBACK sentinel so the
-        caller preserves its existing error handling. Synchronous path."""
+        caller preserves its existing error handling. Synchronous path.
+
+        Cascades: if the chosen fallback ITSELF fails with a swappable reason
+        (notably ENDPOINT_NOT_FOUND — the model isn't deployed in this
+        workspace), it moves on to the next candidate instead of dying. This is
+        what keeps a run alive when the context-window fallback target (e.g.
+        databricks-gemini-2-5-flash) is enabled in config but not served here.
+        """
         from src.core.llm_handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
             return _NO_FALLBACK
-        candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
-        if candidate is None:
-            return _NO_FALLBACK
-        fallback_llm = self._build_fallback_llm(candidate)
-        if fallback_llm is None:
-            return _NO_FALLBACK
-        self._tried_models.add(candidate.name)
-        self._active_fallback = fallback_llm
-        self._emit_fallback_span(reason, candidate, method)
-        self._get_crew_logger().warning(
-            f"[DatabricksRetryLLM] model fallback ({reason}): "
-            f"{self._current_model_key()} -> {candidate.name}"
-        )
-        return fallback_llm.call(**call_kwargs)
+        # Bounded cascade: try successive candidates until one answers or none remain.
+        max_hops = 4
+        for _ in range(max_hops):
+            candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+            if candidate is None:
+                return _NO_FALLBACK
+            self._tried_models.add(candidate.name)  # mark tried BEFORE call, so a failing one is skipped next hop
+            fallback_llm = self._build_fallback_llm(candidate)
+            if fallback_llm is None:
+                continue
+            self._active_fallback = fallback_llm
+            self._emit_fallback_span(reason, candidate, method)
+            self._get_crew_logger().warning(
+                f"[DatabricksRetryLLM] model fallback ({reason}): "
+                f"{self._current_model_key()} -> {candidate.name}"
+            )
+            try:
+                return fallback_llm.call(**call_kwargs)
+            except Exception as fb_exc:  # noqa: BLE001
+                fb_reason = classify_llm_error(fb_exc)
+                if not fb_reason:
+                    raise  # a non-swappable error from the fallback → surface it
+                from src.core.llm_handlers.model_fallback import (
+                    ENDPOINT_MISSING,
+                    mark_endpoint_missing,
+                )
+                if fb_reason == ENDPOINT_MISSING:
+                    # This model has no serving endpoint here — remember it so it's
+                    # never offered again (this run or later), preventing the
+                    # rate-limit→undeployed-endpoint cascade from recurring.
+                    mark_endpoint_missing(candidate.name)
+                self._get_crew_logger().warning(
+                    f"[DatabricksRetryLLM] fallback candidate {candidate.name} failed "
+                    f"({fb_reason}); trying next candidate"
+                )
+                reason = fb_reason
+                continue
+        return _NO_FALLBACK
 
     async def _amaybe_model_fallback(self, exc, method, call_kwargs):
-        """Async variant of _maybe_model_fallback."""
+        """Async variant of _maybe_model_fallback (cascades on swappable failures)."""
         from src.core.llm_handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
             return _NO_FALLBACK
-        candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
-        if candidate is None:
-            return _NO_FALLBACK
-        fallback_llm = await self._abuild_fallback_llm(candidate)
-        if fallback_llm is None:
-            return _NO_FALLBACK
-        self._tried_models.add(candidate.name)
-        self._active_fallback = fallback_llm
-        self._emit_fallback_span(reason, candidate, method)
-        self._get_crew_logger().warning(
-            f"[DatabricksRetryLLM] model fallback ({reason}): "
-            f"{self._current_model_key()} -> {candidate.name}"
-        )
-        return await fallback_llm.acall(**call_kwargs)
+        max_hops = 4
+        for _ in range(max_hops):
+            candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+            if candidate is None:
+                return _NO_FALLBACK
+            self._tried_models.add(candidate.name)  # mark tried BEFORE call
+            fallback_llm = await self._abuild_fallback_llm(candidate)
+            if fallback_llm is None:
+                continue
+            self._active_fallback = fallback_llm
+            self._emit_fallback_span(reason, candidate, method)
+            self._get_crew_logger().warning(
+                f"[DatabricksRetryLLM] model fallback ({reason}): "
+                f"{self._current_model_key()} -> {candidate.name}"
+            )
+            try:
+                return await fallback_llm.acall(**call_kwargs)
+            except Exception as fb_exc:  # noqa: BLE001
+                fb_reason = classify_llm_error(fb_exc)
+                if not fb_reason:
+                    raise
+                from src.core.llm_handlers.model_fallback import (
+                    ENDPOINT_MISSING,
+                    mark_endpoint_missing,
+                )
+                if fb_reason == ENDPOINT_MISSING:
+                    mark_endpoint_missing(candidate.name)
+                self._get_crew_logger().warning(
+                    f"[DatabricksRetryLLM] fallback candidate {candidate.name} failed "
+                    f"({fb_reason}); trying next candidate"
+                )
+                reason = fb_reason
+                continue
+        return _NO_FALLBACK
 
     @staticmethod
     def _coerce_to_response_model(result, kwargs):

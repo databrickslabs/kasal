@@ -164,8 +164,8 @@ class MqueryConversionPipelineSchema(BaseModel):
         description="[LLM] Databricks API token for LLM access (optional)"
     )
     llm_model: str = Field(
-        "databricks-claude-sonnet-4",
-        description="[LLM] Model endpoint name for conversion (default: databricks-claude-sonnet-4)"
+        "databricks-claude-sonnet-4-5",
+        description="[LLM] Model endpoint name for conversion (default: databricks-claude-sonnet-4-5)"
     )
     use_llm: bool = Field(
         True,
@@ -325,7 +325,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # LLM Configuration
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
-            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
             "use_llm": kwargs.get("use_llm", True),
             # Target Configuration
             "target_catalog": kwargs.get("target_catalog", "main"),
@@ -593,7 +593,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 # LLM Configuration
                 llm_workspace_url=llm_workspace_url if llm_workspace_url else None,
                 llm_token=llm_token if llm_token else None,
-                llm_model=merged_kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+                llm_model=merged_kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
                 # Target Configuration
                 target_catalog=merged_kwargs.get("target_catalog", "main"),
                 target_schema=merged_kwargs.get("target_schema", "default"),
@@ -1032,7 +1032,7 @@ class MqueryConversionPipelineTool(BaseTool):
             access_token=cfg.get("access_token"),
             workspace_id=workspace_id,
             dataset_id=dataset_id,
-            llm_model=cfg.get("llm_model", "databricks-claude-sonnet-4"),
+            llm_model=cfg.get("llm_model", "databricks-claude-sonnet-4-5"),
             llm_workspace_url=cfg.get("llm_workspace_url"),
             llm_token=cfg.get("llm_token"),
             target_catalog=cfg.get("target_catalog", "main"),
@@ -1320,7 +1320,7 @@ class MqueryConversionPipelineTool(BaseTool):
         try:
             from src.core.llm_manager import LLMManager
             from src.utils.telemetry import get_user_agent_header, KasalProduct
-            model = cfg.get("llm_model", "databricks-claude-sonnet-4")
+            model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (
                 f"You are a Databricks SQL expert. This SQL was transpiled from a Power BI M-Query "
                 f"but the row count does not match: {diff}\n\n"
@@ -1336,6 +1336,18 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"Return ONLY the corrected SQL SELECT statement that faithfully implements "
                 f"the M-Query transformation. No explanation."
             )
+            # SEC #4: the prompt embeds PBI-sourced M-query text — scan for
+            # prompt-injection before the LLM call (fail-open + log).
+            try:
+                from src.engines.crewai.security.scanner_pipeline import security_scanner
+                _inj = security_scanner.scan_injection(mquery or "")
+                if getattr(_inj, "detected", False):
+                    logger.warning(
+                        "[Validation] Possible prompt-injection in PBI M-query fed to "
+                        "SQL-correction LLM (severity=%s) — proceeding.",
+                        getattr(_inj, "severity", "?"))
+            except Exception as _e:  # noqa: BLE001 — advisory only
+                logger.debug(f"[Validation] injection scan skipped: {_e}")
             response = await LLMManager.completion(
                 messages=[{"role": "user", "content": prompt}],
                 model=model,
@@ -1435,7 +1447,7 @@ class MqueryConversionPipelineTool(BaseTool):
         try:
             from src.core.llm_manager import LLMManager
             from src.utils.telemetry import get_user_agent_header, KasalProduct
-            model = cfg.get("llm_model", "databricks-claude-sonnet-4")
+            model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (
                 f"You are a Databricks SQL expert. A Power BI table called '{tname}' "
                 f"has been fetched via EVALUATE and needs to be inserted into Delta table `{full_target}`.\n\n"

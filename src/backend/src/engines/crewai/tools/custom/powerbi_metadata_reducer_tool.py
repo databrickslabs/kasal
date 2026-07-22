@@ -140,7 +140,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             "report_id": kwargs.get("report_id"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
-            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
             "business_mappings": kwargs.get("business_mappings", {}),
             "field_synonyms": kwargs.get("field_synonyms", {}),
             "active_filters": kwargs.get("active_filters", {}),
@@ -332,7 +332,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             user_question,
             known_measures=known_measure_names,
             known_dimensions=known_dimension_names,
-            llm_model=config.get("llm_model", "databricks-claude-sonnet-4"),
+            llm_model=config.get("llm_model", "databricks-claude-sonnet-4-5"),
         )
 
         # Detect question split
@@ -1100,7 +1100,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         Provides fuzzy pre-screening hints to guide the LLM.
         Falls back to fuzzy-only if LLM call fails.
         """
-        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         # Build table catalog for the prompt
         table_catalog_lines = []

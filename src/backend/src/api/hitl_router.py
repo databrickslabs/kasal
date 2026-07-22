@@ -48,6 +48,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/hitl", tags=["Human in the Loop"])
 
+# Keys in a config-gen gate output that are DOWNSTREAM-HANDOFF payloads (injected
+# into the next crew by the flow) and are never displayed at the gate UI. They
+# make up ~390 KB of an ~810 KB config-gen `previous_crew_output`. The
+# `?view=ui` projection strips them from the UI fetch so the browser downloads
+# only what it renders. The full blob stays in the DB untouched for the flow.
+_UI_STRIP_KEYS = ("measures_json", "mquery_json", "relationships_json")
+
+
+def _project_output_for_ui(previous_crew_output: str | None) -> str | None:
+    """Return previous_crew_output with downstream-handoff arrays removed.
+
+    Only applies to JSON-object outputs (config-gen gate). Non-JSON or
+    non-dict outputs (or those without the keys) are returned unchanged — a
+    validator gate output (yaml/sql/stats) has none of the strip keys, so it is
+    untouched. Fail-open: any parse/shape surprise returns the original string.
+    """
+    if not previous_crew_output:
+        return previous_crew_output
+    import json
+
+    try:
+        parsed = json.loads(previous_crew_output)
+        if not isinstance(parsed, dict):
+            return previous_crew_output
+        if not any(k in parsed for k in _UI_STRIP_KEYS):
+            return previous_crew_output
+        for k in _UI_STRIP_KEYS:
+            parsed.pop(k, None)
+        return json.dumps(parsed, default=str)
+    except (ValueError, TypeError):
+        return previous_crew_output
+
 
 # =============================================================================
 # Dependency Providers
@@ -120,9 +152,20 @@ async def get_approval(
     approval_id: int,
     service: HITLServiceDep,
     group_context: GroupContextDep,
+    view: Annotated[
+        str | None,
+        Query(description="'ui' strips downstream-handoff arrays from previous_crew_output "
+                          "to shrink the UI fetch; omit for the full output."),
+    ] = None,
 ) -> HITLApprovalResponse:
     """
     Get a specific HITL approval by ID.
+
+    `view=ui` returns previous_crew_output with the heavy downstream-handoff
+    arrays (measures_json/mquery_json/relationships_json) removed — the gate UI
+    only renders proposed_config, so this cuts an ~810 KB config-gen output to
+    ~300 KB. The full output (default) is still available for anything that needs
+    the handoff data; the DB copy the flow injects downstream is never touched.
     """
     try:
         # Get execution status which includes the approval
@@ -135,6 +178,10 @@ async def get_approval(
 
         from src.schemas.hitl import HITLApprovalStatusEnum, HITLRejectionActionEnum
 
+        _output = approval.previous_crew_output
+        if view == "ui":
+            _output = _project_output_for_ui(_output)
+
         return HITLApprovalResponse(
             id=approval.id,
             execution_id=approval.execution_id,
@@ -144,7 +191,9 @@ async def get_approval(
             status=HITLApprovalStatusEnum(approval.status),
             gate_config=approval.gate_config,
             previous_crew_name=approval.previous_crew_name,
-            previous_crew_output=approval.previous_crew_output,
+            previous_crew_output=_output,
+            has_previous_crew_output=bool(approval.previous_crew_output),
+            previous_crew_output_size=(len(_output) if _output else None),
             flow_state_snapshot=approval.flow_state_snapshot,
             responded_by=approval.responded_by,
             responded_at=approval.responded_at,

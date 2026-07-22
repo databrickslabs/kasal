@@ -16,8 +16,8 @@ Usage:
     --client-secret "U5b8Q~..." \
     --admin-client-id 8d8aa6ee-... \
     --admin-client-secret "RXm8Q~..." \
-    --catalog david_test_metrics \
-    --schema cchbc \
+    --catalog my_catalog \
+    --schema my_schema \
     --output proposed_pipeline_config.json
 """
 from __future__ import annotations
@@ -31,12 +31,13 @@ from collections import defaultdict
 from typing import Any
 
 __all__ = [
-    "get_token", "extract_relationships", "extract_measures",
+    "get_token", "get_fabric_token", "extract_relationships", "extract_measures",
     "trigger_admin_scan", "parse_admin_tables", "extract_report_definition",
+    "fetch_tmdl_parts", "parse_tmdl_to_admin_tables",
     "build_config", "to_snake_case",
     "derive_join_key_map", "derive_enrichment_joins", "derive_dim_alias_map",
     "derive_switch_decompositions", "derive_filter_sets",
-    "derive_measure_resolutions", "derive_column_overrides",
+    "derive_measure_resolutions", "derive_measure_usage", "derive_column_overrides",
     "derive_mapping_only_tables", "derive_column_metadata",
     "derive_column_alias_map", "derive_parameter_defaults",
     "derive_name_prefixes", "derive_dimension_exclusions", "derive_period_dims",
@@ -55,7 +56,14 @@ except ImportError:
 # ═══════════════════════════════════════════════════════════════════════
 
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire OAuth2 token via client_credentials grant."""
+    """Acquire OAuth2 token via client_credentials grant (Service Principal).
+
+    Standalone helper used by this module's own CLI (``main()``). The
+    Pipeline Config Generator *tool* does not call this — it resolves tokens
+    through the shared ``AadService`` (which additionally supports Service
+    Account and User-OAuth), then passes the resulting token into the
+    ``extract_*`` functions below.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     resp = requests.post(url, data={
         "grant_type": "client_credentials",
@@ -67,8 +75,167 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     return resp.json()["access_token"]
 
 
+def fetch_tmdl_parts(
+    fabric_token: str, workspace_id: str, dataset_id: str
+) -> list[dict] | None:
+    """Fetch the semantic model's TMDL definition parts via the Fabric REST API.
+
+    Returns the list of ``{path, payload}`` parts, or ``None`` if the workspace
+    is not Fabric-enabled / the model is unavailable. Handles the async 202
+    long-running-operation poll.
+    """
+    url = (
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
+        f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
+    )
+    headers = {"Authorization": f"Bearer {fabric_token}", "Content-Type": "application/json"}
+    try:
+        resp = requests.post(url, headers=headers, timeout=180)
+        if resp.status_code == 200:
+            return resp.json().get("definition", {}).get("parts", [])
+        if resp.status_code == 202:
+            location = resp.headers.get("Location")
+            if not location:
+                return None
+            for _ in range(60):
+                time.sleep(2)
+                poll = requests.get(location, headers=headers, timeout=60)
+                pdata = poll.json()
+                status = pdata.get("status")
+                if status == "Succeeded":
+                    result = requests.get(location + "/result", headers=headers, timeout=60)
+                    _check_response(result, "TMDL getDefinition result")
+                    return result.json().get("definition", {}).get("parts", [])
+                if status == "Failed":
+                    return None
+            return None
+        # 401/403/404 etc. — Fabric not available for these creds/workspace
+        return None
+    except Exception:
+        return None
+
+
+def parse_tmdl_to_admin_tables(
+    tmdl_parts: list[dict], dataset_id: str | None = None
+) -> dict[str, dict]:
+    """Parse TMDL parts into the SAME shape as :func:`parse_admin_tables`.
+
+    Returns ``{table_name: {columns: [...], mquery_expression: "...",
+    measures: [...]}}`` so ``build_config`` consumes it identically to admin-scan
+    output. ``dataset_id`` is accepted for signature parity; TMDL is already
+    scoped to one model so it is not used to filter.
+    """
+    import base64
+
+    tables: dict[str, dict] = {}
+    for part in tmdl_parts or []:
+        path = part.get("path", "")
+        payload = part.get("payload", "")
+        if not path.startswith("definition/tables/") or not path.endswith(".tmdl"):
+            continue
+        try:
+            content = base64.b64decode(payload).decode("utf-8")
+            tmatch = re.match(r"table\s+(?:'([^']+)'|(\w+))", content.strip())
+            if not tmatch:
+                continue
+            table_name = tmatch.group(1) or tmatch.group(2)
+            if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                continue
+
+            # Columns
+            columns = []
+            for cmatch in re.finditer(r"column\s+(?:'([^']+)'|(\w+))", content, re.MULTILINE):
+                columns.append({
+                    "name": cmatch.group(1) or cmatch.group(2),
+                    "dataType": "",
+                    "isHidden": False,
+                })
+
+            # Measures / calculationItems
+            measures = []
+            mpattern = re.compile(
+                r"(?:measure|calculationItem)\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)"
+                r"(?=\n\s*(?:measure|calculationItem)|\n\s*column|\n\t[^\t]|\Z)",
+                re.MULTILINE,
+            )
+            for mmatch in mpattern.finditer(content):
+                mname = mmatch.group(1) or mmatch.group(2)
+                expr = mmatch.group(3).strip()
+                clean = []
+                for line in expr.split("\n"):
+                    if line.strip().startswith(("lineageTag:", "formatString:", "annotation", "isHidden")):
+                        break
+                    clean.append(line)
+                measures.append({"name": mname, "expression": "\n".join(clean).strip()})
+
+            # M-Query (partition source) — best-effort.
+            #
+            # TMDL partitions look like:
+            #     partition <name> = m
+            #         mode: import
+            #         source =
+            #             let
+            #                 Source = Databricks.Catalogs(...),
+            #                 Filtered = Table.SelectRows(...)
+            #             in
+            #                 Filtered
+            #         annotation ...
+            #
+            # The M body itself contains lines like `Source = ...` / `Filtered = ...`,
+            # so a regex that stops at the first `\n<word> =` truncates the source to
+            # just "let" (its first token). Instead, capture the whole indented block
+            # after `source =`: keep every subsequent line that is blank or MORE
+            # indented than the `source` keyword, and stop at the next line indented
+            # at-or-below it (the next TMDL directive: annotation/partition/measure/etc.).
+            source_expr = ""
+            smatch = re.search(r"^([ \t]*)source\s*=[ \t]*(.*)$", content, re.MULTILINE)
+            if smatch:
+                base_indent = len(smatch.group(1).expandtabs(4))
+                inline = smatch.group(2).strip()  # rare: `source = <single-line M>`
+                body_lines: list[str] = []
+                if inline:
+                    body_lines.append(inline)
+                # Walk the lines AFTER the `source =` line.
+                after = content[smatch.end():].split("\n")
+                for line in after:
+                    if not line.strip():
+                        body_lines.append(line)
+                        continue
+                    indent = len(line[: len(line) - len(line.lstrip())].expandtabs(4))
+                    if indent > base_indent:
+                        body_lines.append(line)
+                    else:
+                        break  # dedented → next TMDL directive → end of source block
+                source_expr = "\n".join(body_lines).strip()
+
+            tables[table_name] = {
+                "columns": columns,
+                "mquery_expression": source_expr,
+                "measures": measures,
+            }
+        except Exception:
+            continue
+    return tables
+
+
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+def _row_get(row: dict, col: str, default: str = "") -> str:
+    """Read a Power BI executeQueries result column, tolerant of key format.
+
+    The API returns column keys either bracketed (``[Measure Name]``) or
+    unbracketed (``Measure Name``) depending on the query/permission path.
+    Reading only the bracketed form silently yields empty strings when the API
+    returns the unbracketed form — which is exactly how measure DAX went missing
+    (471 measures, 0 with DAX). Try both.
+    """
+    bare = col.strip("[]")
+    val = row.get(f"[{bare}]")
+    if val is None:
+        val = row.get(bare)
+    return val if val is not None else default
 
 
 def _check_response(resp, context: str = "") -> None:
@@ -81,6 +248,37 @@ def _check_response(resp, context: str = "") -> None:
         raise RuntimeError(
             f"{context} HTTP {resp.status_code}: {body}"
         )
+
+
+def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | None:
+    """PROP-7: find the report bound to ``dataset_id`` in the workspace.
+
+    Running the pipeline WITHOUT a report_id silently degrades measure DAX (the
+    report's visual bindings carry the full measure expressions). When the caller
+    did not supply one, auto-discover it: list the workspace reports and return the
+    first whose ``datasetId`` matches. Returns None (fail-open) if none match or the
+    API call fails — the caller then proceeds report-less with a loud warning.
+    """
+    try:
+        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
+        resp = requests.get(url, headers=_headers(token), timeout=30)
+        if resp.status_code != 200:
+            return None
+        reports = resp.json().get("value", [])
+        matches = [
+            r for r in reports
+            if str(r.get("datasetId", "")).lower() == str(dataset_id).lower()
+        ]
+        if not matches:
+            return None
+        # Prefer a real report over an auto-generated/usage one; else first match.
+        matches.sort(key=lambda r: (
+            "usage metrics" in str(r.get("name", "")).lower(),
+            "auto" in str(r.get("name", "")).lower(),
+        ))
+        return matches[0].get("id")
+    except Exception:
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -331,14 +529,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
         measures = []
         for row in rows:
-            name = row.get("[Measure Name]", "")
+            name = _row_get(row, "Measure Name")
             if name.startswith("__"):
                 continue
             measures.append({
                 "measure_name": name,
-                "table_name": row.get("[Table]", ""),
-                "expression": row.get("[Expression]", ""),
-                "description": row.get("[Description]", ""),
+                "table_name": _row_get(row, "Table"),
+                "expression": _row_get(row, "Expression"),
+                "description": _row_get(row, "Description"),
             })
         return measures
 
@@ -364,14 +562,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
     rows2 = data2.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
     measures = []
     for row in rows2:
-        name = row.get("[Measure Name]", "")
+        name = _row_get(row, "Measure Name")
         if name.startswith("__"):
             continue
         measures.append({
             "measure_name": name,
-            "table_name": row.get("[Table]", ""),
-            "expression": row.get("[Expression]", ""),
-            "description": row.get("[Description]", ""),
+            "table_name": _row_get(row, "Table"),
+            "expression": _row_get(row, "Expression"),
+            "description": _row_get(row, "Description"),
         })
     return measures
 
@@ -436,6 +634,95 @@ def _extract_switch_branches(dax: str) -> list[dict]:
     return branches
 
 
+def _calculate_branch_bodies(text: str) -> list[str]:
+    """Return the balanced inner text of every top-level ``CALCULATE( ... )``."""
+    bodies: list[str] = []
+    for m in re.finditer(r'CALCULATE\s*\(', text, re.IGNORECASE):
+        start = m.end()
+        depth = 1
+        pos = start
+        while pos < len(text) and depth > 0:
+            if text[pos] == '(':
+                depth += 1
+            elif text[pos] == ')':
+                depth -= 1
+                if depth == 0:
+                    bodies.append(text[start:pos])
+                    break
+            pos += 1
+    return bodies
+
+
+def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
+    """Detect plant/company geo-selector SWITCH measures and emit BOTH branches.
+
+    Shape (no SELECTEDVALUE — that's the parameterized case handled elsewhere):
+        SWITCH(TRUE(),
+               Or(ISFILTERED(dim[plant_desc]), HASONEVALUE(dim[plant])),
+               CALCULATE(<agg>, … creg_type="Plant"),      -- branch A (plant)
+               CALCULATE(<agg>, … creg_type="Company Code"))-- branch B (company)
+
+    A UC metric view has no slicer context, so the single PBI SWITCH measure must
+    become TWO static measures — ``plant_<base>`` and ``company_<base>`` — matching
+    the ground truth. Each branch is resolved to real SQL via the same
+    ``_resolve_referenced_measure_dax`` used for measure-refs, so downstream
+    dependents (which reference the parent by name) still resolve, and the second
+    (company) variant — previously dropped entirely — is now emitted.
+
+    Returns ``{table: [ {name, raw_expr, comment}, ... ]}`` list-format entries
+    (real SQL, not skeletons), mergeable into ``switch_decompositions``.
+    """
+    out: dict[str, list[dict]] = defaultdict(list)
+
+    for m in measures:
+        dax = m.get("expression", "") or ""
+        name = m.get("original_name") or m.get("measure_name", "")
+        table = m.get("table_name", "") or m.get("proposed_allocation", "")
+        if not dax or not name:
+            continue
+        du = dax.upper()
+        # geo-selector: SWITCH(TRUE(), …) whose condition tests plant filter state
+        if not re.search(r'SWITCH\s*\(\s*TRUE\s*\(\s*\)', du):
+            continue
+        if not re.search(r'ISFILTERED|HASONEVALUE', du):
+            continue
+        # Strip var…return scaffolding so the branch CALCULATEs are the ones found.
+        body = dax
+        _ret = re.search(r'\breturn\b\s*(.+)$', body, re.IGNORECASE | re.DOTALL)
+        if _ret and re.match(r'(?is)^\s*var\s+', body):
+            body = _ret.group(1)
+        branches = _calculate_branch_bodies(body)
+        if len(branches) < 2:
+            continue  # need at least a plant + company branch
+
+        # Base measure name → strip a leading Plant_Comp / Plant_Company token and
+        # the geo word, so `Plant_Comp KBI_Value_Actual` → `kbi_value_actual`.
+        base = re.sub(r'(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*', '', name).strip()
+        base_snake = to_snake_case(base) or to_snake_case(name)
+
+        emitted = []
+        for label, branch in (('plant', branches[0]), ('company', branches[1])):
+            resolved = _resolve_referenced_measure_dax(f"CALCULATE({branch})")
+            if not resolved:
+                continue
+            base_expr = resolved["base_expr"]
+            filters = resolved["base_filters"]
+            sql = base_expr
+            if filters:
+                sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"
+            emitted.append({
+                "name": f"{label}_{base_snake}",
+                "raw_expr": sql,
+                "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
+            })
+        # Only emit when BOTH branches resolved — a half-decomposition would be
+        # worse than leaving the parent measure to the normal path.
+        if len(emitted) == 2:
+            out[table].extend(emitted)
+
+    return dict(out)
+
+
 def derive_filter_sets(
     measures: list[dict],
     switch_decomps: dict[str, list[dict]],
@@ -477,6 +764,117 @@ def derive_filter_sets(
     return filter_sets
 
 
+def _resolve_referenced_measure_dax(dax: str) -> dict | None:
+    """PROP-1: transpile a REFERENCED measure's DAX into a UCMV ``base_expr``
+    (+ ``base_filters``) so ``[MeasureRef]`` resolutions carry real SQL instead of
+    a ``TODO`` placeholder.
+
+    Handles the concrete shapes seen in the reference model (and common elsewhere):
+      * numeric constant                     → base_expr = the number
+      * ``SUM(T[col])`` / ``SUMX(T, T[col])`` → base_expr = ``SUM(source.col)``
+      * ``CALCULATE(SUM(T[col]), T[a]="x", …)`` → base_expr + base_filters
+      * ``SWITCH(TRUE(), <cond>, CALCULATE(...), CALCULATE(...))`` (plant-vs-company
+        selector) → the FIRST CALCULATE branch (the default the GT also picks)
+
+    Returns ``{'base_expr': str, 'base_filters': [str]}`` or ``None`` when the DAX
+    is not one of these self-contained aggregate shapes (caller then keeps a TODO).
+    """
+    if not dax:
+        return None
+    d = dax.strip()
+
+    # Strip leading slicer-scalar scaffolding vars before locating the aggregate.
+    # Measures on the _BP/_PY side carry `var std = CALCULATE([F_Start_date]) var
+    # etd = CALCULATE([F_End_date]) return <real expr>` — those date-window vars
+    # are display scaffolding (ignored elsewhere in the pipeline). If we don't
+    # drop them, the FIRST CALCULATE( found is `CALCULATE([F_Start_date])` (the
+    # scaffolding), not the real aggregate branch, and resolution fails — which is
+    # exactly why the _BP twins dropped while the scaffolding-free _Actual twins
+    # resolved. Cut to the RETURN body so the aggregate is the first CALCULATE.
+    _ret = re.search(r'\breturn\b\s*(.+)$', d, re.IGNORECASE | re.DOTALL)
+    if _ret and re.match(r'(?is)^\s*var\s+', d):
+        d = _ret.group(1).strip()
+
+    # Constant (e.g. AVG_KBI_Div_Factor's effective value is 1 in the GT).
+    if re.fullmatch(r'-?\d+(?:\.\d+)?', d):
+        return {"base_expr": d, "base_filters": []}
+
+    def _first_calculate_body(text: str) -> str | None:
+        """Return the balanced inner text of the FIRST ``CALCULATE( ... )``."""
+        cm = re.search(r'CALCULATE\s*\(', text, re.IGNORECASE)
+        if not cm:
+            return None
+        start = cm.end()
+        depth = 1
+        pos = start
+        while pos < len(text) and depth > 0:
+            if text[pos] == '(':
+                depth += 1
+            elif text[pos] == ')':
+                depth -= 1
+                if depth == 0:
+                    return text[start:pos]
+            pos += 1
+        return text[start:pos]
+
+    # If it's a SWITCH selector (or any wrapper containing CALCULATE), resolve to
+    # the FIRST CALCULATE(...) branch — the plant/default branch the ground truth
+    # picks. Bound the parse to that single balanced CALCULATE so a second branch's
+    # filters (e.g. "Company Code") don't leak into this resolution.
+    if re.match(r'(?is)^\s*(?:var\s+.*?return\s+)?switch\s*\(', d) or (
+        'CALCULATE' in d.upper()
+        and not re.match(r'(?is)^\s*CALCULATE\s*\(', d)
+    ):
+        body = _first_calculate_body(d)
+        if body is not None:
+            inner = body
+        else:
+            inner = d
+    else:
+        # CALCULATE(SUM(T[col]), <filter>, ...)  — take its balanced body
+        body = _first_calculate_body(d)
+        inner = body if body is not None else d
+
+    # Aggregate over Table[Column]  →  SUM(source.col)
+    agg = re.search(
+        r'\b(SUM|SUMX|AVERAGE|MIN|MAX|COUNT|DISTINCTCOUNT)\s*\('
+        r'(?:\s*\w+\s*,\s*)?'                    # SUMX(Table, ...) optional table arg
+        r"(?:'[^']+'|\w+)\[(\w+)\]",             # Table[col] / 'Table Name'[col]
+        inner, re.IGNORECASE,
+    )
+    if not agg:
+        # Also handle the SUMX(FILTER(fact, <pred>), fact[col]) shape, where the
+        # first arg is a FILTER(...) table rather than a bare table — the column
+        # is the FINAL Table[col] argument. (Plant/Company KBI selectors on the
+        # _BP side use this shape, unlike the _Actual side's CALCULATE(SUM,…).)
+        agg = re.search(
+            r'\b(SUMX|COUNTX|AVERAGEX)\s*\(\s*FILTER\s*\(.*\)\s*,\s*'
+            r"(?:'[^']+'|\w+)\[(\w+)\]\s*\)",
+            inner, re.IGNORECASE | re.DOTALL,
+        )
+        if not agg:
+            return None
+    func = agg.group(1).upper()
+    spark_func = {'SUMX': 'SUM', 'COUNTX': 'COUNT', 'AVERAGEX': 'AVG',
+                  'DISTINCTCOUNT': 'COUNT_DISTINCT'}.get(func, func)
+    col = to_snake_case(agg.group(2))
+    base_expr = f"{spark_func}(source.{col})"
+
+    # Extract equality filters  T[a] = "x"  →  a = 'x'
+    filters: list[str] = []
+    for fm in re.finditer(
+        r"""(?:'[^']+'|\w+)\[(\w+)\]\s*=\s*("[^"]*"|'[^']*'|-?\d+(?:\.\d+)?)""",
+        inner,
+    ):
+        fcol = to_snake_case(fm.group(1))
+        val = fm.group(2)
+        if val[0] == '"':
+            val = "'" + val[1:-1] + "'"
+        filters.append(f"{fcol} = {val}")
+
+    return {"base_expr": base_expr, "base_filters": filters}
+
+
 def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
     """Detect [MeasureRef] patterns in expressions → resolution map."""
     resolutions: dict[str, dict] = {}
@@ -499,20 +897,82 @@ def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
 
             matched = measure_by_name.get(ref)
             if matched:
-                # It's a measure reference — add to resolutions
+                # It's a measure reference — try to transpile its DAX into real
+                # SQL (PROP-1). Falls back to a TODO placeholder only when the
+                # referenced DAX is not a self-contained aggregate we can resolve.
                 matched_dax = matched.get("expression", "") or ""
+                resolved = _resolve_referenced_measure_dax(matched_dax)
                 snippet = matched_dax[:150] + ("..." if len(matched_dax) > 150 else "")
-                resolutions[ref] = {
-                    "base_expr": "TODO: fill SQL expression",
-                    "base_filters": [],
-                    "_hint": (
-                        f"Matches measure '{ref}' on table "
-                        f"'{matched.get('table_name', '?')}' — "
-                        f"DAX: {snippet}"
-                    ),
-                }
+                if resolved:
+                    resolutions[ref] = {
+                        "base_expr": resolved["base_expr"],
+                        "base_filters": resolved["base_filters"],
+                        "_hint": (
+                            f"Auto-resolved from measure '{ref}' on table "
+                            f"'{matched.get('table_name', '?')}'"
+                        ),
+                    }
+                else:
+                    resolutions[ref] = {
+                        "base_expr": "TODO: fill SQL expression",
+                        "base_filters": [],
+                        "_hint": (
+                            f"Matches measure '{ref}' on table "
+                            f"'{matched.get('table_name', '?')}' — "
+                            f"DAX: {snippet}"
+                        ),
+                    }
 
     return resolutions
+
+
+def derive_measure_usage(measures: list[dict]) -> dict[str, int]:
+    """Count how many OTHER measures reference each measure (in-degree).
+
+    Reviewers use this to prioritize gaps: a TODO/untranslatable measure that
+    many other measures depend on blocks that many downstream translations, so
+    it should be fixed first. This counts measure→measure references only (the
+    DAX dependency graph's in-degree) — NOT dashboard/visual usage.
+
+    A ``[Name]`` token counts only when ``Name`` matches a known measure, which
+    naturally excludes ``Table[Column]`` refs (same discrimination used by
+    ``derive_measure_resolutions``). Self-references are ignored.
+
+    Returns ``{measure_name: referenced_by_count}`` keyed by the ORIGINAL PBI
+    measure name, PLUS a snake_case alias for each (same value). The alias lets
+    consumers keyed on snaked names resolve the count too — notably
+    ``switch_decompositions`` entries, whose ``name`` is ``to_snake_case``'d
+    (e.g. ``F_Start_date`` → ``f_start_date``). Without the alias those entries
+    can't join to this map. When an original name already IS its own snake form
+    the two keys coincide (no duplication).
+    """
+    ref_re = re.compile(r'\[([^\]]+)\]')
+    measure_names = {m["measure_name"] for m in measures}
+    usage: dict[str, int] = {name: 0 for name in measure_names}
+
+    for m in measures:
+        name = m["measure_name"]
+        dax = m.get("expression", "") or ""
+        if not dax:
+            continue
+        # Count each referenced measure at most once per referencing measure.
+        referenced = {
+            ref for ref in (rm.group(1) for rm in ref_re.finditer(dax))
+            if ref in measure_names and ref != name
+        }
+        for ref in referenced:
+            usage[ref] += 1
+
+    # Add snake_case aliases so snaked consumers (switch_decompositions) resolve.
+    # Never overwrite a real measure name's own count. When two originals snake
+    # to the SAME alias, keep the higher count (safest for "highest priority").
+    real_names = set(usage.keys())
+    for name in list(real_names):
+        snake = to_snake_case(name)
+        if snake and snake not in real_names:
+            usage[snake] = max(usage.get(snake, 0), usage[name])
+
+    return usage
 
 
 def derive_column_overrides(
@@ -800,17 +1260,43 @@ def derive_name_prefixes(admin_tables: dict[str, dict]) -> list[str]:
     return sorted(p for p, c in prefix_counts.items() if c >= 3)
 
 
+# Pure ETL / plumbing columns that are never business dimensions. Demoted from
+# the emitted dimension list (conservative curation). Matched on the snake name
+# with underscores stripped (so "obj_vers"/"ObjVers"/"objvers" all collapse to
+# "objvers"), so real business columns are never caught. Extend deliberately.
+_ETL_PLUMBING_COLUMNS = frozenset({
+    "objvers", "logsys", "processrunid", "yearcard", "pastflag",
+    "recordmode", "aedat", "aezet", "erdat", "erzet",
+    "loadtime", "etlloaddate", "etltimestamp", "dwloaddate",
+    "sourcesystem", "batchid", "runid", "loadedat",
+})
+
+
+def _is_etl_plumbing(snake_name: str) -> bool:
+    """True when a snake-cased column name is pure ETL plumbing (underscore-
+    insensitive match against _ETL_PLUMBING_COLUMNS)."""
+    return snake_name.replace("_", "") in _ETL_PLUMBING_COLUMNS
+
+
 def derive_dimension_exclusions(admin_tables: dict[str, dict]) -> dict[str, list[str]]:
-    """Hidden columns per table → dimension_exclusions."""
+    """Hidden + pure-ETL columns per table → dimension_exclusions.
+
+    Two sources: (1) columns PBI marks isHidden, (2) a conservative allow-list of
+    ETL plumbing columns (objvers, logsys, process_run_id, …) that are never
+    business dimensions. Matched by snake-cased name so real business columns are
+    never demoted.
+    """
     exclusions: dict[str, list[str]] = {}
 
     for tbl_name, tbl in admin_tables.items():
-        hidden = []
+        excluded = []
         for col in tbl.get("columns", []):
-            if col.get("isHidden", False):
-                hidden.append(to_snake_case(col["name"]))
-        if hidden:
-            exclusions[tbl_name] = hidden
+            snake = to_snake_case(col["name"])
+            if col.get("isHidden", False) or _is_etl_plumbing(snake):
+                excluded.append(snake)
+        if excluded:
+            # de-dup while preserving order
+            exclusions[tbl_name] = list(dict.fromkeys(excluded))
 
     return exclusions
 
@@ -871,16 +1357,45 @@ def derive_period_dims(
 # API 4: Report Definition (optional)
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_fabric_token(tenant_id: str, client_id: str, client_secret: str) -> str:
-    """Acquire Fabric API token (different scope from PBI API)."""
+def get_fabric_token(
+    tenant_id: str,
+    client_id: str,
+    client_secret: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Acquire a Microsoft Fabric-scoped OAuth token (different scope from PBI API).
+
+    Supports both Service Principal (client_credentials) and Service Account
+    (ROPC password grant, when username + password are supplied). The SA grant
+    is what lets an SA-only caller read the model via TMDL when the Power BI
+    Admin Scanner rejects the service-account token.
+    """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    resp = requests.post(url, data={
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://api.fabric.microsoft.com/.default",
-    }, timeout=30)
-    _check_response(resp, "Auth (Fabric API)")
+    scope = "https://api.fabric.microsoft.com/.default"
+
+    if username and password:
+        data = {
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "scope": scope,
+        }
+        if client_secret:
+            data["client_secret"] = client_secret
+        context = "Auth (Fabric API, service account)"
+    else:
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": scope,
+        }
+        context = "Auth (Fabric API)"
+
+    resp = requests.post(url, data=data, timeout=30)
+    _check_response(resp, context)
     return resp.json()["access_token"]
 
 
@@ -1281,6 +1796,12 @@ def build_config(
 
     # 4. filter_sets
     switch_decomps = derive_switch_decompositions(measures)
+    # Merge geo-selector (plant/company) SWITCH decompositions — these emit BOTH
+    # branches as real-SQL measures (plant_<base> + company_<base>), recovering
+    # the company variant the single PBI SWITCH measure would otherwise collapse.
+    geo_decomps = derive_geo_switch_decompositions(measures)
+    for _tbl, _entries in geo_decomps.items():
+        switch_decomps.setdefault(_tbl, []).extend(_entries)
     config["filter_sets"] = derive_filter_sets(measures, switch_decomps)
 
     # 5. switch_decompositions
@@ -1306,6 +1827,11 @@ def build_config(
             k: v for k, v in entry.items() if not k.startswith("_")
         }
     config["measure_resolutions"] = clean_resolutions
+
+    # 7b. measure_usage — how many other measures reference each measure
+    # (in-degree). Surfaced on TODOs + the UCMV overview so reviewers prioritize
+    # high-impact gaps. Measure→measure references only (not visual usage).
+    config["measure_usage"] = derive_measure_usage(measures)
 
     # 8. mapping_only_tables
     raw_mapping = derive_mapping_only_tables(measures, admin_tables)
@@ -1382,7 +1908,32 @@ def build_config(
     complex_measures = _find_complex_measures(measures)
     config["manual_overrides"] = _build_manual_overrides_skeleton(complex_measures)
 
+    # ── Final pass: resolve {catalog}/{schema} placeholders ───────────
+    # Several derivers (enrichment join sources, mapping-only source tables)
+    # template dim/source tables as "{catalog}.{schema}.<table>" because they do
+    # not receive the target catalog/schema. Those literals survive into the
+    # emitted join `source:` and make the view non-runnable. build_config DOES
+    # know catalog/schema, so substitute them everywhere in one place — this
+    # catches every current and future placeholder source.
+    config = _resolve_catalog_schema_placeholders(config, catalog, schema)
+
     return config
+
+
+def _resolve_catalog_schema_placeholders(obj: Any, catalog: str, schema: str) -> Any:
+    """Recursively replace ``{catalog}``/``{schema}`` tokens in all config
+    strings with the real target catalog/schema. Leaves everything else
+    untouched. Applied once at the end of build_config."""
+    if isinstance(obj, str):
+        if "{catalog}" in obj or "{schema}" in obj:
+            return obj.replace("{catalog}", catalog).replace("{schema}", schema)
+        return obj
+    if isinstance(obj, dict):
+        return {k: _resolve_catalog_schema_placeholders(v, catalog, schema)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_catalog_schema_placeholders(v, catalog, schema) for v in obj]
+    return obj
 
 
 def _identify_fact_tables(
@@ -1560,8 +2111,8 @@ def main():
             "    --client-secret 'U5b8Q~...' \\\n"
             "    --admin-client-id 8d8aa6ee-... \\\n"
             "    --admin-client-secret 'RXm8Q~...' \\\n"
-            "    --catalog david_test_metrics \\\n"
-            "    --schema cchbc \\\n"
+            "    --catalog my_catalog \\\n"
+            "    --schema my_schema \\\n"
             "    --output proposed_pipeline_config.json"
         ),
     )

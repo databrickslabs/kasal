@@ -105,23 +105,52 @@ class TestEncryptionUtils:
     def test_get_encryption_key_with_env_var(self):
         """Test get_encryption_key with environment variable set."""
         test_key = "test_encryption_key"
-        
+
+        EncryptionUtils._cached_key = None  # reset process cache
         with patch.dict(os.environ, {'ENCRYPTION_KEY': test_key}):
             result = EncryptionUtils.get_encryption_key()
-            
+
             assert result == test_key.encode()
-    
-    def test_get_encryption_key_without_env_var(self):
-        """Test get_encryption_key without environment variable."""
+        EncryptionUtils._cached_key = None
+
+    def test_get_encryption_key_from_secret_scope(self):
+        """No env var → resolves from the Databricks secret scope (the stable key)."""
+        EncryptionUtils._cached_key = None
         with patch.dict(os.environ, {}, clear=True), \
-             patch('src.utils.encryption_utils.Fernet.generate_key') as mock_generate:
-            
-            mock_key = b"generated_key"
-            mock_generate.return_value = mock_key
-            
+             patch.object(EncryptionUtils, '_read_key_from_secret_scope',
+                          return_value='scopeKeyValue'):
             result = EncryptionUtils.get_encryption_key()
-            
-            assert result == mock_key
+            assert result == b'scopeKeyValue'
+        EncryptionUtils._cached_key = None
+
+    def test_get_encryption_key_without_env_var(self):
+        """No env var AND no secret-scope key → generate an ephemeral key (fallback)."""
+        EncryptionUtils._cached_key = None
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(EncryptionUtils, '_read_key_from_secret_scope', return_value=''), \
+             patch('src.utils.encryption_utils.Fernet.generate_key') as mock_generate:
+
+            mock_generate.return_value = b"generated_key"
+            result = EncryptionUtils.get_encryption_key()
+
+            assert result == b"generated_key"
+        EncryptionUtils._cached_key = None
+
+    def test_get_encryption_key_is_cached(self):
+        """The resolved key is cached for the process lifetime (no re-resolution)."""
+        EncryptionUtils._cached_key = None
+        with patch.dict(os.environ, {'ENCRYPTION_KEY': 'first'}):
+            assert EncryptionUtils.get_encryption_key() == b'first'
+        # env cleared, but cache holds the first value
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(EncryptionUtils, '_read_key_from_secret_scope', return_value='second'):
+            assert EncryptionUtils.get_encryption_key() == b'first'
+        EncryptionUtils._cached_key = None
+
+    def test_read_key_from_secret_scope_never_raises(self):
+        """_read_key_from_secret_scope returns '' on any failure (no WorkspaceClient)."""
+        with patch('databricks.sdk.WorkspaceClient', side_effect=RuntimeError('no auth')):
+            assert EncryptionUtils._read_key_from_secret_scope() == ''
     
     def test_encrypt_with_ssh(self):
         """Test encrypt_with_ssh method."""

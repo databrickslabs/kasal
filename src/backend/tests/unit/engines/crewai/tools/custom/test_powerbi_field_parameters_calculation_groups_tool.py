@@ -731,3 +731,32 @@ class TestFieldParamsRunIntegration:
         with patch.object(tool, "_run_sync", return_value=json_output):
             result = tool._run()
         assert result == json_output
+
+
+class TestSqlOutputEscaping:
+    """SEC ext-#1: the output_format='sql' path must escape PBI-sourced string
+    literals (the markdown path already did; the SQL path previously did not)."""
+
+    def _malicious(self):
+        # a field-parameter label crafted to break out of the VALUES literal
+        return [{
+            "name": "Sel",
+            "items": [{
+                "label": "x'), ('evil", "source_table": "t",
+                "source_measure": "m", "ordinal": 0,
+            }],
+        }]
+
+    def test_field_param_label_is_escaped(self):
+        tool = _make_tool()
+        out = tool._format_sql_output(
+            self._malicious(), [], [], "main", "default")
+        # the single quote must be doubled, not left to break out
+        assert "x''), (''evil" in out
+        assert "'x'), ('evil'" not in out  # the raw breakout must NOT appear
+
+    def test_module_helpers_escape(self):
+        from src.engines.crewai.tools.custom.powerbi_field_parameters_calculation_groups_tool import (
+            _sql_lit, _sql_int)
+        assert _sql_lit("a'b") == "'a''b'"
+        assert _sql_int("7") == 7 and _sql_int("nope", 3) == 3

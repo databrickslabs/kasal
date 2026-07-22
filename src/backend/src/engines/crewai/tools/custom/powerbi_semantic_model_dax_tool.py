@@ -173,7 +173,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             "access_token": kwargs.get("access_token"),
             "llm_workspace_url": kwargs.get("llm_workspace_url"),
             "llm_token": kwargs.get("llm_token"),
-            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4"),
+            "llm_model": kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
             "include_visual_references": kwargs.get("include_visual_references", True),
             "max_dax_retries": kwargs.get("max_dax_retries", 5),
             "output_format": kwargs.get("output_format", "markdown"),
@@ -1181,7 +1181,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         """Generate DAX query using LLM with enriched context."""
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
-        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         if not llm_workspace_url or not llm_token:
             return self._generate_deterministic_dax(user_question, model_context, config)
@@ -1271,7 +1271,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
         """Generate DAX with self-correction based on previous failed attempts."""
         llm_workspace_url = config.get("llm_workspace_url")
         llm_token = config.get("llm_token")
-        llm_model = config.get("llm_model", "databricks-claude-sonnet-4")
+        llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         if not llm_workspace_url or not llm_token:
             return None

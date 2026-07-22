@@ -831,6 +831,39 @@ async def _ensure_crew_columns(conn) -> None:
         logger.warning(f"Could not ensure crews.reasoning_config column: {e}")
 
 
+async def _disable_bi_specialist_crew_memory(conn) -> None:
+    """Idempotently disable crew/agent memory for the pre-seeded 'bi-specialist'
+    workspace. These are deterministic ETL crews (PBI config extraction → UCMV
+    generation → validation → deploy) that pass all data via the flow handoff and
+    tool configs, NOT via cross-run semantic recall. With memory on, CrewAI
+    auto-saves each task's output (incl. the ~174K-char pipeline-config JSON) and
+    recalls it workspace-wide into every later agent prompt — overflowing the
+    model's context window (200K), which forces a fallback to a larger model and
+    stalls the HITL approval gate. The seed now ships memory=False, but the seeder
+    is insert-only (it skips a group that already exists), so DBs seeded before
+    this change keep memory on. This self-heals them. Safe to run every startup —
+    it only flips rows that are still True, scoped to the bi-specialist group."""
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    # SQLite stores booleans as 0/1; Postgres uses true/false. exec_driver_sql
+    # with a literal keeps this dialect-agnostic enough for both.
+    true_val = "1" if is_sqlite else "true"
+    false_val = "0" if is_sqlite else "false"
+    try:
+        for table in ("crews", "agents"):
+            if is_sqlite:
+                res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+                cols = {row[1] for row in res.fetchall()}
+                if "memory" not in cols or "group_id" not in cols:
+                    continue  # table/columns not present yet (fresh DB handled by seed)
+            await conn.exec_driver_sql(
+                f"UPDATE {table} SET memory = {false_val} "
+                f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
+            )
+        logger.info("Ensured bi-specialist crews/agents have memory disabled")
+    except Exception as e:
+        logger.warning(f"Could not disable bi-specialist crew memory: {e}")
+
+
 async def _ensure_ui_config_columns(conn) -> None:
     """Idempotently add the Predefined-UI columns to ui_config. The table itself is
     created via create_all, but create_all never ALTERs an existing table — so DBs
@@ -923,6 +956,23 @@ async def _ensure_crew_feedback_table(conn) -> None:
         logger.warning(f"Could not ensure crew_feedback table: {e}")
 
 
+async def _ensure_powerbi_extraction_table(conn) -> None:
+    """Idempotently create the powerbi_extraction table (raw Power BI extraction
+    artifacts persisted per Pipeline Config Generator run, for SQL querying).
+    create_all is skipped on existing DBs, so DBs created before this table
+    existed need this self-heal."""
+    try:
+        from src.models.powerbi_extraction import PowerBIExtraction
+
+        def _create_powerbi_extraction_table(sync_conn):
+            PowerBIExtraction.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_powerbi_extraction_table)
+        logger.info("Ensured powerbi_extraction table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure powerbi_extraction table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -955,6 +1005,33 @@ async def _ensure_databricks_config_columns(conn) -> None:
         logger.warning(
             f"Could not ensure databricksconfig.ai_gateway_enabled column: {e}"
         )
+
+
+async def run_schema_self_heal(conn) -> None:
+    """Create missing tables and add missing columns on an existing DB.
+
+    ``create_all`` fully creates a NEW table but never ALTERs an existing one, so
+    DBs provisioned before a table/column was added won't have it. Each ``_ensure_*``
+    helper here is idempotent and NON-DESTRUCTIVE — ``CREATE TABLE IF NOT EXISTS``
+    for tables, ``ADD COLUMN IF NOT EXISTS`` for columns — so this is safe to run
+    on every startup and against any engine's connection.
+
+    Runs against BOTH the local/default engine (in ``init_db``) AND, critically,
+    the active Lakebase engine after the runtime hot-swap (``main.py`` lifespan) —
+    the latter is the only path that heals a customer's PRE-EXISTING Lakebase,
+    which ``init_db`` alone misses because it fires before Lakebase activation.
+    """
+    await _ensure_documentation_embeddings_columns(conn)
+    await _ensure_databricks_config_columns(conn)
+    await _ensure_chat_sessions_table(conn)
+    await _ensure_chat_sessions_columns(conn)
+    await _ensure_crew_feedback_table(conn)
+    await _ensure_powerbi_extraction_table(conn)
+    await _ensure_crew_columns(conn)
+    await _ensure_ui_config_columns(conn)
+    await _ensure_hot_polling_indexes(conn)
+    await _heal_personal_group_names(conn)
+    await _disable_bi_specialist_crew_memory(conn)
 
 
 async def init_db() -> None:
@@ -1136,25 +1213,16 @@ async def init_db() -> None:
 
             logger.info("Database tables initialized successfully")
 
-        # Self-heal: ensure documentation_embeddings has the group_id/file_path
-        # columns even when the tables already existed (create_all is skipped
-        # then). DBs created before these columns were added would otherwise be
-        # missing them, breaking built-in doc seeding + group-scoped search.
+        # Self-heal: create missing tables and add missing columns even when the
+        # tables already existed (create_all is skipped then). DBs created before
+        # these tables/columns were added would otherwise be missing them.
         try:
             ensure_engine = create_async_engine(
                 str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG
             )
             try:
                 async with ensure_engine.begin() as conn:
-                    await _ensure_documentation_embeddings_columns(conn)
-                    await _ensure_databricks_config_columns(conn)
-                    await _ensure_chat_sessions_table(conn)
-                    await _ensure_chat_sessions_columns(conn)
-                    await _ensure_crew_feedback_table(conn)
-                    await _ensure_crew_columns(conn)
-                    await _ensure_ui_config_columns(conn)
-                    await _ensure_hot_polling_indexes(conn)
-                    await _heal_personal_group_names(conn)
+                    await run_schema_self_heal(conn)
             finally:
                 await ensure_engine.dispose()
         except Exception as ensure_err:

@@ -245,7 +245,7 @@ export const UCMVGenieConfigGeneratorConfigSelector: React.FC<UCMVGenieConfigGen
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Typography variant="caption" color="text.secondary">
-              Upload a GenieSpaceConfig JSON (e.g. from <code>genie_space_config_cchbc_iom004.json</code>)
+              Upload a GenieSpaceConfig JSON (e.g. from <code>genie_space_config_example_iom004.json</code>)
               to skip LLM auto-generation and use your own instructions/questions/SQLs.
             </Typography>
             <Tabs value={overrideTab} onChange={(_, v) => { setOverrideTab(v); setOverrideError(null); setOverrideSuccess(null); }}>

@@ -328,6 +328,77 @@ def wait_for_deployment(client, app_name, deployment_id,
     return False
 
 
+ENCRYPTION_SCOPE = "kasal"
+# Distinct key name — the "kasal" scope is shared and also holds
+# lakebase_pat / lakebase_server, so a generic "encryption_key" could collide.
+ENCRYPTION_KEY_NAME = "kasal_encryption_key"
+
+
+def ensure_encryption_key(client, app_name="kasal"):
+    """Provision a stable Fernet ENCRYPTION_KEY in the app's secret scope (once).
+
+    Generate-once, NEVER-overwrite: rotating this key would strand every
+    already-encrypted secret. The scope is created if missing (idempotent), the
+    key is written only if absent, and the app service principal is granted READ
+    so the runtime can resolve it via the app.yaml `secret` resource binding.
+
+    Best-effort: a failure here is logged but does not abort the deploy (the app
+    still runs; secret persistence just won't be fixed until the key exists).
+    """
+    try:
+        from databricks.sdk.errors import ResourceAlreadyExists
+    except Exception:  # noqa: BLE001
+        ResourceAlreadyExists = Exception  # type: ignore
+
+    try:
+        # 1. Ensure the scope exists (no-op if it already does).
+        try:
+            client.secrets.create_scope(scope=ENCRYPTION_SCOPE)
+            logger.info(f"Created secret scope '{ENCRYPTION_SCOPE}'")
+        except ResourceAlreadyExists:
+            pass
+        except Exception as e:  # noqa: BLE001 — scope may already exist under another error type
+            logger.debug(f"create_scope('{ENCRYPTION_SCOPE}') non-fatal: {e}")
+
+        # 2. Provision the key ONCE — never overwrite an existing one.
+        existing = {s.key for s in client.secrets.list_secrets(scope=ENCRYPTION_SCOPE)}
+        if ENCRYPTION_KEY_NAME in existing:
+            logger.info(
+                f"Reusing existing encryption key '{ENCRYPTION_SCOPE}/{ENCRYPTION_KEY_NAME}' "
+                f"(not regenerated — preserves already-encrypted secrets)"
+            )
+        else:
+            from cryptography.fernet import Fernet
+            client.secrets.put_secret(
+                scope=ENCRYPTION_SCOPE,
+                key=ENCRYPTION_KEY_NAME,
+                string_value=Fernet.generate_key().decode(),
+            )
+            logger.info(
+                f"Provisioned a NEW encryption key '{ENCRYPTION_SCOPE}/{ENCRYPTION_KEY_NAME}'. "
+                f"NOTE: any secrets encrypted with a prior random key must be re-entered once."
+            )
+
+        # 3. Grant the app service principal READ (belt-and-suspenders; the
+        # app.yaml `secret` resource with permission READ is the primary grant).
+        try:
+            app = client.apps.get(name=app_name)
+            sp = getattr(app, "service_principal_client_id", None)
+            if sp:
+                from databricks.sdk.service.workspace import AclPermission
+                client.secrets.put_acl(
+                    scope=ENCRYPTION_SCOPE, principal=sp, permission=AclPermission.READ)
+                logger.info(f"Granted app SP {sp} READ on scope '{ENCRYPTION_SCOPE}'")
+        except Exception as e:  # noqa: BLE001 — resource binding in app.yaml is the real grant
+            logger.debug(f"put_acl for app SP non-fatal (app.yaml resource is primary): {e}")
+
+    except Exception as e:  # noqa: BLE001 — must never abort the deploy
+        logger.warning(
+            f"Could not provision a stable encryption key (continuing deploy): {e}. "
+            f"Encrypted secrets may not survive redeploys until this succeeds."
+        )
+
+
 def deploy_source_to_databricks(
     app_name="kasal",
     user_name=None,
@@ -373,6 +444,16 @@ def deploy_source_to_databricks(
     except Exception as e:
         logger.warning(f"Could not verify identity (proceeding anyway): {e}")
         logger.info(f"Connecting to Databricks at {client.config.host}")
+
+    # Provision a STABLE encryption key so Kasal's at-rest secret encryption
+    # survives redeploys. Without ENCRYPTION_KEY the app generates a random Fernet
+    # key at every startup, so after a redeploy previously-encrypted tool_configs
+    # secrets (client_secret, tokens) can no longer be decrypted — which surfaces
+    # as misleading "workspace_id missing" execution errors. If you deploy WITHOUT
+    # deploy.py (image / source-path), provision the key once manually — the app
+    # logs the exact `databricks secrets put-secret` command on startup when it's
+    # missing (see EncryptionUtils.get_encryption_key).
+    ensure_encryption_key(client, app_name)
 
     # Frontend ships PREBUILT: deploy.py runs the npm build locally on every
     # deploy (root package.json lifecycle) and uploads frontend_static/.

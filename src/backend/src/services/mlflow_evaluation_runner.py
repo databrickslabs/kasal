@@ -45,7 +45,7 @@ class MLflowEvaluationRunner:
             job_id: Job ID for this evaluation
             inputs_text: Input text extracted from execution
             prediction_text: Prediction text extracted from execution
-            judge_model_route: Judge model route (e.g., "databricks/databricks-claude-sonnet-4")
+            judge_model_route: Judge model route (e.g., "databricks/databricks-claude-sonnet-4-5")
             judge_model_defaulted: Whether judge model is using default value
         """
         self.exec_obj = exec_obj

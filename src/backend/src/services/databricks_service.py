@@ -18,17 +18,24 @@ class DatabricksService:
     Service for Databricks integration operations.
     """
     
-    def __init__(self, session, group_id: Optional[str] = None):
+    def __init__(self, session, group_id: Optional[str] = None,
+                 user_token: Optional[str] = None):
         """
         Initialize the service with session.
 
         Args:
             session: Database session from FastAPI DI (from core.dependencies)
             group_id: Group ID for multi-tenant filtering
+            user_token: Optional user access token for OBO auth. When present, the
+                workspace/warehouse/catalog listing calls authenticate on-behalf-of
+                the user (matching how other OBO endpoints work) instead of falling
+                back to PAT/SPN only. Sourced from GroupContext.access_token
+                (the X-Forwarded / X-Auth-Request forwarded token).
         """
         self.session = session
         self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
+        self._user_token = user_token
         # Don't create secrets_service here to avoid circular dependency
         self._secrets_service = None
 
@@ -353,7 +360,11 @@ class DatabricksService:
         """Helper: returns (auth_headers, workspace_url) applying optional host override."""
         from src.utils.databricks_auth import get_auth_context
 
-        auth = await get_auth_context()
+        # Pass the user token so OBO is attempted first (get_auth_context skips OBO
+        # when user_token is None). Without this the warehouse/catalog/schema
+        # dropdowns fall straight through to PAT/SPN and fail in an OBO-only
+        # deployment ("No authentication credentials available").
+        auth = await get_auth_context(user_token=self._user_token)
         if not auth:
             raise KasalError(detail="No authentication credentials available")
 
@@ -486,8 +497,9 @@ class DatabricksService:
             try:
                 from src.utils.databricks_auth import get_auth_context
 
-                # Use unified authentication system (supports OBO, OAuth, and PAT)
-                auth = await get_auth_context()
+                # Use unified authentication system (supports OBO, OAuth, and PAT).
+                # Pass the user token so OBO is attempted (skipped when None).
+                auth = await get_auth_context(user_token=self._user_token)
                 if not auth:
                     return {
                         "status": "error",

@@ -13,6 +13,7 @@ from typing import List, Optional, Set
 CONTEXT_WINDOW = "context_window"  # prompt exceeded the model's context window
 FATAL_4XX = "fatal_4xx"  # model-incompatibility 4xx (e.g. Gemini thought_signature)
 RATE_LIMIT = "rate_limit"  # sustained 429 after same-model backoff
+ENDPOINT_MISSING = "endpoint_missing"  # 404: the model's serving endpoint isn't deployed here
 
 _CONTEXT_MARKERS = (
     "context length",
@@ -26,6 +27,14 @@ _CONTEXT_MARKERS = (
     "input is too long",
 )
 _RATE_LIMIT_MARKERS = ("rate limit", "too many requests", "quota exceeded")
+# Markers that identify a missing serving endpoint (the model isn't deployed in
+# THIS workspace) — a different, deployed model may work. Distinct from a generic
+# 404 so we can route it to "try another model" instead of dying.
+_ENDPOINT_MISSING_MARKERS = (
+    "endpoint_not_found",
+    "does not exist, please retry after checking",
+    "model and version deployment",
+)
 # Markers that identify a model-incompatibility 4xx (a different model may work),
 # as opposed to a generic bad request from malformed user input.
 _FATAL_4XX_MARKERS = (
@@ -37,6 +46,31 @@ _FATAL_4XX_MARKERS = (
     "unsupported value",
     "invalid_request_error",
 )
+
+# Process-wide memory of serving endpoints that returned ENDPOINT_NOT_FOUND in
+# THIS workspace. A model can be enabled in config (e.g. databricks-gpt-5) yet
+# have no serving endpoint deployed here — falling back to it 404s. Once we've
+# seen that, stop offering it as a fallback target (this run AND later runs in
+# the same process) so a transient rate-limit on the primary model doesn't
+# cascade into a fatal ENDPOINT_NOT_FOUND. Process-scoped on purpose: it resets
+# when the flow/crew subprocess restarts, so a later deployment re-learns cleanly.
+_KNOWN_MISSING_ENDPOINTS: Set[str] = set()
+
+
+def mark_endpoint_missing(model_name: Optional[str]) -> None:
+    """Record that a model's serving endpoint isn't deployed in this workspace."""
+    if model_name:
+        _KNOWN_MISSING_ENDPOINTS.add(model_name.split("/")[-1])
+
+
+def is_endpoint_missing(model_name: Optional[str]) -> bool:
+    """True if this model was previously seen to have no serving endpoint here."""
+    return bool(model_name) and model_name.split("/")[-1] in _KNOWN_MISSING_ENDPOINTS
+
+
+def reset_known_missing_endpoints() -> None:
+    """Clear the known-missing set (test helper / manual re-probe)."""
+    _KNOWN_MISSING_ENDPOINTS.clear()
 
 
 @dataclass(frozen=True)
@@ -109,6 +143,17 @@ def classify_llm_error(exc) -> Optional[str]:
     ):
         return CONTEXT_WINDOW
 
+    # A missing serving endpoint (404 ENDPOINT_NOT_FOUND) — the model isn't
+    # deployed in this workspace. Another enabled model might be, so try one.
+    # Checked before RATE_LIMIT/FATAL_4XX because it is unambiguous and terminal
+    # for THIS model (no amount of ret/backoff makes a nonexistent endpoint appear).
+    if (
+        "notfounderror" in text
+        or any(m in text for m in _ENDPOINT_MISSING_MARKERS)
+        or (status == 404 and "endpoint" in text)
+    ):
+        return ENDPOINT_MISSING
+
     if (
         status == 429
         or "ratelimiterror" in text
@@ -173,6 +218,18 @@ def select_fallback(
         pool = cross_family or avail
         return max(pool, key=lambda c: c.context_window)
 
+    if reason == ENDPOINT_MISSING:
+        # The current model's endpoint isn't deployed here. Any OTHER untried
+        # model might be — prefer a different family (the missing one may be a
+        # whole family that's not provisioned, e.g. no gemini-* endpoints),
+        # roomiest first, else any untried model.
+        cur_family = _model_family(current_model)
+        cross_family = [
+            c for c in avail if cur_family and _model_family(c.name) != cur_family
+        ]
+        pool = cross_family or avail
+        return max(pool, key=lambda c: c.context_window)
+
     return max(avail, key=lambda c: c.context_window)
 
 
@@ -193,6 +250,10 @@ def candidates_from_model_configs(models, current_model_key) -> List[ModelCandid
         if provider and provider != "databricks":
             continue
         if "codex" in key.lower():
+            continue
+        # Skip models whose serving endpoint 404'd here before — offering them
+        # again just re-triggers ENDPOINT_NOT_FOUND.
+        if is_endpoint_missing(key):
             continue
         out.append(
             ModelCandidate(

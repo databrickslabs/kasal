@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from .constants import (
@@ -14,6 +15,147 @@ from .constants import (
     RE_LEFT_JOIN,
 )
 from .data_classes import TableInfo
+
+logger = logging.getLogger(__name__)
+
+
+def looks_like_raw_mquery(sql: str) -> bool:
+    """Heuristic: does this string look like raw Power Query M rather than SQL?
+
+    Raw M (``let ... in ...``, ``Source = Sql.Database(...)``) has no SELECT/FROM
+    the parser can read, so it yields is_fact=False + empty source_table and the
+    table is silently dropped from view generation. Detecting it lets callers
+    route the expression to the M→SQL LLM fallback.
+    """
+    if not sql or not isinstance(sql, str):
+        return False
+    s = sql.strip()
+    upper = s.upper()
+    has_select = bool(re.search(r'\bSELECT\b', upper))
+    # M markers: `let`/`in` blocks or Power Query connector functions.
+    has_m_markers = bool(
+        re.search(r'^\s*let\b', s, re.IGNORECASE)
+        or re.search(r'\bin\b\s*$', s, re.IGNORECASE)
+        or re.search(r'\b(Sql\.Database|Value\.NativeQuery|Databricks\.\w+|'
+                     r'Source\s*\{|\[Schema\s*=|\[Item\s*=|Table\.|#"|Excel\.Workbook)\b', s)
+    )
+    return has_m_markers and not has_select
+
+
+def classify_mquery_source(mquery: str) -> tuple[str, str]:
+    """Classify a raw Power Query M source expression that produced no SQL.
+
+    Returns ``(category, human_reason)``. Categories:
+      * ``inline_const``  — hardcoded table (`Table.FromRows(Json.Document(
+        Binary.Decompress(Binary.FromText("…Base64"))))`): a slicer/selector
+        helper. No warehouse source — correctly skipped.
+      * ``dax_calc``      — DAX-defined calculated table (`GENERATESERIES`,
+        `SUMMARIZECOLUMNS`, `VALUES(...)`, `Row(...)`, parameter query): computed
+        in-model, no source SQL exists — correctly skipped.
+      * ``external``      — non-warehouse connector (`Access.Database`,
+        `Excel.Workbook`, `PowerBI.Dataflows`, `AnalysisServices`): source lives
+        outside the lakehouse; needs a customer-supplied mapping.
+      * ``extractable``   — looks like it SHOULD yield SQL (native query /
+        Databricks connector / Sql.Database) but the parser found no source: a
+        real extraction gap worth investigating, not a benign skip.
+      * ``unknown``       — none of the above.
+
+    Used to (a) skip benign non-warehouse tables with a clear reason instead of
+    routing them to M→SQL recovery, and (b) emit the original M-query as a note
+    (mirroring how untranslatable measures are surfaced).
+    """
+    if not mquery or not isinstance(mquery, str):
+        return ('unknown', 'empty source expression')
+    m = mquery
+    mu = m.upper()
+    if re.search(r'Table\.FromRows\s*\(\s*Json\.Document\s*\(\s*Binary\.Decompress', m):
+        return ('inline_const',
+                'inline constant table (slicer/selector helper, base64-embedded) — '
+                'no warehouse source; correctly skipped')
+    if re.search(r'\b(GENERATESERIES|SUMMARIZECOLUMNS|ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(', mu) \
+            or re.match(r'^\s*ROW\s*\(', mu) \
+            or re.search(r'IsParameterQuery\s*=\s*true', m, re.IGNORECASE):
+        return ('dax_calc',
+                'DAX calculated table / parameter query — computed in-model, '
+                'no source SQL exists; correctly skipped')
+    if re.search(r'\b(Access\.Database|Excel\.Workbook|PowerBI\.Dataflows|Dataflows|'
+                 r'AnalysisServices\.Database|SharePoint\.|Web\.Contents|Folder\.Files)\b', m):
+        return ('external',
+                'non-warehouse external source (dataflow / file / AAS) — needs a '
+                'customer-supplied source-table mapping')
+    if re.search(r'\b(Value\.NativeQuery|Sql\.Databases?|Databricks\.\w+|Spark\.)\b', m):
+        return ('extractable',
+                'looks extractable (native query / Databricks connector) but no '
+                'source table was resolved — extraction gap, investigate')
+    return ('unknown', 'unrecognized M source shape')
+
+
+# 3-level UC name: catalog.schema.table (identifiers, optionally back-quoted).
+_FQN_RE = re.compile(r'([A-Za-z_][\w]*|`[^`]+`)\.'
+                     r'([A-Za-z_][\w]*|`[^`]+`)\.'
+                     r'([A-Za-z_][\w]*|`[^`]+`)')
+
+
+def _unquote(ident: str) -> str:
+    """Strip back-quotes/brackets from a single M identifier."""
+    return ident.strip().strip('`').strip('[]').strip('"')
+
+
+def extract_source_table(mquery: str) -> str | None:
+    """Parse a physical ``catalog.schema.table`` out of an *extractable* M source.
+
+    Only runs for sources ``classify_mquery_source`` tags ``extractable`` (Databricks
+    connector navigation, ``Sql.Database`` table nav, ``Value.NativeQuery`` with an
+    embedded ``FROM``). Returns the fully-qualified 3-level name, or ``None`` when it
+    cannot resolve one confidently — it never guesses (a wrong ``source_table`` would
+    silently wire a bad join). Used to fill ``join_key_map[dim].source_table`` during
+    config-generation enrichment.
+    """
+    if not mquery or not isinstance(mquery, str):
+        return None
+    category, _ = classify_mquery_source(mquery)
+    if category != 'extractable':
+        return None
+    m = mquery
+
+    # 1. Databricks.Catalogs(...){[Name="cat"]}[Data]{[Name="sch"]}[Data]{[Name="tbl"]}[Data]
+    #    — walk the ordered [Name="…"] navigation chain (catalog, schema, table).
+    if re.search(r'\bDatabricks\.\w+', m):
+        names = re.findall(r'\[\s*Name\s*=\s*"([^"]+)"', m)
+        if len(names) >= 3:
+            return f'{names[0]}.{names[1]}.{names[2]}'
+        # Some connectors expose a Catalog/Schema/Table keyed nav instead.
+        cat = re.search(r'\[\s*Catalog\s*=\s*"([^"]+)"', m)
+        sch = re.search(r'\[\s*(?:Schema|Database)\s*=\s*"([^"]+)"', m)
+        tbl = re.search(r'\[\s*(?:Item|Table)\s*=\s*"([^"]+)"', m)
+        if cat and sch and tbl:
+            return f'{cat.group(1)}.{sch.group(1)}.{tbl.group(1)}'
+
+    # 2. Value.NativeQuery(<src>, "… FROM cat.sch.tbl …") — pull the first FROM target.
+    if re.search(r'\bValue\.NativeQuery\b', m):
+        fm = re.search(r'\bFROM\s+((?:`[^`]+`|[A-Za-z_]\w*)'
+                       r'(?:\.(?:`[^`]+`|[A-Za-z_]\w*)){2})', m, re.IGNORECASE)
+        if fm:
+            parts = _FQN_RE.match(fm.group(1))
+            if parts:
+                return '.'.join(_unquote(p) for p in parts.groups())
+
+    # 3. Sql.Database(server, db){[Schema="s", Item="t"]} — db.schema.table.
+    #    Schema/Item can sit anywhere in the record (after `[` or a comma), so the
+    #    key regexes must not require a leading bracket.
+    if re.search(r'\bSql\.Databases?\b', m):
+        db = re.search(r'Sql\.Databases?\s*\(\s*"[^"]*"\s*,\s*"([^"]+)"', m)
+        sch = re.search(r'\bSchema\s*=\s*"([^"]+)"', m)
+        tbl = re.search(r'\bItem\s*=\s*"([^"]+)"', m)
+        if db and sch and tbl:
+            return f'{db.group(1)}.{sch.group(1)}.{tbl.group(1)}'
+
+    # 4. Last resort: a bare qualified 3-level name literal anywhere in the M.
+    bare = _FQN_RE.search(m)
+    if bare:
+        return '.'.join(_unquote(p) for p in bare.groups())
+
+    return None
 
 
 class MQueryParser:
@@ -33,6 +175,9 @@ class MQueryParser:
         else:
             entries = json_path
         tables: dict[str, TableInfo] = {}
+        dropped_validation = 0
+        raw_m_tables: list[str] = []
+        non_fact_tables: list[str] = []
         for entry in entries:
             table_name = entry.get('table_name', '')
             sql = entry.get('transpiled_sql', '')
@@ -41,10 +186,36 @@ class MQueryParser:
                 continue
             if not isinstance(status, str) or not status.startswith('Yes'):
                 if not ('SUM(' in sql.upper() and 'GROUP BY' in sql.upper()):
+                    dropped_validation += 1
                     continue
             info = self._parse_sql(table_name, sql)
             info.raw_transpiled_sql = sql
             tables[table_name] = info
+            # ── Diagnostics: make silent fact/source failures visible ──
+            if not info.is_fact:
+                non_fact_tables.append(table_name)
+                if looks_like_raw_mquery(sql):
+                    raw_m_tables.append(table_name)
+
+        if dropped_validation:
+            logger.warning(
+                "[MQueryParser] Dropped %d entr(ies) with validation_passed != 'Yes' "
+                "(and no SUM+GROUP BY). These tables cannot become UC views.",
+                dropped_validation,
+            )
+        if non_fact_tables:
+            logger.info(
+                "[MQueryParser] %d/%d parsed table(s) are NOT facts (no aggregate columns) "
+                "and will be skipped for view generation: %s",
+                len(non_fact_tables), len(tables), ', '.join(non_fact_tables[:20]),
+            )
+        if raw_m_tables:
+            logger.warning(
+                "[MQueryParser] %d table(s) look like RAW Power Query M (no embedded SQL) — "
+                "the parser cannot extract a source table or detect facts from M syntax, so "
+                "these yield 0 views without the M→SQL LLM fallback: %s",
+                len(raw_m_tables), ', '.join(raw_m_tables[:20]),
+            )
         return tables
 
     def parse(self, xlsx_path: str) -> dict[str, TableInfo]:
@@ -70,6 +241,13 @@ class MQueryParser:
 
     def _parse_sql(self, table_name: str, sql: str) -> TableInfo:
         """Parse transpiled SQL to extract structure."""
+        # Normalize Power Query M escape tokens BEFORE parsing so they never leak
+        # into extracted column/dimension names or the source SQL:
+        # #(lf)=newline, #(tab)=tab, #(cr)=CR, and doubled-quote literals ("" .. "").
+        sql = re.sub(r'#\(lf\)', '\n', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'#\(cr\)', ' ', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'#\(tab\)', ' ', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'""([^"]*)""', r"'\1'", sql)
         is_cte = sql.strip().upper().startswith('CREATE') and 'WITH ' in sql.upper()
         main_sql = self._extract_final_select(sql) if is_cte else sql
 

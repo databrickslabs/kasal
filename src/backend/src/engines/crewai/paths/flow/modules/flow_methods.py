@@ -16,6 +16,12 @@ from .flow_state import FlowStateManager
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
 
+# Per-crew kickoff timeout for flow execution. Large Power BI models (hundreds of
+# measures, dozens of fact tables + opt-in LLM DAX translation) can legitimately
+# take longer than the original 10 min. Bumped to 20 min as headroom; the DAX LLM
+# fallback is also now bounded-concurrent so it finishes far faster than before.
+CREW_KICKOFF_TIMEOUT_SECONDS = 1200.0
+
 
 def extract_final_answer(results) -> str:
     """
@@ -262,6 +268,63 @@ async def configure_flow_crew_memory(
     return crew_kwargs
 
 
+def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> None:
+    """Strip an agent's tool when the SAME tool (by name) is on a task it runs.
+
+    Flow crews are assembled from already-built CrewAI ``Agent``/``Task`` objects,
+    so we de-dupe on the instantiated tools' ``.name`` rather than config ids.
+    For each task with an assigned agent, any agent tool whose name also appears
+    among the task's tools is removed from the agent — the task-level instance is
+    the configured, authoritative one. Best-effort: never raises (a flow must run
+    even if this normalization can't be applied).
+
+    BEHAVIOR-PRESERVING GUARD: CrewAI lets a tool-less task inherit its agent's
+    tools. So an agent that also runs a task with NO tools is skipped entirely —
+    stripping its tools would strand that inheriting task. Identical tool set to
+    before for every crew except the exact duplicate case being fixed.
+    """
+    try:
+        # Agents (by identity) that have at least one tool-less task → skip them.
+        agents_with_inheriting_task = set()
+        for task in task_list:
+            agent = getattr(task, "agent", None)
+            if agent is None:
+                continue
+            if not (getattr(task, "tools", None) or []):
+                agents_with_inheriting_task.add(id(agent))
+
+        for task in task_list:
+            agent = getattr(task, "agent", None)
+            if agent is None:
+                continue
+            if id(agent) in agents_with_inheriting_task:
+                continue
+            task_tools = getattr(task, "tools", None) or []
+            agent_tools = getattr(agent, "tools", None) or []
+            if not task_tools or not agent_tools:
+                continue
+            task_tool_names = {
+                getattr(t, "name", None) for t in task_tools if getattr(t, "name", None)
+            }
+            if not task_tool_names:
+                continue
+            kept = [t for t in agent_tools if getattr(t, "name", None) not in task_tool_names]
+            if len(kept) != len(agent_tools):
+                removed = [
+                    getattr(t, "name", "?") for t in agent_tools
+                    if getattr(t, "name", None) in task_tool_names
+                ]
+                agent.tools = kept
+                agent_role = getattr(agent, "role", "Unknown")
+                logger.info(
+                    f"[FLOW] Agent '{agent_role}': removed tool(s) {removed} also "
+                    f"present on its task — built at task level with the task's "
+                    f"config (avoids an empty-config duplicate tool instance)."
+                )
+    except Exception as e:  # noqa: BLE001 — normalization must never break a flow
+        logger.debug(f"[FLOW] agent∩task tool de-dupe skipped: {e}")
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -319,6 +382,16 @@ class FlowMethodFactory:
                         # Log if agent has no tools
                         if not hasattr(task.agent, 'tools') or not task.agent.tools:
                             logger.info(f"  Agent {agent_role} has no tools assigned but will continue with execution")
+
+            # De-dupe agent∩task tools (flow path): a tool present on BOTH an
+            # agent and a task it runs is built twice — the agent copy carries the
+            # agent-level config (often empty) and the task copy carries the task's
+            # config. CrewAI then shows the LLM two same-named tools and it may pick
+            # the empty one → e.g. "workspace_id ... required". The crew path fixes
+            # this in CrewPreparation, but flow crews bypass that, so apply the
+            # same normalization here on the built Agent/Task objects (match by
+            # tool .name; the task instance is authoritative, so strip the agent's).
+            _dedupe_flow_agent_task_tools(agents, task_list)
 
             logger.info(f"Total unique agents: {len(agents)}")
             logger.info(f"Total tasks: {len(task_list)}")
@@ -520,9 +593,9 @@ class FlowMethodFactory:
                     logger.info(f"📊 LLM Configuration: {llm_info}")
 
                 logger.info(f"📝 Total tasks: {len(task_list)}")
-                logger.info("⏱️ Calling crew.kickoff_async() with 10 minute timeout...")
+                logger.info(f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
 
                 elapsed_time = time.time() - start_time
                 logger.info(f"⏱️ Crew '{crew_name}' execution took {elapsed_time:.2f} seconds")
@@ -601,8 +674,8 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: 600s)")
-                raise TimeoutError(f"Crew '{crew_name}' execution timed out after 10 minutes")
+                logger.error(f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
+                raise TimeoutError(f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minutes")
             except Exception as e:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
                 logger.error(f"❌ Error during crew '{crew_name}' kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
@@ -1032,16 +1105,51 @@ class FlowMethodFactory:
                             for out_idx, prev_data in enumerate(all_outputs):
                                 source_label = all_output_sources[out_idx] if out_idx < len(all_output_sources) else "unknown"
 
-                                # Pipeline config → config_json
-                                is_pipeline_config = any(
+                                # ── Pipeline Config Generator output → UCMV inputs ──
+                                # config-gen emits a WRAPPER dict:
+                                #   {proposed_config: {...join_key_map, measure_resolutions...},
+                                #    measures_json: [...], mquery_json: [...],
+                                #    relationships_json: [...], summary: {...}}
+                                # UCMV (JSON mode) builds views from measures_json +
+                                # mquery_json and reads join maps from config_json — so
+                                # unwrap the wrapper and map each piece to the matching
+                                # UCMV field. Detect by the wrapper's own keys OR by a
+                                # bare (unwrapped) pipeline-config dict.
+                                inner_cfg = prev_data.get('proposed_config') if isinstance(prev_data.get('proposed_config'), dict) else None
+                                has_ucmv_handoff = any(
+                                    k in prev_data for k in ('proposed_config', 'measures_json', 'mquery_json')
+                                )
+                                is_bare_pipeline_config = inner_cfg is None and any(
                                     k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
                                 )
-                                if is_pipeline_config and 'config_json' in cfg:
-                                    existing = cfg.get('config_json') or ''
-                                    if not existing or len(existing) <= 10:
-                                        cfg['config_json'] = _json.dumps(prev_data)
-                                        injected_count += 1
-                                        logger.info(f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json")
+                                if has_ucmv_handoff or is_bare_pipeline_config:
+                                    # config_json ← proposed_config (or the bare dict itself)
+                                    if 'config_json' in cfg:
+                                        existing = cfg.get('config_json') or ''
+                                        if not existing or existing in ('{}', 'null') or len(existing) <= 10:
+                                            config_payload = inner_cfg if inner_cfg is not None else prev_data
+                                            cfg['config_json'] = _json.dumps(config_payload)
+                                            injected_count += 1
+                                            logger.info(f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json")
+                                    # measures_json / mquery_json / relationships_json ← handoff arrays.
+                                    # NOTE: do NOT require the key to already exist in cfg —
+                                    # the UCMV crew is seeded in JSON mode with these fields
+                                    # absent (the tool's __init__ only stores non-None keys),
+                                    # so gating on `_hk in cfg` would silently skip the very
+                                    # data UCMV needs. They are valid UCMV config fields; adding
+                                    # them to _default_config is exactly what JSON mode expects.
+                                    # Only fill when the current value is empty so a manually
+                                    # provided value is never clobbered.
+                                    for _hk in ('measures_json', 'mquery_json', 'relationships_json'):
+                                        payload = prev_data.get(_hk)
+                                        if not payload:
+                                            continue
+                                        existing = cfg.get(_hk) or ''
+                                        if not existing or existing in ('[]', '{}', 'null') or len(str(existing)) <= 2:
+                                            cfg[_hk] = payload if isinstance(payload, str) else _json.dumps(payload)
+                                            injected_count += 1
+                                            _n = len(payload) if isinstance(payload, list) else len(_json.dumps(payload))
+                                            logger.info(f"📥 Injected {_hk} ({_n} items) from {source_label} into {tool_name}")
                                     continue
 
                                 # UCMV output (has 'yaml' key) → ucmv_output
@@ -1077,9 +1185,9 @@ class FlowMethodFactory:
                 except Exception as inject_err:
                     logger.debug(f"Flow chain injection error (non-fatal): {inject_err}")
 
-                logger.info("⏱️ Calling listener crew.kickoff_async() with 10 minute timeout...")
+                logger.info(f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=600.0)
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
 
                 elapsed_time = time.time() - start_time
                 logger.info(f"⏱️ Listener crew execution took {elapsed_time:.2f} seconds")
@@ -1121,7 +1229,7 @@ class FlowMethodFactory:
                 return serializable_result
             except asyncio.TimeoutError:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: 600s)")
+                logger.error(f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
                 raise TimeoutError("Listener crew execution timed out")
             except Exception as e:
                 elapsed_time = time.time() - start_time if 'start_time' in dir() else 0

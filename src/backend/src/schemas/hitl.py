@@ -132,6 +132,14 @@ class HITLApprovalResponse(HITLApprovalBase):
     gate_config: Dict[str, Any] = Field(..., description="Gate configuration")
     previous_crew_name: Optional[str] = Field(None, description="Name of previous crew")
     previous_crew_output: Optional[str] = Field(None, description="Output to review")
+    # The output can be very large (~1 MB for a config-gen gate). The execution
+    # status endpoint omits `previous_crew_output` (returns None) and sets these
+    # so the client knows to lazy-load the full output via GET /approvals/{id}
+    # only when it actually renders it — keeping gate detection fast.
+    has_previous_crew_output: bool = Field(
+        False, description="Whether previous_crew_output exists (fetch via GET /approvals/{id} if omitted)")
+    previous_crew_output_size: Optional[int] = Field(
+        None, description="Size of previous_crew_output in characters (when omitted from this response)")
     flow_state_snapshot: Optional[Dict[str, Any]] = Field(None, description="Flow state at gate")
 
     # Response fields
