@@ -253,12 +253,26 @@ class KnowledgeEmbeddingService:
                 # one tenant's request must never run DML on another's rows
                 # (defense in depth — expired rows are filtered from search
                 # regardless, and each group sweeps its own on upload).
-                result = await store_session.execute(
-                    delete(KnowledgeEmbedding).where(
-                        KnowledgeEmbedding.group_id == self.group_id,
-                        KnowledgeEmbedding.created_at < cutoff,
+                try:
+                    result = await store_session.execute(
+                        delete(KnowledgeEmbedding).where(
+                            KnowledgeEmbedding.group_id == self.group_id,
+                            KnowledgeEmbedding.created_at < cutoff,
+                        )
                     )
-                )
+                except Exception:
+                    # CRITICAL: on the app-DB path store_session IS self.session
+                    # — the SAME session the subsequent embed insert reuses. A
+                    # failed DELETE leaves the transaction ABORTED; without this
+                    # rollback Postgres rejects every following statement with
+                    # InFailedSQLTransactionError, so the real purge error surfaces
+                    # only as a decoy on the bulk INSERT. Roll back here so the
+                    # session is clean and the embed can proceed (or fail with its
+                    # OWN error). The Lakebase path rolls back in its own session
+                    # context, so scope this to the app-DB path.
+                    if not is_lakebase:
+                        await store_session.rollback()
+                    raise
                 if not is_lakebase:
                     await store_session.commit()
                 purged = int(getattr(result, "rowcount", 0) or 0)
@@ -269,7 +283,13 @@ class KnowledgeEmbeddingService:
                     )
                 return purged
         except Exception as e:
-            logger.warning(f"[EMBEDDING] TTL purge failed (non-fatal): {e}")
+            # Real cause is logged at error level (it was previously masked by the
+            # aborted-transaction decoy on the next statement). Still non-fatal:
+            # a purge failure must never block an upload.
+            logger.error(
+                f"[EMBEDDING] TTL purge failed (non-fatal, upload continues): "
+                f"{type(e).__name__}: {e}"
+            )
             return 0
 
     async def _chunk_with_context(
