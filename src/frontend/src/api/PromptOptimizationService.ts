@@ -32,6 +32,10 @@ export interface PromptOptimizationRun {
   optimized_fields?: Record<string, string> | null;
   executions_used?: number | null;
   execution_cap?: number | null;
+  /** Crew runs: human grades/expectations harvested into this run's judge + reflection. */
+  human_feedback_count?: number | null;
+  /** Crew runs: distinct candidate prompt sets actually executed. */
+  candidates_tried?: number | null;
 }
 
 export interface LLMJudge {

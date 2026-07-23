@@ -16,11 +16,12 @@ when this graduates from Phase 1.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.repositories.log_repository import LLMLogRepository
@@ -301,6 +302,8 @@ _PUBLIC_FIELDS = (
     "optimized_fields",
     "executions_used",
     "execution_cap",
+    "human_feedback_count",
+    "candidates_tried",
 )
 
 
@@ -574,7 +577,10 @@ class PromptOptimizationService:
             "group_id": group_id,
             "baseline_template": baseline,
             "applied": False,
-            "created_at": datetime.utcnow(),
+            # Timezone-AWARE so the ISO string carries +00:00 and browsers
+            # render local time (a naive UTC stamp displayed as-is showed a
+            # 01:20 local run as "11:20 PM" — observed live).
+            "created_at": datetime.now(timezone.utc),
         }
         _RUNS[run_id] = run
         self._prune_runs()
@@ -1217,7 +1223,9 @@ class PromptOptimizationService:
             "baseline_template": baseline_doc,
             "baseline_fields": baseline_fields,
             "applied": False,
-            "created_at": datetime.utcnow(),
+            "human_feedback_count": 0,
+            "candidates_tried": 0,
+            "created_at": datetime.now(timezone.utc),
         }
         _RUNS[run_id] = run
         self._prune_runs()
@@ -1277,6 +1285,7 @@ class PromptOptimizationService:
         )
         os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
         import mlflow
+        from mlflow.entities import Feedback
         from mlflow.genai import optimize_prompts
         from mlflow.genai.optimize import GepaPromptOptimizer
         from mlflow.genai.scorers import scorer
@@ -1337,6 +1346,7 @@ class PromptOptimizationService:
             # harvested here and folded into the judge's rubric on the NEXT run.
             judge_rubric = rubric
             objective_for_training = objective
+            train_expectations: Dict[str, str] = {}
             if local_mode and crew_id:
                 try:
                     prior = mlflow.search_traces(
@@ -1344,24 +1354,43 @@ class PromptOptimizationService:
                         max_results=50,
                         return_type="list",
                     )
+                    # Oldest-first so the "keep the last 12" slice below keeps
+                    # the NEWEST notes (search order is not guaranteed).
+                    prior.sort(key=lambda t: t.info.request_time or 0)
                     notes: List[str] = []
+                    expect_notes: List[str] = []
                     for trace in prior:
                         for assessment in trace.search_assessments() or []:
                             name = getattr(assessment, "name", "") or ""
                             value = getattr(
                                 getattr(assessment, "feedback", None), "value", None
                             )
+                            exp_value = getattr(
+                                getattr(assessment, "expectation", None),
+                                "value",
+                                None,
+                            )
+                            if exp_value is not None:
+                                expect_notes.append(str(exp_value))
                             if value is None:
-                                value = getattr(
-                                    getattr(assessment, "expectation", None),
-                                    "value",
-                                    None,
-                                )
+                                value = exp_value
                             rationale = getattr(assessment, "rationale", None) or ""
                             if value is not None or rationale:
                                 notes.append(
                                     f"- {name}: {value if value is not None else ''} {rationale}".strip()
                                 )
+                    if expect_notes:
+                        # Ground truth rides GEPA's expectations channel too —
+                        # the reflective dataset surfaces it to the mutator as
+                        # explicit targets, not just prose inside the request.
+                        train_expectations = {
+                            "human_requirements": "\n".join(
+                                dict.fromkeys(expect_notes)
+                            )[:2000]
+                        }
+                    harvest_entry = _RUNS.get(cancel_run_id) if cancel_run_id else None
+                    if harvest_entry is not None:
+                        harvest_entry["human_feedback_count"] = len(notes)
                     if notes:
                         human_notes = "\n".join(notes[-12:])
                         judge_rubric += (
@@ -1443,24 +1472,46 @@ class PromptOptimizationService:
                                 entity[field] = fields[key].strip()
                 return agents_over, tasks_over
 
+            # Result caches, keyed by content. GEPA re-evaluates the SAME
+            # candidate doc many times (upfront smoke test, baseline valset
+            # pass, and a fresh reflective-minibatch pass EVERY iteration).
+            # Uncached, those re-runs burned most of a small execution budget
+            # re-measuring the baseline — a 4-execution run bought exactly ONE
+            # distinct candidate (observed live: total_metric_calls=7,
+            # candidates=1). Worse, the stochastic judge re-grading identical
+            # prompts drew 0.0 and then 4/10 two minutes apart, so accept/
+            # reject was a coin flip. With caching, each DISTINCT candidate
+            # costs exactly one execution and one judgment, and comparisons
+            # against the baseline are stable within the run.
+            deliverable_cache: Dict[str, str] = {}
+            judge_cache: Dict[str, Any] = {}
+
             def predict_fn(**inputs) -> str:
                 run_entry = _RUNS.get(cancel_run_id, {}) if cancel_run_id else {}
                 # User-requested stop: abort BEFORE spending a crew execution.
                 if run_entry.get("cancel_requested"):
                     raise RuntimeError("Cancelled by user")
+                candidate = client.load_prompt(prompt_uri)
+                doc_key = hashlib.sha256(
+                    candidate.template.encode("utf-8")
+                ).hexdigest()
+                # Cache lookup BEFORE the cap check: re-evaluations of an
+                # already-executed candidate (usually the baseline) stay
+                # truthful even after the budget is spent.
+                if doc_key in deliverable_cache:
+                    return deliverable_cache[doc_key]
                 # HARD execution cap: the user's budget is a promise about crew
                 # executions, but GEPA overshoots (parallel batches are only
                 # budget-checked between iterations, plus the upfront smoke
-                # test). Once the cap is spent, further candidates get a free
-                # empty result — they score 0, never win, and GEPA wraps up
-                # returning the best already-evaluated candidate.
+                # test). Once the cap is spent, further NEW candidates get a
+                # free empty result — they score 0, never win, and GEPA wraps
+                # up returning the best already-evaluated candidate.
                 if run_entry.get("executions_used", 0) >= max_metric_calls:
                     logger.info(
                         "Crew optimization execution cap reached "
                         f"({max_metric_calls}); skipping further executions"
                     )
                     return ""
-                candidate = client.load_prompt(prompt_uri)
                 fields = _parse_crew_doc(candidate.template)
                 # Malformed candidates never execute — free rejection.
                 if fields is None or set(fields) != expected_keys:
@@ -1479,6 +1530,9 @@ class PromptOptimizationService:
                     group_context=group_context,
                     user_token=user_token,
                 )
+                deliverable_cache[doc_key] = deliverable
+                if run_entry:
+                    run_entry["candidates_tried"] = len(deliverable_cache)
                 # Log this evaluation as an MLflow trace so the user can attach
                 # Feedback/Expectations (Assessments panel) that steer the judge
                 # on the next run. Advisory only — never fail the eval over it.
@@ -1503,15 +1557,34 @@ class PromptOptimizationService:
                 return 1.0 if len(text) > 50 else 0.0
 
             @scorer
-            def output_correct(inputs, outputs) -> float:
+            def output_correct(inputs, outputs):
                 # GRADED, not binary: a pass/fail judge saturates at 1.0 for any
                 # acceptable baseline, leaving GEPA no gradient to climb (observed
                 # live: 1.00 -> 1.00 with zero exploration payoff). A harsh 0-10
                 # rubric keeps ordinary output around 6-7 so better prompts can
                 # actually outscore the baseline.
+                #
+                # Returns an mlflow Feedback (value + rationale), NOT a bare
+                # float: rationales are the ONLY textual signal the GEPA
+                # reflection model receives about WHY a candidate scored low
+                # (mlflow folds Feedback.rationale into the reflective
+                # dataset). With floats, mutations were blind guesses — the
+                # judge knew "wrong region, rentals not sales" but the mutator
+                # never heard it (observed live: 1 requirement-aware candidate
+                # in ~10 runs).
                 text = str(outputs or "").strip()
                 if not text:
-                    return 0.0
+                    return Feedback(
+                        name="output_correct",
+                        value=0.0,
+                        rationale="Empty deliverable — the crew produced no output.",
+                    )
+                text_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                cached = judge_cache.get(text_key)
+                if cached is not None:
+                    return Feedback(
+                        name="output_correct", value=cached[0], rationale=cached[1]
+                    )
                 try:
                     verdict = _sync_llm_completion(
                         loop,
@@ -1526,7 +1599,13 @@ class PromptOptimizationService:
                                     "- fidelity: matches the requested format and scope exactly\n"
                                     "10 = flawless and exceptional (rare). 7 = solid with minor "
                                     "gaps. 5 = acceptable but generic. 3 = major omissions. "
-                                    "0 = failed. Reply with ONLY the number."
+                                    "0 = failed.\n"
+                                    "First, in one or two sentences, name the SPECIFIC "
+                                    "failures, quoting the exact expectation or human "
+                                    "requirement that was violated (e.g. wrong region, "
+                                    "rentals instead of sales, missing sources). Then "
+                                    "write the final grade alone on the LAST line as a "
+                                    "bare number."
                                 ),
                             },
                             {
@@ -1553,6 +1632,9 @@ class PromptOptimizationService:
                     logger.error(f"Crew optimization judge call failed: {judge_err}")
                     raise
                 grades: List[float] = []
+                rationale_parts: List[str] = []
+                if verdict and str(verdict).strip():
+                    rationale_parts.append(str(verdict).strip())
                 # LAST number wins: thinking models may reason (with incidental
                 # numbers) before stating the final grade.
                 matches = re.findall(r"\d+(?:\.\d+)?", verdict or "")
@@ -1581,23 +1663,46 @@ class PromptOptimizationService:
                             )
                         else:
                             grades.append(grade)
+                            judge_rationale = getattr(feedback, "rationale", None)
+                            if judge_rationale:
+                                rationale_parts.append(
+                                    f"[{getattr(judge, 'name', 'judge')}] "
+                                    f"{judge_rationale}"
+                                )
                     except Exception as judge_err:
                         logger.warning(
                             f"Registered judge '{getattr(judge, 'name', '?')}' "
                             f"failed: {judge_err}"
                         )
-                return sum(grades) / len(grades) if grades else 0.0
+                grade_value = sum(grades) / len(grades) if grades else 0.0
+                rationale = "\n".join(rationale_parts)[:4000]
+                judge_cache[text_key] = (grade_value, rationale)
+                return Feedback(
+                    name="output_correct", value=grade_value, rationale=rationale
+                )
 
             def aggregation(scores: Dict[str, Any]) -> float:
                 # Registered judges are already averaged INSIDE output_correct.
-                fmt = float(scores.get("output_format") or 0.0)
-                correct = float(scores.get("output_correct") or 0.0)
+                # Scores arrive RAW: a scorer that returned a Feedback shows up
+                # here as the Feedback object, not its numeric value.
+                def _num(value: Any) -> float:
+                    value = getattr(value, "value", value)
+                    try:
+                        return float(value or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                fmt = _num(scores.get("output_format"))
+                correct = _num(scores.get("output_correct"))
                 return 0.3 * fmt + 0.7 * correct
 
             result = optimize_prompts(
                 predict_fn=predict_fn,
                 train_data=[
-                    {"inputs": {"request": objective_for_training}, "expectations": {}}
+                    {
+                        "inputs": {"request": objective_for_training},
+                        "expectations": train_expectations,
+                    }
                 ],
                 prompt_uris=[prompt_uri],
                 optimizer=GepaPromptOptimizer(
@@ -1925,7 +2030,8 @@ class PromptOptimizationService:
         self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
         runs = [r for r in _RUNS.values() if self._visible(r, group_context)]
-        runs.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
+        _epoch = datetime.min.replace(tzinfo=timezone.utc)
+        runs.sort(key=lambda r: r.get("created_at") or _epoch, reverse=True)
         return [{k: r.get(k) for k in _PUBLIC_FIELDS} for r in runs]
 
     @staticmethod
@@ -1941,7 +2047,8 @@ class PromptOptimizationService:
         finished = [
             r for r in _RUNS.values() if r.get("status") in ("completed", "failed")
         ]
-        finished.sort(key=lambda r: r.get("created_at") or datetime.min)
+        _epoch = datetime.min.replace(tzinfo=timezone.utc)
+        finished.sort(key=lambda r: r.get("created_at") or _epoch)
         for run in finished[: len(_RUNS) - _MAX_KEPT_RUNS]:
             _RUNS.pop(run["run_id"], None)
 
