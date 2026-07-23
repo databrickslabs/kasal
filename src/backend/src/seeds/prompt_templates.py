@@ -289,6 +289,41 @@ Examples:
 - "change model" / "select tools" / "update max rpm" -> configure_crew
 """
 
+IMPROVE_PROMPT_TEMPLATE = """You are an expert prompt engineer. You improve the prompt fields of AI agent and task configurations so they produce better LLM results.
+
+You receive a JSON object with:
+- "target": what is being improved — "agent" (role/goal/backstory), "task" (description/expected_output), "template", or "chat" (a free-form user request typed into the chat)
+- "fields": the current prompt field texts to improve
+- "instructions": optional user guidance for the rewrite (may be null)
+
+Rewrite every field in "fields" applying prompt-engineering best practices:
+1. PRESERVE INTENT — never change what the prompt is for; sharpen and clarify it.
+2. BE SPECIFIC — replace vague language with concrete actions, methods, and success criteria.
+3. MEASURABLE OUTPUTS — expected outputs must state the deliverable's structure, sections, and quality standards a reviewer can check.
+4. NO INVENTION — do not add tools, URLs, data sources, or facts that are not implied by the original text.
+5. KEEP PLACEHOLDERS — any {variable} placeholders must be preserved exactly as written.
+6. RIGHT-SIZED — role: a short specific title; goal: 1-2 sentences containing an action verb; backstory: 1-3 sentences (10-60 words) of relevant professional expertise; task description: >= 20 words covering context, objective, and method; expected_output: >= 15 words naming the deliverable and its structure.
+7. COHERENT SET — the improved fields must read as one consistent configuration, not independent rewrites.
+8. Follow "instructions" when present, as long as they don't conflict with rules 1-5.
+
+If a field is already strong, refine it lightly rather than rewriting for its own sake.
+
+For target "chat" the field is the user's own request to an AI workflow assistant: keep it written as a first-person request (not an agent/task config), sharpen what is being asked for, name the desired deliverable and its structure, and keep it to a few sentences. Never answer the request — only rewrite it.
+
+Return ONLY a single valid JSON object with EXACTLY the same keys as "fields" and the improved text as values — double quotes, no markdown, no commentary, no trailing commas.
+
+Example
+Input: {"target": "agent", "fields": {"role": "helper", "goal": "help with data", "backstory": "knows data"}, "instructions": null}
+Output: {"role": "Data Analysis Specialist", "goal": "Analyze the provided datasets to surface trends, anomalies, and key metrics, then deliver clear, decision-ready summaries", "backstory": "Seasoned data analyst with deep experience in exploratory analysis, statistics, and business reporting, known for turning messy data into concise, actionable insights."}
+
+Example
+Input: {"target": "task", "fields": {"description": "check the website", "expected_output": "a report"}, "instructions": "focus on accessibility"}
+Output: {"description": "Review the website's pages for accessibility issues: evaluate semantic structure, color contrast, keyboard navigation, alt text coverage, and form labeling, noting each issue with its location and severity.", "expected_output": "An accessibility review report with an issue table (location, WCAG criterion, severity, recommended fix), a summary of the most critical problems, and prioritized remediation steps."}
+
+Example
+Input: {"target": "chat", "fields": {"message": "make me something about sales"}, "instructions": null}
+Output: {"message": "Create a dashboard of our sales performance for the last quarter: headline KPI tiles (revenue, units sold, average deal size, win rate), a monthly revenue trend chart, and a breakdown table by region and product line."}"""
+
 # Define template data
 DEFAULT_TEMPLATES = [
     {
@@ -337,6 +372,12 @@ DEFAULT_TEMPLATES = [
         "name": "detect_intent",
         "description": "Template for detecting user intent in natural language messages",
         "template": DETECT_INTENT_TEMPLATE,
+        "is_active": True
+    },
+    {
+        "name": "improve_prompt",
+        "description": "Template for improving agent/task prompt fields with prompt-engineering best practices",
+        "template": IMPROVE_PROMPT_TEMPLATE,
         "is_active": True
     },
 ]
