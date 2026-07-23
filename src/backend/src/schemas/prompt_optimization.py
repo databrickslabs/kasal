@@ -135,6 +135,14 @@ class PromptOptimizationRunStatus(BaseModel):
     execution_cap: Optional[int] = Field(
         None, description="Crew runs: hard cap on crew executions"
     )
+    human_feedback_count: Optional[int] = Field(
+        None,
+        description="Crew runs: human grades/expectations steering this run",
+    )
+    candidates_tried: Optional[int] = Field(
+        None,
+        description="Crew runs: distinct candidate prompt sets actually executed",
+    )
 
 
 class PromptOptimizationRunList(BaseModel):

@@ -369,7 +369,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 ))}
               </Select>
             </FormControl>
-            <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. Includes 1 validation + 1 baseline execution, so allow at least 6 for a real search. Executions have real side effects (tools, emails, database writes).">
+            <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. The baseline costs 1 execution; each further execution evaluates one NEW candidate prompt set (re-evaluations are cached and free). Executions have real side effects (tools, emails, database writes).">
               <TextField
                 size="small"
                 type="number"
@@ -556,6 +556,26 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                       variant="outlined"
                       label={`${run.executions_used}/${run.execution_cap} executions`}
                     />
+                  )}
+                {typeof run.candidates_tried === 'number' && run.candidates_tried > 1 && (
+                  <Tooltip title="Distinct prompt variants executed (baseline + GEPA candidates). Re-evaluations of an already-executed variant are cached and free.">
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`${run.candidates_tried} variants tried`}
+                    />
+                  </Tooltip>
+                )}
+                {typeof run.human_feedback_count === 'number' &&
+                  run.human_feedback_count > 0 && (
+                    <Tooltip title="Your grades, comments and expectations on past evaluation answers — folded into this run's judge rubric AND into what the GEPA reflection model sees.">
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color="secondary"
+                        label={`guided by ${run.human_feedback_count} human notes`}
+                      />
+                    </Tooltip>
                   )}
                 {typeof run.initial_score === 'number' &&
                   typeof run.final_score === 'number' && (
