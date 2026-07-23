@@ -1,0 +1,409 @@
+{
+  "version": "1.0",
+  "description": "A2UI component catalog — the single contract shared by the backend composer (which is told these components and asked to emit one of these surfaces) and the frontend registry renderer (which has a React component for each). Add a component here + a renderer in the frontend registry to extend; no other code changes are needed.",
+  "surfaceKinds": [
+    "conversation",
+    "document",
+    "presentation",
+    "dashboard",
+    "mindmap",
+    "quiz",
+    "flashcards",
+    "map"
+  ],
+  "components": {
+    "Markdown": {
+      "summary": "A block of GitHub-flavored markdown (headings, lists, tables, code, links).",
+      "props": {
+        "content": {
+          "type": "string",
+          "binding": true
+        }
+      }
+    },
+    "Text": {
+      "summary": "A short run of plain text.",
+      "props": {
+        "text": {
+          "type": "string",
+          "binding": true
+        },
+        "variant": {
+          "type": "enum",
+          "values": [
+            "body",
+            "caption",
+            "label"
+          ]
+        }
+      }
+    },
+    "Heading": {
+      "summary": "A section heading.",
+      "props": {
+        "text": {
+          "type": "string",
+          "binding": true
+        },
+        "level": {
+          "type": "int",
+          "min": 1,
+          "max": 6
+        }
+      }
+    },
+    "Image": {
+      "summary": "An image with optional caption.",
+      "props": {
+        "src": {
+          "type": "string",
+          "binding": true
+        },
+        "alt": {
+          "type": "string"
+        },
+        "caption": {
+          "type": "string",
+          "binding": true
+        }
+      }
+    },
+    "Card": {
+      "summary": "A titled container that groups child components. Optionally set 'icon' to a supported icon name (see the icon list in the rules).",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "icon": {
+          "type": "string"
+        },
+        "children": {
+          "type": "componentIds"
+        }
+      }
+    },
+    "KeyValue": {
+      "summary": "A single label/value pair; good for KPIs and metrics. Optionally set 'icon' to a supported icon name (see the icon list in the rules) for a pictographic accent.",
+      "props": {
+        "label": {
+          "type": "string",
+          "binding": true
+        },
+        "value": {
+          "type": "string",
+          "binding": true
+        },
+        "icon": {
+          "type": "string"
+        }
+      }
+    },
+    "List": {
+      "summary": "An ordered or unordered list of strings.",
+      "props": {
+        "items": {
+          "type": "array",
+          "binding": true
+        },
+        "ordered": {
+          "type": "bool"
+        }
+      }
+    },
+    "Table": {
+      "summary": "A data table. columns is a list of header strings; rows is a list of row arrays (cell values aligned to columns).",
+      "props": {
+        "columns": {
+          "type": "array"
+        },
+        "rows": {
+          "type": "array",
+          "binding": true
+        }
+      }
+    },
+    "Divider": {
+      "summary": "A horizontal rule / visual separator.",
+      "props": {}
+    },
+    "Row": {
+      "summary": "Lays out children horizontally.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "gap": {
+          "type": "int"
+        }
+      }
+    },
+    "Column": {
+      "summary": "Lays out children vertically.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "gap": {
+          "type": "int"
+        }
+      }
+    },
+    "Grid": {
+      "summary": "Lays out children in a responsive grid with the given column count.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        },
+        "columns": {
+          "type": "int"
+        }
+      }
+    },
+    "Chart": {
+      "summary": "A chart. data is a list of row objects; xKey names the category field; yKeys names the numeric series field(s). chartType: 'bar' (comparisons), 'line' (trends over time), 'pie' (parts of a whole), 'area' (cumulative/volume trends), 'scatter' (correlation between two numeric fields), 'radar' (multi-dimension profile comparison).",
+      "props": {
+        "chartType": {
+          "type": "enum",
+          "values": [
+            "bar",
+            "line",
+            "pie",
+            "area",
+            "scatter",
+            "radar"
+          ]
+        },
+        "data": {
+          "type": "array",
+          "binding": true
+        },
+        "xKey": {
+          "type": "string"
+        },
+        "yKeys": {
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "SlideDeck": {
+      "summary": "A presentation container; each child is a Slide. Use as the root for surfaceKind 'presentation'.",
+      "props": {
+        "children": {
+          "type": "componentIds"
+        }
+      }
+    },
+    "Slide": {
+      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), 'two-column' (bullets on the left, a visual — Chart/Diagram/Table/Image — on the right; children are the text nodes THEN the visual node), 'visual' (a slide whose body is ONE dominant Chart/Diagram/Table with an optional caption Text), 'agenda' (numbered overview rows; children are short Text nodes), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic.",
+      "props": {
+        "variant": {
+          "type": "string",
+          "enum": [
+            "title",
+            "stats",
+            "quote",
+            "content",
+            "two-column",
+            "visual",
+            "agenda",
+            "section"
+          ]
+        },
+        "kicker": {
+          "type": "string",
+          "binding": true
+        },
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "subtitle": {
+          "type": "string",
+          "binding": true
+        },
+        "children": {
+          "type": "componentIds"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "Mindmap": {
+      "summary": "A mindmap / tree. root is a node object of shape {id, label, description?, children:[node...]}. Give EVERY node a short label AND a one-sentence 'description' explaining it (shown as a hover tooltip). Use as the root for surfaceKind 'mindmap'.",
+      "props": {
+        "root": {
+          "type": "object",
+          "binding": true,
+          "shape": "{ id, label, description, children: [node...] }"
+        }
+      }
+    },
+    "Quiz": {
+      "summary": "An interactive multiple-choice quiz / assessment. questions is a list of REAL questions, each of shape {question, options:[4 strings], answer:<0-based index of the correct option>, explanation?}. The renderer handles option selection, immediate right/wrong reveal, scoring and navigation — supply ONLY the question data, never a description of a quiz. Use as the root for surfaceKind 'quiz'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "questions": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ question, options: [string], answer: int, explanation }]"
+        }
+      }
+    },
+    "Flashcards": {
+      "summary": "An interactive Anki-style flashcard deck for studying. cards is a list of REAL study cards, each of shape {front, back, hint?}. front is the prompt/question shown first; back is the answer revealed on flip. The renderer handles flipping (click to reveal), deck navigation and shuffle — supply ONLY the card data, never a description of a deck. Use as the root for surfaceKind 'flashcards'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "cards": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ front, back, hint }]"
+        }
+      }
+    },
+    "Map": {
+      "summary": "A geographic map that plots points from coordinates. points is a list of {lat, lng, label?, value?}. Use ONLY when the data has real latitude/longitude coordinates. The renderer draws a lightweight world map with the points and a legend. Use as the root for surfaceKind 'map'.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "points": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ lat: number, lng: number, label, value }]"
+        }
+      }
+    },
+    "Forecast": {
+      "summary": "A time-series FORECAST chart: a forecast line plus an optional shaded confidence band and optional historical actuals. data is a list of row objects. The renderer AUTO-DETECTS the columns, so pass the query rows as-is; optionally set xKey (time/date column), forecastKey (the predicted value), lowerKey/upperKey (confidence band), actualKey (historical actuals), and seriesKey (a category column to split into one line per group, e.g. risk_category). Use for any prediction/forecast/projection over time with or without a confidence interval.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "data": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ <time>, <forecast>, <lower?>, <upper?>, <actual?>, <category?> }]"
+        },
+        "xKey": {
+          "type": "string"
+        },
+        "forecastKey": {
+          "type": "string"
+        },
+        "lowerKey": {
+          "type": "string"
+        },
+        "upperKey": {
+          "type": "string"
+        },
+        "actualKey": {
+          "type": "string"
+        },
+        "seriesKey": {
+          "type": "string"
+        }
+      }
+    },
+    "Graph": {
+      "summary": "A node-link GRAPH / network / relationship diagram. nodes is a list of {id, label?, group?}; edges a list of {from, to, label?} referencing node ids. Nodes are auto-laid-out on a circle and colored by 'group'. Set directed:false for undirected edges (default is directed with arrowheads). Use for dependencies, relationships, networks, entity links, org/flow structure — NOT for time series (use Chart/Forecast) or hierarchical trees (use Mindmap).",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "nodes": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ id, label, group }]"
+        },
+        "edges": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ from, to, label }]"
+        },
+        "directed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Sequence": {
+      "summary": "A UML-style SEQUENCE diagram. actors is an ordered list of participant names (or {id, label}); messages a list of {from, to, text?, dashed?} drawn top-to-bottom as arrows between actor lifelines (dashed:true for a return/async message). Use for interactions, request/response flows, protocols, call sequences over time between participants.",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "actors": {
+          "type": "array",
+          "binding": true,
+          "shape": "[string | { id, label }]"
+        },
+        "messages": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ from, to, text, dashed }]"
+        }
+      }
+    },
+    "Diagram": {
+      "summary": "A business diagram built from a curated visual ARCHETYPE — the layout is automatic and professionally styled, you supply ONLY the labels. archetype: 'process' (3-6 sequential steps/stages), 'timeline' (dated milestones in order), 'cycle' (a repeating loop of 3-6 phases), 'funnel' (narrowing stages, e.g. conversion), 'pyramid' (layered levels, apex first), 'comparison' (EXACTLY 2 items compared side-by-side, each with 'points'), 'matrix2x2' (EXACTLY 4 items in reading order top-left/top-right/bottom-left/bottom-right, with optional xLabel/yLabel axis names), 'hierarchy' (org/tree structure: items[0] is the root with nested 'children'). Each item is {label, detail?, value?, points?, children?} — label SHORT (2-5 words), detail ONE short sentence. Use whenever the content describes steps, phases, structure or a comparison — NOT for numeric series (use Chart) or entity networks (use Graph).",
+      "props": {
+        "archetype": {
+          "type": "enum",
+          "values": [
+            "process",
+            "timeline",
+            "cycle",
+            "funnel",
+            "pyramid",
+            "comparison",
+            "matrix2x2",
+            "hierarchy"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "items": {
+          "type": "array",
+          "binding": true,
+          "shape": "[{ label, detail, value, points: [string], children: [item...] }]"
+        },
+        "xLabel": {
+          "type": "string"
+        },
+        "yLabel": {
+          "type": "string"
+        }
+      }
+    },
+    "Album": {
+      "summary": "An image ALBUM shown as a one-image-at-a-time CAROUSEL with prev/next. items is a list of image URLs or {src, caption?, href?}. Use ONLY for real image URLs (src must be a direct image link). The caption links to href (or the source URL). Use for photo galleries / image collections — never for a list of non-image links (use a Table or List for those).",
+      "props": {
+        "title": {
+          "type": "string",
+          "binding": true
+        },
+        "items": {
+          "type": "array",
+          "binding": true,
+          "shape": "[string | { src, caption, href }]"
+        }
+      }
+    }
+  }
+}

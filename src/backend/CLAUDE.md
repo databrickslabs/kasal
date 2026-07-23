@@ -1,0 +1,224 @@
+# Backend CLAUDE.md
+
+Backend-specific instructions for Claude Code when working in the backend directory.
+
+## Commands
+
+### Development
+- **Dependencies are managed with `uv`** (not Poetry). Install/sync: `uv sync` (or `uv sync --frozen`). The venv lives at `src/backend/.venv`.
+- **Start server**: `./run.sh` (defaults to PostgreSQL) or `./run.sh sqlite` for SQLite. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`.
+- **Run tests**: `python run_tests.py` (runs all tests with linting)
+- **Run specific tests**: `python run_tests.py --type unit` or `python run_tests.py --type integration`
+- **Run tests with coverage**: `python run_tests.py --coverage --html-coverage`
+- **Run single test file**: `.venv/bin/python -m pytest tests/unit/test_file.py -v`
+
+### Database
+- **Migrations**: `alembic upgrade head`
+- **Create migration**: `alembic revision --autogenerate -m "description"`
+- **Seed database**: `python run_seeders.py`
+
+### Code Quality
+- **Format code**: `python -m black src tests && python -m isort src tests`
+- **Type checking**: `python -m mypy src`
+- **Format check**: `python -m black --check src tests`
+
+## Architecture
+
+### Clean Architecture Pattern
+- **Repository Pattern**: All database access through repositories
+- **Unit of Work**: Transaction management for complex operations
+- **Service Layer**: Business logic orchestration
+- **Dependency Injection**: Use FastAPI's built-in DI system
+- **Async/Await**: All database operations are async
+
+### Directory Structure
+```
+src/
+├── api/             # FastAPI route handlers (see api/CLAUDE.md)
+├── core/            # Dependencies, base repo/service, permissions, UoW, exceptions
+├── models/          # SQLAlchemy database models (see models/CLAUDE.md)
+├── schemas/         # Pydantic validation schemas
+├── services/        # Business logic layer (see services/CLAUDE.md)
+├── repositories/    # Data access layer (see repositories/CLAUDE.md)
+├── engines/crewai/  # CrewAI engine — POST-REFACTOR layout (see engines/crewai/CLAUDE.md)
+└── main.py          # Application entry point (uvicorn target: src.main:app)
+```
+
+### CrewAI engine (three execution paths)
+The engine has three answer paths selected by `execution_type`:
+- `"agent"` → **light** path = **ChatMode / chat answer mode**, a single agent run
+  in-process (`Agent.kickoff_async`) for sub-second latency.
+- `"crew"` → crew path, runs in a **subprocess** (`process_crew_executor.py`).
+- `"flow"` → flow path, also **subprocess**.
+
+The engine was restructured into `paths/{light_agent,crew,flow}/` over a shared
+`kernel/`, plus `infra/`, `memory/`, `guardrails/{core,demo}/`. The old
+`common/`, `helpers/`, `utils/`, `services/`, `mcp/` packages are gone. See
+`src/backend/src/engines/crewai/CLAUDE.md` for details.
+
+## Database Patterns
+
+### Migrations
+- Always create Alembic migrations for model changes
+- Use `alembic revision --autogenerate` to create migrations
+- Test migrations on SQLite before applying to PostgreSQL
+
+### Connection Management
+- When dealing with asyncpg and multiple event loops, asyncpg connections can conflict
+- `USE_NULLPOOL=true` environment variable disables connection pooling when needed
+- For testing with pytest-asyncio, use function-scoped fixtures instead of session-scoped ones
+
+## Databricks Integration
+
+### Model Configuration
+Add new models in `src/seeds/model_configs.py`:
+```python
+"databricks-model-name": {
+    "name": "databricks-model-name",
+    "temperature": 0.7,
+    "provider": "databricks",
+    "context_window": 128000,
+    "max_output_tokens": 25000
+}
+```
+
+### User-Agent Telemetry (REQUIRED for new Databricks API callers)
+
+Every HTTP call to a Databricks API **must** include a Kasal User-Agent header for usage tracking
+(Partner Well-Architected Framework). When creating a new tool, service, or repository that calls
+Databricks, add telemetry using one of these patterns:
+
+**For direct REST calls (httpx/aiohttp):**
+```python
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+headers = {"Authorization": f"Bearer {token}", **get_user_agent_header(KasalProduct.YOUR_PRODUCT)}
+```
+
+**For headers from `auth.get_headers()`:**
+```python
+headers = auth.get_headers()
+from src.utils.telemetry import get_user_agent_header, KasalProduct
+headers.update(get_user_agent_header(KasalProduct.YOUR_PRODUCT))
+```
+
+**For WorkspaceClient SDK calls:**
+```python
+from databricks.sdk.useragent import with_product
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+with_product(f"{KASAL_BASE}_{KasalProduct.YOUR_PRODUCT}", VERSION)
+w = WorkspaceClient()
+```
+
+**For LLM calls via `llm_manager.get_llm()`:** Already handled — `extra_headers` with User-Agent
+is injected automatically by `llm_manager.py`.
+
+Add new product constants to `KasalProduct` in `src/utils/telemetry.py` as needed.
+Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
+
+### Known Issues
+- **databricks-gpt-oss Models**: Return reasoning blocks without "signature" field
+- **Fix**: Automatic monkey patch in `llm_manager.py` handles missing signature fields
+- **Long-term**: Upgrade to litellm 1.75.0+ when stable
+
+### Authentication Hierarchy
+
+#### General Databricks Services
+1. OBO (On-Behalf-Of) authentication using user token
+2. OAuth client credentials (DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET)
+3. API key from service (DATABRICKS_TOKEN or DATABRICKS_API_KEY)
+4. Environment variables as last resort
+
+#### Vector Search (Direct Access Indexes)
+**Authentication Priority for Vector Search:**
+
+1. **OBO authentication** - User token from X-Forwarded-Access-Token header (preferred)
+2. **PAT from database** - Encrypted tokens stored in database
+3. **PAT from environment** - DATABRICKS_TOKEN or DATABRICKS_API_KEY
+4. **Default SDK authentication** - Falls back to SDK's authentication chain
+
+**Note**: Service Principal authentication has been removed from Vector Search operations as OBO and PAT tokens provide sufficient access for Direct Access indexes.
+
+### Vector Search Limitations
+- Doesn't support bulk delete operations
+- To empty an index: retrieve all vectors (up to 10,000) then delete them
+- For larger indexes, consider dropping and recreating
+
+## Memory Backend
+
+### Schema Layer Usage (CRITICAL)
+**ALWAYS use the centralized schema layer `DatabricksIndexSchemas` for all Databricks Vector Search operations:**
+- Use `DatabricksIndexSchemas.get_schema(memory_type)` to get field definitions
+- Use `DatabricksIndexSchemas.get_search_columns(memory_type)` for search operations
+- Use `DatabricksIndexSchemas.get_column_positions(memory_type)` for result parsing
+- **NEVER hardcode column names or positions** - always reference the schema
+- The schema supports memory types: "short_term", "long_term", "entity", "document"
+- When saving to DatabricksVectorStorage, build records using only fields that exist in the schema
+
+### Repository Pattern Usage (CRITICAL)
+**ALWAYS use the repository pattern for database operations:**
+- Use `DatabricksVectorIndexRepository` for all Vector Search index operations
+- Repository methods handle async operations, authentication, and error handling
+- Available repository methods:
+  - `upsert()` - Insert or update records
+  - `similarity_search()` - Search for similar vectors
+  - `delete_records()` - Delete specific records
+  - `count_documents()` - Count documents with optional filters
+  - `describe_index()` - Get index metadata
+- **NEVER call index client methods directly** - always go through the repository
+- Handle async context properly when calling from sync code (use asyncio.run or ThreadPoolExecutor)
+
+### Pydantic Schema Enum Handling (CRITICAL)
+**When working with Pydantic schemas that have `use_enum_values = True`:**
+- Enum fields like `IndexState` are automatically converted to string values
+- **NEVER access `.value` attribute** - the field already contains the string value
+- Example: `index_response.index.state` is already a string like "READY" or "NOT_FOUND"
+- Common mistake: `index_response.index.state.value` will cause "'str' object has no attribute 'value'" error
+
+### Disabled Configuration
+- All memory types disabled = "Disabled Configuration"
+- System ignores it and falls back to default ChromaDB + SQLite
+- Default memory creates storage in `/Library/Application Support/kasal_default_[crew_id]/`
+
+### Crew Memory Persistence
+- Crew ID generated from hash of: agent roles, task names, crew name, model, group_id
+- NOTE: run_name is NOT included - this ensures memory persists across all runs of the same crew structure
+- Same crew configuration (agents, tasks, model) gets same ID across ALL runs
+- Group_id ensures complete tenant isolation
+- Long-Term Memory uses EXACT TEXT MATCH on task_description (CrewAI design decision)
+
+## Testing Requirements
+
+### Coverage
+- Minimum 80% coverage required
+- Run with: `python run_tests.py --coverage --html-coverage`
+
+### Test Types
+- **Unit Tests**: Mock all external dependencies
+- **Integration Tests**: Test full request/response cycle
+- Use pytest fixtures for test setup
+- Test all API endpoints with different scenarios
+
+## Critical Rules
+
+- **ALWAYS use async/await** - Never use sync operations that could block the event loop
+- **NEVER include real URLs in code** - Use "https://example.com" or environment variables
+- **DO NOT restart backend service** - It auto-reloads with `--reload` flag
+- **Check service status**: `ps aux | grep uvicorn`
+
+## AI Engine Integration
+
+### CrewAI Integration Points
+- **Engine Service** (`engines/crewai/crewai_engine_service.py`): the hub that dispatches to one of three paths.
+- **Three execution paths** (`engines/crewai/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
+- **Kernel** (`engines/crewai/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
+- **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to CrewAI shape.
+- **Tool Factory** (`engines/crewai/tools/`): extensible tool system (see tools/CLAUDE.md).
+
+See `engines/crewai/CLAUDE.md` for the full path model and the subprocess-boundary rules.
+
+## Environment
+
+- Python 3.11 required (pinned `>=3.11,<3.12` in `pyproject.toml`)
+- Dependencies managed with **uv** (`pyproject.toml` + `uv.lock`, both committed). Never hand-edit `uv.lock`; run `uv lock` then `uv sync`.
+- Database type controlled by environment variables / DB config (SQLite, PostgreSQL, or Databricks Lakebase)
+- API keys for LLM services configured via environment or the API Keys service

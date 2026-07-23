@@ -1,0 +1,707 @@
+/**
+ * M-Query Converter Configuration Selector Component
+ *
+ * Provides configuration UI for the M-Query Conversion Pipeline tool.
+ * Extracts M-Query expressions from Power BI and converts them to Databricks SQL.
+ */
+
+import React from 'react';
+import {
+  Box,
+  Typography,
+  TextField,
+  FormControlLabel,
+  Checkbox,
+  Divider,
+  ToggleButtonGroup,
+  ToggleButton,
+  Alert,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Button
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import LoginIcon from '@mui/icons-material/Login';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import SecurityIcon from '@mui/icons-material/Security';
+import PersonIcon from '@mui/icons-material/Person';
+import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
+
+// Authentication method type
+export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
+
+export interface MQueryConverterConfig {
+  // Power BI Admin API configuration
+  workspace_id?: string;
+  dataset_id?: string;
+  // Authentication method
+  auth_method?: PowerBIAuthMethod;
+  // Service Principal authentication
+  tenant_id?: string;
+  client_id?: string;
+  client_secret?: string;
+  // Service Account authentication
+  username?: string;
+  password?: string;
+  // User OAuth authentication
+  oauth_client_id?: string; // Azure AD app client ID for OAuth
+  access_token?: string;
+  // LLM Configuration
+  llm_workspace_url?: string;
+  llm_token?: string;
+  llm_model?: string;
+  use_llm?: boolean;
+  // Target Configuration
+  target_catalog?: string;
+  target_schema?: string;
+  // Scan Options
+  include_lineage?: boolean;
+  include_datasource_details?: boolean;
+  include_dataset_schema?: boolean;
+  include_dataset_expressions?: boolean;
+  include_hidden_tables?: boolean;
+  skip_static_tables?: boolean;
+  // Output Options
+  include_relationships?: boolean;
+  include_summary?: boolean;
+  // Data Retrieval Credentials (for Execute Queries / EVALUATE — needs Dataset.ReadWrite.All)
+  exec_tenant_id?: string;
+  exec_client_id?: string;
+  exec_client_secret?: string;
+  exec_access_token?: string;
+  // DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
+  databricks_sql_endpoint?: string;
+  databricks_pat?: string;
+  max_iterations?: string;
+  // Index signature for compatibility
+  [key: string]: string | boolean | undefined;
+}
+
+interface MQueryConverterConfigSelectorProps {
+  value: MQueryConverterConfig;
+  onChange: (config: MQueryConverterConfig) => void;
+  disabled?: boolean;
+}
+
+export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelectorProps> = ({
+  value = {},
+  onChange,
+  disabled = false
+}) => {
+  // OAuth hook for User OAuth authentication - pass the client ID from config
+  const { accessToken, isAuthenticated, signIn, signOut, userEmail, isLoading: oauthLoading, error: oauthError } = usePowerBIOAuth({
+    clientId: value.oauth_client_id || ''
+  });
+
+  const handleFieldChange = (field: keyof MQueryConverterConfig, fieldValue: string | boolean) => {
+    onChange({
+      ...value,
+      [field]: fieldValue
+    });
+  };
+
+  const handleAuthMethodChange = (_event: React.MouseEvent<HTMLElement>, newMethod: PowerBIAuthMethod | null) => {
+    if (newMethod !== null) {
+      const updatedConfig: MQueryConverterConfig = {
+        ...value,
+        auth_method: newMethod
+      };
+
+      // Clear credentials when switching methods
+      if (newMethod === 'user_oauth') {
+        updatedConfig.tenant_id = undefined;
+        updatedConfig.client_id = undefined;
+        updatedConfig.client_secret = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
+        // Set access token if authenticated
+        if (accessToken) {
+          updatedConfig.access_token = accessToken;
+        }
+      } else if (newMethod === 'service_principal') {
+        updatedConfig.access_token = undefined;
+        updatedConfig.username = undefined;
+        updatedConfig.password = undefined;
+      } else if (newMethod === 'service_account') {
+        updatedConfig.access_token = undefined;
+        updatedConfig.client_secret = undefined;
+      }
+
+      onChange(updatedConfig);
+    }
+  };
+
+  // Update access token when OAuth state changes
+  React.useEffect(() => {
+    if (value.auth_method === 'user_oauth' && accessToken) {
+      onChange({
+        ...value,
+        access_token: accessToken
+      });
+    }
+  }, [accessToken, value.auth_method]);
+
+  const authMethod = value.auth_method || 'service_principal';
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Power BI Configuration */}
+      <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 600 }}>
+        Power BI Workspace Configuration
+      </Typography>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <TextField
+          label="Workspace ID"
+          value={value.workspace_id || ''}
+          onChange={(e) => handleFieldChange('workspace_id', e.target.value)}
+          disabled={disabled}
+          required
+          fullWidth
+          helperText="Power BI workspace ID to scan"
+          size="small"
+        />
+        <TextField
+          label="Dataset ID (Optional)"
+          value={value.dataset_id || ''}
+          onChange={(e) => handleFieldChange('dataset_id', e.target.value)}
+          disabled={disabled}
+          fullWidth
+          helperText="Specific dataset to filter (leave empty to scan all)"
+          size="small"
+        />
+      </Box>
+
+      <Divider sx={{ my: 1 }}>
+        <Typography variant="caption" color="text.secondary">
+          Authentication Method
+        </Typography>
+      </Divider>
+
+      {/* Auth Method Toggle */}
+      <ToggleButtonGroup
+        value={authMethod}
+        exclusive
+        onChange={handleAuthMethodChange}
+        disabled={disabled}
+        fullWidth
+        size="small"
+      >
+        <ToggleButton value="service_principal">
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+            <SecurityIcon sx={{ fontSize: 18, mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Service Principal
+            </Typography>
+          </Box>
+        </ToggleButton>
+        <ToggleButton value="service_account">
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+            <PersonIcon sx={{ fontSize: 18, mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Service Account
+            </Typography>
+          </Box>
+        </ToggleButton>
+        <ToggleButton value="user_oauth">
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 0.5 }}>
+            <LoginIcon sx={{ fontSize: 18, mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              User OAuth
+            </Typography>
+          </Box>
+        </ToggleButton>
+      </ToggleButtonGroup>
+
+      {/* Service Principal Authentication Fields */}
+      {authMethod === 'service_principal' && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <TextField
+            label="Tenant ID"
+            value={value.tenant_id || ''}
+            onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+            disabled={disabled}
+            required
+            fullWidth
+            helperText="Azure AD tenant ID"
+            size="small"
+          />
+          <TextField
+            label="Client ID"
+            value={value.client_id || ''}
+            onChange={(e) => handleFieldChange('client_id', e.target.value)}
+            disabled={disabled}
+            required
+            fullWidth
+            helperText="Application/Client ID"
+            size="small"
+          />
+          <TextField
+            label="Client Secret"
+            value={value.client_secret || ''}
+            onChange={(e) => handleFieldChange('client_secret', e.target.value)}
+            disabled={disabled}
+            required
+            type="password"
+            fullWidth
+            helperText="Client secret for service principal"
+            size="small"
+          />
+        </Box>
+      )}
+
+      {/* Service Account Authentication Fields */}
+      {authMethod === 'service_account' && (
+        <>
+          <Alert severity="info" variant="outlined" sx={{ mb: 1 }}>
+            <Typography variant="caption">
+              <strong>Service Account:</strong> Use a user account (username + password) instead of Service Principal.
+              This is useful when Service Principal doesn't have sufficient permissions to access Power BI Admin API.
+              Requires an Azure AD app with delegated permissions.
+            </Typography>
+          </Alert>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Tenant ID"
+              value={value.tenant_id || ''}
+              onChange={(e) => handleFieldChange('tenant_id', e.target.value)}
+              disabled={disabled}
+              required
+              fullWidth
+              helperText="Azure AD tenant ID"
+              size="small"
+            />
+            <TextField
+              label="Client ID"
+              value={value.client_id || ''}
+              onChange={(e) => handleFieldChange('client_id', e.target.value)}
+              disabled={disabled}
+              required
+              fullWidth
+              helperText="Azure AD application Client ID (with delegated permissions)"
+              size="small"
+            />
+            <TextField
+              label="Username (UPN)"
+              value={value.username || ''}
+              onChange={(e) => handleFieldChange('username', e.target.value)}
+              disabled={disabled}
+              required
+              fullWidth
+              helperText="Service account email/UPN (e.g., user@domain.com)"
+              size="small"
+            />
+            <TextField
+              label="Password"
+              value={value.password || ''}
+              onChange={(e) => handleFieldChange('password', e.target.value)}
+              disabled={disabled}
+              required
+              type="password"
+              fullWidth
+              helperText="Service account password"
+              size="small"
+            />
+          </Box>
+        </>
+      )}
+
+      {/* User OAuth Authentication */}
+      {authMethod === 'user_oauth' && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Alert severity="warning" variant="outlined">
+            <Typography variant="caption">
+              <strong>Note:</strong> The Admin API requires <code>Tenant.Read.All</code> permission which is Application-only.
+              User OAuth may have limited functionality. For full Admin API access, use Service Principal.
+            </Typography>
+          </Alert>
+
+          <Alert severity="info" variant="outlined">
+            <Typography variant="caption" component="div">
+              <strong>Option 1:</strong> If you have an Azure AD app, enter its Client ID and sign in.
+              <br />
+              <strong>Option 2:</strong> Get a token from{' '}
+              <a
+                href="https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-get-scan-result?tryIt=true"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Microsoft's API docs (Try It)
+              </a>
+              {' '}and paste it below.
+            </Typography>
+          </Alert>
+
+          <TextField
+            label="OAuth Client ID (Optional)"
+            value={value.oauth_client_id || ''}
+            onChange={(e) => handleFieldChange('oauth_client_id', e.target.value)}
+            disabled={disabled || isAuthenticated}
+            fullWidth
+            helperText="Your Azure AD app Client ID for OAuth sign-in"
+            size="small"
+          />
+
+          <TextField
+            label="Access Token (Alternative)"
+            value={value.access_token || ''}
+            onChange={(e) => handleFieldChange('access_token', e.target.value)}
+            disabled={disabled || isAuthenticated}
+            fullWidth
+            type="password"
+            helperText="Paste a token from Microsoft's Try It page"
+            size="small"
+          />
+
+          {oauthError && (
+            <Alert severity="error" variant="outlined">
+              <Typography variant="caption">{oauthError}</Typography>
+            </Alert>
+          )}
+
+          {!isAuthenticated && !value.access_token ? (
+            <Button
+              variant="contained"
+              onClick={signIn}
+              disabled={disabled || oauthLoading || !value.oauth_client_id}
+              startIcon={<LoginIcon />}
+              fullWidth
+            >
+              {oauthLoading ? 'Signing in...' : 'Sign in with Microsoft'}
+            </Button>
+          ) : value.access_token && !isAuthenticated ? (
+            <Alert severity="success" icon={<CheckCircleIcon />}>
+              <Typography variant="body2">Access token provided</Typography>
+            </Alert>
+          ) : (
+            <>
+              <Alert severity="success" icon={<CheckCircleIcon />}>
+                <Typography variant="body2">
+                  Signed in as <strong>{userEmail || 'User'}</strong>
+                </Typography>
+              </Alert>
+              <Button
+                variant="outlined"
+                onClick={signOut}
+                disabled={disabled}
+                size="small"
+              >
+                Sign Out
+              </Button>
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* Advanced Options */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">Advanced Options</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Target Configuration */}
+            <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
+              Target Configuration
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="Target Catalog"
+                value={value.target_catalog || 'main'}
+                onChange={(e) => handleFieldChange('target_catalog', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                helperText="Unity Catalog name (e.g. david_test_metrics)"
+              />
+              <TextField
+                label="Target Schema"
+                value={value.target_schema || 'default'}
+                onChange={(e) => handleFieldChange('target_schema', e.target.value)}
+                disabled={disabled}
+                fullWidth
+                size="small"
+                helperText="Schema for generated views"
+              />
+            </Box>
+
+            {/* LLM Configuration */}
+            <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
+              LLM Conversion Settings
+            </Typography>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={value.use_llm !== false}
+                  onChange={(e) => handleFieldChange('use_llm', e.target.checked)}
+                  disabled={disabled}
+                />
+              }
+              label="Use LLM for complex M-Query conversions"
+            />
+            {value.use_llm !== false && (
+              <>
+                <TextField
+                  label="LLM Model"
+                  value={value.llm_model || 'databricks-claude-sonnet-4'}
+                  onChange={(e) => handleFieldChange('llm_model', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  helperText="Model endpoint for LLM conversion"
+                  size="small"
+                />
+                <TextField
+                  label="LLM Workspace URL (Optional)"
+                  value={value.llm_workspace_url || ''}
+                  onChange={(e) => handleFieldChange('llm_workspace_url', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  helperText="Databricks workspace URL for LLM (uses default if empty)"
+                  size="small"
+                />
+                <TextField
+                  label="LLM Token (DAPI)"
+                  value={value.llm_token || ''}
+                  onChange={(e) => handleFieldChange('llm_token', e.target.value)}
+                  disabled={disabled}
+                  fullWidth
+                  type="password"
+                  helperText="Databricks API token (PAT) for LLM access (uses DATABRICKS_TOKEN env var if empty)"
+                  size="small"
+                />
+              </>
+            )}
+
+            <Divider sx={{ my: 1 }} />
+
+            {/* Scan Options */}
+            <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
+              Scan Options
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_lineage !== false}
+                    onChange={(e) => handleFieldChange('include_lineage', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include lineage</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_datasource_details !== false}
+                    onChange={(e) => handleFieldChange('include_datasource_details', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include data source details</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_dataset_schema !== false}
+                    onChange={(e) => handleFieldChange('include_dataset_schema', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include dataset schema</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_dataset_expressions !== false}
+                    onChange={(e) => handleFieldChange('include_dataset_expressions', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include M-Query expressions</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_hidden_tables || false}
+                    onChange={(e) => handleFieldChange('include_hidden_tables', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include hidden tables</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.skip_static_tables !== false}
+                    onChange={(e) => handleFieldChange('skip_static_tables', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Skip static tables (Table.FromRows)</Typography>}
+              />
+            </Box>
+
+            <Divider sx={{ my: 1 }} />
+
+            {/* Output Options */}
+            <Typography variant="subtitle2" color="secondary" sx={{ fontWeight: 600 }}>
+              Output Options
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_relationships !== false}
+                    onChange={(e) => handleFieldChange('include_relationships', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include relationships (FK constraints)</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={value.include_summary !== false}
+                    onChange={(e) => handleFieldChange('include_summary', e.target.checked)}
+                    disabled={disabled}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="body2">Include summary report</Typography>}
+              />
+            </Box>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* DBSQL Validation */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">DBSQL Validation (optional)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" variant="outlined" sx={{ py: 0.5 }}>
+              <Typography variant="caption">
+                When configured, enables <strong>classify-first validation</strong>:
+                Requires two sets of credentials — the Admin API SP above for scanning,
+                and a <strong>Data Retrieval SP</strong> (workspace member with Dataset.ReadWrite.All)
+                for Execute Queries and EVALUATE. Databricks tables are
+                converted and their SQL output is compared against DAX (row-count comparison). Static tables
+                (Excel/JSON/Table.FromRows) are fetched from PBI and INSERTed into Delta. Other sources are
+                flagged as non-transpilable — no LLM calls wasted on them.
+              </Typography>
+            </Alert>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1 }}>
+              Data Retrieval Credentials
+            </Typography>
+            <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+              <Typography variant="caption">
+                Must be a <strong>workspace member</strong> with <code>Dataset.ReadWrite.All</code> permission.
+                Used for DAX Execute Queries (COUNT comparison) and EVALUATE (static table extraction).
+              </Typography>
+            </Alert>
+            <TextField
+              label="Tenant ID"
+              value={value.exec_tenant_id || ''}
+              onChange={(e) => handleFieldChange('exec_tenant_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="Azure AD tenant ID (leave empty to reuse Admin API tenant)"
+            />
+            <TextField
+              label="Client ID"
+              value={value.exec_client_id || ''}
+              onChange={(e) => handleFieldChange('exec_client_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="SP or app Client ID with Dataset.ReadWrite.All"
+            />
+            <TextField
+              label="Client Secret"
+              value={value.exec_client_secret || ''}
+              onChange={(e) => handleFieldChange('exec_client_secret', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Client secret — OR paste a pre-obtained token below instead"
+            />
+            <TextField
+              label="Access Token (alternative)"
+              value={value.exec_access_token || ''}
+              onChange={(e) => handleFieldChange('exec_access_token', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Pre-obtained OAuth token with Dataset.ReadWrite.All (overrides SP credentials above)"
+            />
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1 }}>
+              DBSQL Connection
+            </Typography>
+            <TextField
+              label="Databricks SQL Endpoint"
+              value={value.databricks_sql_endpoint || ''}
+              onChange={(e) => handleFieldChange('databricks_sql_endpoint', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="e.g. https://your-workspace.cloud.databricks.com/api/2.0/mcp/sql — warehouse auto-detected"
+            />
+            <TextField
+              label="Databricks PAT"
+              value={value.databricks_pat || ''}
+              onChange={(e) => handleFieldChange('databricks_pat', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              type="password"
+              size="small"
+              helperText="Personal Access Token for DBSQL — leave empty to skip validation"
+            />
+            <TextField
+              label="Max Correction Iterations"
+              value={value.max_iterations || '10'}
+              onChange={(e) => handleFieldChange('max_iterations', e.target.value)}
+              disabled={disabled}
+              type="number"
+              fullWidth
+              size="small"
+              helperText="Max LLM SQL correction attempts per table when SQL ≠ DAX row count"
+              inputProps={{ min: 1, max: 20 }}
+            />
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* Info about what the tool does */}
+      <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          What this tool does:
+        </Typography>
+        <Typography variant="caption">
+          Scans Power BI workspaces via the Admin API to extract M-Query (Power Query) expressions
+          and converts them to Databricks SQL CREATE VIEW statements. Supports:
+        </Typography>
+        <Box component="ul" sx={{ pl: 2, mt: 0.5, mb: 0, fontSize: '0.75rem' }}>
+          <li>Value.NativeQuery (embedded SQL)</li>
+          <li>DatabricksMultiCloud.Catalogs connections</li>
+          <li>Sql.Database connections</li>
+          <li>Table transformations (Table.SelectRows, Table.AddColumn, etc.)</li>
+          <li>Relationship extraction as FK constraints</li>
+        </Box>
+      </Alert>
+    </Box>
+  );
+};

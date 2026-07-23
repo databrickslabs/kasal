@@ -1,0 +1,773 @@
+/**
+ * HITL Approval Dialog Component
+ *
+ * A dialog that appears when clicking on an "Awaiting Approval" status badge.
+ * Allows users to quickly approve or reject a pending HITL gate.
+ */
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  Typography,
+  Box,
+  CircularProgress,
+  Alert,
+  Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Divider,
+  IconButton,
+  Paper,
+} from '@mui/material';
+import {
+  CheckCircle as ApproveIcon,
+  Cancel as RejectIcon,
+  Close as CloseIcon,
+  AccessTime as TimeIcon,
+  Description as DescriptionIcon,
+  Refresh as RefreshIcon,
+  EditNote as EditNoteIcon,
+  Fullscreen as FullscreenIcon,
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import {
+  HITLService,
+  HITLApprovalResponse,
+  HITLRejectionAction,
+} from '../../api/HITLService';
+import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
+import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
+import { runService } from '../../api/ExecutionHistoryService';
+import SaveIcon from '@mui/icons-material/Save';
+import DownloadIcon from '@mui/icons-material/Download';
+import { CrewOutputRenderer } from './CrewOutputRenderer';
+
+interface HITLApprovalDialogProps {
+  /** Whether the dialog is open */
+  open: boolean;
+  /** The execution ID to fetch approval for */
+  executionId: string;
+  /** Callback when dialog is closed */
+  onClose: () => void;
+  /** Callback when an approval action is completed */
+  onActionComplete?: (action: 'approve' | 'reject') => void;
+}
+
+const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
+  open,
+  executionId,
+  onClose,
+  onActionComplete,
+}) => {
+  const navigate = useNavigate();
+  const [approval, setApproval] = useState<HITLApprovalResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
+  const [comment, setComment] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [rejectionAction, setRejectionAction] = useState<HITLRejectionAction>(
+    HITLRejectionAction.REJECT
+  );
+  const [actionLoading, setActionLoading] = useState(false);
+  const [outputFullScreen, setOutputFullScreen] = useState(false);
+  // The status endpoint omits the (potentially ~1 MB) previous_crew_output; we
+  // lazy-load it via getApproval(id) so the gate opens instantly.
+  const [outputLoading, setOutputLoading] = useState(false);
+
+  // UCMV edit state
+  const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
+  const [editedGenieConfig, setEditedGenieConfig] = useState<GenieSpaceConfig | null>(null);
+
+  // Fetch approval for the execution
+  const fetchApproval = useCallback(async () => {
+    if (!executionId) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const status = await HITLService.getExecutionHITLStatus(executionId);
+      if (status.pending_approval) {
+        const pending = status.pending_approval;
+        // Render the gate shell immediately (status omits the heavy output).
+        setApproval(pending);
+
+        // Lazy-load the full previous_crew_output on demand (it can be ~1 MB and
+        // would make the gate slow to open if shipped in the status response).
+        if (pending.has_previous_crew_output && !pending.previous_crew_output) {
+          setOutputLoading(true);
+          // 'ui' projection strips downstream-handoff arrays (~390 KB) the gate
+          // doesn't render — the flow still injects the full blob downstream.
+          HITLService.getApproval(pending.id, 'ui')
+            .then((full) => {
+              setApproval((prev) =>
+                prev && prev.id === full.id
+                  ? { ...prev, previous_crew_output: full.previous_crew_output }
+                  : prev
+              );
+              // Pre-persist UCMV output so the Validator can find it even if the
+              // user approves immediately without editing.
+              if (full.previous_crew_output) {
+                try {
+                  const parsed = JSON.parse(full.previous_crew_output);
+                  if (isUCMVResult(parsed)) {
+                    runService.updateExecutionResult(
+                      full.execution_id,
+                      parsed as unknown as Record<string, unknown>
+                    ).catch(() => { /* non-blocking */ });
+                  }
+                } catch { /* not UCMV, skip */ }
+              }
+            })
+            .catch(() => { /* leave output empty; gate still actionable */ })
+            .finally(() => setOutputLoading(false));
+        }
+      } else {
+        setApproval(null);
+        setError('No pending approval found for this execution');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch approval');
+    } finally {
+      setLoading(false);
+    }
+  }, [executionId]);
+
+  // Fetch on open
+  useEffect(() => {
+    if (open && executionId) {
+      fetchApproval();
+      // Reset form state
+      setActionType(null);
+      setComment('');
+      setRejectionReason('');
+      setRejectionAction(HITLRejectionAction.REJECT);
+      setEditedUCMV(null);
+    }
+  }, [open, executionId, fetchApproval]);
+
+  // Handle approve action
+  const handleApprove = async () => {
+    /* v8 ignore next -- defensive: Approve is only shown when approval exists */
+    if (!approval) return;
+
+    setActionLoading(true);
+    try {
+      // If the previous crew output is a UCMV result, persist it to ucmv_yaml_edits
+      // BEFORE approving so the UCMV Validator can find it in the next flow step.
+      if (approval.previous_crew_output) {
+        try {
+          const parsed = JSON.parse(approval.previous_crew_output);
+          if (isUCMVResult(parsed)) {
+            await runService.updateExecutionResult(
+              approval.execution_id,
+              (editedUCMV ?? parsed) as unknown as Record<string, unknown>
+            );
+          }
+        } catch { /* not UCMV, skip */ }
+      }
+      await HITLService.approveGate(approval.id, {
+        comment: comment || undefined,
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle reject action
+  const handleReject = async () => {
+    /* v8 ignore next -- defensive: Confirm Rejection is disabled until both exist */
+    if (!approval || !rejectionReason) return;
+
+    setActionLoading(true);
+    try {
+      await HITLService.rejectGate(approval.id, {
+        reason: rejectionReason,
+        action: rejectionAction,
+      });
+      onActionComplete?.('reject');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited Genie Space config
+  const handleSaveAndApproveGenieConfig = async () => {
+    if (!approval || !editedGenieConfig) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited Genie config to checkpoint_data.edited_config
+      // The HITL gate reads this and passes it as previous_output to the next crew
+      await runService.updateExecutionResult(approval.execution_id, editedGenieConfig as unknown as Record<string, unknown>);
+      await HITLService.approveGate(approval.id, {
+        comment: 'Genie Space config reviewed and edited',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Save & Approve for edited UCMV output
+  const handleSaveAndApproveUCMV = async () => {
+    if (!approval || !editedUCMV) return;
+
+    setActionLoading(true);
+    try {
+      // Save edited UCMV result to checkpoint_data.edited_config
+      await runService.updateExecutionResult(approval.execution_id, editedUCMV as unknown as Record<string, unknown>);
+      // Approve the gate
+      await HITLService.approveGate(approval.id, {
+        comment: 'UCMV output reviewed and edited via UCMV Viewer',
+      });
+      onActionComplete?.('approve');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save and approve');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Format time remaining
+  const formatTimeRemaining = (expiresAt: string | null | undefined) => {
+    if (!expiresAt) return 'No expiry';
+
+    const now = new Date();
+    const expires = new Date(expiresAt);
+    const diff = expires.getTime() - now.getTime();
+
+    if (diff <= 0) return 'Expired';
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (hours > 24) {
+      const days = Math.floor(hours / 24);
+      return `${days}d ${hours % 24}h remaining`;
+    }
+    if (hours > 0) {
+      return `${hours}h ${minutes}m remaining`;
+    }
+    return `${minutes}m remaining`;
+  };
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <Box display="flex" justifyContent="center" alignItems="center" p={4}>
+          <CircularProgress size={32} />
+          <Typography variant="body2" sx={{ ml: 2 }}>
+            Loading approval details...
+          </Typography>
+        </Box>
+      );
+    }
+
+    if (error && !approval) {
+      return (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={fetchApproval}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      );
+    }
+
+    /* v8 ignore start -- defensive only: when there is no pending approval,
+       fetchApproval also sets `error`, so the `error && !approval` branch above
+       always renders first; this fallback is therefore unreachable in practice. */
+    if (!approval) {
+      return (
+        <Alert severity="info">
+          No pending approval found for this execution.
+        </Alert>
+      );
+    }
+    /* v8 ignore stop */
+
+    // Show approval form based on action type
+    if (actionType === 'approve') {
+      return (
+        <Box>
+          <Typography variant="body1" gutterBottom>
+            Approving this gate will resume the flow execution.
+          </Typography>
+          <TextField
+            label="Comment (optional)"
+            fullWidth
+            multiline
+            rows={3}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add an optional comment..."
+            sx={{ mt: 2 }}
+          />
+          {error && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {error}
+            </Alert>
+          )}
+        </Box>
+      );
+    }
+
+    if (actionType === 'reject') {
+      return (
+        <Box>
+          <Typography variant="body1" gutterBottom>
+            Please provide a reason for rejection.
+          </Typography>
+          <TextField
+            label="Rejection Reason"
+            fullWidth
+            required
+            multiline
+            rows={3}
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+            placeholder="Enter reason for rejection..."
+            sx={{ mt: 2, mb: 2 }}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Action</InputLabel>
+            <Select
+              value={rejectionAction}
+              label="Action"
+              onChange={(e) => setRejectionAction(e.target.value as HITLRejectionAction)}
+            >
+              <MenuItem value={HITLRejectionAction.REJECT}>
+                Reject - Fail the flow execution
+              </MenuItem>
+              <MenuItem value={HITLRejectionAction.RETRY}>
+                Retry - Re-run the previous crew
+              </MenuItem>
+            </Select>
+          </FormControl>
+          {error && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {error}
+            </Alert>
+          )}
+        </Box>
+      );
+    }
+
+    // Default: show approval details
+    return (
+      <Box>
+        {/* Status and Time */}
+        <Box display="flex" alignItems="center" gap={1} mb={2}>
+          <Chip
+            label={approval.status}
+            size="small"
+            color="warning"
+          />
+          <Chip
+            icon={<TimeIcon />}
+            label={formatTimeRemaining(approval.expires_at)}
+            size="small"
+            variant="outlined"
+            color={approval.is_expired ? 'error' : 'default'}
+          />
+        </Box>
+
+        {/* Message */}
+        <Typography variant="h6" gutterBottom>
+          {(approval.gate_config as { message?: string })?.message || 'Approval Required'}
+        </Typography>
+
+        {/* Previous Crew Info */}
+        {approval.previous_crew_name && (
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Waiting after: <strong>{approval.previous_crew_name}</strong>
+          </Typography>
+        )}
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* Output still lazy-loading (status omits it; fetched via getApproval) */}
+        {outputLoading && !approval.previous_crew_output && (
+          <Box mb={2} display="flex" alignItems="center" gap={1}>
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">
+              Loading output for review
+              {approval.previous_crew_output_size
+                ? ` (${Math.round(approval.previous_crew_output_size / 1024)} KB)…`
+                : '…'}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Previous Output */}
+        {approval.previous_crew_output && (
+          <Box mb={2}>
+            <Box
+              display="flex"
+              alignItems="center"
+              justifyContent="space-between"
+              gap={0.5}
+            >
+              <Typography
+                variant="body2"
+                fontWeight="medium"
+                display="flex"
+                alignItems="center"
+                gap={0.5}
+              >
+                <DescriptionIcon fontSize="small" />
+                Previous Crew Output:
+              </Typography>
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <IconButton
+                  size="small"
+                  title="Download output"
+                  onClick={() => {
+                    const raw = approval.previous_crew_output ?? '';
+                    const triggerDownload = (content: string, name: string, mime = 'application/octet-stream') => {
+                      const blob = new Blob([content], { type: mime });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = name; a.click();
+                      URL.revokeObjectURL(url);
+                    };
+                    try {
+                      const parsed = JSON.parse(raw);
+                      if (parsed && typeof parsed === 'object' && 'yaml' in parsed) {
+                        // UCMV/Validator output — download each view as individual .yml
+                        const yamlDict = parsed.yaml as Record<string, string>;
+                        const entries = Object.entries(yamlDict);
+                        entries.forEach(([key, yamlContent], i) => {
+                          setTimeout(() => {
+                            triggerDownload(yamlContent, `${key}.yml`, 'text/yaml');
+                          }, i * 100);
+                        });
+                      } else {
+                        triggerDownload(JSON.stringify(parsed, null, 2), 'step_output.json', 'application/json');
+                      }
+                    } catch {
+                      triggerDownload(raw, 'step_output.txt', 'text/plain');
+                    }
+                  }}
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => setOutputFullScreen(true)}
+                  aria-label="View output full screen"
+                  title="View full screen"
+                >
+                  <FullscreenIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+            {(() => {
+              // Try to detect UCMV result shape for structured rendering
+              try {
+                const parsed = JSON.parse(approval.previous_crew_output);
+                if (isUCMVResult(parsed)) {
+                  return (
+                    <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 500, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <UCMVResultViewer
+                        result={editedUCMV ?? parsed}
+                        editable
+                        onResultChange={setEditedUCMV}
+                      />
+                    </Paper>
+                  );
+                }
+                // Detect Genie Space Config output (has space_title + text_instructions)
+                if (parsed && typeof parsed === 'object' && 'space_title' in parsed && 'text_instructions' in parsed) {
+                  const genieConfig = editedGenieConfig ?? (parsed as GenieSpaceConfig);
+                  return (
+                    <Paper variant="outlined" sx={{ p: 2, maxHeight: 600, overflow: 'auto', bgcolor: 'background.default' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                        Review and edit the auto-generated Genie Space configuration before approving:
+                      </Typography>
+                      <GenieSpaceConfigSelector
+                        value={genieConfig}
+                        onChange={(config) => setEditedGenieConfig(config)}
+                      />
+                    </Paper>
+                  );
+                }
+              } catch { /* not JSON, fall through to raw display */ }
+              return (
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight={320}
+                />
+              );
+            })()}
+
+            {/* Full-screen view of the crew output */}
+            <Dialog
+              open={outputFullScreen}
+              onClose={() => setOutputFullScreen(false)}
+              fullScreen
+            >
+              <DialogTitle
+                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <Box display="flex" alignItems="center" gap={0.5}>
+                  <DescriptionIcon fontSize="small" />
+                  Previous Crew Output
+                </Box>
+                <IconButton
+                  onClick={() => setOutputFullScreen(false)}
+                  aria-label="Close full screen"
+                >
+                  <CloseIcon />
+                </IconButton>
+              </DialogTitle>
+              <DialogContent dividers>
+                <CrewOutputRenderer
+                  content={approval.previous_crew_output}
+                  maxHeight="calc(100vh - 160px)"
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setOutputFullScreen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
+          </Box>
+        )}
+
+        {/* Review in Config Editor — detect pipeline_config in previous_crew_output */}
+        {(() => {
+          if (!approval?.previous_crew_output) return null;
+          const configKeys = ['join_key_map', 'enrichment_joins', 'switch_decompositions', 'filter_sets', 'measure_resolutions'];
+          let configData: Record<string, unknown> | null = null;
+
+          // Try parsing previous_crew_output as JSON containing config keys
+          try {
+            const parsed = JSON.parse(approval.previous_crew_output);
+            if (parsed?.proposed_config) {
+              configData = parsed.proposed_config;
+            } else if (configKeys.some(k => k in (parsed || {}))) {
+              configData = parsed;
+            }
+          } catch { /* not JSON, skip */ }
+
+          if (!configData) return null;
+
+          return (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<EditNoteIcon />}
+              onClick={() => {
+                onClose();
+                navigate('/config-editor', {
+                  state: {
+                    config: configData,
+                    source: `HITL Review: ${approval.previous_crew_name || 'Unknown crew'}`,
+                    jobId: approval.execution_id,
+                    approvalId: approval.id,
+                  },
+                });
+              }}
+              sx={{ mb: 2 }}
+            >
+              Review &amp; Edit in Config Editor
+            </Button>
+          );
+        })()}
+
+        {/* Metadata */}
+        <Box display="flex" flexWrap="wrap" gap={2} sx={{ fontSize: '0.85rem' }}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Gate
+            </Typography>
+            <Typography variant="body2" fontFamily="monospace">
+              {approval.gate_node_id?.split('-').slice(-2).join('-') || 'N/A'}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Created
+            </Typography>
+            <Typography variant="body2">
+              {new Date(approval.created_at).toLocaleString()}
+            </Typography>
+          </Box>
+        </Box>
+
+        {error && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {error}
+          </Alert>
+        )}
+      </Box>
+    );
+  };
+
+  const renderActions = () => {
+    if (loading || (!approval && !error)) {
+      return (
+        <Button onClick={onClose}>Close</Button>
+      );
+    }
+
+    if (!approval) {
+      return (
+        <>
+          <Button startIcon={<RefreshIcon />} onClick={fetchApproval}>
+            Refresh
+          </Button>
+          <Button onClick={onClose}>Close</Button>
+        </>
+      );
+    }
+
+    if (actionType === 'approve') {
+      return (
+        <>
+          <Button onClick={() => setActionType(null)} disabled={actionLoading}>
+            Back
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={handleApprove}
+            disabled={actionLoading}
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <ApproveIcon />}
+          >
+            Confirm Approval
+          </Button>
+        </>
+      );
+    }
+
+    if (actionType === 'reject') {
+      return (
+        <>
+          <Button onClick={() => setActionType(null)} disabled={actionLoading}>
+            Back
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleReject}
+            disabled={actionLoading || !rejectionReason}
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <RejectIcon />}
+          >
+            Confirm Rejection
+          </Button>
+        </>
+      );
+    }
+
+    // Default: show approve/reject buttons
+    return (
+      <>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<RejectIcon />}
+          onClick={() => setActionType('reject')}
+          disabled={approval.is_expired}
+        >
+          Reject
+        </Button>
+        {editedUCMV ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveUCMV}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save &amp; Approve
+          </Button>
+        ) : editedGenieConfig ? (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
+            onClick={handleSaveAndApproveGenieConfig}
+            disabled={actionLoading || approval.is_expired}
+          >
+            Save Config &amp; Approve
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<ApproveIcon />}
+            onClick={() => setActionType('approve')}
+            disabled={approval.is_expired}
+          >
+            Approve
+          </Button>
+        )}
+      </>
+    );
+  };
+
+  // Detect UCMV output to size dialog appropriately
+  const hasUCMVOutput = useMemo(() => {
+    if (!approval?.previous_crew_output) return false;
+    try {
+      return isUCMVResult(JSON.parse(approval.previous_crew_output));
+    } catch { return false; }
+  }, [approval?.previous_crew_output]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={hasUCMVOutput ? 'lg' : 'sm'}
+      fullWidth
+      PaperProps={{
+        sx: { minHeight: 300 },
+      }}
+    >
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box>
+          {actionType === 'approve' && 'Approve Gate'}
+          {actionType === 'reject' && 'Reject Gate'}
+          {!actionType && 'Human Approval Required'}
+        </Box>
+        <IconButton size="small" onClick={onClose}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        {renderContent()}
+      </DialogContent>
+      <DialogActions>
+        {renderActions()}
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+export default HITLApprovalDialog;

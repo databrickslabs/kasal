@@ -1,0 +1,122 @@
+from typing import Any, Dict, List, Optional, Union
+import os
+from pathlib import Path
+
+from pydantic import AnyHttpUrl, PostgresDsn, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "Modern Backend"
+    PROJECT_DESCRIPTION: str = "A modern backend API for the Kasal application"
+    VERSION: str = "0.1.0"
+    API_V1_STR: str = "/api/v1"
+    
+    # BACKEND_CORS_ORIGINS is a comma-separated list of origins
+    # e.g: "http://localhost,http://localhost:8080"
+    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3002", "http://127.0.0.1:3002", "http://localhost:5173", "http://127.0.0.1:5173"]
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+
+    # Database settings
+    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "postgres")  # 'postgres' or 'sqlite'
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "kasal"
+    POSTGRES_PORT: str = "5432"
+    DATABASE_URI: Optional[str] = None
+    SYNC_DATABASE_URI: Optional[str] = None
+    
+    # Database file path for SQLite
+    SQLITE_DB_PATH: Optional[str] = os.getenv("SQLITE_DB_PATH", "./app.db")
+    DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
+
+    @field_validator("DATABASE_URI", mode="before")
+    def assemble_db_connection(cls, v: Optional[str], info) -> Any:
+        if isinstance(v, str):
+            return v
+        
+        # Check database type to determine URI format
+        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        
+        if db_type.lower() == "sqlite":
+            sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
+            return f"sqlite+aiosqlite:///{sqlite_path}"
+        else:
+            # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
+            return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
+
+    @field_validator("SYNC_DATABASE_URI", mode="before")
+    def assemble_sync_db_connection(cls, v: Optional[str], info) -> Any:
+        if isinstance(v, str):
+            return v
+        
+        # Check database type to determine URI format
+        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        
+        if db_type.lower() == "sqlite":
+            sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
+            return f"sqlite:///{sqlite_path}"
+        else:
+            # Use asyncpg for sync operations too - avoid psycopg2 dependency
+            return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
+
+    # API Documentation
+    DOCS_ENABLED: bool = True
+    
+    # Logging
+    # Support both old LOG_LEVEL and new KASAL_LOG_LEVEL environment variables
+    LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
+
+    # Server settings
+    SERVER_HOST: str = "0.0.0.0"
+    SERVER_PORT: int = 8000
+    DEBUG_MODE: bool = False
+
+    # Local development fallback user.
+    # Set this in your .env file when running outside Databricks Apps.
+    # Leave empty (the default) in production — the platform provides X-Forwarded-Email.
+    LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
+
+    # Add the following setting to control database seeding
+    AUTO_SEED_DATABASE: bool = True
+
+    # LiteLLM response caching
+    # Caches LLM completions/embeddings to cut latency and cost on repeated
+    # identical calls. CrewAI uses LiteLLM under the hood, so enabling this
+    # transparently benefits crew execution too.
+    LITELLM_CACHE_ENABLED: bool = os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
+    # Backend: "disk" (default), "local" (in-memory), "redis", or "s3".
+    # Defaults to "disk" because crews run in fresh subprocesses — an in-memory
+    # ("local") cache is cold on every run and only helps repeats within a single
+    # process. "disk" persists and is shared across the API process and crew
+    # subprocesses, so identical calls hit across runs (no Redis infra required).
+    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "disk")
+    # Time-to-live for cached responses, in seconds (default 1 hour).
+    LITELLM_CACHE_TTL: int = int(os.getenv("LITELLM_CACHE_TTL", "3600"))
+    # On-disk cache directory (only used when LITELLM_CACHE_TYPE == "disk").
+    # Defaults to <logs>/llm_cache so the cache lives in a controlled, shared
+    # location across the API process and crew subprocesses (enabling cross-run
+    # hits) instead of litellm's default ".litellm_cache" in the current dir.
+    LITELLM_CACHE_DIR: Optional[str] = os.getenv("LITELLM_CACHE_DIR")
+    # Redis connection (only used when LITELLM_CACHE_TYPE == "redis").
+    LITELLM_CACHE_REDIS_HOST: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_HOST")
+    LITELLM_CACHE_REDIS_PORT: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PORT")
+    LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PASSWORD")
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
+
+
+settings = Settings() 

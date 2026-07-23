@@ -1,0 +1,984 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Typography,
+  Box,
+  Alert,
+  TextField,
+  Button,
+  CircularProgress,
+  Switch,
+  FormControlLabel,
+  Grid,
+  Slider,
+  Tooltip as MuiTooltip,
+  IconButton,
+  Paper,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Select,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  InputLabel,
+  FormControl,
+  Chip,
+  SelectChangeEvent,
+  Snackbar,
+} from '@mui/material';
+import CloudIcon from '@mui/icons-material/Cloud';
+import StorageIcon from '@mui/icons-material/Storage';
+import InfoIcon from '@mui/icons-material/Info';
+import AddIcon from '@mui/icons-material/Add';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+
+import { useTranslation } from 'react-i18next';
+import { MCPService } from '../../../api/MCPService';
+import DatabricksMcpCatalog from './DatabricksMcpCatalog';
+
+// Define MCP Server configuration interface
+export interface MCPServerConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  global_enabled: boolean;  // NEW: Enable across all agents/tasks
+  server_url: string;
+  api_key: string;
+  server_type: string;  // "sse" or "streamable"
+  auth_type?: string;  // "api_key", "databricks_obo", or "databricks_spn"
+  timeout_seconds: number;
+  max_retries: number;
+  rate_limit: number;
+  command?: string;  // Command for stdio server type
+  args?: string[];   // Arguments for stdio server type
+  session_id?: string;  // Session ID for streamable server type
+  additional_config?: Record<string, unknown>;  // Additional configuration parameters
+  group_id?: string | null; // Workspace override identifier when present
+}
+
+export const DEFAULT_MCP_CONFIG: MCPServerConfig = {
+  id: '',
+  name: 'Default MCP Server',
+  enabled: false,
+  global_enabled: false,  // Default to not globally enabled
+  server_url: '',
+  api_key: '',
+  server_type: 'streamable',  // Default to Streamable HTTP server type
+  auth_type: 'api_key',  // Default to API key authentication
+  timeout_seconds: 30,
+  max_retries: 3,
+  rate_limit: 60,
+  command: '',
+  args: [],
+  additional_config: {},
+  group_id: null,
+};
+
+// Define MCP configuration to store multiple servers
+export interface MCPConfiguration {
+  servers: MCPServerConfig[];
+  global_enabled: boolean;
+}
+
+export const DEFAULT_MCP_CONFIGURATION: MCPConfiguration = {
+  servers: [],
+  global_enabled: false
+};
+
+// MCPConfiguration component doesn't need props currently
+
+interface ServerEditDialogProps {
+  open: boolean;
+  onClose: () => void;
+  server: MCPServerConfig | null;
+  onSave: (server: MCPServerConfig) => void;
+  isNew?: boolean;
+}
+
+// Server edit dialog component
+const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
+  open,
+  onClose,
+  server,
+  onSave,
+  isNew = false
+}) => {
+  const { t } = useTranslation();
+  const [editedServer, setEditedServer] = useState<MCPServerConfig | null>(server);
+  const [originalApiKey, setOriginalApiKey] = useState<string>('');
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    tested: boolean;
+    success: boolean;
+    message: string;
+  }>({ tested: false, success: false, message: '' });
+
+  useEffect(() => {
+    setEditedServer(server);
+    // Store the original API key for comparison
+    if (server) {
+      setOriginalApiKey(server.api_key || '');
+    }
+    // Reset connection test result when dialog opens/closes or server changes
+    setConnectionTestResult({ tested: false, success: false, message: '' });
+  }, [server, isNew]);
+
+  if (!editedServer) return null;
+
+  const handleTextChange = (field: keyof MCPServerConfig) => (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = event.target.value;
+    setEditedServer(prev => prev ? {
+      ...prev,
+      [field]: value
+    } : null);
+  };
+
+  const handleSelectChange = (field: keyof MCPServerConfig) => (
+    event: SelectChangeEvent<string>
+  ) => {
+    const value = event.target.value;
+    setEditedServer(prev => prev ? {
+      ...prev,
+      [field]: value
+    } : null);
+  };
+
+  const handleSliderChange = (field: keyof MCPServerConfig) => (
+    _event: Event,
+    newValue: number | number[]
+  ) => {
+    setEditedServer(prev => prev ? {
+      ...prev,
+      [field]: newValue as number
+    } : null);
+  };
+
+  const handleSave = () => {
+    if (editedServer) {
+      // For existing servers, only include API key if it has been changed
+      const serverToSave = { ...editedServer };
+
+      if (!isNew && editedServer.api_key === originalApiKey) {
+        // API key hasn't changed, remove it from the update payload
+        const { api_key, ...serverWithoutApiKey } = serverToSave;
+        Object.assign(serverToSave, serverWithoutApiKey);
+      }
+
+      onSave(serverToSave);
+      onClose();
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!editedServer) return;
+
+    setTestingConnection(true);
+    setConnectionTestResult({ tested: false, success: false, message: '' });
+
+    try {
+      const mcpService = MCPService.getInstance();
+      const result = await mcpService.testConnection(editedServer);
+      setConnectionTestResult({
+        tested: true,
+        success: result.success,
+        message: result.message
+      });
+    } catch (error) {
+      setConnectionTestResult({
+        tested: true,
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed'
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="md"
+      PaperProps={{
+        sx: {
+          borderRadius: 2,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
+        }
+      }}
+    >
+      <DialogTitle sx={{
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+        p: 3,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <CloudIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.5rem' }} />
+          <Typography variant="h5">
+            {isNew
+              ? t('configuration.mcp.addServer', { defaultValue: 'Add MCP Server' })
+              : t('configuration.mcp.editServer', { defaultValue: 'Edit MCP Server' })}
+          </Typography>
+        </Box>
+        <IconButton onClick={onClose}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ p: 3 }}>
+        <Grid container spacing={3} sx={{ mt: 0.5 }}>
+          <Grid item xs={12}>
+            <TextField
+              label={t('configuration.mcp.serverName', { defaultValue: 'Server Name' })}
+              value={editedServer.name}
+              onChange={handleTextChange('name')}
+              fullWidth
+              required
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 1.5,
+                }
+              }}
+            />
+          </Grid>
+
+          <Grid item xs={12} md={9}>
+            <TextField
+              label={t('configuration.mcp.serverUrl', { defaultValue: 'Server URL' })}
+              value={editedServer.server_url}
+              onChange={handleTextChange('server_url')}
+              fullWidth
+              required
+              helperText={t('configuration.mcp.serverUrlHelp', { defaultValue: 'Full URL of the MCP server endpoint' })}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 1.5,
+                }
+              }}
+            />
+          </Grid>
+
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth>
+              <InputLabel id="server-type-label">Server Type</InputLabel>
+              <Select
+                labelId="server-type-label"
+                value={editedServer.server_type || 'streamable'}
+                label="Server Type"
+                onChange={handleSelectChange('server_type')}
+              >
+                <MenuItem value="streamable">Streamable HTTP</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {editedServer.server_type === 'streamable' && (
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel id="auth-type-label">Authentication Type</InputLabel>
+                <Select
+                  labelId="auth-type-label"
+                  value={editedServer.auth_type || 'api_key'}
+                  label="Authentication Type"
+                  onChange={handleSelectChange('auth_type')}
+                >
+                  <MenuItem value="api_key">API Key</MenuItem>
+                  <MenuItem value="databricks_obo">Apps OBO (on-behalf-of user)</MenuItem>
+                  <MenuItem value="databricks_spn">Apps SPN</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
+
+          {editedServer.server_type === 'streamable' && !['databricks_spn', 'databricks_obo'].includes(editedServer.auth_type || '') && (
+            <Grid item xs={12} md={6}>
+              <TextField
+                label={t('configuration.mcp.apiKey', { defaultValue: 'API Key' })}
+                value={editedServer.api_key}
+                onChange={handleTextChange('api_key')}
+                fullWidth
+                type="password"
+                required
+                helperText={t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 1.5,
+                  }
+                }}
+              />
+            </Grid>
+          )}
+
+          {editedServer.server_type === 'streamable' && (
+            <Grid item xs={12}>
+              <TextField
+                label={t('configuration.mcp.sessionId', { defaultValue: 'Session ID (Optional)' })}
+                value={editedServer.session_id || ''}
+                onChange={handleTextChange('session_id')}
+                fullWidth
+                helperText={t('configuration.mcp.sessionIdHelp', { defaultValue: 'Optional session ID for maintaining state across requests. Leave empty for stateless connections.' })}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 1.5,
+                  }
+                }}
+              />
+            </Grid>
+          )}
+
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" gutterBottom>
+              {t('configuration.mcp.advanced', { defaultValue: 'Advanced Settings' })}
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography variant="body2">
+                {t('configuration.mcp.timeout', { defaultValue: 'Timeout (seconds)' })}
+              </Typography>
+              <MuiTooltip title={t('configuration.mcp.timeoutHelp', { defaultValue: 'Maximum time to wait for server response' })}>
+                <InfoIcon fontSize="small" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.9rem' }} />
+              </MuiTooltip>
+            </Box>
+            <Slider
+              value={editedServer.timeout_seconds}
+              onChange={handleSliderChange('timeout_seconds')}
+              min={5}
+              max={120}
+              step={5}
+              marks={[
+                { value: 5, label: '5s' },
+                { value: 30, label: '30s' },
+                { value: 60, label: '60s' },
+                { value: 120, label: '120s' },
+              ]}
+              valueLabelDisplay="auto"
+            />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography variant="body2">
+                {t('configuration.mcp.maxRetries', { defaultValue: 'Max Retries' })}
+              </Typography>
+              <MuiTooltip title={t('configuration.mcp.maxRetriesHelp', { defaultValue: 'Number of retry attempts on failure' })}>
+                <InfoIcon fontSize="small" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.9rem' }} />
+              </MuiTooltip>
+            </Box>
+            <Slider
+              value={editedServer.max_retries}
+              onChange={handleSliderChange('max_retries')}
+              min={0}
+              max={10}
+              step={1}
+              marks={[
+                { value: 0, label: '0' },
+                { value: 3, label: '3' },
+                { value: 5, label: '5' },
+                { value: 10, label: '10' },
+              ]}
+              valueLabelDisplay="auto"
+            />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Typography variant="body2">
+                {t('configuration.mcp.rateLimit', { defaultValue: 'Rate Limit (RPM)' })}
+              </Typography>
+              <MuiTooltip title={t('configuration.mcp.rateLimitHelp', { defaultValue: 'Maximum requests per minute to the MCP server' })}>
+                <InfoIcon fontSize="small" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.9rem' }} />
+              </MuiTooltip>
+            </Box>
+            <Slider
+              value={editedServer.rate_limit}
+              onChange={handleSliderChange('rate_limit')}
+              min={10}
+              max={600}
+              step={10}
+              marks={[
+                { value: 10, label: '10' },
+                { value: 60, label: '60' },
+                { value: 300, label: '300' },
+                { value: 600, label: '600' },
+              ]}
+              valueLabelDisplay="auto"
+            />
+          </Grid>
+        </Grid>
+
+        {/* Connection Test Result */}
+        {connectionTestResult.tested && (
+          <Box sx={{ mt: 2 }}>
+            <Alert
+              severity={connectionTestResult.success ? 'success' : 'error'}
+              icon={connectionTestResult.success ? <CheckCircleIcon /> : <ErrorIcon />}
+            >
+              {connectionTestResult.message}
+            </Alert>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ p: 3, pt: 1, display: 'flex', justifyContent: 'space-between' }}>
+        <Button
+          onClick={handleTestConnection}
+          disabled={
+            testingConnection ||
+            !editedServer.server_url?.trim() ||
+            (editedServer.server_type === 'streamable' &&
+             !['databricks_spn', 'databricks_obo'].includes(editedServer.auth_type || '') &&
+             !editedServer.api_key?.trim())
+          }
+          startIcon={testingConnection ? <CircularProgress size={16} /> : <CloudIcon />}
+        >
+          {testingConnection
+            ? t('configuration.mcp.testingConnection', { defaultValue: 'Testing...' })
+            : t('configuration.mcp.testConnection', { defaultValue: 'Test Connection' })
+          }
+        </Button>
+        <Box>
+          <Button onClick={onClose} color="inherit" sx={{ mr: 1 }}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            onClick={handleSave}
+            variant="contained"
+            color="primary"
+          >
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </Box>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+interface MCPConfigurationProps {
+  /**
+   * 'system'  → global admin view: lists base/global servers and toggles their
+   *             availability to ALL workspaces (Configuration → System Admin).
+   * 'workspace' (default) → per-workspace view: lists the workspace's effective
+   *             servers and toggles them for THIS workspace (creating an override
+   *             when disabling an inherited global server).
+   */
+  mode?: 'system' | 'workspace';
+}
+
+const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' }) => {
+  const { t } = useTranslation();
+  const isSystem = mode === 'system';
+  const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(DEFAULT_MCP_CONFIGURATION);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [currentServer, setCurrentServer] = useState<MCPServerConfig | null>(null);
+  const [isNewServer, setIsNewServer] = useState(false);
+  // "Add Server" opens a small menu (Manual vs Databricks catalog). The catalog
+  // is a lazy picker dialog, so the (potentially large) catalog is fetched only
+  // when explicitly opened — never on every MCP (Global) page load.
+  const [addMenuAnchor, setAddMenuAnchor] = useState<null | HTMLElement>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [notification, setNotification] = useState({
+    message: '',
+    open: false,
+    severity: 'success' as 'success' | 'error',
+  });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+
+  // `silent` re-syncs the server list WITHOUT flipping the loading state — used by
+  // the Databricks catalog toggles so enabling a server updates in place instead of
+  // reloading (flashing) the whole dialog.
+  const loadMcpServers = async (silent = false) => {
+    if (!silent) setLoading(true);
+    setLoadError(null);
+    try {
+      const mcpService = MCPService.getInstance();
+      // System view manages the base/global catalog; workspace view manages the
+      // effective set (global servers + this workspace's own + overrides).
+      const response = isSystem
+        ? await mcpService.getBaseServers()
+        : await mcpService.getMcpServers();
+
+      // Update the mcpConfig with the servers from the API
+      setMcpConfig(prevConfig => ({
+        ...prevConfig,
+        servers: response.servers || []
+      }));
+
+    } catch (error) {
+      console.error('Error loading MCP servers:', error);
+      const message = error instanceof Error ? error.message : 'Failed to load MCP servers';
+      setLoadError(message);
+      setNotification({
+        open: true,
+        message,
+        severity: 'error',
+      });
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMcpServers();
+  }, []);
+
+  const _handleEnableForWorkspace = async (server: MCPServerConfig) => {
+    try {
+      const mcpService = MCPService.getInstance();
+      await mcpService.enableForWorkspace(server.id);
+      setNotification({ open: true, message: 'Enabled for this teamspace', severity: 'success' });
+      await loadMcpServers();
+    } catch (error) {
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to enable for this teamspace',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleServerToggle = (server: MCPServerConfig) => async (
+    _event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    try {
+      const mcpService = MCPService.getInstance();
+      const desired = !server.enabled;
+      if (isSystem) {
+        // Global view: flip the base server's availability to all workspaces.
+        await mcpService.setGlobalAvailability(server.id, desired);
+      } else {
+        // Workspace view: flip for THIS workspace (creates an override when
+        // disabling an inherited global server; flips in place for own rows).
+        await mcpService.setWorkspaceEnabled(server.id, desired);
+      }
+
+      // Reload servers to get updated state
+      await loadMcpServers();
+
+    } catch (error) {
+      console.error(`Error toggling MCP server ${server.id}:`, error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to toggle server state',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleEditServer = async (server: MCPServerConfig) => {
+    try {
+      // Fetch full server details with decrypted API key
+      const mcpService = MCPService.getInstance();
+      const fullServer = await mcpService.getMcpServer(server.id);
+
+      if (fullServer) {
+        setCurrentServer(fullServer);
+        setIsNewServer(false);
+        setEditDialogOpen(true);
+      }
+    } catch (error) {
+      console.error('Error fetching server details for edit:', error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to load server details',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleAddServer = () => {
+    setCurrentServer({
+      ...DEFAULT_MCP_CONFIG,
+      id: new Date().getTime().toString(),
+      enabled: true,
+      auth_type: 'api_key'  // Ensure default auth type is set
+    });
+    setIsNewServer(true);
+    setEditDialogOpen(true);
+  };
+
+  const handleDeleteServer = async (serverId: string) => {
+    try {
+      const mcpService = MCPService.getInstance();
+      await mcpService.deleteMcpServer(serverId);
+
+      // Reload servers after successful deletion
+      await loadMcpServers();
+
+      setNotification({
+        open: true,
+        message: 'MCP Server deleted successfully',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error(`Error deleting MCP server ${serverId}:`, error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to delete MCP server',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleSaveServer = async (updatedServer: MCPServerConfig) => {
+    try {
+      const mcpService = MCPService.getInstance();
+
+      if (isNewServer) {
+        // Create new server — base/global in system view, workspace-scoped otherwise.
+        if (isSystem) {
+          await mcpService.createGlobalServer(updatedServer);
+        } else {
+          await mcpService.createMcpServer(updatedServer);
+        }
+      } else {
+        // Update existing server
+        await mcpService.updateMcpServer(updatedServer.id, updatedServer);
+      }
+
+      // Reload servers after successful save
+      await loadMcpServers();
+
+      setNotification({
+        open: true,
+        message: `MCP Server ${isNewServer ? 'created' : 'updated'} successfully`,
+        severity: 'success',
+      });
+
+      setEditDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving MCP server:', error);
+      setNotification({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to save MCP server',
+        severity: 'error',
+      });
+    }
+  };
+
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+        <CircularProgress />
+        <Typography variant="body2" sx={{ ml: 2 }}>
+          Loading MCP configuration...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Box sx={{ minHeight: 200 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {loadError}
+        </Alert>
+        <Button variant="outlined" onClick={() => loadMcpServers()}>
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        mb: 3
+      }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <CloudIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
+            <Typography variant="h6">
+              {isSystem
+                ? t('configuration.mcp.globalTitle', { defaultValue: 'Global MCP Servers' })
+                : t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, ml: 4.5 }}>
+            {isSystem
+              ? t('configuration.mcp.globalSubtitle', {
+                  defaultValue:
+                    'MCP servers available to all teamspaces. Teamspace admins can disable any of these for their own teamspace.',
+                })
+              : t('configuration.mcp.workspaceSubtitle', {
+                  defaultValue:
+                    'MCP servers usable in this teamspace — globally-available ones (inherited) plus this teamspace’s own. Disabling hides a server from this teamspace only.',
+                })}
+          </Typography>
+        </Box>
+      </Box>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 3,
+          mb: 3,
+          bgcolor: 'background.paper',
+          borderRadius: 2
+        }}
+      >
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 2
+        }}>
+          <Typography variant="subtitle1" fontWeight="medium">
+            {t('configuration.mcp.servers', { defaultValue: 'MCP Servers' })}
+          </Typography>
+          {/* Only the global (system) view registers servers; the workspace view
+              consumes the globally-enabled set and toggles it per workspace. */}
+          {isSystem && (
+            <>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={(e) => setAddMenuAnchor(e.currentTarget)}
+              >
+                {t('configuration.mcp.addServer', { defaultValue: 'Add Server' })}
+              </Button>
+              <Menu
+                anchorEl={addMenuAnchor}
+                open={Boolean(addMenuAnchor)}
+                onClose={() => setAddMenuAnchor(null)}
+              >
+                <MenuItem
+                  onClick={() => {
+                    setAddMenuAnchor(null);
+                    handleAddServer();
+                  }}
+                >
+                  <ListItemIcon>
+                    <EditNoteIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={t('configuration.mcp.addManual', { defaultValue: 'Manual entry' })}
+                    secondary={t('configuration.mcp.addManualHelp', {
+                      defaultValue: 'Enter a server URL and auth by hand',
+                    })}
+                  />
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setAddMenuAnchor(null);
+                    setCatalogOpen(true);
+                  }}
+                >
+                  <ListItemIcon>
+                    <StorageIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={t('configuration.mcp.addCatalog', { defaultValue: 'Databricks catalog' })}
+                    secondary={t('configuration.mcp.addCatalogHelp', {
+                      defaultValue: 'Pick from the workspace’s Databricks MCPs',
+                    })}
+                  />
+                </MenuItem>
+              </Menu>
+            </>
+          )}
+        </Box>
+
+        <Box sx={{ mt: 2 }}>
+          {mcpConfig.servers.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
+              {isSystem
+                ? t('configuration.mcp.noServers', { defaultValue: 'No MCP servers configured yet.' })
+                : t('configuration.mcp.noWorkspaceServers', {
+                    defaultValue: 'No MCP servers have been made available globally yet.',
+                  })}
+            </Typography>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {mcpConfig.servers
+                .slice() // Create a copy of the array to avoid modifying the original
+                .sort((a, b) => a.name.localeCompare(b.name)) // Sort by name alphabetically
+                .map((server) => {
+                  // In the workspace view, a server with no group_id is an
+                  // INHERITED GLOBAL server: it can be enabled/disabled for this
+                  // workspace, but it's edited/deleted only in MCP (Global).
+                  const isInheritedGlobal = !isSystem && !server.group_id;
+                  return (
+                <Paper
+                  key={server.id}
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    borderRadius: 1.5,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                      borderColor: 'primary.main'
+                    }
+                  }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                        <Typography variant="subtitle1" fontWeight="medium">
+                          {server.name}
+                        </Typography>
+                        <Chip
+                          label="STREAMABLE"
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          sx={{ ml: 1.5, fontSize: '0.7rem', height: 20 }}
+                        />
+                        {isInheritedGlobal && (
+                          <Chip
+                            label={t('configuration.mcp.globalChip', { defaultValue: 'Global' })}
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                            sx={{ ml: 1, fontSize: '0.7rem', height: 20 }}
+                          />
+                        )}
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        {server.server_url}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              size="small"
+                              checked={server.enabled}
+                              onChange={handleServerToggle(server)}
+                            />
+                          }
+                          label={
+                            <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                              {isSystem
+                                ? (server.enabled
+                                    ? t('configuration.mcp.available', { defaultValue: 'Available' })
+                                    : t('configuration.mcp.unavailable', { defaultValue: 'Unavailable' }))
+                                : (server.enabled
+                                    ? t('common.enabled', { defaultValue: 'Enabled' })
+                                    : t('common.disabled', { defaultValue: 'Disabled' }))}
+                            </Typography>
+                          }
+                        />
+                      </Box>
+                      {/* Servers are edited/deleted only in MCP (Global). The
+                          workspace view just toggles them on/off per workspace. */}
+                      {isSystem && (
+                        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleEditServer(server)}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDeleteServer(server.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      )}
+                    </Box>
+                  </Box>
+                </Paper>
+                  );
+                })}
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Databricks MCP catalog — SYSTEM (global) view only, and lazily mounted
+          behind "Add Server → Databricks catalog" so the (potentially large)
+          catalog is fetched only on demand, not on every page load. A system
+          admin picks an MCP here and it's registered as a base/global server
+          available to all workspaces. */}
+      {isSystem && (
+        <Dialog
+          open={catalogOpen}
+          onClose={() => setCatalogOpen(false)}
+          fullWidth
+          maxWidth="lg"
+          PaperProps={{ sx: { borderRadius: 2, height: '85vh' } }}
+        >
+          <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
+              <Typography variant="h6">
+                {t('configuration.mcp.catalogDialogTitle', {
+                  defaultValue: 'Add from Databricks Catalog',
+                })}
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setCatalogOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent dividers>
+            {/* Only mount when open → the catalog is fetched on demand. */}
+            {catalogOpen && (
+              <DatabricksMcpCatalog
+                registeredServers={mcpConfig.servers}
+                onChanged={() => loadMcpServers(true)}
+                scope="global"
+                embedded
+              />
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCatalogOpen(false)} variant="contained">
+              {t('common.done', { defaultValue: 'Done' })}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+
+      {/* Server Edit Dialog */}
+      <ServerEditDialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        server={currentServer}
+        onSave={handleSaveServer}
+        isNew={isNewServer}
+      />
+
+      {/* Notification */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert severity={notification.severity} onClose={() => setNotification(prev => ({ ...prev, open: false }))}>
+          {notification.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+export default MCPConfiguration;

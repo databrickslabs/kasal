@@ -1,0 +1,510 @@
+/**
+ * Converts plan/flow nodes + edges into the CrewConfig format
+ * expected by the Kasal backend POST /executions endpoint.
+ *
+ * This mirrors the logic in the main Kasal frontend's
+ * JobExecutionService.executeJob().
+ */
+
+interface NodeData {
+  [key: string]: unknown;
+}
+
+interface FlowNode {
+  id: string;
+  type: string;
+  data: NodeData;
+  position?: { x: number; y: number };
+}
+
+interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface CrewExecutionConfig {
+  agents_yaml: Record<string, Record<string, unknown>>;
+  tasks_yaml: Record<string, Record<string, unknown>>;
+  inputs: Record<string, unknown>;
+  planning: boolean;
+  reasoning: boolean;
+  model?: string;
+  execution_type: string;
+  schema_detection_enabled: boolean;
+  /**
+   * Stable chat-session id that scopes session-only memory recall. The backend
+   * keeps its own deterministic `crew_id` for tracing/identity; this is purely
+   * the memory partition for the conversation, stable across messages.
+   */
+  session_id?: string;
+  /** Memory READ scope: true = workspace-wide (default), false = this chat session only. */
+  memory_workspace_scope?: boolean;
+}
+
+export interface FlowExecutionConfig {
+  agents_yaml: Record<string, Record<string, unknown>>;
+  tasks_yaml: Record<string, Record<string, unknown>>;
+  inputs: Record<string, unknown>;
+  planning: boolean;
+  reasoning: boolean;
+  model?: string;
+  execution_type: string;
+  schema_detection_enabled: boolean;
+  nodes: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
+  edges: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
+  flow_id?: string;
+  flow_config?: Record<string, unknown>;
+}
+
+function normalizeTaskName(nodeId: string): string {
+  if (nodeId.startsWith('task-') || nodeId.startsWith('task_')) {
+    return nodeId.replace('task-', 'task_');
+  }
+  return `task_${nodeId}`;
+}
+
+function isAgentNode(node: FlowNode): boolean {
+  return node.type === 'agentNode' || node.type === 'agent';
+}
+
+function isTaskNode(node: FlowNode): boolean {
+  return node.type === 'taskNode' || node.type === 'task';
+}
+
+export function buildCrewConfig(plan: {
+  name?: string;
+  nodes: unknown[];
+  edges: unknown[];
+  process?: string;
+  planning?: boolean;
+}, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true,
+   agentBricksEndpoints: string[] = []): CrewExecutionConfig {
+  const nodes = plan.nodes as FlowNode[];
+  const edges = plan.edges as FlowEdge[];
+
+  const agents_yaml: Record<string, Record<string, unknown>> = {};
+  const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // First pass: create agent and task configurations from nodes
+  nodes.forEach((node) => {
+    if (isAgentNode(node)) {
+      const d = node.data;
+      const agentName = `agent_${node.id}`;
+      const agentConfig: Record<string, unknown> = {
+        role: d.role || '',
+        goal: d.goal || '',
+        backstory: d.backstory || '',
+        tools: Array.isArray(d.tools) ? d.tools : [],
+      };
+
+      // Copy optional agent fields if present
+      const optionalFields = [
+        'llm', 'function_calling_llm', 'max_iter', 'max_rpm',
+        'max_execution_time', 'memory', 'verbose', 'allow_delegation',
+        'cache', 'system_template', 'prompt_template', 'response_template',
+        'allow_code_execution', 'code_execution_mode', 'max_retry_limit',
+        'use_system_prompt', 'respect_context_window', 'reasoning',
+        'max_reasoning_attempts', 'embedder_config', 'knowledge_sources',
+        'tool_configs', 'inject_date', 'date_format',
+      ];
+      optionalFields.forEach((field) => {
+        if (d[field] !== undefined && d[field] !== null) {
+          agentConfig[field] = d[field];
+        }
+      });
+
+      // "No memory" mode (chat toggle) overrides the loaded crew's saved memory:
+      // force every agent without memory so the backend disables crew memory.
+      if (!memoryEnabled) {
+        agentConfig.memory = false;
+      }
+
+      agents_yaml[agentName] = agentConfig;
+    } else if (isTaskNode(node)) {
+      const d = node.data;
+      const taskName = normalizeTaskName(node.id);
+      tasks_yaml[taskName] = {
+        id: node.id.startsWith('task-') ? node.id.substring(5) : node.id,
+        description: d.description || '',
+        expected_output: d.expected_output || '',
+        tools: Array.isArray(d.tools) ? d.tools : [],
+        context: [],
+        agent: null,
+        async_execution: Boolean(d.async_execution),
+        output_file: d.config
+          ? (d.config as Record<string, unknown>).output_file || `output/${node.id}.md`
+          : `output/${node.id}.md`,
+      };
+
+      // Copy optional task fields
+      if (d.tool_configs) tasks_yaml[taskName].tool_configs = d.tool_configs;
+      if ((d as Record<string, unknown>).config) {
+        const cfg = (d as Record<string, unknown>).config as Record<string, unknown>;
+        if (cfg.output_json) tasks_yaml[taskName].output_json = String(cfg.output_json);
+        if (cfg.output_pydantic) tasks_yaml[taskName].output_pydantic = String(cfg.output_pydantic);
+        if (cfg.human_input !== undefined) tasks_yaml[taskName].human_input = Boolean(cfg.human_input);
+        if (cfg.guardrail) {
+          try {
+            tasks_yaml[taskName].guardrail = JSON.parse(String(cfg.guardrail));
+          } catch { /* ignore */ }
+        }
+        if (cfg.llm_guardrail) {
+          tasks_yaml[taskName].guardrail = JSON.stringify(cfg.llm_guardrail);
+        }
+      }
+    }
+  });
+
+  // Second pass: edges -> connect agents to tasks and set task dependencies
+  edges.forEach((edge) => {
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const targetNode = nodes.find((n) => n.id === edge.target);
+
+    if (sourceNode && isAgentNode(sourceNode) && targetNode && isTaskNode(targetNode)) {
+      const agentName = `agent_${edge.source}`;
+      const taskName = normalizeTaskName(edge.target);
+      // A task-typed target always has an entry created in the first pass.
+      tasks_yaml[taskName].agent = agentName;
+    } else if (sourceNode && isTaskNode(sourceNode) && targetNode && isTaskNode(targetNode)) {
+      const depTaskName = normalizeTaskName(edge.source);
+      const targetTaskName = normalizeTaskName(edge.target);
+      // A task-typed target always has an entry created in the first pass.
+      (tasks_yaml[targetTaskName].context as string[]).push(depTaskName);
+    }
+  });
+
+  // Third pass: handle agent_id on task nodes for missing connections
+  nodes.forEach((node) => {
+    if (isTaskNode(node) && node.data.agent_id) {
+      const taskName = normalizeTaskName(node.id);
+      if (tasks_yaml[taskName] && !tasks_yaml[taskName].agent) {
+        const agentNode = nodes.find(
+          (n) =>
+            isAgentNode(n) &&
+            (n.data.id === node.data.agent_id || n.id === node.data.agent_id)
+        );
+        if (agentNode) {
+          tasks_yaml[taskName].agent = `agent_${agentNode.id}`;
+        }
+      }
+    }
+  });
+
+  // Agent Bricks endpoints picked in the chat "+" menu: equip + CONFIGURE the
+  // AgentBricksTool (catalog id 71) on every agent and task of this loaded/saved
+  // crew. Without this the saved crew may carry the tool but not the endpoint,
+  // so it fails at runtime with "AgentBricks endpoint name is not configured".
+  // When NO endpoint is picked, do the opposite: STRIP any AgentBricksTool the
+  // saved crew/LLM carries, since an unconfigured AgentBricksTool aborts the run.
+  {
+    const ABT = '71'; // AgentBricksTool seed id
+    const isABT = (t: unknown) => String(t) === ABT || String(t) === 'AgentBricksTool';
+    if (agentBricksEndpoints.length > 0) {
+      const config = { endpointName: agentBricksEndpoints };
+      const equip = (entry: Record<string, unknown>) => {
+        const tools = Array.isArray(entry.tools) ? (entry.tools as string[]) : [];
+        if (!tools.includes(ABT)) entry.tools = [...tools, ABT];
+        entry.tool_configs = {
+          ...(entry.tool_configs as Record<string, unknown> | undefined),
+          AgentBricksTool: config,
+        };
+      };
+      Object.values(agents_yaml).forEach(equip);
+      Object.values(tasks_yaml).forEach(equip);
+    } else {
+      const strip = (entry: Record<string, unknown>) => {
+        if (Array.isArray(entry.tools)) {
+          entry.tools = (entry.tools as unknown[]).filter((t) => !isABT(t));
+        }
+      };
+      Object.values(agents_yaml).forEach(strip);
+      Object.values(tasks_yaml).forEach(strip);
+    }
+  }
+
+  return {
+    agents_yaml,
+    tasks_yaml,
+    inputs: inputs || {},
+    planning: plan.planning || false,
+    reasoning: false,
+    model: model || undefined,
+    execution_type: 'crew',
+    schema_detection_enabled: true,
+  };
+}
+
+/**
+ * Builds a CrewExecutionConfig directly from generated agent/task arrays
+ * (as returned by the generation_complete SSE event), without needing
+ * ReactFlow nodes/edges.
+ */
+export function buildCrewConfigFromGenerated(
+  agents: Record<string, unknown>[],
+  tasks: Record<string, unknown>[],
+  model?: string,
+  toolConfigs?: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+  toolNameMap: Record<string, string> = {},
+  sessionId?: string | null,
+  workspaceMemory: boolean = true,
+  memoryEnabled: boolean = true,
+  mcpServers: string[] = [],
+  userRequest?: string,
+  agentBricksEndpoints: string[] = [],
+  reasoning: boolean = false,
+  planning: boolean = false,
+  planningLlm?: string,
+): CrewExecutionConfig {
+  const agents_yaml: Record<string, Record<string, unknown>> = {};
+  const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // Agent Bricks endpoints picked in the chat "+" menu equip the regular
+  // AgentBricksTool (catalog tool, seed id 71) configured for those endpoints.
+  // Unlike MCP_SERVERS (a special backend key), AgentBricksTool must appear in
+  // the agent/task `tools` list by ID, so resolve its id from the name map
+  // (falling back to the stable seed id).
+  const hasAgentBricks = agentBricksEndpoints.length > 0;
+  const agentBricksToolId =
+    Object.keys(toolNameMap).find((id) => toolNameMap[id] === 'AgentBricksTool') || '71';
+  const isAgentBricksTool = (t: string): boolean =>
+    String(t) === agentBricksToolId ||
+    String(t) === 'AgentBricksTool' ||
+    toolNameMap[String(t)] === 'AgentBricksTool';
+  // When the user picks an endpoint in the "+" menu, ensure the AgentBricksTool is
+  // equipped (and configured below). When the user did NOT pick one, STRIP any
+  // AgentBricksTool the generator/LLM added on its own: an unconfigured
+  // AgentBricksTool fails the whole run with "AgentBricks endpoint name is not
+  // configured", so it must never reach the crew without a selected endpoint.
+  const withAgentBricksTool = (toolIds: string[]): string[] => {
+    if (hasAgentBricks) {
+      return toolIds.includes(agentBricksToolId) ? toolIds : [...toolIds, agentBricksToolId];
+    }
+    return toolIds.filter((t) => !isAgentBricksTool(t));
+  };
+
+  // toolConfigs are keyed by canonical tool NAME (e.g. "GenieTool"), but a
+  // generated agent/task references tools by ID. Resolve each tool entry through
+  // toolNameMap so the override attaches under the name the backend looks up
+  // (task_tool_configs.get(tool_name)). Without this, a Genie space picked in
+  // the chat never reaches the tool ("Genie space ID is not configured").
+  const applicableToolConfigs = (
+    tools: string[],
+  ): Record<string, Record<string, unknown>> => {
+    const applicable: Record<string, Record<string, unknown>> = {};
+    if (!toolConfigs) return applicable;
+    tools.forEach((t) => {
+      // toolConfigs is keyed by canonical tool name; the agent/task may list the
+      // tool by id, so resolve through toolNameMap before matching.
+      const name = toolNameMap[String(t)] || String(t);
+      if (toolConfigs[name]) applicable[name] = toolConfigs[name];
+    });
+    return applicable;
+  };
+
+  // Build agent configs keyed by agent_<id>
+  const agentIdToKey: Record<string, string> = {};
+  agents.forEach((agent) => {
+    const id = String(agent.id || '');
+    const key = `agent_${id}`;
+    agentIdToKey[id] = key;
+
+    const baseAgentTools: string[] = Array.isArray(agent.tools) ? agent.tools as string[] : [];
+    const agentTools = withAgentBricksTool(baseAgentTools);
+    const agentConfig: Record<string, unknown> = {
+      role: agent.role || '',
+      goal: agent.goal || '',
+      backstory: agent.backstory || '',
+      tools: agentTools,
+    };
+
+    // Inject tool_configs for tools that have overrides (e.g. GenieTool spaceId)
+    const agentApplicable = applicableToolConfigs(agentTools);
+    // MCP servers picked in the chat's "+" menu: every agent gets the
+    // selection via tool_configs.MCP_SERVERS — the backend MCP integration
+    // resolves these names against the registered (enabled) servers and
+    // equips the agent with their tools.
+    if (mcpServers.length > 0) {
+      agentApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    // Agent Bricks endpoints: configure the AgentBricksTool with the picked
+    // serving endpoint(s). The tool uses the first when given a list.
+    if (hasAgentBricks) {
+      agentApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
+    }
+    if (Object.keys(agentApplicable).length > 0) {
+      agentConfig.tool_configs = agentApplicable;
+    }
+
+    const optionalFields = [
+      'llm', 'function_calling_llm', 'max_iter', 'max_rpm',
+      'max_execution_time', 'memory', 'verbose', 'allow_delegation',
+      'cache', 'system_template', 'prompt_template', 'response_template',
+      'allow_code_execution', 'code_execution_mode', 'max_retry_limit',
+      'use_system_prompt', 'respect_context_window',
+    ];
+    optionalFields.forEach((field) => {
+      if (agent[field] !== undefined && agent[field] !== null) {
+        agentConfig[field] = agent[field];
+      }
+    });
+
+    // "No memory" mode: force every agent to be created without memory. The
+    // backend's determine_crew_memory() disables crew memory entirely when ALL
+    // agents have memory:false, so nothing is recalled or persisted.
+    if (!memoryEnabled) {
+      agentConfig.memory = false;
+    }
+
+    agents_yaml[key] = agentConfig;
+  });
+
+  // Build task configs
+  tasks.forEach((task) => {
+    const id = String(task.id || '');
+    const key = `task_${id}`;
+
+    const agentId = String(task.agent_id || task.agent || '');
+    const agentKey = agentIdToKey[agentId] || null;
+
+    // Resolve context (task dependencies)
+    let context: string[] = [];
+    if (Array.isArray(task.context)) {
+      context = task.context.map((dep: unknown) => {
+        if (typeof dep === 'string') return `task_${dep}`;
+        if (typeof dep === 'object' && dep !== null && 'id' in dep) return `task_${(dep as Record<string, unknown>).id}`;
+        return '';
+      }).filter(Boolean);
+    }
+
+    const taskTools: string[] = withAgentBricksTool(
+      Array.isArray(task.tools) ? task.tools as string[] : [],
+    );
+    // Generated task descriptions are often generic mission statements
+    // ("process diverse user inquiries…"). Ground the run with the chat prompt
+    // that asked for it and the attached MCP data sources — without these,
+    // agents have no concrete question and never query tools (e.g. Genie).
+    const baseDescription = String(task.description || '');
+    const groundingParts: string[] = [];
+    if (userRequest) {
+      groundingParts.push(`USER REQUEST — this run exists to answer it:\n${userRequest}`);
+    }
+    if (mcpServers.length > 0) {
+      groundingParts.push(
+        `MCP data sources attached — query them for data questions: ${mcpServers.join(', ')}`,
+      );
+    }
+    if (hasAgentBricks) {
+      // The user picked a Databricks Agent Bricks agent for this run: instruct the
+      // task's agent to delegate the work to it via the AgentBricksTool (configured
+      // above with the endpoint) and return its answer, rather than solving alone.
+      groundingParts.push(
+        `An Agent Bricks agent is assigned to this task — use the AgentBricksTool to ` +
+        `delegate the request to it and base your answer on its response: ${agentBricksEndpoints.join(', ')}`,
+      );
+    }
+    const description = groundingParts.length > 0
+      ? `${baseDescription}\n\n${groundingParts.join('\n\n')}`
+      : baseDescription;
+    const taskEntry: Record<string, unknown> = {
+      id,
+      description,
+      expected_output: task.expected_output || '',
+      tools: taskTools,
+      context,
+      agent: agentKey,
+      async_execution: Boolean(task.async_execution),
+      output_file: (task.output_file as string) || `output/${id}.md`,
+    };
+
+    // Inject tool_configs for tasks that have matching tools
+    const taskApplicable = applicableToolConfigs(taskTools);
+    // TASKS need the MCP selection too: CrewAI replaces the agent's tools with
+    // the task's own tools whenever a task lists any (generated tasks usually
+    // do), which would mask the agent-level MCP tools entirely — the run would
+    // never see them. create_task() merges tool_configs.MCP_SERVERS into the
+    // task's tools, keeping the MCP tools visible alongside the task's own.
+    if (mcpServers.length > 0) {
+      taskApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    if (hasAgentBricks) {
+      taskApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
+    }
+    if (Object.keys(taskApplicable).length > 0) {
+      taskEntry.tool_configs = taskApplicable;
+    }
+
+    tasks_yaml[key] = taskEntry;
+  });
+
+  return {
+    agents_yaml,
+    tasks_yaml,
+    // planning_llm must ride in inputs — the backend reads it from
+    // inputs.planning_llm, not a top-level config key (and Deep planning without
+    // an explicit planning_llm defaults to OpenAI → 401 on a Databricks app).
+    inputs: { ...(inputs || {}), ...(planning && planningLlm ? { planning_llm: planningLlm } : {}) },
+    planning,
+    reasoning,
+    model: model || undefined,
+    execution_type: 'crew',
+    schema_detection_enabled: true,
+    // Memory scoping for chat. The backend generates its own deterministic
+    // crew_id for tracing; we pass the chat session id purely as the memory
+    // partition. The READ scope is controlled by `memory_workspace_scope`:
+    //   - true (default): backend recalls workspace-wide (group_id) — all context;
+    //   - false: backend recalls only this chat session (session_id).
+    session_id: sessionId || undefined,
+    memory_workspace_scope: workspaceMemory,
+  };
+}
+
+export function buildFlowConfig(flow: {
+  id?: string;
+  name?: string;
+  nodes: unknown[];
+  edges: unknown[];
+  flow_config?: Record<string, unknown>;
+}, model?: string): FlowExecutionConfig {
+  const nodes = flow.nodes as FlowNode[];
+  const edges = flow.edges as FlowEdge[];
+
+  const mappedNodes = nodes.map((node) => ({
+    id: node.id,
+    type: node.type || 'unknown',
+    position: node.position || { x: 0, y: 0 },
+    data: node.data || {},
+  }));
+
+  const mappedEdges = edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    sourceHandle: edge.sourceHandle || undefined,
+    targetHandle: edge.targetHandle || undefined,
+    data: edge.data || {},
+  }));
+
+  return {
+    agents_yaml: {},
+    tasks_yaml: {},
+    inputs: {},
+    planning: false,
+    reasoning: false,
+    model: model || undefined,
+    execution_type: 'flow',
+    schema_detection_enabled: true,
+    nodes: mappedNodes,
+    edges: mappedEdges,
+    flow_id: flow.id,
+    flow_config: {
+      ...(flow.flow_config || {}),
+      nodes: mappedNodes,
+      edges: mappedEdges,
+    },
+  };
+}

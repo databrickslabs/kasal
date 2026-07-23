@@ -1,0 +1,489 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * All chat styling is scoped under #kasal-chat-root so it never affects the
+ * Material-UI surfaces in the rest of Kasal. Theme variables are driven by the
+ * `data-theme` attribute that ChatWorkspace sets on the root element (synced
+ * from Kasal's theme store).
+ */
+#kasal-chat-root,
+#kasal-chat-root[data-theme="light"],
+.kasal-chat-root,
+.kasal-chat-root[data-theme="light"] {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F7FA;
+  --bg-sidebar: #F5F7FA;
+  --bg-input: #FFFFFF;
+  --bg-user-msg: #EEF1F5;
+  --bg-assistant-msg: transparent;
+  --text-primary: #1B1F23;
+  --text-secondary: #5A6872;
+  --text-muted: #8D99A4;
+  --border-color: #DFE3E8;
+  --accent: #FF3621;
+  --accent-hover: #E02E1B;
+  /* Borderless-rail tonal + shadow tokens */
+  --bg-rail: #F7F8FA;                          /* a hair grayer than the white canvas */
+  --bg-rail-hover: rgba(27, 31, 35, 0.045);    /* ~4.5% ink — whisper hover */
+  --bg-active-chip: rgba(27, 31, 35, 0.075);   /* ~7.5% ink — soft filled active pill */
+  --shadow-input: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);
+  --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.14);
+  --shadow-popover: 0 8px 28px rgba(16, 24, 40, 0.12);
+  /* A2UI design tokens — the SAME `--a2-*` contract the exported app defines in
+     its index.css. tailwind.config.js maps the shadcn utilities (bg-card,
+     text-card-foreground, bg-secondary, …) to these, so inline surfaces
+     (dashboards/cards/tables) have proper contrast even with NO workspace palette.
+     A2uiSurface overrides them per-surface via themeToTokens when a palette is set. */
+  --a2-background: 0 0% 100%;
+  --a2-foreground: 222.2 47.4% 11.2%;
+  --a2-card: 0 0% 100%;
+  --a2-card-foreground: 222.2 47.4% 11.2%;
+  --a2-popover: 0 0% 100%;
+  --a2-popover-foreground: 222.2 47.4% 11.2%;
+  --a2-primary: 221.2 83.2% 53.3%;
+  --a2-primary-foreground: 210 40% 98%;
+  --a2-secondary: 210 40% 96.1%;
+  --a2-secondary-foreground: 222.2 47.4% 11.2%;
+  --a2-muted: 210 40% 96.1%;
+  --a2-muted-foreground: 215.4 16.3% 46.9%;
+  --a2-accent: 210 40% 96.1%;
+  --a2-accent-foreground: 222.2 47.4% 11.2%;
+  --a2-destructive: 0 84.2% 60.2%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 214.3 31.8% 91.4%;
+  --a2-input: 214.3 31.8% 91.4%;
+  --a2-ring: 221.2 83.2% 53.3%;
+  --a2-radius: 0.5rem;
+}
+
+#kasal-chat-root[data-theme="dark"],
+.kasal-chat-root[data-theme="dark"] {
+  --bg-primary: #1B1F23;
+  --bg-secondary: #232930;
+  --bg-sidebar: #15191E;
+  --bg-input: #232930;
+  --bg-user-msg: #2A3038;
+  --bg-assistant-msg: transparent;
+  --text-primary: #E8ECEF;
+  --text-secondary: #A0AAB4;
+  --text-muted: #6B7785;
+  --border-color: #333C45;
+  --accent: #FF3621;
+  --accent-hover: #FF5A47;
+  /* Borderless-rail tonal + shadow tokens */
+  --bg-rail: #15191E;                          /* reuse the darker sidebar tone */
+  --bg-rail-hover: rgba(255, 255, 255, 0.05);
+  --bg-active-chip: rgba(255, 255, 255, 0.085);
+  --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-input-focus: 0 0 0 3px rgba(255, 54, 33, 0.22);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.45);
+  /* A2UI design tokens — dark-theme channels (mirror the exported app's `.dark`). */
+  --a2-background: 222.2 84% 4.9%;
+  --a2-foreground: 210 40% 98%;
+  --a2-card: 222.2 84% 4.9%;
+  --a2-card-foreground: 210 40% 98%;
+  --a2-popover: 222.2 84% 4.9%;
+  --a2-popover-foreground: 210 40% 98%;
+  --a2-primary: 217.2 91.2% 59.8%;
+  --a2-primary-foreground: 222.2 47.4% 11.2%;
+  --a2-secondary: 217.2 32.6% 17.5%;
+  --a2-secondary-foreground: 210 40% 98%;
+  --a2-muted: 217.2 32.6% 17.5%;
+  --a2-muted-foreground: 215 20.2% 65.1%;
+  --a2-accent: 217.2 32.6% 17.5%;
+  --a2-accent-foreground: 210 40% 98%;
+  --a2-destructive: 0 62.8% 30.6%;
+  --a2-destructive-foreground: 210 40% 98%;
+  --a2-border: 217.2 32.6% 17.5%;
+  --a2-input: 217.2 32.6% 17.5%;
+  --a2-ring: 224.3 76.3% 48%;
+  --a2-radius: 0.5rem;
+}
+
+#kasal-chat-root {
+  /*
+   * `display: flex` MUST be a direct rule here, not the Tailwind `flex` utility:
+   * the config uses `important: '#kasal-chat-root'`, which scopes every utility
+   * as a DESCENDANT selector (`#kasal-chat-root .flex`), so utilities on the
+   * root element itself never apply. Without this, the root is `display: block`,
+   * the sidebar <aside> and <main> stack vertically, and opening the sidebar
+   * pushes the chat content down. Forcing flex keeps them side-by-side and the
+   * main area vertically stable regardless of sidebar state.
+   */
+  display: flex;
+  width: 100%;
+  height: 100%;
+  font-family: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/*
+ * Tailwind's preflight is disabled (to protect MUI), so form controls keep
+ * their user-agent defaults — a monospace font and a boxy inset border on
+ * <textarea>. Re-apply just the preflight bits the chat needs so inputs match
+ * the surrounding UI and the chat input looks soft rather than "edgy".
+ * `button` is intentionally excluded so buttons keep their own styling.
+ */
+#kasal-chat-root input,
+#kasal-chat-root optgroup,
+#kasal-chat-root select,
+#kasal-chat-root textarea {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
+/*
+ * Buttons get the same font normalization, but scoped to the .kasal-chat-root
+ * CLASS (not the #id). Tailwind's `important: '.kasal-chat-root'` scopes every
+ * utility as `.kasal-chat-root .text-xs` (specificity 0,2,0); an `#id button`
+ * rule (1,0,1) would outrank ALL of them, pinning every button to font-size:100%
+ * and silently defeating `text-xs` / `text-[10px]` on the pill/chip buttons.
+ * The class selector (0,1,1) sits just under the utilities, so it sets the
+ * default while per-button `text-*` classes still win.
+ */
+.kasal-chat-root button {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
+/*
+ * Buttons need the full preflight reset too: without it, raw <button>s keep
+ * the user-agent beveled border + gray background, which is what made the
+ * model-picker rows and session items look boxy/"edgy". Each button supplies
+ * its own background/radius via Tailwind/inline styles.
+ */
+#kasal-chat-root button {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  background-image: none;
+  color: inherit;
+  text-align: inherit;
+  text-transform: none;
+  -webkit-appearance: button;
+  appearance: button;
+  cursor: pointer;
+}
+#kasal-chat-root button:disabled {
+  cursor: default;
+}
+
+/*
+ * First-run launchpad suggestion cards. Border/bg are set inline (the padding:0
+ * reset above forces inline styling on these buttons), so the hover lift needs
+ * !important to beat those inline values.
+ */
+.kasal-suggest:hover {
+  border-color: var(--text-muted) !important;
+  background-color: var(--bg-rail-hover) !important;
+}
+
+/*
+ * Strip native chrome from TEXT-like controls only. Checkbox/radio/color/range
+ * are deliberately EXEMPT: `appearance: none` on them erases the control
+ * entirely (e.g. the "Customize" panel's switches rendered as invisible boxes),
+ * so they keep their native rendering (tinted via `accent-color`).
+ */
+#kasal-chat-root input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+#kasal-chat-root select,
+#kasal-chat-root textarea {
+  color: inherit;
+  background: transparent;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#kasal-chat-root textarea {
+  border: 0;
+  padding: 0;
+  resize: none;
+  box-shadow: none;
+}
+
+#kasal-chat-root textarea::placeholder,
+#kasal-chat-root input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* ---- Chat input shell: soft card + calm red focus ring ---- */
+#kasal-chat-root .kasal-input-shell {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+#kasal-chat-root .kasal-input-shell:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-input), var(--shadow-input-focus);
+}
+
+/* ---- Sidebar session chips (hover needs a class; inline can't hover) ---- */
+#kasal-chat-root .kasal-session {
+  transition: background-color 0.15s ease;
+}
+#kasal-chat-root .kasal-session:hover {
+  background-color: var(--bg-rail-hover);
+}
+#kasal-chat-root .kasal-session:hover .kasal-session-title {
+  color: var(--text-primary);
+}
+
+/* ---- New Chat chip hover (borderless) ---- */
+#kasal-chat-root .kasal-newchat {
+  transition: background-color 0.15s ease;
+}
+#kasal-chat-root .kasal-newchat:hover {
+  background-color: var(--bg-rail-hover);
+}
+
+/* ---- Rename input: red focus ring, not a hard red border ---- */
+#kasal-chat-root .kasal-rename-input {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+#kasal-chat-root .kasal-rename-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 54, 33, 0.22);
+}
+
+/* ---- Floating popovers keep a card edge but get a softened shadow ---- */
+#kasal-chat-root .kasal-popover {
+  box-shadow: var(--shadow-popover);
+}
+
+/* ---- Inline quiz surface breathing room ----
+ * The quiz's deck wrapper (flex flex-col gap-*) carries no padding of its own —
+ * in the exported app the wrapping themed Card supplies the inset, but the inline
+ * chat surface has none, so the title / progress bar / question card cling to the
+ * surface edge. The quiz also has no Download row (removed), which previously
+ * reserved the top band, so the title otherwise rides the very top-left corner
+ * next to the floating controls. Add a small inset. Scoped to #kasal-chat-root so
+ * the exported standalone app (no such id) is unaffected. */
+#kasal-chat-root .kasal-a2ui[data-surface-kind="quiz"] {
+  padding: 16px 20px;
+}
+
+/* ---- A2UI surface in native full screen (the inline "Full screen" control) ----
+ * The element stays a DOM descendant of #kasal-chat-root in fullscreen, so the
+ * scoped Tailwind utilities still apply; it just needs a page background, some
+ * breathing room, and scrolling for tall content (otherwise fullscreen paints a
+ * black backdrop and clips). */
+#kasal-chat-root .kasal-a2ui:fullscreen,
+#kasal-chat-root .kasal-a2ui:-webkit-full-screen {
+  overflow: auto;
+  /* Use the surface's own palette background (set on .kasal-a2ui), falling back
+     to the chat page when no palette token is present. A thin page margin only. */
+  background: hsl(var(--a2-background, var(--bg-primary)));
+  padding: 12px;
+}
+/* Non-deck surfaces used to cling to the top-left; make them fill the width and
+   center vertically so they use the whole screen. Decks are EXCLUDED: their 16:9
+   stage already scales to fill, so a width cap / centering would shrink the slide
+   (presentations must stay full-bleed). */
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):fullscreen,
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):-webkit-full-screen {
+  display: flex;
+  flex-direction: column;
+}
+/* Card-like surfaces (quiz, flashcards, dashboard, document, map) read best at a
+   bounded width, centered — NOT stretched edge-to-edge. The mindmap is excluded
+   too: it fills the viewport via its canvas-height rule below. */
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):fullscreen > *,
+#kasal-chat-root .kasal-a2ui:not([data-surface-kind="presentation"]):not([data-surface-kind="mindmap"]):-webkit-full-screen > * {
+  margin: auto;
+  width: 100%;
+  max-width: 1200px;
+}
+/* Top clearance so the surface's floating controls (palette / preview / full
+   screen, top-right) sit ABOVE the mindmap canvas instead of grazing its corner
+   (the canvas reaches the control band, unlike padded card surfaces). */
+#kasal-chat-root .a2-mindmap-canvas {
+  margin-top: 0.75rem;
+}
+/* The pan/zoom mindmap is a fixed 64vh inline; in fullscreen let it fill the
+   viewport (minus the page padding + the control-band clearance) instead of
+   floating small at the top. `!important` beats the inline height; viewport units
+   sidestep the height chain. */
+#kasal-chat-root .kasal-a2ui:fullscreen .a2-mindmap-canvas,
+#kasal-chat-root .kasal-a2ui:-webkit-full-screen .a2-mindmap-canvas {
+  height: calc(100vh - 48px) !important;
+}
+
+/* Slide body inherits the deck theme's text color so prose/lists stay readable on
+   a dark slide (mirrors the exported app's index.css — the ONE source of truth for
+   slide text contrast). Inline-styled elements (stat numbers, titles, kickers)
+   keep their own explicit colors. Without this, Markdown prose + list text fall
+   back to their default near-black color and vanish on a dark stage. */
+#kasal-chat-root .a2-slide :where(p, li, ul, ol, h1, h2, h3, h4, h5, h6, strong, em, blockquote, code, td, th, a) {
+  color: inherit;
+}
+#kasal-chat-root .a2-slide .prose,
+#kasal-chat-root .a2-slide .prose :where(p, li, a, strong, em, blockquote, code, h1, h2, h3, h4, h5, h6, th, td) {
+  color: inherit !important;
+}
+
+/* Scrollbar */
+#kasal-chat-root ::-webkit-scrollbar {
+  width: 5px;
+}
+#kasal-chat-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+#kasal-chat-root ::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 10px;
+}
+#kasal-chat-root ::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Code */
+#kasal-chat-root pre {
+  background: #1B2A32;
+  color: #E1E8ED;
+  border-radius: 12px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 12px 0;
+  border: 1px solid #2A3F4A;
+}
+
+#kasal-chat-root code:not(pre code) {
+  background: rgba(255, 54, 33, 0.08);
+  color: #D42E1B;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#kasal-chat-root[data-theme="dark"] code:not(pre code) {
+  background: rgba(255, 54, 33, 0.15);
+  color: #FF7A6B;
+}
+
+/* Animations */
+@keyframes kasalChatFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes kasalChatSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#kasal-chat-root .animate-fade-in {
+  animation: kasalChatFadeIn 0.2s ease-out;
+}
+#kasal-chat-root .animate-slide-up {
+  animation: kasalChatSlideUp 0.2s ease-out;
+}
+
+/* Markdown prose overrides */
+#kasal-chat-root .prose h1,
+#kasal-chat-root .prose h2,
+#kasal-chat-root .prose h3,
+#kasal-chat-root .prose h4 {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+#kasal-chat-root .prose p {
+  color: var(--text-primary);
+  line-height: 1.65;
+}
+#kasal-chat-root .prose a {
+  color: var(--accent);
+  text-decoration: none;
+}
+#kasal-chat-root .prose a:hover {
+  text-decoration: underline;
+}
+#kasal-chat-root .prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+#kasal-chat-root .prose ul,
+#kasal-chat-root .prose ol {
+  color: var(--text-primary);
+}
+#kasal-chat-root .prose table {
+  font-size: 13px;
+}
+#kasal-chat-root .prose th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+}
+#kasal-chat-root .prose td {
+  color: var(--text-primary);
+}
+
+/* A2UI surfaces own their text colors (deck-theme inline colors, the deck theme's
+   --tw-prose-* vars, and the --a2-* tokens). The chat-TRANSCRIPT prose overrides
+   above are scoped to #kasal-chat-root and therefore leak into any A2UI surface
+   rendered inside chat — forcing its themed body/heading text to the chat page's
+   --text-primary. On a dark deck theme with a light chat page that paints the
+   slide's text dark-on-dark (invisible). Reset prose text to `inherit` inside any
+   .kasal-a2ui surface so the renderer's own theme wins. Links keep their themed
+   color via --tw-prose-links, so `a` is intentionally excluded. */
+#kasal-chat-root .kasal-a2ui .prose,
+#kasal-chat-root .kasal-a2ui .prose :where(p, li, ul, ol, strong, em, blockquote, h1, h2, h3, h4, h5, h6, th, td) {
+  color: inherit;
+}
+
+/* --- Presentation deck entrance (UiRenderer Slides) --------------------- */
+/* Each slide change remounts .ui-slide-enter, replaying a staggered rise-in
+   on the slide's content rows — same motion language as hand-built decks. */
+@keyframes kasalSlideRise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+.ui-slide-enter > div > * {
+  opacity: 0;
+  animation: kasalSlideRise 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+.ui-slide-enter > div > *:nth-child(1) { animation-delay: 0.06s; }
+.ui-slide-enter > div > *:nth-child(2) { animation-delay: 0.16s; }
+.ui-slide-enter > div > *:nth-child(3) { animation-delay: 0.26s; }
+.ui-slide-enter > div > *:nth-child(4) { animation-delay: 0.36s; }
+.ui-slide-enter > div > *:nth-child(5) { animation-delay: 0.46s; }
+.ui-slide-enter > div > *:nth-child(6) { animation-delay: 0.54s; }
+.ui-slide-enter > div > *:nth-child(n + 7) { animation-delay: 0.6s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-slide-enter > div > * {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Subtle row highlight on the results table (run-activity context). */
+.ui-table-row {
+  transition: background-color 0.12s ease;
+}
+.ui-table-row:hover {
+  background-color: var(--ui-surface-strong, rgba(127, 127, 127, 0.06));
+}
+
+/* Thinking dots — sequential blink while a crew is being generated */
+.kasal-thinking-dots span {
+  opacity: 0;
+  animation: kasalThinkingDot 1.2s infinite;
+}
+.kasal-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.kasal-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes kasalThinkingDot {
+  0%, 60%, 100% { opacity: 0; }
+  20%, 40% { opacity: 1; }
+}

@@ -1,0 +1,797 @@
+"""
+Core logging functionality for the application.
+
+This module provides a centralized logging system with domain-specific loggers
+for different parts of the application, supporting both file and console output.
+
+USAGE:
+    from src.core.logger import get_logger
+    logger = get_logger(__name__)
+"""
+
+import logging
+import os
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Optional
+
+# Standard Python LogRecord attributes that may legitimately be None
+# (e.g. exc_info, exc_text, stack_info) and should never be stripped.
+_STANDARD_LOG_RECORD_ATTRS = frozenset({
+    'args', 'created', 'exc_info', 'exc_text', 'filename', 'funcName',
+    'levelname', 'levelno', 'lineno', 'message', 'module', 'msg', 'msecs',
+    'name', 'pathname', 'process', 'processName', 'relativeCreated',
+    'stack_info', 'thread', 'threadName', 'taskName',
+})
+
+
+class _NoneAttributeFilter(logging.Filter):
+    """Strips None-valued non-standard attributes from log records.
+
+    The OTel OTLP exporter cannot encode ``None`` values in log record
+    attributes — it raises ``Invalid type <class 'NoneType'>``.
+    Third-party libraries (notably MLflow) add extra attributes such as
+    ``experiment_id=None`` to their Python log records.  This filter
+    removes those before the OTel LoggingHandler extracts them.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        for key in list(record.__dict__):
+            if (
+                record.__dict__[key] is None
+                and not key.startswith('_')
+                and key not in _STANDARD_LOG_RECORD_ATTRS
+            ):
+                del record.__dict__[key]
+        return True
+
+
+class LoggerManager:
+    """Manages domain-specific loggers with file and console output."""
+    
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(LoggerManager, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            self._crew_logger = None
+            self._flow_logger = None
+            self._system_logger = None
+            self._llm_logger = None
+            self._scheduler_logger = None
+            self._api_logger = None
+            self._access_logger = None
+            self._guardrails_logger = None
+            self._databricks_vector_search_logger = None
+            self._databricks_short_term_logger = None
+            self._databricks_long_term_logger = None
+            self._databricks_entity_logger = None
+            self._documentation_embedding_logger = None
+            self._knowledge_source_logger = None
+            self._database_logger = None
+            self._log_dir = None
+            self._otel_logger_provider = None
+            self._otel_handler = None
+            self._initialized = True
+    
+    @classmethod
+    def get_instance(cls, log_dir: str = None):
+        """Get or create a LoggerManager instance and initialize it with the given log directory."""
+        instance = cls()
+        if log_dir:
+            instance.initialize(log_dir)
+        return instance
+    
+    def initialize(self, log_dir: str = None):
+        """Initialize all domain-specific loggers with both file and console handlers."""
+        # Set up log directory - always prefer the environment variable if set
+        if log_dir:
+            self._log_dir = Path(log_dir)
+        else:
+            # Check environment variable first
+            env_log_dir = os.environ.get("LOG_DIR")
+            if env_log_dir:
+                self._log_dir = Path(env_log_dir)
+            else:
+                # Default to backend/logs instead of backend/src/logs
+                self._log_dir = Path(__file__).parent.parent.parent / "logs"
+        
+        # Ensure directory exists
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Configure formatters for different domains
+        formatters = {
+            'crew': logging.Formatter(
+                '[CREW] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'flow': logging.Formatter(
+                '[FLOW] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'system': logging.Formatter(
+                '[SYSTEM] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'llm': logging.Formatter(
+                '[LLM] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'scheduler': logging.Formatter(
+                '[SCHEDULER] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'api': logging.Formatter(
+                '[API] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'access': logging.Formatter(
+                '[ACCESS] %(asctime)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'guardrails': logging.Formatter(
+                '[GUARDRAILS] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'databricks_vector_search': logging.Formatter(
+                '[DATABRICKS_VECTOR_SEARCH] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'databricks_short_term': logging.Formatter(
+                '[DATABRICKS_SHORT_TERM] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'databricks_long_term': logging.Formatter(
+                '[DATABRICKS_LONG_TERM] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'databricks_entity': logging.Formatter(
+                '[DATABRICKS_ENTITY] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'documentation_embedding': logging.Formatter(
+                '[DOC_EMBEDDING] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            ),
+            'knowledge_source': logging.Formatter(
+                '[KNOWLEDGE_SOURCE] %(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S.%f'
+            ),
+            'database': logging.Formatter(
+                '[DB] %(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S.%f'
+            )
+        }
+        
+        # Set up the uvicorn logger early
+        # This helps prevent any stdout logging before our handlers are attached
+        uvicorn_logger = logging.getLogger("uvicorn")
+        uvicorn_logger.handlers = []
+        uvicorn_logger.propagate = True
+        
+        uvicorn_access_logger = logging.getLogger("uvicorn.access")
+        uvicorn_access_logger.handlers = []
+        uvicorn_access_logger.propagate = True
+        
+        # Initialize each logger
+        self._crew_logger = self._setup_logger('crew', formatters['crew'])
+        self._flow_logger = self._setup_logger('flow', formatters['flow'])
+        self._system_logger = self._setup_logger('system', formatters['system'], suppress_stdout=True)
+        self._llm_logger = self._setup_logger('llm', formatters['llm'], suppress_stdout=True)
+        self._scheduler_logger = self._setup_logger('scheduler', formatters['scheduler'])
+        self._api_logger = self._setup_logger('api', formatters['api'])
+        self._access_logger = self._setup_logger('access', formatters['access'], suppress_stdout=True)
+        self._guardrails_logger = self._setup_logger('guardrails', formatters['guardrails'])
+        self._databricks_vector_search_logger = self._setup_logger('databricks_vector_search', formatters['databricks_vector_search'], suppress_stdout=True)
+        self._databricks_short_term_logger = self._setup_logger('databricks_short_term', formatters['databricks_short_term'], suppress_stdout=True)
+        self._databricks_long_term_logger = self._setup_logger('databricks_long_term', formatters['databricks_long_term'], suppress_stdout=True)
+        self._databricks_entity_logger = self._setup_logger('databricks_entity', formatters['databricks_entity'], suppress_stdout=True)
+        self._documentation_embedding_logger = self._setup_logger('documentation_embedding', formatters['documentation_embedding'], suppress_stdout=True)
+        self._knowledge_source_logger = self._setup_logger('knowledge_source', formatters['knowledge_source'], debug_level=True, suppress_stdout=True)
+        self._database_logger = self._setup_logger('database', formatters['database'], debug_level=True, suppress_stdout=True)
+
+        # Configure uvicorn access logging after all loggers are initialized
+        self._configure_uvicorn_logging()
+
+        # Re-attach OTel handler if it was previously active (survives --reload)
+        if self._otel_handler is not None:
+            for domain_logger in self._get_all_domain_loggers():
+                domain_logger.addHandler(self._otel_handler)
+            logging.getLogger().addHandler(self._otel_handler)
+
+        # Log initialization success
+        self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
+    
+    def _get_all_domain_loggers(self) -> list:
+        """Return all initialized domain loggers."""
+        loggers = []
+        for attr in [
+            '_crew_logger', '_flow_logger', '_system_logger', '_llm_logger',
+            '_scheduler_logger', '_api_logger', '_access_logger',
+            '_guardrails_logger', '_databricks_vector_search_logger',
+            '_databricks_short_term_logger', '_databricks_long_term_logger',
+            '_databricks_entity_logger', '_documentation_embedding_logger',
+            '_knowledge_source_logger', '_database_logger',
+        ]:
+            logger = getattr(self, attr, None)
+            if logger is not None:
+                loggers.append(logger)
+        return loggers
+
+    def enable_otel_app_telemetry(self, enabled: bool = True, log_level: str = "INFO") -> None:
+        """Enable or disable Databricks App Telemetry via OpenTelemetry (Preview).
+
+        Called from the application lifespan after DB init, reading the
+        ``otel_app_telemetry_enabled`` flag from EngineConfig.
+
+        Prerequisites (both must be true for activation):
+        1. ``enabled`` is True (persisted in DatabricksConfig DB)
+        2. ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var is present (auto-injected by
+           Databricks when telemetry infrastructure is enabled via the App settings UI)
+
+        The Fluent Bit sidecar already captures system logs (raw text from stdout)
+        into otel_logs automatically. This handler adds structured OTel log records
+        with severity, trace context, and resource attributes — providing richer
+        observability data alongside the sidecar's raw captures.
+
+        Args:
+            enabled: Whether OTel App Telemetry is enabled in DB config.
+            log_level: Minimum log level for OTel export (DEBUG, INFO, WARNING, ERROR).
+        """
+        if not enabled:
+            if self._otel_logger_provider is not None:
+                self.shutdown_otel_app_telemetry()
+            return
+
+        # Already active — nothing to do
+        if self._otel_logger_provider is not None:
+            return
+
+        endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if not endpoint:
+            if self._system_logger:
+                self._system_logger.info(
+                    "OTel App Telemetry enabled in config but OTEL_EXPORTER_OTLP_ENDPOINT "
+                    "not set — telemetry infrastructure not active in this environment"
+                )
+            return
+
+        # Ensure OTEL_SDK_DISABLED is not set — it causes the SDK to silently no-op
+        os.environ.pop("OTEL_SDK_DISABLED", None)
+
+        try:
+            from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+            from opentelemetry.sdk.resources import Resource
+
+            protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc").lower()
+
+            if protocol == "grpc":
+                from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+                    OTLPLogExporter,
+                )
+            else:
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+                    OTLPLogExporter,
+                )
+
+            service_name = os.environ.get("OTEL_SERVICE_NAME", "kasal")
+            resource = Resource.create({"service.name": service_name})
+
+            # Use dedicated logs endpoint if set, otherwise share the main endpoint
+            logs_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
+            # Determine TLS mode:
+            # - Localhost endpoints (Databricks Apps sidecar, local collectors)
+            #   never need TLS — the sidecar runs in the same pod.
+            # - Remote endpoints respect the URL scheme (http:// = insecure).
+            is_localhost = bool(
+                logs_endpoint
+                and ("localhost" in logs_endpoint or "127.0.0.1" in logs_endpoint)
+            )
+            is_http_scheme = bool(
+                logs_endpoint and logs_endpoint.startswith("http://")
+            )
+            use_insecure = is_localhost or is_http_scheme
+            exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
+            provider = LoggerProvider(resource=resource)
+            provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+
+            otel_level = getattr(logging, log_level.upper(), logging.INFO)
+            otel_handler = LoggingHandler(
+                level=otel_level,
+                logger_provider=provider,
+            )
+
+            # Add filter to strip None-valued extra attributes from log records.
+            # The OTLP exporter cannot encode None values — it raises:
+            #   "Invalid type <class 'NoneType'> of value None"
+            # Third-party libraries (notably MLflow) add extra attributes such as
+            # experiment_id=None to their log records.  This filter strips those
+            # before the OTel pipeline processes them.
+            otel_handler.addFilter(_NoneAttributeFilter())
+
+            self._otel_logger_provider = provider
+            self._otel_handler = otel_handler
+
+            # Attach to all domain loggers (they have propagate=False so root won't reach them)
+            for domain_logger in self._get_all_domain_loggers():
+                domain_logger.addHandler(otel_handler)
+
+            # Also attach to root logger for any non-domain logs
+            logging.getLogger().addHandler(otel_handler)
+
+            if self._system_logger:
+                self._system_logger.info(
+                    f"Databricks App Telemetry (OTel) configured: "
+                    f"endpoint={endpoint}, protocol={protocol}, service={service_name}, "
+                    f"log_level={log_level.upper()}"
+                )
+
+        except ImportError as e:
+            if self._system_logger:
+                self._system_logger.warning(
+                    f"Databricks App Telemetry: required packages not installed: {e}. "
+                    "Install: opentelemetry-exporter-otlp-proto-grpc (for gRPC) or "
+                    "opentelemetry-exporter-otlp-proto-http (for HTTP)."
+                )
+        except Exception as e:
+            if self._system_logger:
+                self._system_logger.error(
+                    f"Failed to configure Databricks App Telemetry: {e}"
+                )
+
+    def set_otel_log_level(self, log_level: str) -> None:
+        """Change the OTel handler log level at runtime.
+
+        Args:
+            log_level: One of DEBUG, INFO, WARNING, ERROR.
+        """
+        if self._otel_handler is None:
+            return
+        level = getattr(logging, log_level.upper(), logging.INFO)
+        self._otel_handler.setLevel(level)
+        if self._system_logger:
+            self._system_logger.info(f"OTel App Telemetry log level changed to {log_level.upper()}")
+
+    def shutdown_otel_app_telemetry(self) -> None:
+        """Shutdown the OTel App Telemetry provider, flushing pending logs."""
+        if self._otel_logger_provider is not None:
+            try:
+                self._otel_logger_provider.shutdown()
+                if self._system_logger:
+                    self._system_logger.info("Databricks App Telemetry (OTel) shutdown complete")
+            except Exception as e:
+                if self._system_logger:
+                    self._system_logger.warning(
+                        f"Error during OTel App Telemetry shutdown: {e}"
+                    )
+            finally:
+                self._otel_logger_provider = None
+                self._otel_handler = None
+
+    def _get_logger_level(self, name: str) -> int:
+        """Get the log level for a logger based on environment variables.
+
+        Priority:
+        1. KASAL_DEBUG_ALL=true -> DEBUG
+        2. KASAL_LOG_{NAME} environment variable
+        3. KASAL_LOG_LEVEL global setting
+        4. None (use default)
+        """
+        import os
+
+        # Check if debug all is enabled
+        if os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]:
+            return logging.DEBUG
+
+        # Check domain-specific environment variable
+        env_var = f"KASAL_LOG_{name.upper().replace('_', '')}"
+        domain_level = self._parse_log_level(os.environ.get(env_var))
+        if domain_level is not None:
+            return domain_level
+
+        # Check global log level
+        global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL"))
+        if global_level is not None:
+            return global_level
+
+        return None
+
+    def _parse_log_level(self, level_str: str) -> int:
+        """Parse a log level string to a logging level constant."""
+        if not level_str:
+            return None
+
+        level_str = level_str.upper().strip()
+
+        if level_str == "OFF":
+            return logging.CRITICAL + 1
+        elif level_str == "DEBUG":
+            return logging.DEBUG
+        elif level_str == "INFO":
+            return logging.INFO
+        elif level_str in ["WARNING", "WARN"]:
+            return logging.WARNING
+        elif level_str == "ERROR":
+            return logging.ERROR
+        elif level_str == "CRITICAL":
+            return logging.CRITICAL
+        else:
+            return None
+
+    def _configure_uvicorn_logging(self):
+        """Configure Uvicorn logging to redirect to our loggers."""
+        # Set up Uvicorn access logging
+        uvicorn_access_logger = logging.getLogger("uvicorn.access")
+        uvicorn_access_logger.handlers = []
+        uvicorn_access_logger.propagate = False
+        
+        # Create a special filter to determine where to log
+        class APIRequestFilter:
+            def __init__(self, api_logger, access_logger):
+                self.api_logger = api_logger
+                self.access_logger = access_logger
+                
+            def filter_and_log(self, record):
+                try:
+                    client_addr = getattr(record, 'client_addr', '-')
+                    status_code = getattr(record, 'status_code', '-')
+                    request_line = getattr(record, 'request_line', '-')
+                    
+                    # Skip empty or placeholder requests
+                    if request_line == "-":
+                        return False
+                        
+                    msg = f"{client_addr} - \"{request_line}\" {status_code}"
+                    
+                    # Route API requests to the API log file
+                    if '/api/' in request_line:
+                        self.api_logger.info(msg)
+                    else:
+                        self.access_logger.info(msg)
+                    
+                    # Filter out all messages to prevent them from going to console
+                    return False
+                except Exception:
+                    # In case of any error, let the record pass through (but this won't happen since we've removed default handlers)
+                    return False
+        
+        # Create and attach the filter
+        api_request_filter = APIRequestFilter(self._api_logger, self._access_logger)
+        
+        class UvicornAccessHandler(logging.Handler):
+            def __init__(self, filter_func):
+                super().__init__()
+                self.filter_func = filter_func
+                
+            def emit(self, record):
+                # Process the record with our filter/router
+                self.filter_func(record)
+        
+        # Attach our handler to Uvicorn access logger
+        uvicorn_access_logger.addHandler(UvicornAccessHandler(api_request_filter.filter_and_log))
+        
+        # Also suppress other uvicorn loggers
+        for logger_name in ["uvicorn", "uvicorn.error"]:
+            logger = logging.getLogger(logger_name)
+            logger.handlers = []
+            logger.propagate = False
+    
+    def _setup_logger(self, name: str, formatter: logging.Formatter, suppress_stdout=False, debug_level=False) -> logging.Logger:
+        """Set up a specific logger with both file and console handlers."""
+        logger = logging.getLogger(name)
+
+        # Determine the log level based on environment variables
+        env_level = self._get_logger_level(name)
+        if env_level is not None:
+            logger.setLevel(env_level)
+        elif os.environ.get("KASAL_LOG_APP"):
+            # Apply app-level setting if this is an app logger
+            app_level = self._parse_log_level(os.environ.get("KASAL_LOG_APP"))
+            if app_level:
+                logger.setLevel(app_level)
+        else:
+            logger.setLevel(logging.DEBUG if debug_level else logging.INFO)
+
+        logger.propagate = False
+        logger.handlers = []  # Clear any existing handlers
+        
+        # Create file handler
+        file_handler = RotatingFileHandler(
+            self._log_dir / f"{name}.log",
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # Create console handler if console output is enabled
+        # Check environment variable for console output
+        console_enabled = os.environ.get("KASAL_LOG_CONSOLE", "true").lower() in ["true", "1", "yes"]
+
+        # Create console handler for all loggers except scheduler and when not suppressed
+        if console_enabled and name != 'scheduler' and not suppress_stdout:
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+        
+        # Special handling for LLM logger
+        if name == 'llm':
+            litellm_logger = logging.getLogger('LiteLLM')
+            litellm_logger.handlers = []
+            litellm_logger.propagate = True
+            litellm_logger.addHandler(logging.handlers.MemoryHandler(
+                capacity=1024*1024,
+                target=logger
+            ))
+            
+            llm_config_logger = logging.getLogger('backendcrew.llm_config')
+            llm_config_logger.handlers = []
+            llm_config_logger.propagate = True
+            llm_config_logger.addHandler(logging.handlers.MemoryHandler(
+                capacity=1024*1024,
+                target=logger
+            ))
+        
+        # Special handling for scheduler logger
+        elif name == 'scheduler':
+            for scheduler_logger_name in [
+                'backendcrew.scheduler',
+                'apscheduler.scheduler',
+                'apscheduler.executors',
+                'apscheduler.jobstores'
+            ]:
+                sub_logger = logging.getLogger(scheduler_logger_name)
+                sub_logger.handlers = []
+                sub_logger.propagate = False
+                sub_logger.setLevel(logging.INFO)
+                sub_logger.addHandler(file_handler)
+                # No console handler for scheduler-related loggers
+        
+        # Special handling for API logger
+        elif name == 'api':
+            # Configure all API-related loggers
+            api_logger_names = [
+                'src.api',  # All API routers under src.api
+                'backendcrew.api.runs',
+                'backendcrew.api.jobs',
+                'backendcrew.api.tools',
+                'backendcrew.api.keys',
+                'backendcrew.api.uc_tools'
+            ]
+
+            for api_logger_name in api_logger_names:
+                api_logger = logging.getLogger(api_logger_name)
+                api_logger.handlers = []
+                api_logger.propagate = False
+
+                # Respect environment variable for API log level
+                api_env_level = self._get_logger_level('api')
+                if api_env_level is not None:
+                    api_logger.setLevel(api_env_level)
+                else:
+                    api_logger.setLevel(logging.INFO)
+
+                api_logger.addHandler(file_handler)
+
+                # Also add console handler if enabled
+                if console_enabled and not suppress_stdout:
+                    api_logger.addHandler(console_handler)
+        
+        # Special handling for access logger
+        elif name == 'access':
+            uvicorn_logger = logging.getLogger("uvicorn.access")
+            uvicorn_logger.handlers = []
+            uvicorn_logger.propagate = False  # Change to False to prevent logging to stdout
+            
+            class AccessLogHandler(logging.Handler):
+                def __init__(self, target_logger, api_logger=None):
+                    super().__init__()
+                    self.target_logger = target_logger
+                    self.api_logger = api_logger
+
+                def emit(self, record):
+                    try:
+                        client_addr = getattr(record, 'client_addr', '-')
+                        status_code = getattr(record, 'status_code', '-')
+                        request_line = getattr(record, 'request_line', '-')
+                        
+                        # Skip empty or placeholder requests
+                        if request_line == "-":
+                            return
+                            
+                        msg = f"{client_addr} - \"{request_line}\" {status_code}"
+                        
+                        # Route API requests to the API log file
+                        if self.api_logger and '/api/' in request_line:
+                            self.api_logger.info(msg)
+                        else:
+                            self.target_logger.info(msg)
+                    except Exception:
+                        self.handleError(record)
+            
+            # Pass both loggers to handle routing based on the request path
+            uvicorn_logger.addHandler(AccessLogHandler(logger, self._api_logger))
+        
+        return logger
+    
+    @property
+    def crew(self) -> logging.Logger:
+        """Get the crew-specific logger."""
+        if not self._crew_logger:
+            self.initialize()
+        return self._crew_logger
+
+    @property
+    def flow(self) -> logging.Logger:
+        """Get the flow-specific logger."""
+        if not self._flow_logger:
+            self.initialize()
+        return self._flow_logger
+    
+    @property
+    def system(self) -> logging.Logger:
+        """Get the system-specific logger."""
+        if not self._system_logger:
+            self.initialize()
+        return self._system_logger
+    
+    @property
+    def llm(self) -> logging.Logger:
+        """Get the LLM-specific logger."""
+        if not self._llm_logger:
+            self.initialize()
+        return self._llm_logger
+    
+    @property
+    def scheduler(self) -> logging.Logger:
+        """Get the scheduler-specific logger."""
+        if not self._scheduler_logger:
+            self.initialize()
+        return self._scheduler_logger
+    
+    @property
+    def api(self) -> logging.Logger:
+        """Get the API-specific logger."""
+        if not self._api_logger:
+            self.initialize()
+        return self._api_logger
+    
+    @property
+    def access(self) -> logging.Logger:
+        """Get the access logger."""
+        if not self._access_logger:
+            self.initialize()
+        return self._access_logger
+    
+    @property
+    def guardrails(self) -> logging.Logger:
+        """Get the guardrails logger."""
+        if not self._guardrails_logger:
+            self.initialize()
+        return self._guardrails_logger
+    
+    @property
+    def databricks_vector_search(self) -> logging.Logger:
+        """Get the Databricks Vector Search logger for memory operations."""
+        if not self._databricks_vector_search_logger:
+            self.initialize()
+        return self._databricks_vector_search_logger
+    
+    @property
+    def databricks_short_term(self) -> logging.Logger:
+        """Get the Databricks short-term memory logger."""
+        if not self._databricks_short_term_logger:
+            self.initialize()
+        return self._databricks_short_term_logger
+    
+    @property
+    def databricks_long_term(self) -> logging.Logger:
+        """Get the Databricks long-term memory logger."""
+        if not self._databricks_long_term_logger:
+            self.initialize()
+        return self._databricks_long_term_logger
+    
+    @property
+    def databricks_entity(self) -> logging.Logger:
+        """Get the Databricks entity memory logger."""
+        if not self._databricks_entity_logger:
+            self.initialize()
+        return self._databricks_entity_logger
+
+    @property
+    def documentation_embedding(self) -> logging.Logger:
+        """Get the documentation embedding service logger."""
+        if not self._documentation_embedding_logger:
+            self.initialize()
+        return self._documentation_embedding_logger
+
+    @property
+    def knowledge_source(self) -> logging.Logger:
+        """Get the knowledge source logger for debugging knowledge retrieval."""
+        if not self._knowledge_source_logger:
+            self.initialize()
+        return self._knowledge_source_logger
+
+    @property
+    def database(self) -> logging.Logger:
+        """Get the database logger for SQL and transaction debugging."""
+        if not self._database_logger:
+            self.initialize()
+        return self._database_logger
+
+    def get_logger(self, name: str) -> logging.Logger:
+        """
+        Get a logger with the given name, properly configured according to environment variables.
+        This is the main method that should be used by all modules.
+
+        Args:
+            name: The name of the logger (typically __name__)
+
+        Returns:
+            A properly configured logger
+        """
+        logger = logging.getLogger(name)
+
+        # Apply configuration based on environment variables
+        if os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]:
+            logger.setLevel(logging.DEBUG)
+        elif name.startswith("src."):
+            # This is an application module
+            app_level = self._parse_log_level(os.environ.get("KASAL_LOG_APP"))
+            if app_level:
+                logger.setLevel(app_level)
+            else:
+                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                if global_level:
+                    logger.setLevel(global_level)
+        else:
+            # Check if it's a third-party library
+            third_party_patterns = ["sqlalchemy", "uvicorn", "httpx", "crewai", "mlflow", "litellm"]
+            is_third_party = any(pattern in name.lower() for pattern in third_party_patterns)
+
+            if is_third_party:
+                third_party_level = self._parse_log_level(os.environ.get("KASAL_LOG_THIRD_PARTY", "WARNING"))
+                if third_party_level:
+                    logger.setLevel(third_party_level)
+            else:
+                # Default to global level
+                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                if global_level:
+                    logger.setLevel(global_level)
+
+        return logger
+
+
+# Create a singleton instance
+_logger_manager = LoggerManager.get_instance()
+
+
+def get_logger(name: str) -> logging.Logger:
+    """
+    Get a logger with proper configuration based on environment variables.
+
+    This is the main function that should be used by all modules to get their loggers.
+    It ensures consistent configuration across the application.
+
+    Args:
+        name: The name of the logger (typically __name__)
+
+    Returns:
+        A properly configured logger
+
+    Example:
+        from src.core.logger import get_logger
+        logger = get_logger(__name__)
+    """
+    # Initialize if not already done
+    if not _logger_manager._initialized:
+        _logger_manager.initialize()
+
+    return _logger_manager.get_logger(name) 

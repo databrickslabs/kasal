@@ -1,0 +1,1 @@
+export type ResultValue = string | number | boolean | null | ResultValue[] | { [key: string]: ResultValue }; 

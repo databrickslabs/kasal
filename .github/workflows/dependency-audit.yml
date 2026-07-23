@@ -1,0 +1,83 @@
+name: Dependency Audit
+
+# Security supply-chain checks:
+#   1. lockfile-hygiene  — fail if committed lockfiles reference an internal
+#      package proxy (must use public registries; the proxy is local-dev-only).
+#   2. python-cve        — uv lock drift + pip-audit CVE scan.
+#   3. npm-cve           — npm lockfile consistency + npm audit.
+#
+# The hygiene guard runs on every PR (cheap). The CVE/drift jobs run weekly and
+# whenever a dependency manifest/lock changes.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-hygiene:
+    name: Lockfile hygiene (no internal proxy URLs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject internal proxy hosts in committed lockfiles
+        run: |
+          set -euo pipefail
+          # Internal dev proxies are local-dev-only and must never be committed.
+          # Committed lockfiles must reference public registries so the repo is
+          # portable and the Databricks Apps build (no VPN) can install.
+          patterns='npm-proxy\.dev\.databricks\.com|pypi-proxy\.dev\.databricks\.com'
+          files="src/backend/uv.lock src/frontend/package-lock.json"
+          found=0
+          for f in $files; do
+            if [ -f "$f" ] && grep -nE "$patterns" "$f"; then
+              echo "::error file=$f::Internal package-proxy URL found in committed lockfile. Regenerate against the public registry."
+              found=1
+            fi
+          done
+          if [ "$found" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK: no internal proxy URLs in committed lockfiles."
+
+  python-cve:
+    name: Python deps — lock drift + CVE audit
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dependencies')
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Lockfile is in sync with pyproject (no drift)
+        run: uv lock --check
+      - name: CVE audit (pip-audit over the locked deps)
+        run: |
+          set -euo pipefail
+          uv export --frozen --no-emit-project --no-dev --format requirements-txt > /tmp/reqs.txt
+          uvx pip-audit -r /tmp/reqs.txt
+
+  npm-cve:
+    name: Frontend deps — lock consistency + npm audit
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dependencies')
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lockfile consistency (npm ci installs strictly from the lock)
+        run: npm ci
+      - name: CVE audit (fail on high/critical)
+        run: npm audit --audit-level=high

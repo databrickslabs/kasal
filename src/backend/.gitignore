@@ -1,0 +1,69 @@
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+# The Databricks-App export template ships real frontend source dirs named
+# `lib/` (shadcn utils, markdown renderer, deck themes) — both frontend/src/lib/
+# AND the vendored renderer's frontend/src/a2ui/lib/. These are NOT Python venv
+# libs — keep them tracked despite the `lib/` rule above, else exports break on a
+# fresh clone (the files exist locally but never get committed, and the vendored
+# a2ui/components.tsx imports from a2ui/lib/deckThemes.ts that isn't there).
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/lib/
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/lib/**
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/a2ui/lib/
+!src/engines/crewai/exporters/templates/databricks_app/frontend/src/a2ui/lib/**
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.env
+.venv
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+*.sqlite3
+*.db
+
+# Alembic
+alembic/versions/
+
+# Local development
+.DS_Store
+.coverage
+htmlcov/
+.pytest_cache/
+
+# CrewAI unified cognitive memory stores (per-crew local LanceDB) — never commit
+# user data. Matches the CREWAI_STORAGE_DIR naming that
+# CrewMemoryService.setup_storage_directory emits.
+kasal_default_*/
+kasal_databricks_*/
+kasal_lakebase_*/
+**/memories.lance/
+**/memories.lance/**

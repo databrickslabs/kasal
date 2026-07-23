@@ -1,0 +1,933 @@
+#!/usr/bin/env python3
+"""
+Direct deployment script for Kasal application.
+
+Deploys backend source, prebuilt frontend assets, and docs to Databricks Apps.
+The frontend is BUILT LOCALLY on every deploy (npm run build via the root
+package.json lifecycle) and ships as static assets in frontend_static/.
+
+Scopes: by default BOTH frontend and backend are uploaded. Pass --frontend to
+upload only the frontend (and docs), or --backend to upload only the backend.
+Upload uses `databricks sync` per component — full upload by default, pass
+--diff for an incremental (changed-files-only) sync.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import logging
+import argparse
+import json
+import tempfile
+import time
+import datetime
+from pathlib import Path
+
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.apps import (
+    AppDeploymentMode,
+    App,
+    AppDeployment,
+    AppDeploymentState,
+)
+from databricks.sdk.service.workspace import ImportFormat
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger("deploy")
+
+def custom_ignore_function(excluded_dirs, excluded_patterns):
+    """Create a robust ignore function that excludes specific directories and patterns."""
+    def _ignore(directory, contents):
+        ignored = []
+        for item in contents:
+            # Ignore specific directory names
+            if item in excluded_dirs:
+                ignored.append(item)
+                logger.debug(f"Ignoring directory: {item}")
+            # Ignore patterns
+            elif any(Path(item).match(pattern) for pattern in excluded_patterns):
+                ignored.append(item)
+                logger.debug(f"Ignoring pattern match: {item}")
+        return ignored
+    return _ignore
+
+def prune_remote_dir(client, remote_dir, local_dir):
+    """Recursively delete remote workspace entries absent from the local bundle.
+
+    `databricks sync` only adds/overwrites — it never mirror-deletes — so stale
+    files from older deploys would otherwise live in the workspace (and the app
+    deployment snapshot) forever.
+
+    MUST recurse into subdirectories. frontend_static/assets is the critical
+    case: Vite content-hashes every chunk (``index-<hash>.js``), so each build
+    emits NEW filenames and the old ones are orphaned. A shallow (top-level
+    only) prune kept ``assets/`` because its *name* still exists locally, so
+    stale chunks accumulated there across deploys (2400+ remote vs ~150 real),
+    bloating the app deployment's per-file source sync past the platform's hard
+    10-minute app-start window → "App process did not start within 10 minutes".
+    """
+    try:
+        remote_entries = list(client.workspace.list(remote_dir))
+    except Exception:
+        return  # remote dir doesn't exist yet
+    local_names = {p.name for p in local_dir.iterdir()} if local_dir.exists() else set()
+    for entry in remote_entries:
+        entry_path = entry.path or ""
+        if not entry_path:
+            continue
+        name = entry_path.rsplit("/", 1)[-1]
+        if name not in local_names:
+            # Entire entry is orphaned (recursive=True handles directories).
+            try:
+                client.workspace.delete(entry_path, recursive=True)
+                logger.info(f"Pruned remote leftover: {entry_path}")
+            except Exception as prune_err:
+                logger.warning(f"Could not prune {entry_path}: {prune_err}")
+        elif (local_dir / name).is_dir():
+            # Name still present locally AND it's a directory — recurse to prune
+            # orphaned files inside it (e.g. assets/*-<hash> Vite chunks).
+            prune_remote_dir(client, entry_path, local_dir / name)
+
+
+def clear_remote_dir(client, remote_dir):
+    """Delete a remote workspace dir wholesale (one recursive server-side call).
+
+    Used for frontend_static instead of prune_remote_dir: Vite content-hashes
+    every chunk (``index-<hash>.js``), so the whole ``assets/`` tree is new each
+    build and almost nothing is reusable. Pruning has to LIST every remote dir
+    and DELETE each orphan one-by-one (thousands of stale chunks across deploys)
+    — slow. A single recursive delete of the parent wipes them in one call, and
+    the sync re-creates the dir fresh.
+
+    CALLER CONTRACT: re-upload with a FULL sync afterwards. ``databricks sync
+    --diff`` keys off a local snapshot, so after the remote is emptied out-of-band
+    a diff sync would wrongly think the files still exist remotely and skip them,
+    leaving an empty frontend_static (a broken app).
+
+    Returns True if a delete was issued, False if there was nothing to clear.
+    """
+    try:
+        client.workspace.delete(remote_dir, recursive=True)
+        logger.info(f"Cleared remote dir for clean re-upload: {remote_dir}")
+        return True
+    except Exception as e:
+        logger.debug(f"Nothing to clear at {remote_dir}: {e}")
+        return False
+
+
+def build_frontend(root_dir, api_url=None):
+    """Build the frontend locally so every deploy ships fresh static assets.
+
+    Runs the root package.json npm lifecycle (prebuild → build → postbuild):
+    docs are copied into frontend/public/docs, the React app is built with
+    npm install + npm run build, and frontend_static/ is recreated from the
+    build output (including docs). Aborts the deployment if the build fails.
+
+    VITE_API_URL is pinned via the process environment, which in Vite takes
+    precedence over .env/.env.local files — otherwise a developer's local
+    `frontend/.env.local` (e.g. VITE_API_URL=http://localhost:3003/api/v1)
+    would be baked into the deployed bundle and the app UI would silently
+    call localhost instead of the backend.
+    """
+    logger.info("=" * 60)
+    logger.info("🔨 Building frontend (npm run build)...")
+    logger.info("=" * 60)
+    effective_api_url = api_url or "/api/v1"
+    logger.info(f"Pinning VITE_API_URL={effective_api_url} for the production build")
+    build_env = {**os.environ, "VITE_API_URL": effective_api_url}
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+    try:
+        subprocess.run([npm_cmd, "run", "build"], cwd=str(root_dir), check=True, env=build_env)
+    except FileNotFoundError:
+        logger.error("npm not found on PATH — install Node.js to build the frontend.")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Frontend build failed with exit code {e.returncode} — aborting deployment")
+        raise
+    frontend_static = root_dir / "frontend_static"
+    if not (frontend_static / "index.html").exists():
+        logger.error("frontend_static/index.html missing after build — aborting deployment")
+        raise FileNotFoundError("frontend_static/index.html not found after npm run build")
+    logger.info("✅ Frontend build completed — frontend_static/ refreshed")
+
+def get_desired_oauth_scopes(exclude_dataplane=True):
+    """Return the OAuth user-authorization scopes the app should have.
+
+    These are the current Databricks Apps scope ids (the consent screen
+    names) — the platform replaced the older granular ids
+    (sql.warehouses, vectorsearch.*, serving.serving-endpoints,
+    dashboards.genie, files.files) with these umbrella scopes.
+    """
+    desired_scopes = [
+        # Execute SQL and manage SQL-related resources
+        "sql",
+        # Databricks Genie spaces
+        "genie",
+        # Lakebase / Postgres database instances and their configurations
+        "postgres",
+        # Model Serving endpoints
+        "model-serving",
+        # Unity Catalog reads - CRITICAL for catalog operations
+        "catalog.catalogs:read",
+        "catalog.schemas:read",
+        "catalog.tables:read",
+        # External connections / Lakehouse Federation
+        "catalog.connections",
+        # Filesystem-like file operations (volumes, workspace files)
+        "files",
+        # AI Gateway V2 inference routing
+        "ai-gateway",
+        # Vector Search - CRITICAL for index creation
+        "vector-search",
+        # Workspace folders, files and notebooks
+        "workspace.workspace",
+        # MCP servers: external + UC functions
+        "mcp.external",
+        "mcp.functions",
+    ]
+    if not exclude_dataplane:
+        desired_scopes.append("serving.serving-endpoints-data-plane")
+    return desired_scopes
+
+def configure_oauth_scopes(app_name, exclude_dataplane=True):
+    """Configure OAuth scopes for the Databricks app
+
+    Args:
+        app_name: Name of the Databricks app
+        exclude_dataplane: If True, excludes the problematic serving-endpoints-data-plane scope
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        logger.info(f"Configuring OAuth scopes for app: {app_name}")
+
+        desired_scopes = get_desired_oauth_scopes(exclude_dataplane=exclude_dataplane)
+        if not exclude_dataplane:
+            logger.warning("Including serving-endpoints-data-plane scope (may cause issues)")
+        else:
+            logger.info("Excluding serving-endpoints-data-plane scope (known to cause issues)")
+
+        logger.info(f"Configuring {len(desired_scopes)} OAuth scopes")
+
+        # Prepare the JSON payload
+        payload = {
+            "user_api_scopes": desired_scopes
+        }
+
+        logger.info("Executing OAuth scope configuration...")
+
+        # Execute the API call using databricks CLI
+        cmd = [
+            "databricks", "api", "patch",
+            f"/api/2.0/apps/{app_name}",
+            "--json", json.dumps(payload),
+            "-o", "json"
+        ]
+
+        # Run the command
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+
+        if result.returncode == 0:
+            logger.info("✅ OAuth scopes configured successfully")
+
+            try:
+                response_data = json.loads(result.stdout)
+                if "user_api_scopes" in response_data:
+                    configured_scopes = response_data["user_api_scopes"]
+                    logger.info(f"Successfully configured {len(configured_scopes)} scopes")
+
+                    # Log scope categories
+                    sql_scopes = [s for s in configured_scopes if s.startswith("sql")]
+                    vector_scopes = [s for s in configured_scopes if s.startswith("vector")]
+                    serving_scopes = [s for s in configured_scopes if "serving" in s]
+
+                    if sql_scopes:
+                        logger.info(f"  SQL scopes configured: {len(sql_scopes)}")
+                    if vector_scopes:
+                        logger.info(f"  Vector Search scopes configured: {len(vector_scopes)}")
+                    if serving_scopes:
+                        logger.info(f"  Serving scopes configured: {len(serving_scopes)}")
+
+            except json.JSONDecodeError:
+                logger.debug(f"OAuth configuration response: {result.stdout}")
+
+            return True
+        else:
+            logger.error(f"OAuth scope configuration failed with exit code {result.returncode}")
+
+            # Log actual error for debugging
+            if result.stderr:
+                logger.error(f"Scope error: {result.stderr.strip()}")
+            if result.stdout:
+                logger.error(f"Scope output: {result.stdout.strip()}")
+            if "is not a valid scope" in (result.stderr or ""):
+                logger.warning("Invalid scope detected. The app may require manual scope configuration.")
+
+            return False
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"OAuth scope configuration command execution failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error configuring OAuth scopes: {e}")
+        return False
+
+
+def wait_for_deployment(client, app_name, deployment_id,
+                        timeout_seconds=3600, interval_seconds=30):
+    """Poll an app deployment until it reaches a terminal state.
+
+    The SDK waiter (``waiter.result()``) gives up after 20 minutes, but a large
+    source tree can take longer than that to download/build server-side — the
+    deployment keeps running and usually still succeeds. This polls the
+    deployment status directly so a slow-but-successful deploy isn't reported as
+    a failure. Returns True only if the deployment ends in the SUCCEEDED state.
+    """
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            dep = client.apps.get_deployment(
+                app_name=app_name, deployment_id=deployment_id
+            )
+        except Exception as e:
+            logger.warning(f"Error polling deployment {deployment_id}: {e}")
+            time.sleep(interval_seconds)
+            continue
+
+        status = getattr(dep, "status", None)
+        state = getattr(status, "state", None)
+        message = getattr(status, "message", "") or ""
+        logger.info(f"Deployment {deployment_id} state: {state} {message}".rstrip())
+
+        if state == AppDeploymentState.SUCCEEDED:
+            return True
+        if state in (AppDeploymentState.FAILED, AppDeploymentState.CANCELLED):
+            logger.error(
+                f"Deployment {deployment_id} ended in state {state}: {message}"
+            )
+            return False
+        time.sleep(interval_seconds)
+
+    logger.error(
+        f"Deployment {deployment_id} did not reach a terminal state within "
+        f"{timeout_seconds}s"
+    )
+    return False
+
+
+ENCRYPTION_SCOPE = "kasal"
+# Distinct key name — the "kasal" scope is shared and also holds
+# lakebase_pat / lakebase_server, so a generic "encryption_key" could collide.
+ENCRYPTION_KEY_NAME = "kasal_encryption_key"
+
+
+def ensure_encryption_key(client, app_name="kasal"):
+    """Provision a stable Fernet ENCRYPTION_KEY in the app's secret scope (once).
+
+    Generate-once, NEVER-overwrite: rotating this key would strand every
+    already-encrypted secret. The scope is created if missing (idempotent), the
+    key is written only if absent, and the app service principal is granted READ
+    so the runtime can resolve it via the app.yaml `secret` resource binding.
+
+    Best-effort: a failure here is logged but does not abort the deploy (the app
+    still runs; secret persistence just won't be fixed until the key exists).
+    """
+    try:
+        from databricks.sdk.errors import ResourceAlreadyExists
+    except Exception:  # noqa: BLE001
+        ResourceAlreadyExists = Exception  # type: ignore
+
+    try:
+        # 1. Ensure the scope exists (no-op if it already does).
+        try:
+            client.secrets.create_scope(scope=ENCRYPTION_SCOPE)
+            logger.info(f"Created secret scope '{ENCRYPTION_SCOPE}'")
+        except ResourceAlreadyExists:
+            pass
+        except Exception as e:  # noqa: BLE001 — scope may already exist under another error type
+            logger.debug(f"create_scope('{ENCRYPTION_SCOPE}') non-fatal: {e}")
+
+        # 2. Provision the key ONCE — never overwrite an existing one.
+        existing = {s.key for s in client.secrets.list_secrets(scope=ENCRYPTION_SCOPE)}
+        if ENCRYPTION_KEY_NAME in existing:
+            logger.info(
+                f"Reusing existing encryption key '{ENCRYPTION_SCOPE}/{ENCRYPTION_KEY_NAME}' "
+                f"(not regenerated — preserves already-encrypted secrets)"
+            )
+        else:
+            from cryptography.fernet import Fernet
+            client.secrets.put_secret(
+                scope=ENCRYPTION_SCOPE,
+                key=ENCRYPTION_KEY_NAME,
+                string_value=Fernet.generate_key().decode(),
+            )
+            logger.info(
+                f"Provisioned a NEW encryption key '{ENCRYPTION_SCOPE}/{ENCRYPTION_KEY_NAME}'. "
+                f"NOTE: any secrets encrypted with a prior random key must be re-entered once."
+            )
+
+        # 3. Grant the app service principal READ (belt-and-suspenders; the
+        # app.yaml `secret` resource with permission READ is the primary grant).
+        try:
+            app = client.apps.get(name=app_name)
+            sp = getattr(app, "service_principal_client_id", None)
+            if sp:
+                from databricks.sdk.service.workspace import AclPermission
+                client.secrets.put_acl(
+                    scope=ENCRYPTION_SCOPE, principal=sp, permission=AclPermission.READ)
+                logger.info(f"Granted app SP {sp} READ on scope '{ENCRYPTION_SCOPE}'")
+        except Exception as e:  # noqa: BLE001 — resource binding in app.yaml is the real grant
+            logger.debug(f"put_acl for app SP non-fatal (app.yaml resource is primary): {e}")
+
+    except Exception as e:  # noqa: BLE001 — must never abort the deploy
+        logger.warning(
+            f"Could not provision a stable encryption key (continuing deploy): {e}. "
+            f"Encrypted secrets may not survive redeploys until this succeeds."
+        )
+
+
+def deploy_source_to_databricks(
+    app_name="kasal",
+    user_name=None,
+    workspace_dir=None,
+    profile=None,
+    host=None,
+    token=None,
+    description=None,
+    oauth_scopes=None,
+    config_template=None,
+    api_url=None,
+    configure_oauth=True,
+    exclude_dataplane=True,
+    full_sync=True,
+    scope="all"
+):
+    """Deploy source code to Databricks Apps"""
+    root_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+    logger.info(f"Deploying source code from: {root_dir}")
+
+    # Set default workspace directory if not provided
+    if user_name is None:
+        user_name = os.environ.get("USER", "default_user")
+    
+    if not workspace_dir:
+        workspace_dir = f"/Workspace/Users/{user_name}/{app_name}"
+    
+    # Connect to Databricks
+    if profile:
+        logger.info(f"Connecting to Databricks using profile: {profile}")
+        client = WorkspaceClient(profile=profile)
+    elif host and token:
+        logger.info(f"Connecting to Databricks using host: {host}")
+        client = WorkspaceClient(host=host, token=token)
+    else:
+        logger.info(f"Connecting to Databricks using default configuration")
+        client = WorkspaceClient()
+    
+    try:
+        me = client.current_user.me()
+        logger.info(f"Connected to Databricks as {me.user_name}")
+    except Exception as e:
+        logger.warning(f"Could not verify identity (proceeding anyway): {e}")
+        logger.info(f"Connecting to Databricks at {client.config.host}")
+
+    # Provision a STABLE encryption key so Kasal's at-rest secret encryption
+    # survives redeploys. Without ENCRYPTION_KEY the app generates a random Fernet
+    # key at every startup, so after a redeploy previously-encrypted tool_configs
+    # secrets (client_secret, tokens) can no longer be decrypted — which surfaces
+    # as misleading "workspace_id missing" execution errors. If you deploy WITHOUT
+    # deploy.py (image / source-path), provision the key once manually — the app
+    # logs the exact `databricks secrets put-secret` command on startup when it's
+    # missing (see EncryptionUtils.get_encryption_key).
+    ensure_encryption_key(client, app_name)
+
+    # Frontend ships PREBUILT: deploy.py runs the npm build locally on every
+    # deploy (root package.json lifecycle) and uploads frontend_static/.
+    ship_frontend = scope in ("all", "frontend")
+    ship_backend = scope in ("all", "backend")
+    if ship_frontend:
+        if not (root_dir / "frontend").exists():
+            logger.error("frontend/ directory not found. Cannot deploy frontend.")
+            raise FileNotFoundError("frontend/ directory not found")
+        if not (root_dir / "package.json").exists():
+            logger.error("package.json not found. Required to run the local npm build.")
+            raise FileNotFoundError("package.json not found")
+        build_frontend(root_dir, api_url=api_url)
+
+    # Check that docs directory exists
+    docs_dir = root_dir / "docs"
+    if not docs_dir.exists():
+        logger.warning("docs/ directory not found. Continuing without docs.")
+
+    # Verify app.yaml exists
+    app_yaml_path = root_dir / "app.yaml"
+    if not app_yaml_path.exists():
+        logger.error("app.yaml not found in root directory. Please ensure app.yaml exists.")
+        raise FileNotFoundError("app.yaml not found")
+    
+    logger.info(f"Using existing app.yaml at {app_yaml_path}")
+    
+    # uv-native dependency management.
+    # The app's Python dependencies are defined in backend/pyproject.toml and
+    # locked in backend/uv.lock. We copy BOTH to the bundle root below so the
+    # Databricks Apps build runs `uv sync` for a fully reproducible install.
+    # We deliberately do NOT generate or ship a requirements.txt — if one exists
+    # at the bundle root it takes precedence and bypasses uv (see the Databricks
+    # Apps "Manage dependencies" docs).
+    pyproject_src = root_dir / "backend" / "pyproject.toml"
+    uvlock_src = root_dir / "backend" / "uv.lock"
+    if not pyproject_src.exists() or not uvlock_src.exists():
+        logger.error(
+            "uv manifests not found: backend/pyproject.toml and backend/uv.lock "
+            "are required for the uv-based deploy. Run `cd src/backend && uv lock`."
+        )
+        raise FileNotFoundError("backend/pyproject.toml or backend/uv.lock not found")
+    logger.info("Using uv (pyproject.toml + uv.lock) for dependency management")
+
+    try:
+        # Check if app exists, create if not
+        try:
+            app_exists = False
+            app_info = None
+            logger.info(f"Checking if app {app_name} exists")
+
+            try:
+                # Try to get the app
+                app_info = client.apps.get(name=app_name)
+                app_exists = True
+                logger.info(f"App {app_name} already exists")
+            except Exception as get_err:
+                # App doesn't exist
+                logger.info(f"App {app_name} does not exist (will create): {get_err}")
+                app_exists = False
+            
+            if not app_exists:
+                logger.info(f"Creating app: {app_name}")
+                app_description = description if description else f"{app_name} application"
+
+                # Create an App object first, then pass it to create_and_wait
+                app_obj = App(name=app_name)
+                if description:
+                    app_obj.description = description
+
+                app = client.apps.create_and_wait(app=app_obj)
+                logger.info(f"Created app: {app_name}")
+
+                # Configure OAuth scopes for the newly created app
+                if configure_oauth:
+                    logger.info("Configuring OAuth scopes for the new app...")
+                    oauth_success = configure_oauth_scopes(app_name, exclude_dataplane=exclude_dataplane)
+                    if not oauth_success:
+                        logger.warning("OAuth scope configuration failed, but continuing with deployment")
+            else:
+                # Configure OAuth scopes for existing app if requested,
+                # skipping the PATCH when the app already has the desired set.
+                if configure_oauth:
+                    desired = set(get_desired_oauth_scopes(exclude_dataplane=exclude_dataplane))
+                    current = set(getattr(app_info, "user_api_scopes", None) or [])
+                    if current == desired:
+                        logger.info("OAuth scopes already up to date, skipping configuration")
+                    else:
+                        logger.info("Updating OAuth scopes for existing app...")
+                        oauth_success = configure_oauth_scopes(app_name, exclude_dataplane=exclude_dataplane)
+                        if not oauth_success:
+                            logger.warning("OAuth scope configuration failed, but continuing with deployment")
+
+        except Exception as e:
+            logger.error(f"Error checking/creating app: {e}")
+            raise
+        
+        # Create the deployment bundle with only the files we need.
+        # IMPORTANT: the bundle lives OUTSIDE the git repo — `databricks sync`
+        # honors the repository's .gitignore, which ignores databricksdist/ and
+        # frontend_static/, so an in-repo bundle would be silently skipped.
+        # The path is stable per app so sync's incremental snapshot keeps working.
+        try:
+            databricks_dist = Path(tempfile.gettempdir()) / f"kasal-databricksdist-{app_name}"
+            logger.info(f"Creating clean databricks deployment directory: {databricks_dist}")
+            
+            # Remove and recreate databricksdist directory
+            if databricks_dist.exists():
+                shutil.rmtree(databricks_dist)
+            databricks_dist.mkdir()
+            
+            # Copy backend: WHITELIST — the deployed app only needs backend/src.
+            # Everything else in src/backend (tests, migrations, .venv, runtime
+            # artifacts like kasal_default_* LanceDB dirs, *.db, caches) is dev
+            # junk that must never ship. migrations/ (alembic) stays dev-only:
+            # the app creates and self-heals its schema at startup
+            # (db/session.py create_all + _ensure_*_columns).
+            if ship_backend:
+                logger.info("Copying backend/src (whitelist mode)...")
+                backend_src = root_dir / "backend"
+                backend_dst = databricks_dist / "backend"
+                if not (backend_src / "src").exists():
+                    logger.error("backend/src folder not found!")
+                    raise FileNotFoundError("backend/src folder not found")
+                backend_excluded_dirs = {
+                    '__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules', 'logs', 'tmp'
+                }
+                backend_excluded_patterns = [
+                    '*.pyc', '*.pyo', '*.log', '*.db', '*.db-shm', '*.db-wal',
+                    '*.backup', '.coverage', '.env', '.gitignore', '.DS_Store'
+                ]
+                backend_dst.mkdir()
+                shutil.copytree(
+                    backend_src / "src",
+                    backend_dst / "src",
+                    ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
+                )
+                logger.info("Copied backend/src (only src/ ships; dev/test/runtime artifacts stay local)")
+
+            if ship_frontend:
+                # Prebuilt assets: build_frontend() just refreshed
+                # frontend_static/ via the root package.json lifecycle.
+                logger.info("Copying frontend_static (prebuilt assets)...")
+                shutil.copytree(
+                    root_dir / "frontend_static",
+                    databricks_dist / "frontend_static",
+                    ignore=custom_ignore_function({'.git'}, ['.DS_Store'])
+                )
+                logger.info("Copied frontend_static folder")
+
+                # Docs also ship standalone; the npm postbuild already copied
+                # docs/*.md into frontend_static/docs for the app to serve.
+                docs_src = root_dir / "docs"
+                if docs_src.exists():
+                    logger.info("Copying docs folder...")
+                    shutil.copytree(
+                        docs_src,
+                        databricks_dist / "docs",
+                        ignore=custom_ignore_function({'archive', '__pycache__'}, ['*.pyc', '.DS_Store'])
+                    )
+                    logger.info("Copied docs folder")
+                else:
+                    logger.warning("docs/ folder not found, skipping")
+
+            # Root files always ship (tiny): the app needs all of them whatever
+            # the scope. package.json deliberately does NOT ship — its presence
+            # at the bundle root would trigger a remote npm build on Databricks
+            # Apps against frontend source we no longer upload. pyproject.toml +
+            # uv.lock at the bundle root make the build run `uv sync` (we never
+            # ship requirements.txt — it would take precedence and bypass uv).
+            root_files = ["app.yaml", "entrypoint.py"]
+            for file_name in root_files:
+                src_file = root_dir / file_name
+                if src_file.exists():
+                    shutil.copy2(src_file, databricks_dist / file_name)
+                    logger.info(f"Copied {file_name}")
+                else:
+                    logger.warning(f"{file_name} not found, skipping")
+            for manifest in ("pyproject.toml", "uv.lock"):
+                shutil.copy2(root_dir / "backend" / manifest, databricks_dist / manifest)
+                logger.info(f"Copied {manifest} to bundle root")
+
+            logger.info(f"Uploading deployment to workspace: {workspace_dir}")
+            logger.info(f"Uploading from: {databricks_dist} (scope: {scope})")
+            logger.info("Proceeding with upload...")
+
+            # Remove stale workspace artifacts: requirements.txt would override
+            # uv; frontend/ and package.json are leftovers from the remote-build
+            # deploy mode (their presence would trigger a pointless — and now
+            # failing — npm build on Databricks Apps).
+            stale_paths = [(f"{workspace_dir}/requirements.txt", False),
+                           (f"{workspace_dir}/package.json", False),
+                           (f"{workspace_dir}/frontend", True)]
+            for stale_path, recursive in stale_paths:
+                try:
+                    client.workspace.delete(stale_path, recursive=recursive)
+                    logger.info(f"Removed stale workspace artifact: {stale_path}")
+                except Exception:
+                    pass  # not present — nothing to clean
+
+            # Prune remote entries no longer in the local bundle (recursively —
+            # see prune_remote_dir). `databricks sync` only adds/overwrites and
+            # never mirror-deletes, so without this, junk from older deploys
+            # (.ruff_cache, kasal_default_* memory dirs, tests/, migrations/, and
+            # — critically — orphaned Vite content-hashed assets/*-<hash> chunks)
+            # would accumulate in the workspace and the deployment snapshot
+            # forever, bloating the app's source sync past the platform's hard
+            # 10-minute app-start window.
+            if ship_backend:
+                prune_remote_dir(client, f"{workspace_dir}/backend", databricks_dist / "backend")
+            if ship_frontend:
+                # frontend_static is wiped wholesale (one recursive delete) rather
+                # than pruned file-by-file — Vite re-hashes every chunk so the whole
+                # assets/ tree is new each build, making a per-file prune slow for no
+                # benefit. The sync below re-uploads it fresh; it is forced --full
+                # because the diff snapshot would otherwise skip into the emptied dir.
+                clear_remote_dir(client, f"{workspace_dir}/frontend_static")
+                prune_remote_dir(client, f"{workspace_dir}/docs", databricks_dist / "docs")
+
+            # Upload each component with `databricks sync` (parallel transfers).
+            # Full upload by default; with --diff the per-pair snapshot (under
+            # ~/.databricks, keyed on local+remote path) skips unchanged files —
+            # copy2 preserves source mtimes, so the snapshot stays valid even
+            # though the bundle directory is recreated each run.
+            def run_sync(local_dir, remote_dir, force_full=False):
+                use_full = full_sync or force_full
+                sync_cmd = ["databricks", "sync", str(local_dir), remote_dir]
+                if use_full:
+                    sync_cmd.append("--full")
+                if profile is not None:
+                    sync_cmd.extend(["--profile", profile])
+                logger.info(f"Syncing {local_dir.name}/ to {remote_dir}{' (full)' if use_full else ' (diff)'}")
+                result = subprocess.run(sync_cmd, check=True, capture_output=True, text=True)
+                if result.stderr:
+                    logger.debug(f"sync output: {result.stderr.strip()}")
+
+            if ship_backend:
+                run_sync(databricks_dist / "backend", f"{workspace_dir}/backend")
+            if ship_frontend:
+                # force_full: the remote frontend_static was just wiped wholesale
+                # (clear_remote_dir), so a diff sync would skip the now-missing
+                # files and leave it empty. Always re-upload it fully.
+                run_sync(databricks_dist / "frontend_static", f"{workspace_dir}/frontend_static", force_full=True)
+                if (databricks_dist / "docs").exists():
+                    run_sync(databricks_dist / "docs", f"{workspace_dir}/docs")
+
+            # Root files go up individually via the SDK (avoids any .py→notebook
+            # conversion and keeps them out of the directory snapshots).
+            for file_name in root_files + ["pyproject.toml", "uv.lock"]:
+                file_path = databricks_dist / file_name
+                if file_path.exists():
+                    with open(file_path, "rb") as f:
+                        client.workspace.upload(
+                            f"{workspace_dir}/{file_name}", f,
+                            format=ImportFormat.AUTO, overwrite=True
+                        )
+                    logger.info(f"Uploaded {file_name}")
+
+            # Verify what actually landed — sync can silently skip files
+            # (e.g. gitignore rules), so trust but verify.
+            try:
+                remote_top = sorted(
+                    (e.path or "").rsplit("/", 1)[-1] for e in client.workspace.list(workspace_dir)
+                )
+                logger.info(f"Workspace now contains: {remote_top}")
+                for expected in (["frontend_static"] if ship_frontend else []) + (["backend"] if ship_backend else []):
+                    if expected not in remote_top:
+                        logger.error(
+                            f"{expected} is MISSING from the workspace after sync — "
+                            "check the `databricks sync` output."
+                        )
+            except Exception as verify_err:
+                logger.warning(f"Could not verify workspace contents: {verify_err}")
+
+            logger.info("All files uploaded successfully")
+
+            # Clean up databricksdist directory
+            logger.info("Cleaning up databricksdist directory")
+            shutil.rmtree(databricks_dist)
+
+            logger.info("✅ Upload completed successfully!")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error uploading source code: {e}")
+            if e.stdout:
+                logger.error(f"Stdout: {e.stdout}")
+            if e.stderr:
+                logger.error(f"Stderr: {e.stderr}")
+            raise
+        except Exception as e:
+            logger.error(f"Error during upload: {e}")
+            raise
+        
+        # Now deploy the app using the uploaded files
+        logger.info("=" * 60)
+        logger.info("🚀 Starting app deployment...")
+        logger.info("=" * 60)
+        try:
+            logger.info(f"Deploying app {app_name} from {workspace_dir}")
+            
+            # Create an AppDeployment object to use with deploy
+            try:
+                logger.info(f"Creating AppDeployment object with workspace_dir={workspace_dir}")
+                app_deployment = AppDeployment(
+                    source_code_path=workspace_dir,
+                    mode=AppDeploymentMode.SNAPSHOT
+                )
+                logger.info(f"AppDeployment object created successfully")
+            except Exception as e:
+                logger.error(f"Error creating AppDeployment object: {e}")
+                raise
+            
+            # Deploy the app. If another deployment is already in progress
+            # (e.g. a previous run still building), wait for it and retry.
+            deadline = time.time() + 1800  # give an in-flight deployment up to 30 min
+            # The SDK waiter defaults to a 20-minute timeout; a large source tree
+            # can take longer than that to download/build, so give it a generous
+            # window before falling back to polling the deployment status.
+            result_timeout = datetime.timedelta(minutes=45)
+            while True:
+                try:
+                    logger.info("Deploying application")
+                    waiter = client.apps.deploy(
+                        app_name=app_name,
+                        app_deployment=app_deployment
+                    )
+                    # Capture the deployment id from the initial response so we
+                    # can poll for the outcome if the waiter times out below.
+                    deployment_id = getattr(
+                        getattr(waiter, "bind", None), "deployment_id", None
+                    )
+                    try:
+                        result = waiter.result(timeout=result_timeout)
+                        deployment_id = result.deployment_id
+                        logger.info(f"Deployment created with ID: {deployment_id}")
+                    except TimeoutError as te:
+                        # The deploy is still running server-side — don't report
+                        # a false failure. Poll the deployment status ourselves
+                        # until it reaches a terminal state.
+                        logger.warning(
+                            f"Waiter timed out after {result_timeout}: {te}. "
+                            f"Falling back to polling deployment status..."
+                        )
+                        if not deployment_id:
+                            logger.error(
+                                "No deployment_id available to poll; treating as failure"
+                            )
+                            return False
+                        if not wait_for_deployment(client, app_name, deployment_id):
+                            return False
+                        logger.info(
+                            f"Deployment {deployment_id} succeeded (confirmed via polling)"
+                        )
+                    break
+                except Exception as e1:
+                    if "active deployment in progress" in str(e1) and time.time() < deadline:
+                        logger.info("Another deployment is in progress — waiting 20s before retrying...")
+                        time.sleep(20)
+                        continue
+                    logger.error(f"Deployment failed with error type: {type(e1)}")
+                    logger.error(f"Deployment error: {e1}")
+                    return False
+            
+            # waiter.result() above already blocked until the deployment
+            # reached a terminal state — start the app immediately.
+            # Start the app
+            try:
+                logger.info(f"Starting app: {app_name}")
+                client.apps.start(app_name)
+                logger.info(f"App started. Check the app URL: {client.config.host}#apps/{app_name}")
+                return True
+            except Exception as start_error:
+                if "compute is in ACTIVE state" in str(start_error):
+                    logger.info("App is already running - deployment successful!")
+                    return True
+                logger.error(f"Error starting app: {start_error}")
+                try:
+                    app_info = client.apps.get(name=app_name)
+                    logger.info(f"App info: {app_info}")
+                    if hasattr(app_info, 'state'):
+                        logger.info(f"App state: {app_info.state}")
+                except Exception as info_error:
+                    logger.error(f"Error getting app info: {info_error}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error during deployment: {e}")
+            logger.error(f"Error type: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+        
+    except Exception as e:
+        logger.error(f"Error during deployment: {e}")
+        raise
+
+def main():
+    parser = argparse.ArgumentParser(description="Deploy source code to Databricks Apps")
+    parser.add_argument("--app-name", default="kasal", required=True,
+                        help="Name for the Databricks App (lowercase with hyphens only)")
+    parser.add_argument("--user-name", required=True,
+                        help="User name for workspace path (e.g., user@example.com)")
+    parser.add_argument("--workspace-dir",
+                        help="Workspace directory to upload files (default: /Workspace/Users/<user-name>/<app-name>)")
+    parser.add_argument("--profile", help="Databricks CLI profile to use")
+    parser.add_argument("--host", help="Databricks host URL")
+    parser.add_argument("--token", help="Databricks API token")
+    parser.add_argument("--description", help="Description for the app")
+    parser.add_argument("--oauth-scopes", nargs="*",
+                        help="Custom OAuth scopes for the app (default: comprehensive set)")
+    parser.add_argument("--config-template",
+                        help="Path to app.yaml template file (default: use built-in template)")
+    parser.add_argument("--api-url",
+                        help="API URL to use in the frontend build (e.g. https://kasal-xxx.aws.databricksapps.com/api/v1)")
+    parser.add_argument("--configure-oauth", action="store_true", default=True,
+                        help="Configure OAuth scopes during deployment (default: True)")
+    parser.add_argument("--no-configure-oauth", dest="configure_oauth", action="store_false",
+                        help="Skip OAuth scope configuration")
+    parser.add_argument("--include-dataplane", action="store_true", default=False,
+                        help="Include the problematic serving-endpoints-data-plane scope (not recommended)")
+    parser.add_argument("--frontend", action="store_true", default=False,
+                        help="Deploy only the frontend (and docs)")
+    parser.add_argument("--backend", action="store_true", default=False,
+                        help="Deploy only the backend")
+    parser.add_argument("--diff", action="store_true", default=False,
+                        help="Incremental upload — sync only changed files (default: full upload)")
+
+    args = parser.parse_args()
+    
+    # Validate app name (lowercase letters, numbers, and hyphens only)
+    import re
+    if not re.match(r'^[a-z0-9-]+$', args.app_name):
+        logger.error("App name must contain only lowercase letters, numbers, and hyphens")
+        sys.exit(1)
+    
+    # Resolve deploy scope: default is everything; --frontend / --backend narrow
+    # it. Passing both is the same as the default. The frontend is built
+    # LOCALLY by deploy.py (npm lifecycle from package.json) on every deploy
+    # that includes the frontend, and ships as prebuilt static assets.
+    if args.frontend and not args.backend:
+        scope = "frontend"
+    elif args.backend and not args.frontend:
+        scope = "backend"
+    else:
+        scope = "all"
+    logger.info(f"Deploy scope: {scope} (frontend is built locally during deployment)")
+
+    try:
+        success = deploy_source_to_databricks(
+            app_name=args.app_name,
+            user_name=args.user_name,
+            workspace_dir=args.workspace_dir,
+            profile=args.profile,
+            host=args.host,
+            token=args.token,
+            description=args.description,
+            oauth_scopes=getattr(args, 'oauth_scopes', None),
+            config_template=getattr(args, 'config_template', None),
+            api_url=args.api_url,
+            configure_oauth=args.configure_oauth,
+            exclude_dataplane=not args.include_dataplane,
+            full_sync=not args.diff,
+            scope=scope
+        )
+        
+        if success:
+            logger.info("Deployment completed successfully")
+            sys.exit(0)
+        else:
+            logger.error("Deployment failed")
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error during deployment: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

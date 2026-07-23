@@ -1,0 +1,1105 @@
+"""
+Crew preparation module for CrewAI engine.
+
+This module handles the preparation and configuration of CrewAI agents and tasks.
+"""
+
+from typing import Dict, Any, List, Optional
+import logging
+import re
+import os
+from datetime import datetime
+from crewai import Agent, Crew, Task, Process
+from src.core.logger import LoggerManager
+from src.engines.crewai.paths.crew.task_adapter import create_task, is_data_missing
+from src.engines.crewai.paths.crew.agent_adapter import create_agent
+from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
+from src.utils.databricks_url_utils import DatabricksURLUtils
+# Import new service classes
+from src.engines.crewai.memory.crew_memory_service import CrewMemoryService
+from src.engines.crewai.config.embedder_config_builder import EmbedderConfigBuilder
+from src.engines.crewai.config.manager_config_builder import ManagerConfigBuilder
+from src.engines.crewai.config.crew_config_builder import CrewConfigBuilder
+
+
+
+logger = LoggerManager.get_instance().crew
+
+def validate_crew_config(config: Dict[str, Any]) -> bool:
+    """
+    Validate crew configuration
+
+    Args:
+        config: Crew configuration dictionary
+
+    Returns:
+        True if configuration is valid
+    """
+    # Simple validation - check required sections
+    required_sections = ['agents', 'tasks']
+    for section in required_sections:
+        if section not in config or not config[section]:
+            logger.error(f"Missing or empty required section: {section}")
+            return False
+
+    return True
+
+def handle_crew_error(e: Exception, message: str) -> None:
+    """
+    Handle crew-related errors
+
+    Args:
+        e: Exception that occurred
+        message: Base error message
+    """
+    error_msg = f"{message}: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+
+async def process_crew_output(result: Any) -> Dict[str, Any]:
+    """
+    Process crew execution output
+
+    Args:
+        result: Raw output from crew execution
+
+    Returns:
+        Processed output dictionary
+    """
+    try:
+        if isinstance(result, dict):
+            return result
+        elif hasattr(result, 'raw'):
+            # CrewAI result object with raw attribute
+            return {"result": result.raw, "type": "crew_result"}
+        else:
+            # Convert any other result to string
+            return {"result": str(result), "type": "processed"}
+    except Exception as e:
+        logger.error(f"Error processing crew output: {e}")
+        return {"error": f"Failed to process output: {str(e)}"}
+
+class CrewPreparation:
+    """Handles the preparation of CrewAI agents and tasks"""
+
+    def __init__(self, config: Dict[str, Any], tool_service=None, tool_factory=None, user_token: Optional[str] = None):
+        """
+        Initialize the CrewPreparation class
+
+        Args:
+            config: Configuration dictionary containing crew setup
+            tool_service: Tool service instance for resolving tool IDs
+            tool_factory: Tool factory for creating tool instances
+            user_token: Optional user access token for OBO authentication
+        """
+        self.config = config
+        self.agents: Dict[str, Agent] = {}
+        self.tasks: List[Task] = []
+        self.crew: Optional[Crew] = None
+        self.tool_service = tool_service
+        self.tool_factory = tool_factory
+        self.user_token = user_token  # Store user token for OBO auth
+        self.custom_embedder = None
+        self.embedder_config = None
+        # Group agent list cache: the UUID lookup runs once PER agent in the
+        # crew; without this, every agent re-fetched and re-decrypted the
+        # ENTIRE group agent table (O(crew_agents x group_agents) DB load).
+        self._group_agents_cache: Optional[list] = None
+
+        # Log the configuration to debug memory backend
+        logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
+        if 'memory_backend_config' in config:
+            logger.info(f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}")
+
+    def _should_disable_memory_for_agent(self, agent_config: Dict[str, Any]) -> bool:
+        """
+        Check if memory is explicitly disabled for an agent.
+
+        Args:
+            agent_config: Agent configuration dictionary
+
+        Returns:
+            True if memory is explicitly set to False in the agent config
+        """
+        # Only check if memory is explicitly disabled in agent config
+        if 'memory' in agent_config and agent_config['memory'] is False:
+            logger.info(f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}")
+            return True
+        return False
+
+    async def prepare(self) -> bool:
+        """
+        Prepare the crew by creating agents and tasks
+
+        Returns:
+            bool: True if preparation was successful
+        """
+        try:
+            # Validate configuration
+            if not validate_crew_config(self.config):
+                logger.error("Invalid crew configuration")
+                return False
+
+            # Normalize agent/task tool placement BEFORE building anything.
+            self._dedupe_agent_task_tools()
+
+            # Create agents
+            if not await self._create_agents():
+                logger.error("Failed to create agents")
+                return False
+
+            # Create tasks
+            if not await self._create_tasks():
+                logger.error("Failed to create tasks")
+                return False
+
+            # Create crew
+            if not await self._create_crew():
+                logger.error("Failed to create crew")
+                return False
+
+            logger.info("Crew preparation completed successfully")
+            return True
+
+        except Exception as e:
+            handle_crew_error(e, "Error during crew preparation")
+            return False
+
+    def _find_agent_by_reference(self, agent_reference: str) -> Optional[Agent]:
+        """
+        Find an agent by various reference formats.
+
+        Args:
+            agent_reference: Agent reference (name, ID, role, or prefixed ID)
+
+        Returns:
+            Agent instance or None if not found
+        """
+        logger.info(f"[_find_agent_by_reference] Looking for agent: '{agent_reference}'")
+        logger.info(f"[_find_agent_by_reference] Available agents: {list(self.agents.keys())}")
+
+        if not agent_reference or agent_reference == 'unknown':
+            logger.info(f"[_find_agent_by_reference] Returning None for unknown/empty reference")
+            return None
+
+        # Try direct lookup first
+        agent = self.agents.get(agent_reference)
+        if agent:
+            logger.info(f"[_find_agent_by_reference] Found by direct lookup: {agent_reference}")
+            return agent
+
+        # If reference starts with 'agent_agent-', extract the UUID part and try lookup
+        if agent_reference.startswith('agent_agent-'):
+            # Extract UUID: 'agent_agent-47b50da8-bfa2-41c9-8d0f-19c063f5c9c0' -> '47b50da8-bfa2-41c9-8d0f-19c063f5c9c0'
+            uuid_part = agent_reference[12:]  # Remove 'agent_agent-' prefix
+
+            # Try to find agent by matching the UUID in the stored agent keys
+            for agent_key, stored_agent in self.agents.items():
+                # Check if the stored agent key contains this UUID
+                if uuid_part in agent_key:
+                    logger.info(f"Found agent by UUID match: {agent_reference} -> {agent_key}")
+                    return stored_agent
+
+        # If still not found, try to match by agent role in the original config
+        # This handles cases where the task references an agent ID but we stored by role
+        for agent_config in self.config.get('agents', []):
+            agent_id = agent_config.get('id', '')
+            if agent_id == agent_reference:
+                # Found the config, now find the corresponding stored agent
+                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
+                stored_agent = self.agents.get(agent_name)
+                if stored_agent:
+                    logger.info(f"Found agent by config ID match: {agent_reference} -> {agent_name}")
+                    return stored_agent
+
+        logger.warning(f"Could not find agent for reference: {agent_reference}")
+        return None
+
+    def _dedupe_agent_task_tools(self) -> None:
+        """Strip an agent's tool when the SAME tool is also on a task it runs.
+
+        A tool defined at BOTH agent and task level is built twice — once by
+        ``_create_agents`` (using the AGENT's ``tool_configs``) and once by
+        ``_create_tasks`` (using the TASK's ``tool_configs``). CrewAI then exposes
+        two same-named tools to the LLM during that task, and it may pick the
+        agent-level instance — which typically carries an EMPTY config (the UI
+        stores tool configuration on the task node), so a config-driven tool like
+        the Pipeline Config Generator fails with "workspace_id ... required" even
+        though the task is configured correctly.
+
+        The task-level instance is the configured, authoritative one, so we drop
+        the duplicate from the agent. An agent-only tool (no task overrides it) is
+        left untouched — this only removes genuine agent∩task duplicates.
+
+        BEHAVIOR-PRESERVING GUARD: CrewAI lets a task with an EMPTY tools list
+        inherit its agent's tools (task.py check_tools). So if an agent also runs a
+        task that lists NO tools, that task depends on inheriting the agent's tool
+        — stripping it would remove a tool that task needs. We therefore skip
+        de-dupe entirely for any agent that has at least one tool-less task, and
+        only strip tools an agent shares with its OWN tasks. This keeps the tool
+        set the LLM sees identical to before for every crew except the exact
+        duplicate case we're fixing.
+
+        Pure config normalization, no DB access — safe across the subprocess
+        boundary. Ids are compared as strings (the config mixes ints and strings).
+        """
+        agents = self.config.get('agents', [])
+        tasks = self.config.get('tasks', [])
+        if not agents or not tasks:
+            return
+
+        # Map each agent (by every reference form a task might use) → tool ids on
+        # the tasks assigned to it.
+        def _agent_refs(agent_config: Dict[str, Any]) -> set:
+            refs = set()
+            for k in ('id', 'name', 'role'):
+                v = agent_config.get(k)
+                if v:
+                    refs.add(str(v))
+            return refs
+
+        task_tools_by_agent_ref: Dict[str, set] = {}
+        # Agent refs that have a task relying on tool inheritance (task tools empty).
+        agent_refs_with_inheriting_task: set = set()
+        for task_config in tasks:
+            agent_ref = task_config.get('agent')
+            if not agent_ref:
+                continue
+            t_tools = {
+                str(t) for t in (task_config.get('tools') or []) if t is not None
+            }
+            if not t_tools:
+                # This task carries no tools → at runtime it inherits the agent's
+                # tools. Do NOT strip anything from that agent.
+                agent_refs_with_inheriting_task.add(str(agent_ref))
+                continue
+            task_tools_by_agent_ref.setdefault(str(agent_ref), set()).update(t_tools)
+
+        if not task_tools_by_agent_ref:
+            return
+
+        for agent_config in agents:
+            agent_tools = agent_config.get('tools') or []
+            if not agent_tools:
+                continue
+            refs = _agent_refs(agent_config)
+            # Skip agents any of whose tasks rely on tool inheritance.
+            if refs & agent_refs_with_inheriting_task:
+                continue
+            # Union of task tools across every reference form this agent answers to.
+            task_tool_ids: set = set()
+            for ref in refs:
+                task_tool_ids |= task_tools_by_agent_ref.get(ref, set())
+            if not task_tool_ids:
+                continue
+
+            kept = [t for t in agent_tools if str(t) not in task_tool_ids]
+            removed = [t for t in agent_tools if str(t) in task_tool_ids]
+            if removed:
+                agent_name = agent_config.get(
+                    'name', agent_config.get('role', agent_config.get('id', 'unknown'))
+                )
+                logger.info(
+                    f"[CrewPreparation] Agent '{agent_name}': removed tool(s) "
+                    f"{removed} also present on its task(s) — they are built at "
+                    f"task level with the task's configuration (avoids an "
+                    f"empty-config duplicate tool instance)."
+                )
+                agent_config['tools'] = kept
+
+    async def _create_agents(self) -> bool:
+        """
+        Create all agents defined in the configuration, with MCP tools based on their assigned tasks
+
+        Returns:
+            bool: True if all agents were created successfully
+        """
+        try:
+            # Use MCP integration to collect agent MCP requirements
+            from src.engines.crewai.tools.mcp_integration import MCPIntegration
+            agent_mcp_requirements = await MCPIntegration.collect_agent_mcp_requirements(self.config)
+
+            for i, agent_config in enumerate(self.config.get('agents', [])):
+                # Use the agent's 'name' if present, then 'id', then 'role', or generate a name if none exist
+                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
+                config_agent_id = agent_config.get('id', agent_name)
+
+                # CRITICAL FIX: Look up the actual Kasal agent UUID from database using AgentService
+                # The config agent_id is the CrewAI agent name, but we need the Kasal agent UUID for vector search
+                kasal_agent_id = await self._lookup_kasal_agent_uuid_via_service(agent_config, config_agent_id)
+                agent_id = kasal_agent_id if kasal_agent_id else config_agent_id
+
+                # Debug logging to track agent ID resolution for knowledge source access control
+                logger.info(f"[CrewPreparation] Agent {i}: name='{agent_name}', config_id='{config_agent_id}'")
+                logger.info(f"[CrewPreparation] Agent {i}: kasal_agent_id='{kasal_agent_id}', final_agent_id='{agent_id}'")
+                logger.info(f"[CrewPreparation] Agent {i}: Will use agent_id '{agent_id}' for knowledge source access control")
+
+                # Log agent configuration to debug knowledge_sources
+                logger.info(f"[CrewPreparation] Processing agent {agent_name} with config keys: {list(agent_config.keys())}")
+                if 'knowledge_sources' in agent_config:
+                    ks = agent_config['knowledge_sources']
+                    logger.info(f"[CrewPreparation] Agent {agent_name} has {len(ks)} knowledge_sources: {ks}")
+                else:
+                    logger.debug(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
+
+                # Add MCP requirements from assigned tasks to agent config
+                # Try multiple keys: collect_agent_mcp_requirements() uses
+                # _resolve_agent_reference() which returns the config-level ID
+                # (e.g. "agent_agent-xxx"), but agent_id here may be the Kasal
+                # UUID resolved via _lookup_kasal_agent_uuid_via_service().
+                agent_mcp_servers = (
+                    agent_mcp_requirements.get(agent_id, [])
+                    or agent_mcp_requirements.get(config_agent_id, [])
+                    or agent_mcp_requirements.get(agent_name, [])
+                )
+                if agent_mcp_servers:
+                    logger.info(f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}")
+                    if 'tool_configs' not in agent_config:
+                        agent_config['tool_configs'] = {}
+                    agent_config['tool_configs']['MCP_SERVERS'] = {'servers': agent_mcp_servers}
+
+                # Propagate crew-level reasoning config to each agent
+                # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT a Crew-level parameter
+                crew_config = self.config.get('crew', {})
+                if crew_config.get('reasoning') and 'reasoning' not in agent_config:
+                    agent_config['reasoning'] = True
+                    logger.info(f"Agent {agent_name}: Enabling reasoning from crew-level config")
+                if crew_config.get('max_reasoning_attempts') and 'max_reasoning_attempts' not in agent_config:
+                    agent_config['max_reasoning_attempts'] = crew_config['max_reasoning_attempts']
+                    logger.info(f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config")
+                # PlanningConfig overrides (effort + step/replan caps) set in the sidebar
+                # Reasoning section. The shared agent builder turns this into a bounded
+                # crewai PlanningConfig; without it the agent gets CrewAI's expansive defaults.
+                if crew_config.get('reasoning_config') and 'reasoning_config' not in agent_config:
+                    agent_config['reasoning_config'] = crew_config['reasoning_config']
+                    logger.info(f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}")
+
+                # SAFETY: CrewAI's reasoning refine loop is
+                #   while not ready and (max_attempts is None or attempt < max_attempts)
+                # so an unset cap (None) loops FOREVER whenever the model never returns
+                # ready=True — which smaller local models routinely don't (they omit the
+                # structured `ready` field). With litellm response caching on, each refine
+                # call is an instant cache hit, so it spins at hundreds/sec and never
+                # finishes. Bound it whenever reasoning is enabled without an explicit cap.
+                if agent_config.get('reasoning') and not agent_config.get('max_reasoning_attempts'):
+                    agent_config['max_reasoning_attempts'] = 3
+                    logger.info(f"Agent {agent_name}: reasoning enabled without a cap — defaulting max_reasoning_attempts=3 to prevent an unbounded refine loop")
+
+                agent = await create_agent(
+                    agent_key=agent_name,
+                    agent_config=agent_config,
+                    tool_service=self.tool_service,
+                    tool_factory=self.tool_factory,
+                    config=self.config,  # Pass the full config for execution_id and group_id
+                    agent_id=agent_id   # Pass Kasal agent UUID for knowledge source access control
+                )
+                if not agent:
+                    logger.error(f"Failed to create agent: {agent_name}")
+                    return False
+
+                # NOTE: knowledge_sources handling removed - we now use DatabricksKnowledgeSearchTool directly
+                # The tool is configured via agent.tools, not agent.knowledge_sources
+
+                # Store the agent with the agent_name as key
+                self.agents[agent_name] = agent
+                logger.info(f"Created agent: {agent_name}")
+            return True
+        except Exception as e:
+            handle_crew_error(e, "Error creating agents")
+            return False
+
+
+    async def _create_tasks(self) -> bool:
+        """
+        Create all tasks defined in the configuration
+
+        Returns:
+            bool: True if all tasks were created successfully
+        """
+        try:
+            from src.engines.crewai.paths.crew.task_adapter import create_task
+
+            tasks = self.config.get('tasks', [])
+            # Predefined UI Configurator surfaces are now composed POST-execution by
+            # the shared A2UI composer (a2ui_runner.wrap_result_with_surface, wired
+            # into the crew completion paths in execution_runner) — the same
+            # implementation the light-agent path and the exported app use. The old
+            # ui_emission prompt-injection was retired so there is ONE A2UI path.
+            total_tasks = len(tasks)
+
+            # Create a dictionary to store tasks by ID for reference
+            task_dict = {}
+
+            # First pass: create all tasks without setting context
+            for i, task_config in enumerate(tasks):
+                # Get the agent for this task, default to first agent if not specified
+                agent_name = task_config.get('agent', 'unknown')
+                agent = self._find_agent_by_reference(agent_name)
+
+                # Handle missing agent
+                if not agent:
+                    if not self.agents:
+                        logger.error("No agents available for tasks")
+                        return False
+
+                    # Use the first available agent as fallback
+                    fallback_agent_name, agent = next(iter(self.agents.items()))
+                    logger.warning(f"Invalid agent '{agent_name}' specified for task. Using '{fallback_agent_name}' instead.")
+
+                # Define task_name first so it can be used in logging
+                # If this is the first task and it has the Databricks knowledge tool, add context
+                try:
+                    if i == 0 and agent is not None:
+                        # Check if DatabricksKnowledgeSearchTool is in the task's tools list.
+                        # IMPORTANT: the tool can be referenced by NAME or by any of its
+                        # numeric IDs (the seed registers it as 36, but the dispatcher-
+                        # generated crew may reference a duplicate row, e.g. 83). Hardcoding
+                        # a single ID misses those, so resolve IDs -> names via the tool
+                        # service first. This is what makes weaker models (e.g. Haiku) get
+                        # the "you MUST call the tool" nudge — Opus calls it unprompted, Haiku
+                        # does not, so a missed nudge looks like a model bug.
+                        task_tools = task_config.get('tools', []) or task_config.get('_original_tools', [])
+                        resolved_task_tool_names = []
+                        if task_tools and self.tool_service:
+                            try:
+                                from src.engines.crewai.kernel.tool_helpers import (
+                                    resolve_tool_ids_to_names,
+                                )
+                                resolved_task_tool_names = await resolve_tool_ids_to_names(
+                                    task_tools, self.tool_service
+                                )
+                            except Exception as _resolve_err:
+                                logger.warning(
+                                    f"[CrewPreparation] Could not resolve task tool names "
+                                    f"for nudge detection: {_resolve_err}"
+                                )
+                        has_db_knowledge_tool = (
+                            'DatabricksKnowledgeSearchTool' in resolved_task_tool_names or
+                            'DatabricksKnowledgeSearchTool' in task_tools or
+                            '36' in [str(t) for t in task_tools]
+                        )
+
+                        if has_db_knowledge_tool:
+                            # Extract available file information from the task's assigned agent's knowledge_sources
+                            available_files = []
+
+                            # Find the agent config that matches the current task's agent
+                            task_agent_ref = task_config.get('agent', '')
+                            agent_config_for_files = None
+
+                            for agent_cfg in self.config.get('agents', []):
+                                agent_id = agent_cfg.get('id', '')
+                                agent_role = agent_cfg.get('role', '')
+                                # Match by ID or role
+                                if agent_id == task_agent_ref or agent_role == task_agent_ref:
+                                    agent_config_for_files = agent_cfg
+                                    break
+
+                            if not agent_config_for_files:
+                                # Fallback to first agent if no match found
+                                agent_config_for_files = self.config.get('agents', [{}])[0]
+
+                            knowledge_sources = agent_config_for_files.get('knowledge_sources', [])
+
+                            for ks in knowledge_sources:
+                                if isinstance(ks, dict):
+                                    # Extract filename from fileInfo or metadata
+                                    file_info = ks.get('fileInfo', {})
+                                    metadata = ks.get('metadata', {})
+                                    filename = file_info.get('filename') or metadata.get('filename')
+
+                                    if filename:
+                                        available_files.append(filename)
+
+                            # Build file list string
+                            files_info = ""
+                            if available_files:
+                                files_list = "\n".join([f"  - {fname}" for fname in available_files])
+                                files_info = f"\n\n**Available Knowledge Files:**\n{files_list}\n"
+
+                            # Prepend a STRONG instruction to REQUIRE tool use with file context.
+                            # The "already uploaded / do NOT ask for paths" wording matters for
+                            # the chat/dispatched path, where available_files is empty (the
+                            # generated agent has no knowledge_sources). Without it, weaker
+                            # models reply "please provide file paths" instead of calling the tool.
+                            nudge = (
+                                "**CRITICAL INSTRUCTION**: You MUST call the DatabricksKnowledgeSearchTool BEFORE answering. "
+                                f"{files_info}"
+                                "The user's documents are ALREADY uploaded and indexed in the knowledge base — "
+                                "you do NOT need file paths and you MUST NOT ask the user to provide any files or paths. "
+                                "Call DatabricksKnowledgeSearchTool with a search query derived from the request, read the "
+                                "retrieved passages, then base your answer ONLY on that retrieved content and cite the specific "
+                                "passages. DO NOT answer from your own knowledge and DO NOT proceed without calling this tool first.\n\n"
+                            )
+                            # Only inject once, and keep original description intact after the nudge
+                            original_desc = task_config.get('description', '') or ''
+                            if nudge.strip() not in original_desc:
+                                task_config['description'] = f"{nudge}{original_desc}"
+                                t_name_for_log = task_config.get('name', 'first_task')
+                                logger.info(f"[CrewPreparation] Injected STRONG knowledge-search requirement with {len(available_files)} files into first task '{t_name_for_log}' for agent '{agent_name}'")
+
+                            # Also ensure DatabricksKnowledgeSearchTool is in the task's tools
+                            # list — but only if it isn't already present under a name OR a
+                            # numeric id (e.g. 83). has_db_knowledge_tool already accounts for
+                            # the resolved names, so appending here would only duplicate the tool.
+                            if not has_db_knowledge_tool:
+                                task_tools = task_config.get('tools', [])
+                                task_tools.append('DatabricksKnowledgeSearchTool')
+                                task_config['tools'] = task_tools
+                                logger.info(f"[CrewPreparation] Added DatabricksKnowledgeSearchTool to task '{t_name_for_log}' tools list")
+                except Exception as _nudge_err:
+                    logger.warning(f"[CrewPreparation] Failed to inject knowledge-search nudge: {_nudge_err}")
+
+                task_name = task_config.get('name', f"task_{len(self.tasks)}")
+                task_id = task_config.get('id', task_name)
+
+                # Store any context IDs for second pass resolution (only if multiple tasks)
+                if len(tasks) > 1 and "context" in task_config:
+                    context_value = task_config.pop("context")
+                    # Only process non-empty context values
+                    if context_value:  # Skip empty lists, empty strings, etc.
+                        logger.info(f"Saved context references for task {task_name}: {context_value}")
+                        # Store the references for resolution in second pass
+                        if isinstance(context_value, list) and context_value:
+                            task_config['_context_refs'] = [str(item) for item in context_value]
+                        elif isinstance(context_value, str) and context_value.strip():
+                            task_config['_context_refs'] = [context_value]
+                        elif isinstance(context_value, dict) and "task_ids" in context_value and context_value["task_ids"]:
+                            task_config['_context_refs'] = context_value["task_ids"]
+                elif "context" in task_config:
+                    # Remove context from single-task configurations to avoid issues
+                    task_config.pop("context")
+
+                # Get the async execution setting
+                # Tasks with async_execution=True will run in parallel (if they have no context dependencies)
+                # CrewAI validation requires that a crew ends with at most one async task
+                # We handle this by auto-creating a completion task after the loop if needed
+                is_async = task_config.get('async_execution', False)
+
+                if is_async:
+                    # Mark that this task wants async execution for later processing
+                    task_config['_wanted_async'] = True
+                    has_context = '_context_refs' in task_config or task_config.get('context')
+                    if has_context:
+                        logger.info(f"Task '{task_name}' has async_execution=True with context - will wait for dependencies")
+                    else:
+                        logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
+
+                logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
+
+                # Create the task
+                # Get execution_name from config (can be run_name or execution_id)
+                execution_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name') or self.config.get('execution_id')
+
+                task = await create_task(
+                    task_key=task_name,
+                    task_config=task_config,
+                    agent=agent,
+                    config=self.config,
+                    tool_service=self.tool_service,
+                    tool_factory=self.tool_factory,
+                    execution_name=execution_name
+                )
+
+                # Self-hosted vLLM: CrewAI engages NATIVE tool-calling only when the
+                # executing AGENT carries the tools (the executor gates native mode on
+                # bool(original_tools), populated from agent.tools — NOT task.tools).
+                # The dispatcher frequently attaches tools to the TASK with an empty
+                # agent.tools, so the agent's executor is built with zero tools, native
+                # calling never engages, and Qwen3-Coder falls back to ReAct text and
+                # skips the tool entirely. Mirror the task's resolved tools onto its
+                # agent and rebuild the executor so they are present at execution.
+                # Scoped to vLLM agents (the _VLLMFunctionCallingLLM subclass) so
+                # Databricks/other providers are unaffected. De-dup by tool name.
+                try:
+                    from src.core.llm_manager import _VLLMFunctionCallingLLM
+                    task_tools = getattr(task, "tools", None) or []
+                    if task_tools and isinstance(getattr(agent, "llm", None), _VLLMFunctionCallingLLM):
+                        existing = {getattr(t, "name", id(t)) for t in (agent.tools or [])}
+                        added = [t for t in task_tools if getattr(t, "name", id(t)) not in existing]
+                        if added:
+                            agent.tools = list(agent.tools or []) + added
+                            if hasattr(agent, "create_agent_executor"):
+                                agent.create_agent_executor(tools=agent.tools)
+                            logger.info(
+                                f"[CrewPreparation] Propagated {len(added)} task tool(s) onto "
+                                f"agent '{agent_name}' for native vLLM tool-calling: "
+                                f"{[getattr(t, 'name', '?') for t in added]} "
+                                f"(agent.tools={len(agent.tools)})"
+                            )
+                except Exception as _prop_err:
+                    logger.warning(
+                        f"[CrewPreparation] Could not propagate task tools to agent "
+                        f"'{agent_name}': {_prop_err}"
+                    )
+
+                self.tasks.append(task)
+                # Store in our dictionary for context resolution
+                task_dict[task_id] = task
+                logger.info(f"Created task: {task_name} for agent: {agent_name}")
+
+            # Second pass: Resolve context references to actual Task objects
+            for task_config in tasks:
+                task_id = task_config.get('id', task_config.get('name'))
+                task = task_dict.get(task_id)
+
+                if not task:
+                    logger.warning(f"Could not find task for ID {task_id} during context resolution")
+                    continue
+
+                # If this task has context references, resolve them
+                if '_context_refs' in task_config:
+                    context_refs = task_config['_context_refs']
+                    context_tasks = []
+
+                    for ref in context_refs:
+                        # Try direct lookup first
+                        resolved_task = task_dict.get(ref)
+                        if not resolved_task:
+                            # Frontend sends refs with "task_" prefix (e.g. "task_<uuid>")
+                            # but task_dict keys are raw IDs from task_config['id'].
+                            # Strip the prefix and retry.
+                            stripped = ref.replace("task_", "", 1) if ref.startswith("task_") else None
+                            if stripped:
+                                resolved_task = task_dict.get(stripped)
+                        if resolved_task:
+                            context_tasks.append(resolved_task)
+                        else:
+                            logger.warning(f"Could not resolve context reference '{ref}' for task {task_id}")
+
+                    if context_tasks:
+                        logger.info(f"Setting context for task {task_id} to {len(context_tasks)} Task objects")
+                        task.context = context_tasks
+                    else:
+                        logger.warning(f"No context tasks could be resolved for task {task_id}")
+
+            # Handle parallel execution for multiple async tasks
+            # CrewAI validation: "A crew must end with at most one async task"
+            # Solution: Keep ALL async tasks as async (they run in parallel), add a minimal
+            # completion task with context=[all_async_tasks] to satisfy CrewAI validation
+            #
+            # IMPORTANT: Tasks with async_execution=True must NOT have context set,
+            # otherwise they will wait for that context and not run in parallel!
+            if self.tasks:
+                async_tasks = [t for t in self.tasks if getattr(t, 'async_execution', False)]
+
+                if len(async_tasks) > 1:
+                    logger.info(f"Found {len(async_tasks)} async tasks - configuring for parallel execution")
+
+                    # Remove any context from async tasks so they can run truly in parallel
+                    for async_task in async_tasks:
+                        if getattr(async_task, 'context', None):
+                            logger.info(f"Removing context from async task to enable parallel execution")
+                            async_task.context = None
+
+                    # Add a minimal completion task that waits for all async tasks
+                    # This satisfies CrewAI's validation while enabling true parallel execution
+                    from crewai import Task as CrewAITask
+
+                    # Use the last async task's agent for the completion task
+                    completion_agent = async_tasks[-1].agent
+
+                    # Create a minimal completion task
+                    completion_task = CrewAITask(
+                        description="Return the combined outputs from the parallel tasks.",
+                        expected_output="The outputs from all parallel tasks.",
+                        agent=completion_agent,
+                        context=async_tasks,  # Wait for ALL async tasks to complete
+                        async_execution=False  # Sync task to satisfy CrewAI validation
+                    )
+
+                    # Add completion task to the crew's task list
+                    self.tasks.append(completion_task)
+
+                    # Log the parallel execution setup
+                    parallel_descriptions = [
+                        getattr(t, 'description', 'unknown')[:40] + '...'
+                        if len(getattr(t, 'description', '')) > 40
+                        else getattr(t, 'description', 'unknown')
+                        for t in async_tasks
+                    ]
+
+                    logger.info(f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}")
+                    logger.info(f"  Added completion task to collect results and satisfy CrewAI validation")
+
+            return True
+        except Exception as e:
+            handle_crew_error(e, "Error creating tasks")
+            return False
+
+    async def _create_crew(self) -> bool:
+        """
+        Create the crew with all prepared agents and tasks.
+        Refactored to use specialized service classes.
+
+        Returns:
+            bool: True if crew was created successfully
+        """
+        try:
+            # Initialize builders and services
+            config_builder = CrewConfigBuilder(self.config)
+            memory_service = CrewMemoryService(self.config, self.user_token)
+            embedder_builder = EmbedderConfigBuilder(self.config, self.user_token)
+            manager_builder = ManagerConfigBuilder(
+                self.config,
+                self.tool_service,
+                self.tool_factory,
+                self.user_token
+            )
+
+            # 1. Determine crew memory and process type
+            default_crew_memory = config_builder.determine_crew_memory_setting()
+            process_type = config_builder.determine_process_type()
+
+            # 2. Build base crew kwargs
+            crew_kwargs = config_builder.build_base_crew_kwargs(
+                agents=list(self.agents.values()),
+                tasks=self.tasks,
+                process_type=process_type,
+                default_crew_memory=default_crew_memory
+            )
+
+            # 3. Configure manager (hierarchical/sequential)
+            crew_kwargs = await manager_builder.configure_manager(crew_kwargs, process_type)
+
+            # 4. Configure embedder
+            crew_kwargs, custom_embedder, embedder_config = await embedder_builder.configure_embedder(crew_kwargs)
+            self.custom_embedder = custom_embedder
+            self.embedder_config = embedder_config
+
+            # 5. Fetch and setup memory backend
+            # CRITICAL: Use consistent defaults - memory is enabled by default
+            memory_enabled = crew_kwargs.get('memory', True)
+            should_disable_memory = not memory_enabled
+
+            logger.info("=" * 80)
+            logger.info("MEMORY BACKEND CONFIGURATION FLOW")
+            logger.info("=" * 80)
+            logger.info(f"crew_kwargs['memory'] = {crew_kwargs.get('memory')}")
+            logger.info(f"memory_enabled = {memory_enabled}")
+            logger.info(f"should_disable_memory = {should_disable_memory}")
+
+            memory_backend_config = None
+            if memory_enabled and not should_disable_memory:
+                logger.info("Memory is enabled - fetching memory backend config from database...")
+                memory_backend_config = await memory_service.fetch_memory_backend_config()
+                if memory_backend_config:
+                    logger.info(f"Successfully fetched memory backend config: {memory_backend_config.get('backend_type')}")
+                else:
+                    logger.warning("fetch_memory_backend_config returned None")
+            else:
+                logger.info(f"Skipping memory backend fetch: memory_enabled={memory_enabled}, should_disable_memory={should_disable_memory}")
+
+            # If no config found, create default
+            if not memory_backend_config and memory_enabled:
+                memory_backend_config = {
+                    'backend_type': 'default',
+                }
+                logger.info(
+                    "Created default memory backend configuration "
+                    "(CrewAI unified Memory / LanceDB)"
+                )
+
+            # 6. Generate crew ID and setup storage
+            crew_id = memory_service.generate_crew_id()
+            memory_service.setup_storage_directory(crew_id, memory_backend_config)
+
+            # 7. Check if all memory types disabled
+            if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
+                crew_kwargs['memory'] = False
+                should_disable_memory = True
+                logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
+
+            # 8. Configure unified cognitive memory (CrewAI 1.10+)
+            memory_enabled = crew_kwargs.get('memory', True) and not should_disable_memory
+            logger.info(
+                "Step 8 - Configure unified memory: memory_enabled=%s, memory_backend_config=%s",
+                memory_enabled,
+                memory_backend_config is not None,
+            )
+            if memory_enabled and memory_backend_config:
+                backend_type = memory_backend_config.get('backend_type')
+                embedder_for_backend = (
+                    custom_embedder if backend_type in ('databricks', 'lakebase')
+                    else crew_kwargs.get('embedder')
+                )
+                logger.info(
+                    "Creating unified storage (backend=%s, custom_embedder=%s)",
+                    backend_type,
+                    embedder_for_backend is not None,
+                )
+
+                unified_storage = await memory_service.create_unified_storage(
+                    memory_backend_config,
+                    crew_id,
+                    embedder_for_backend,
+                )
+                logger.info(
+                    "Unified storage: %s",
+                    type(unified_storage).__name__ if unified_storage else "crewai-default",
+                )
+
+                from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
+                memory_config = MemBackConfig(**memory_backend_config)
+
+                # Resolve the optional memory-analysis LLM override into a fully
+                # configured instance (provider prefix + creds) so CrewAI Memory
+                # doesn't fall back to an unconfigured OpenAI LLM and 401.
+                memory_llm_override = await memory_service.resolve_memory_llm_override(
+                    memory_config
+                )
+
+                crew_kwargs = memory_service.configure_crew_memory_components(
+                    crew_kwargs,
+                    memory_config,
+                    unified_storage,
+                    crew_id,
+                    custom_embedder,
+                    memory_llm_override=memory_llm_override,
+                )
+
+            # 9. Add optional parameters
+            crew_kwargs = config_builder.add_optional_parameters(crew_kwargs)
+            crew_kwargs = await config_builder.add_llm_parameters(crew_kwargs)
+
+            # 10. Handle memory disabling
+            if should_disable_memory:
+                crew_kwargs = config_builder.disable_memory_completely(crew_kwargs)
+
+            # 11. Log configuration
+            config_builder.log_memory_configuration(crew_kwargs, memory_backend_config)
+
+            logger.info("=" * 80)
+            logger.info("MEMORY BACKEND SUMMARY (FINAL)")
+            logger.info("=" * 80)
+            actual_backend = memory_backend_config.get('backend_type', 'unknown') if memory_backend_config else 'default (LanceDB)'
+            logger.info("Backend Type: %s", actual_backend)
+            resolved_memory = crew_kwargs.get('memory')
+            logger.info(
+                "Unified Memory: %s",
+                type(resolved_memory).__name__ if resolved_memory not in (True, False, None) else resolved_memory,
+            )
+            if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
+                db_config = memory_backend_config.get('databricks_config')
+                if db_config:
+                    memory_index = (
+                        getattr(db_config, 'memory_index', None)
+                        if not isinstance(db_config, dict)
+                        else db_config.get('memory_index')
+                    )
+                    logger.info("Databricks unified memory index: %s", memory_index or 'N/A')
+            logger.info("=" * 80)
+
+            # 13. Handle OpenAI API key
+            await self._handle_openai_api_key()
+
+            # 14. Create crew instance with error handling
+            # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
+            logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
+            try:
+                self.crew = Crew(**crew_kwargs)
+            except (TypeError, Exception) as e:
+                # Handle both TypeError and Pydantic ValidationError
+                error_msg = str(e)
+                logger.warning(f"Crew creation failed with error: {error_msg}")
+
+                # Try to extract the problematic field from the error message
+                if "unexpected keyword argument" in error_msg or "validation error" in error_msg.lower():
+                    # Common problematic fields that might not be supported in all CrewAI versions
+                    problematic_keys = ['tracing', 'embedder', 'reasoning_llm', 'planning_llm']
+
+                    # Try removing each problematic key one at a time
+                    for key in problematic_keys:
+                        if key in crew_kwargs:
+                            logger.warning(f"Removing potentially unsupported Crew kwarg '{key}' and retrying")
+                            crew_kwargs.pop(key, None)
+                            try:
+                                self.crew = Crew(**crew_kwargs)
+                                logger.info(f"Successfully created crew after removing '{key}'")
+                                break
+                            except Exception:
+                                continue
+
+                    if not self.crew:
+                        # If still failing, try with minimal kwargs
+                        logger.warning("Trying crew creation with minimal kwargs")
+                        minimal_kwargs = {
+                            'agents': crew_kwargs.get('agents', []),
+                            'tasks': crew_kwargs.get('tasks', []),
+                            'process': crew_kwargs.get('process'),
+                            'verbose': crew_kwargs.get('verbose', True),
+                            'memory': crew_kwargs.get('memory', False)
+                        }
+                        # For hierarchical process, manager_llm or manager_agent is required
+                        if 'manager_llm' in crew_kwargs:
+                            minimal_kwargs['manager_llm'] = crew_kwargs['manager_llm']
+                        elif 'manager_agent' in crew_kwargs:
+                            minimal_kwargs['manager_agent'] = crew_kwargs['manager_agent']
+                        self.crew = Crew(**minimal_kwargs)
+                else:
+                    raise
+
+            if not self.crew:
+                logger.error("Failed to create crew")
+                return False
+
+            # SECURITY: Run all assembly-time security checks via the shared helper.
+            # Covers: spotlighting wrappers, crew-wide trifecta, per-task trifecta,
+            # mixed-task anti-pattern, and destructive-tool detection.
+            # The same function is called by flow_methods.py so both execution paths
+            # get identical protection.
+            try:
+                from src.engines.crewai.security.tool_capability_manifest import (
+                    run_crew_security_checks as _run_security_checks,
+                )
+                _run_security_checks(
+                    self.crew,
+                    context=f"crew with {len(self.crew.tasks)} task(s)",
+                )
+            except Exception as _sec_err:
+                logger.debug("[SECURITY] Crew security checks skipped: %s", _sec_err)
+
+            # 16. Set crew references and attach trace context (memory + tools).
+            # The attach sequence is shared with the flow path via
+            # attach_execution_trace_context; pass our existing service so
+            # exec_id/group_id come from its config. set_crew_reference_on_memory
+            # stays crew-only (no flow equivalent).
+            memory_service.set_crew_reference_on_memory(self.crew)
+            from src.engines.crewai.kernel.trace_context import attach_execution_trace_context
+            attach_execution_trace_context(
+                self.crew, crew_kwargs, service=memory_service
+            )
+
+            logger.info("Created crew successfully")
+            return True
+
+        except Exception as e:
+            handle_crew_error(e, "Error creating crew")
+            return False
+
+    async def _handle_openai_api_key(self) -> None:
+        """Handle OpenAI API key configuration"""
+        try:
+            from src.services.api_keys_service import ApiKeysService
+
+            # SECURITY: Get group_id from config for multi-tenant isolation
+            group_id = self.config.get('group_id')
+            openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+            if openai_key:
+                os.environ["OPENAI_API_KEY"] = openai_key
+                logger.info("OpenAI API key is configured, keeping it for CrewAI")
+            else:
+                os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
+                logger.info("No OpenAI API key configured, set dummy key for CrewAI validation")
+        except Exception as e:
+            logger.warning(f"Error handling OpenAI API key: {e}")
+
+    async def execute(self) -> Dict[str, Any]:
+        """
+        Execute the prepared crew
+
+        Returns:
+            Dict[str, Any]: Results from crew execution
+        """
+        if not self.crew:
+            logger.error("Cannot execute crew: crew not prepared")
+            return {"error": "Crew not prepared"}
+
+        try:
+            # Execute the crew. Use the async kickoff: CrewAI 1.14.5 raises if a
+            # synchronous ``kickoff()`` is invoked from within a running event loop.
+            result = await self.crew.kickoff_async()
+
+            # Process the output
+            processed_output = await process_crew_output(result)
+
+            # Check if data is missing
+            if is_data_missing(processed_output):
+                logger.warning("Crew execution completed but data may be missing")
+
+            return processed_output
+
+        except Exception as e:
+            handle_crew_error(e, "Error during crew execution")
+            return {"error": str(e)}
+
+    async def _lookup_kasal_agent_uuid_via_service(self, agent_config: Dict[str, Any], config_agent_id: str) -> Optional[str]:
+        """
+        Look up the actual Kasal agent UUID from the database using AgentService.
+
+        This is critical for knowledge source access control - we need to use the same
+        agent ID that the task search will use, which is the Kasal agent UUID from the database,
+        not the CrewAI agent name from the configuration.
+
+        Args:
+            agent_config: Agent configuration from CrewAI config
+            config_agent_id: Agent ID from config (usually CrewAI agent name)
+
+        Returns:
+            Kasal agent UUID from database, or None if not found
+        """
+        try:
+            # Fetch the group's agents ONCE per preparation and reuse for every
+            # agent in the crew (previously each agent re-fetched the whole
+            # group table, including tool_config decryption per row).
+            if self._group_agents_cache is None:
+                from src.services.agent_service import AgentService
+                from src.utils.user_context import GroupContext
+                from src.db.session import request_scoped_session
+
+                group_id = self.config.get('group_id', 'default')
+                async with request_scoped_session() as session:
+                    agent_service = AgentService(session)
+                    group_context = GroupContext(group_ids=[group_id])
+                    self._group_agents_cache = await agent_service.find_by_group(group_context)
+                logger.info(
+                    f"[CrewPreparation] Cached {len(self._group_agents_cache)} group "
+                    f"agents for UUID lookups (group '{group_id}')"
+                )
+
+            agents = self._group_agents_cache
+
+            # Try to match by various criteria
+            agent_role = agent_config.get('role', '')
+            agent_name = agent_config.get('name', '')
+
+            for db_agent in agents:
+                # Try exact matches first
+                if (db_agent.role == agent_role or
+                    db_agent.name == agent_name or
+                    str(db_agent.id) == config_agent_id):
+                    logger.info(f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
+                    return str(db_agent.id)
+
+            # No exact match: log a BOUNDED summary. Dumping the whole group
+            # table (up to hundreds of rows) at INFO cost ~60KB of log + the
+            # same again copied into execution_logs, per failed lookup.
+            sample = ", ".join(
+                f"{db_agent.role!r}" for db_agent in agents[:3]
+            )
+            logger.warning(
+                f"[CrewPreparation] No matching agent found for config_id='{config_agent_id}' "
+                f"(role='{agent_role}', name='{agent_name}') among {len(agents)} group agents; "
+                f"sample roles: [{sample}]"
+            )
+
+            return None
+
+        except Exception as e:
+            logger.error(f"[CrewPreparation] Error looking up Kasal agent UUID: {e}")
+            return None
+
+    def cleanup(self):
+        """
+        Cleanup method to restore original environment settings.
+        This should be called when done with the crew to restore the original storage directory.
+        """
+        if hasattr(self, '_original_storage_dir'):
+            import os
+            if self._original_storage_dir is not None:
+                os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
+                logger.info(f"Restored original CREWAI_STORAGE_DIR: {self._original_storage_dir}")
+            elif "CREWAI_STORAGE_DIR" in os.environ:
+                # If there was no original value, remove the environment variable
+                del os.environ["CREWAI_STORAGE_DIR"]
+                logger.info("Removed CREWAI_STORAGE_DIR environment variable")

@@ -1,0 +1,266 @@
+"""
+Encryption utilities module.
+
+This module provides utilities for encrypting and decrypting sensitive data.
+"""
+
+import os
+import logging
+import base64
+from typing import Optional, Tuple
+from pathlib import Path
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.backends import default_backend
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+
+class EncryptionUtils:
+    """Utility class for encryption and decryption operations."""
+    
+    @staticmethod
+    def get_key_directory() -> Path:
+        """Get the directory where SSH keys are stored"""
+        # Use a directory in the user's home directory
+        home_dir = Path.home()
+        key_dir = home_dir / ".backendcrew" / "keys"
+        key_dir.mkdir(parents=True, exist_ok=True)
+        return key_dir
+
+    @staticmethod
+    def generate_ssh_key_pair() -> Tuple[bytes, bytes]:
+        """Generate a new RSA key pair for encryption"""
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Serialize private key
+        private_key_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        # Serialize public key
+        public_key_bytes = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        return private_key_bytes, public_key_bytes
+
+    @staticmethod
+    def get_or_create_ssh_keys() -> Tuple[bytes, bytes]:
+        """Get existing SSH keys or create new ones if they don't exist"""
+        key_dir = EncryptionUtils.get_key_directory()
+        private_key_path = key_dir / "private_key.pem"
+        public_key_path = key_dir / "public_key.pem"
+        
+        # Check if keys already exist
+        if private_key_path.exists() and public_key_path.exists():
+            private_key = private_key_path.read_bytes()
+            public_key = public_key_path.read_bytes()
+        else:
+            # Generate new keys
+            private_key, public_key = EncryptionUtils.generate_ssh_key_pair()
+            # Save keys to files with restrictive permissions
+            private_key_path.write_bytes(private_key)
+            try:
+                os.chmod(str(private_key_path), 0o600)
+            except (OSError, TypeError):
+                pass  # Best-effort on platforms where chmod may not apply
+            public_key_path.write_bytes(public_key)
+            logger.info("Generated new SSH key pair for encryption")
+        
+        return private_key, public_key
+
+    # Process-lifetime cache for the resolved key, so we don't hit the secrets
+    # API on every encrypt/decrypt. Reset only on restart.
+    _cached_key: Optional[bytes] = None
+
+    # Secret-scope fallback location (matches src/deploy.py provisioning).
+    ENCRYPTION_SCOPE = "kasal"
+    ENCRYPTION_KEY_NAME = "kasal_encryption_key"
+
+    @staticmethod
+    def _read_key_from_secret_scope() -> str:
+        """Read the stable encryption key from the Databricks secret scope.
+
+        Returns the key string, or '' if unavailable (scope/key missing, no
+        permission, not running against Databricks). Best-effort — never raises.
+        The app runs as its service principal, which `deploy.py` grants READ on the
+        scope, so this succeeds in the deployed app without any env-var wiring.
+        """
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            # get_secret returns the base64-encoded bytes value.
+            resp = w.secrets.get_secret(
+                scope=EncryptionUtils.ENCRYPTION_SCOPE,
+                key=EncryptionUtils.ENCRYPTION_KEY_NAME,
+            )
+            raw = getattr(resp, "value", None)
+            if not raw:
+                return ""
+            import base64
+            return base64.b64decode(raw).decode()
+        except Exception as e:  # noqa: BLE001 — fallback path, must never raise
+            logger.debug(f"Could not read encryption key from secret scope: {e}")
+            return ""
+
+    @staticmethod
+    def get_encryption_key() -> bytes:
+        """Resolve the Fernet encryption key, in priority order:
+
+        1. ``ENCRYPTION_KEY`` env var (explicit override / local dev).
+        2. The Databricks secret scope ``kasal/kasal_encryption_key`` (the stable
+           key provisioned by ``deploy.py`` — survives redeploys).
+        3. A freshly-generated key (last resort; NOT persisted — logs a warning,
+           and encrypted secrets will not survive a restart).
+
+        The resolved key is cached for the process lifetime.
+        """
+        if EncryptionUtils._cached_key is not None:
+            return EncryptionUtils._cached_key
+
+        key = os.getenv("ENCRYPTION_KEY")
+        source = "ENCRYPTION_KEY env var"
+        if not key:
+            key = EncryptionUtils._read_key_from_secret_scope()
+            source = f"secret scope '{EncryptionUtils.ENCRYPTION_SCOPE}/{EncryptionUtils.ENCRYPTION_KEY_NAME}'"
+        if not key:
+            key = Fernet.generate_key().decode()
+            source = "generated (ephemeral)"
+            # Self-contained remediation: `deploy.py` provisions the key
+            # automatically, but if the app was deployed another way (image /
+            # source-path, no deploy.py run) the scope may have no key. Log the
+            # EXACT one-time CLI command so it's fixable without hunting docs.
+            logger.warning(
+                "ENCRYPTION_KEY not set and no key found in secret scope "
+                f"'{EncryptionUtils.ENCRYPTION_SCOPE}/{EncryptionUtils.ENCRYPTION_KEY_NAME}'. "
+                "Generated a TEMPORARY key — it will NOT persist across restarts, so "
+                "encrypted secrets (client_secret, tokens) will need re-entering after "
+                "a redeploy. To fix once, provision a stable key:\n"
+                "  databricks secrets put-secret "
+                f"{EncryptionUtils.ENCRYPTION_SCOPE} {EncryptionUtils.ENCRYPTION_KEY_NAME} "
+                "--string-value \"$(python -c 'from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())')\"\n"
+                "then grant the app service principal READ on that scope."
+            )
+        else:
+            logger.info(f"Encryption key resolved from {source}.")
+
+        EncryptionUtils._cached_key = key.encode() if isinstance(key, str) else key
+        return EncryptionUtils._cached_key
+
+    @staticmethod
+    def encrypt_with_ssh(value: str) -> str:
+        """Encrypt a value using RSA public key encryption"""
+        try:
+            _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
+            public_key = serialization.load_pem_public_key(
+                public_key_bytes,
+                backend=default_backend()
+            )
+            
+            # RSA can only encrypt limited data size, so we'll use a hybrid approach
+            # Generate a symmetric key
+            symmetric_key = Fernet.generate_key()
+            f = Fernet(symmetric_key)
+            
+            # Encrypt the value with the symmetric key
+            encrypted_value = f.encrypt(value.encode())
+            
+            # Encrypt the symmetric key with the public key
+            encrypted_key = public_key.encrypt(
+                symmetric_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            
+            # Combine the encrypted key and value, with a separator
+            combined = base64.b64encode(encrypted_key) + b":" + encrypted_value
+            return base64.b64encode(combined).decode()
+        except Exception as e:
+            logger.error(f"Error encrypting value with SSH key: {str(e)}")
+            raise
+
+    @staticmethod
+    def decrypt_with_ssh(encrypted_value: str) -> str:
+        """Decrypt a value using RSA private key encryption"""
+        try:
+            private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
+            private_key = serialization.load_pem_private_key(
+                private_key_bytes,
+                password=None,
+                backend=default_backend()
+            )
+            
+            # Decode the combined value
+            combined = base64.b64decode(encrypted_value.encode())
+            encrypted_key, encrypted_data = combined.split(b":", 1)
+            encrypted_key = base64.b64decode(encrypted_key)
+            
+            # Decrypt the symmetric key
+            symmetric_key = private_key.decrypt(
+                encrypted_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            
+            # Use the symmetric key to decrypt the value
+            f = Fernet(symmetric_key)
+            decrypted_value = f.decrypt(encrypted_data).decode()
+            return decrypted_value
+        except Exception as e:
+            logger.error(f"Error decrypting value with SSH key: {str(e)}")
+            return ""
+
+    @staticmethod
+    def is_ssh_encrypted(value: str) -> bool:
+        """Check if a value is encrypted with SSH keys"""
+        try:
+            # Try to decode as base64 and split
+            combined = base64.b64decode(value.encode())
+            parts = combined.split(b":", 1)
+            return len(parts) == 2
+        except Exception:
+            return False
+
+    @staticmethod
+    def encrypt_value(value: str) -> str:
+        """Encrypt a value using SSH key encryption or Fernet for backward compatibility"""
+        try:
+            # Use SSH encryption
+            return EncryptionUtils.encrypt_with_ssh(value)
+        except Exception as e:
+            logger.error(f"Error with SSH encryption, falling back to Fernet: {str(e)}")
+            # Fall back to Fernet encryption
+            f = Fernet(EncryptionUtils.get_encryption_key())
+            return f.encrypt(value.encode()).decode()
+
+    @staticmethod
+    def decrypt_value(encrypted_value: str) -> str:
+        """Decrypt a value using the appropriate method"""
+        try:
+            # Check if the value is encrypted with SSH keys
+            if EncryptionUtils.is_ssh_encrypted(encrypted_value):
+                return EncryptionUtils.decrypt_with_ssh(encrypted_value)
+            else:
+                # Fall back to Fernet decryption
+                f = Fernet(EncryptionUtils.get_encryption_key())
+                return f.decrypt(encrypted_value.encode()).decode()
+        except Exception as e:
+            logger.error(f"Error decrypting value: {str(e)}")
+            return "" 
