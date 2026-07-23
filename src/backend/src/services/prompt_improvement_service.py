@@ -94,7 +94,8 @@ class PromptImprovementService:
                 messages=messages,
                 model=model,
                 temperature=0.4,
-                max_tokens=2000,
+                # A whole crew's field set can be large — give it room.
+                max_tokens=6000 if target == "crew" else 2000,
                 extra_headers=get_user_agent_header(KasalProduct.PROMPT_IMPROVEMENT),
             )
             parsed = robust_json_parser(content or "")

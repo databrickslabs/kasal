@@ -46,7 +46,12 @@ os.environ["SEED_DEBUG"] = "True"
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 # Prevent MLflow from creating local mlruns directories
-# This MUST be set before MLflow is imported anywhere to ensure Databricks backend is used
+# This MUST be set before MLflow is imported anywhere to ensure Databricks backend is used.
+# Preserve the launch value first: prompt optimization's local-registry mode
+# (MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI=<local server>) reads the
+# value the process was STARTED with, which this override would otherwise erase.
+if os.environ.get("MLFLOW_TRACKING_URI"):
+    os.environ.setdefault("KASAL_LAUNCH_MLFLOW_TRACKING_URI", os.environ["MLFLOW_TRACKING_URI"])
 os.environ["MLFLOW_TRACKING_URI"] = "databricks"
 
 # Set log directory environment variable

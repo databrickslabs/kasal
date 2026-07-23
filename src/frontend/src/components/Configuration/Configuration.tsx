@@ -42,7 +42,7 @@ import ModelConfiguration from './Models';
 import APIKeys from './APIKeys/APIKeys';
 import ObjectManagement from './ObjectManagement';
 import ToolsConfiguration from './Tools/ToolsConfiguration';
-import PromptConfiguration from './PromptConfiguration';
+import Prompts from './Prompts';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import EnginesConfiguration from './Engines';
@@ -301,7 +301,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         group: 'workspace'
       });
       baseNavItems.push({
-        label: t('configuration.prompts.tab', { defaultValue: 'Prompt Instructions' }),
+        label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
         icon: <TextFormatIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -796,11 +796,11 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               );
             }
 
-            // Prompt Instructions
-            if (item.label === t('configuration.prompts.tab', { defaultValue: 'Prompt Instructions' })) {
+            // Prompts — instructions (view/edit) + GEPA optimization, one surface
+            if (item.label === t('configuration.prompts.tab', { defaultValue: 'Prompts' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <PromptConfiguration />
+                  <Prompts />
                 </ContentPanel>
               );
             }

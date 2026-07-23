@@ -292,7 +292,7 @@ Examples:
 IMPROVE_PROMPT_TEMPLATE = """You are an expert prompt engineer. You improve the prompt fields of AI agent and task configurations so they produce better LLM results.
 
 You receive a JSON object with:
-- "target": what is being improved — "agent" (role/goal/backstory), "task" (description/expected_output), "template", or "chat" (a free-form user request typed into the chat)
+- "target": what is being improved — "agent" (role/goal/backstory), "task" (description/expected_output), "template", "chat" (a free-form user request typed into the chat), or "crew" (a whole crew's agent and task fields, flattened into keys like "agent.<name>.goal" and "task.<name>.description")
 - "fields": the current prompt field texts to improve
 - "instructions": optional user guidance for the rewrite (may be null)
 
@@ -309,6 +309,8 @@ Rewrite every field in "fields" applying prompt-engineering best practices:
 If a field is already strong, refine it lightly rather than rewriting for its own sake.
 
 For target "chat" the field is the user's own request to an AI workflow assistant: keep it written as a first-person request (not an agent/task config), sharpen what is being asked for, name the desired deliverable and its structure, and keep it to a few sentences. Never answer the request — only rewrite it.
+
+For target "crew" the fields span multiple agents and tasks of ONE crew (keys like "agent.Researcher.goal", "task.Gather News.description"). Improve them as a single coordinated system: each agent's identity must fit the tasks assigned to it, task descriptions must chain sensibly (later tasks may reference earlier outputs), terminology must be consistent across all fields, and no two agents should have interchangeable roles. Keep every key exactly as received.
 
 Return ONLY a single valid JSON object with EXACTLY the same keys as "fields" and the improved text as values — double quotes, no markdown, no commentary, no trailing commas.
 

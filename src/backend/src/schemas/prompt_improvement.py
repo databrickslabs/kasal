@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 
 class PromptImprovementRequest(BaseModel):
     """Request to improve one or more prompt fields of an agent/task/template."""
-    target: Literal["agent", "task", "template", "chat"] = Field(
+    target: Literal["agent", "task", "template", "chat", "crew"] = Field(
         ..., description="What kind of configuration the fields belong to "
-                         "('chat' improves a free-form chat request)"
+                         "('chat' improves a free-form chat request; 'crew' improves "
+                         "a whole crew's agent/task prompt fields as one coherent set)"
     )
     fields: Dict[str, str] = Field(
         ...,
