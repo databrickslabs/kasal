@@ -21,9 +21,20 @@ import {
 import { useTranslation } from 'react-i18next';
 import EditIcon from '@mui/icons-material/Edit';
 import RestoreIcon from '@mui/icons-material/RestoreOutlined';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import { Tooltip } from '@mui/material';
 import { PromptService, PromptTemplate } from '../../api/PromptService';
+import { OPTIMIZABLE_TEMPLATES } from './optimizableTemplates';
 
-const PromptConfiguration: React.FC = () => {
+const OPTIMIZABLE_NAMES = new Set(OPTIMIZABLE_TEMPLATES.map((tpl) => tpl.name));
+
+interface PromptConfigurationProps {
+  /** When provided, optimizable templates get an Optimize action that hands
+   *  the template name to the parent (which opens the Optimization view). */
+  onOptimize?: (templateName: string) => void;
+}
+
+const PromptConfiguration: React.FC<PromptConfigurationProps> = ({ onOptimize }) => {
   const { t } = useTranslation();
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,14 +159,11 @@ const PromptConfiguration: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h6" gutterBottom>
-        {t('configuration.prompts.title', { defaultValue: 'Prompt Instructions' })}
-      </Typography>
-      <Typography variant="body2" color="textSecondary" paragraph>
-        {t('configuration.prompts.description', { defaultValue: 'Edit the system prompt instructions used by Kasal agents.' })}
-      </Typography>
-
-      <Box display="flex" justifyContent="flex-end" mb={2}>
+      {/* No panel title — the hosting Prompts tab already names this view. */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="body2" color="textSecondary">
+          {t('configuration.prompts.description', { defaultValue: 'Edit the system prompt instructions used by Kasal agents.' })}
+        </Typography>
         <Button
           startIcon={<RestoreIcon />}
           variant="outlined"
@@ -172,9 +180,18 @@ const PromptConfiguration: React.FC = () => {
             <React.Fragment key={prompt.id}>
               <ListItem
                 secondaryAction={
-                  <IconButton edge="end" onClick={() => handleEditClick(prompt)}>
-                    <EditIcon />
-                  </IconButton>
+                  <>
+                    {onOptimize && OPTIMIZABLE_NAMES.has(prompt.name) && (
+                      <Tooltip title={t('configuration.prompts.optimize', { defaultValue: 'Optimize with GEPA' })}>
+                        <IconButton onClick={() => onOptimize(prompt.name)}>
+                          <AutoFixHighIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    <IconButton edge="end" onClick={() => handleEditClick(prompt)}>
+                      <EditIcon />
+                    </IconButton>
+                  </>
                 }
               >
                 <ListItemText

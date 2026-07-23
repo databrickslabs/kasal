@@ -34,6 +34,8 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import PersonIcon from '@mui/icons-material/Person';
 import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CrewOptimizeDialog from '../CrewOptimizeDialog';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
 import { AgentService } from '../../../api/AgentService';
@@ -102,6 +104,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   hideFlowsTab = false,
 }): JSX.Element => {
   const [tabValue, setTabValue] = useState(initialTab);
+  // Crew whose prompts are being optimized (opens CrewOptimizeDialog).
+  const [optimizeCrew, setOptimizeCrew] = useState<CrewResponse | null>(null);
   
   // When showing only one tab, always use that tab's value
   useEffect(() => {
@@ -1509,6 +1513,17 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 {crew.name}
                               </Typography>
                               <Box>
+                                <Tooltip title="Optimize Prompts">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOptimizeCrew(crew);
+                                    }}
+                                  >
+                                    <AutoFixHighIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
                                 <Tooltip title="Export Crew">
                                   <IconButton
                                     size="small"
@@ -1975,14 +1990,20 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         accept=".json"
         onChange={handleImportFlow}
       />
-      <input 
-        type="file" 
-        ref={bulkFileInputRef} 
-        style={{ display: 'none' }} 
+      <input
+        type="file"
+        ref={bulkFileInputRef}
+        style={{ display: 'none' }}
         accept=".json"
         onChange={handleBulkImport}
       />
 
+      <CrewOptimizeDialog
+        open={optimizeCrew !== null}
+        crewId={optimizeCrew?.id ?? null}
+        crewName={optimizeCrew?.name}
+        onClose={() => setOptimizeCrew(null)}
+      />
 
     </>
   );
