@@ -80,6 +80,20 @@ class PromptImprovementService:
         """
         model = model or os.getenv("PROMPT_IMPROVE_MODEL", DEFAULT_IMPROVE_MODEL)
         system = await TemplateService.get_effective_template_content("improve_prompt", group_context)
+        if not (system and system.strip()):
+            # The DB template resolves empty when the improve_prompt seed row is
+            # absent — which happens on any app DB that was seeded BEFORE this
+            # feature shipped (seeds only add rows on fresh/startup seeding, so
+            # already-deployed DBs never got it). Sending an empty system block
+            # makes the Databricks Claude endpoint reject the request with
+            # "system: text content blocks must be non-empty" (400). Fall back to
+            # the bundled default so the feature works regardless of seed state.
+            from src.seeds.prompt_templates import IMPROVE_PROMPT_TEMPLATE
+            logger.warning(
+                "improve_prompt template empty/missing in DB (seed not applied?); "
+                "falling back to the bundled default template"
+            )
+            system = IMPROVE_PROMPT_TEMPLATE
         user = json.dumps(
             {"target": target, "fields": fields, "instructions": instructions},
             ensure_ascii=False,
