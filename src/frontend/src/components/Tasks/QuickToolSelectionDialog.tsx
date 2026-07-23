@@ -86,7 +86,14 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
     }
   }, [open, initialTab]);
 
-  // Fetch tools and set current selection when dialog opens
+  // Fetch tools and set current selection ONLY when the dialog opens.
+  // currentTools/currentMcpServers are unstable array props (the parent
+  // recomputes them on every render), so keeping them in the deps re-ran these
+  // effects on every parent re-render while the dialog was open — re-fetching
+  // the list and resetting the in-progress selection to the original props.
+  // That wiped the user's first click ("refreshes without selecting"). Seeding
+  // once on open is the intended behaviour: the dialog owns the working
+  // selection until Apply/Cancel.
   useEffect(() => {
     if (open) {
       fetchTools();
@@ -94,9 +101,10 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
       setToolSearchQuery('');
       setToolFocusedIndex(-1);
     }
-  }, [open, currentTools]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  // Fetch MCP servers when dialog opens
+  // Fetch MCP servers ONLY when the dialog opens (see note above).
   useEffect(() => {
     if (open) {
       fetchMcpServers();
@@ -104,7 +112,8 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
       setMcpSearchQuery('');
       setMcpFocusedIndex(-1);
     }
-  }, [open, currentMcpServers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Focus search input when tab changes
   useEffect(() => {
