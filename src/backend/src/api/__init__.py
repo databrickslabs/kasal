@@ -42,6 +42,7 @@ from src.api.memory_backend_router import router as memory_backend_router
 from src.api.mlflow_router import router as mlflow_router
 from src.api.models_router import router as models_router
 from src.api.powerbi_router import router as powerbi_router
+from src.api.prompt_improvement_router import router as prompt_improvement_router
 from src.api.scheduler_router import router as scheduler_router
 from src.api.schemas_router import router as schemas_router
 from src.api.sse_router import router as sse_router
@@ -90,6 +91,7 @@ api_router.include_router(connections_router)
 api_router.include_router(crew_generation_router)
 api_router.include_router(task_generation_router)
 api_router.include_router(template_generation_router)
+api_router.include_router(prompt_improvement_router)
 api_router.include_router(executions_router)
 api_router.include_router(execution_history_router)
 api_router.include_router(execution_trace_router)
@@ -137,6 +139,7 @@ __all__ = [
     "connections_router",
     "crew_generation_router",
     "task_generation_router",
+    "prompt_improvement_router",
     "template_generation_router",
     "executions_router",
     "execution_history_router",
