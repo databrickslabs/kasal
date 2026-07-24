@@ -588,7 +588,10 @@ def _preflight_reflection(
             loop,
             messages=[{"role": "user", "content": "ping — reply with OK"}],
             model=model,
-            max_tokens=5,
+            # >= 16: Responses-API models (GPT-5/Codex family) reject smaller
+            # max_output_tokens outright; LLMManager floors this too, but the
+            # preflight should not depend on the safety net.
+            max_tokens=32,
             group_context=group_context,
             user_token=user_token,
         )

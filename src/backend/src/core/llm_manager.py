@@ -755,7 +755,12 @@ class LLMManager:
         group_id = LLMManager._get_group_id_from_context(required=True)
         llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
         if max_tokens is not None:
-            llm.max_tokens = max_tokens
+            # Responses-API models (the GPT-5/Codex family, whether served by
+            # OpenAI or Databricks) reject max_output_tokens below 16 with
+            # "invalid max_output_tokens: integer below minimum value". Tiny
+            # caps only ever mean "ping / one-word reply", so floor the value
+            # centrally instead of teaching every caller the provider quirk.
+            llm.max_tokens = max(16, max_tokens)
         elif not getattr(llm, "max_tokens", None) and not getattr(llm, "max_completion_tokens", None):
             llm.max_tokens = 4000
         if extra_headers:

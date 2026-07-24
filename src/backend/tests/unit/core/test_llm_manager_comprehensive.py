@@ -184,6 +184,26 @@ class TestCompletion:
         assert mock_llm.max_tokens == 8000
 
     @pytest.mark.asyncio
+    async def test_completion_floors_tiny_max_tokens(self):
+        # Responses-API models (GPT-5/Codex family) reject max_output_tokens
+        # below 16 ("integer below minimum value") — the manager floors it so
+        # callers never need to know the provider quirk.
+        mock_llm = MagicMock()
+
+        with (
+            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
+            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
+        ):
+            await LLMManager.completion(
+                messages=[{"role": "user", "content": "ping"}],
+                model="databricks-gpt-5-3-codex",
+                max_tokens=5,
+            )
+
+        assert mock_llm.max_tokens == 16
+
+    @pytest.mark.asyncio
     async def test_completion_emits_llm_span_when_trace_active(self):
         """When a trace is active, completion wraps the call in an LLM span and
         records model/messages as inputs and the response as outputs."""
