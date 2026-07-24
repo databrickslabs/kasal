@@ -14,7 +14,6 @@ from typing import Any
 
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.template_service import TemplateService
-from src.services.documentation_embedding_service import DocumentationEmbeddingService
 from src.utils.prompt_utils import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
 from src.services.log_service import LLMLogService
@@ -133,74 +132,10 @@ class TaskGenerationService:
             )
             raise
 
-    async def _get_relevant_documentation(self, user_prompt: str, agent_context: Optional[str] = None, limit: int = 5) -> str:
-        """
-        Retrieve relevant documentation embeddings based on the task generation request.
-        Specifically looks for task templates and best practices.
+    # NOTE: the crewai-docs retrieval helper (_get_relevant_documentation)
+    # was removed with the crewai->kasal migration: it was never invoked and
+    # the docs.crewai.com seeder that fed it is gone.
 
-        Args:
-            user_prompt: The user's prompt for task generation
-            agent_context: Optional agent context (role, goal) to enhance search
-            limit: Maximum number of documentation chunks to retrieve (default 5 for tasks)
-
-        Returns:
-            String containing relevant documentation formatted for context
-        """
-        try:
-            # Build enhanced query including agent context if available
-            search_query = user_prompt
-            if agent_context:
-                search_query = f"{user_prompt}\n\nAgent context: {agent_context}"
-
-            # Add keywords to find task-specific best practices
-            search_query += "\n\nTask description expected output best practices template example"
-
-            logger.info("Creating embedding for task generation query to find relevant documentation")
-
-            # Configure embedder (default to Databricks for consistency)
-            embedder_config = {
-                'provider': 'databricks',
-                'config': {'model': 'databricks-gte-large-en'}
-            }
-
-            # Get the embedding for the search query
-            embedding_response = await LLMManager.get_embedding(search_query, embedder_config=embedder_config)
-            if not embedding_response:
-                logger.warning("Failed to create embedding for task generation query")
-                return ""
-
-            query_embedding = embedding_response
-
-            # Retrieve similar documentation based on the embedding
-            logger.info(f"Searching for {limit} most relevant documentation chunks for task generation")
-            doc_service = DocumentationEmbeddingService(self.session)
-            similar_docs = await doc_service.search_similar_embeddings(
-                query_embedding=query_embedding,
-                limit=limit
-            )
-
-            if not similar_docs or len(similar_docs) == 0:
-                logger.warning("No relevant documentation found for task generation")
-                return ""
-
-            # Format the documentation for context, emphasizing task patterns
-            docs_context = "\n\n## Task Generation Best Practices and Examples\n\n"
-
-            for doc in similar_docs:
-                # Prioritize best practices and template documentation
-                if 'best_practices' in doc.source or 'task' in doc.title.lower():
-                    docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
-                else:
-                    docs_context += f"### {doc.title}\n\n{doc.content}\n\n"
-
-            logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks for task generation")
-            return docs_context
-
-        except Exception as e:
-            logger.error(f"Error retrieving documentation for task generation: {str(e)}")
-            logger.error(traceback.format_exc())
-            return ""
-    
     async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
         """Public entrypoint — wraps task generation in an MLflow root trace so
         it lands in the shared UC experiment (alongside dispatcher intent, crew

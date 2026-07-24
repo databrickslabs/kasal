@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class EngineConfigBase(BaseModel):
     """Base schema with common engine configuration attributes."""
-    engine_name: str = Field(..., description="Name of the engine (e.g., 'crewai')")
+    engine_name: str = Field(..., description="Name of the engine (e.g., 'kasal')")
     engine_type: str = Field(..., description="Type of engine (e.g., 'workflow', 'ai', 'processing')")
     config_key: str = Field(..., description="Configuration key (e.g., 'flow_enabled')")
     config_value: str = Field(..., description="Configuration value (JSON string or simple value)")
@@ -50,7 +50,7 @@ class EngineConfigListResponse(BaseModel):
     count: int
 
 
-class CrewAIFlowConfigUpdate(BaseModel):
+class KasalFlowConfigUpdate(BaseModel):
     """Schema for updating CrewAI flow configuration."""
     flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
 

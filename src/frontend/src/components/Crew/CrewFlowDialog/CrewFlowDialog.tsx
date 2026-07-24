@@ -142,7 +142,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const firstTaskCardRef = useRef<HTMLDivElement>(null);
   
   // Get flow configuration to check if CrewAI flows are enabled
-  const { crewAIFlowEnabled } = useFlowConfigStore();
+  const { kasalFlowEnabled } = useFlowConfigStore();
   
   // Helper function to detect if a crew contains flow nodes
   const isCrewActuallyFlow = (crew: CrewResponse): boolean => {
@@ -162,11 +162,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         loadAgents();
       } else if (tabValue === 2) {
         loadTasks();
-      } else if (tabValue === 3 && crewAIFlowEnabled) {
+      } else if (tabValue === 3 && kasalFlowEnabled) {
         loadFlows();
       }
     }
-  }, [open, tabValue, crewAIFlowEnabled]);
+  }, [open, tabValue, kasalFlowEnabled]);
 
   // Clear selections when closing dialog
   useEffect(() => {
@@ -178,10 +178,10 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   // Switch to Plans tab if CrewAI flow is disabled and user is on Flows tab
   useEffect(() => {
-    if (!crewAIFlowEnabled && tabValue === 3) {
+    if (!kasalFlowEnabled && tabValue === 3) {
       setTabValue(0);
     }
-  }, [crewAIFlowEnabled, tabValue]);
+  }, [kasalFlowEnabled, tabValue]);
 
   // Focus management when dialog opens
   const handleDialogEntered = () => {
@@ -875,7 +875,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     // Prevent switching to Flows tab if CrewAI flow is disabled
-    if (newValue === 3 && !crewAIFlowEnabled) {
+    if (newValue === 3 && !kasalFlowEnabled) {
       return;
     }
     // Only allow tab changes when showing all tabs
@@ -1358,7 +1358,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                   <Tab icon={<PersonIcon />} iconPosition="start" label="Crews" id="crew-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
                   <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
                   <Tab icon={<AssignmentIcon />} iconPosition="start" label="Tasks" id="task-tab-2" aria-controls="tabpanel-2" sx={{ textTransform: 'none' }} />
-                  {crewAIFlowEnabled && !hideFlowsTab && (
+                  {kasalFlowEnabled && !hideFlowsTab && (
                     <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Flows" id="flow-tab-3" aria-controls="tabpanel-3" sx={{ textTransform: 'none' }} />
                   )}
                 </Tabs>
@@ -1470,7 +1470,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                   {crews
                     .filter(crew => {
                       // Filter out flows if CrewAI flow is disabled
-                      if (!crewAIFlowEnabled && isCrewActuallyFlow(crew)) {
+                      if (!kasalFlowEnabled && isCrewActuallyFlow(crew)) {
                         return false;
                       }
                       
@@ -1816,7 +1816,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             )}
             
             {/* Flows Tab Panel */}
-            {crewAIFlowEnabled && (showOnlyTab === undefined || showOnlyTab === 3) && (
+            {kasalFlowEnabled && (showOnlyTab === undefined || showOnlyTab === 3) && (
               <TabPanel value={tabValue} index={3}>
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>

@@ -15,7 +15,6 @@ from src.core.llm_handlers.databricks_gpt_oss_handler import (
     DatabricksGPTOSSHandler,
     DatabricksRetryLLM,
     apply_empty_content_fix,
-    apply_tool_calls_fix,
     _resolve_schema_refs,
     _is_gemini_model,
     _sanitize_tools_for_gemini,
@@ -329,214 +328,59 @@ class TestApplyEmptyContentFix:
         assert msgs[1]["tool_calls"] == [{"id": "1"}]
 
 
-class TestApplyToolCallsFix:
-    """Test suite for apply_tool_calls_fix monkey-patch.
+class TestEngineToolCallsWithContent:
+    """Regression guard replacing the crewAI-era apply_tool_calls_fix patch:
+    kasal_engine must execute tool_calls even when the same response also
+    carries content text (Claude commonly returns both)."""
 
-    This patch fixes a CrewAI bug where tool_calls are silently dropped when
-    the LLM returns both content text and tool_calls in the same response.
-    """
+    def test_tool_calls_execute_when_content_present(self):
+        from types import SimpleNamespace
+        from unittest.mock import PropertyMock
 
-    def _make_mock_llm(self):
-        """Build a mock LLM instance with required attributes."""
-        llm = MagicMock()
-        llm.is_litellm = False
-        llm._token_usage = {}
-        llm._handle_emit_call_events = MagicMock()
-        llm._track_token_usage_internal = MagicMock()
-        llm._handle_tool_call = MagicMock()
-        return llm
+        from kasal_engine.llm import OpenAICompletion
 
-    def _make_mock_response(self, content="", tool_calls=None):
-        """Build a mock litellm ModelResponse."""
-        mock_message = MagicMock()
-        mock_message.content = content
-        mock_message.tool_calls = tool_calls or []
+        llm = OpenAICompletion(model="gpt-4o")
 
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = MagicMock()
-        return mock_response
-
-    def _make_tool_call(self, name="PerplexityTool", arguments='{"query": "test"}'):
-        tc = MagicMock()
-        tc.function.name = name
-        tc.function.arguments = arguments
-        return tc
-
-    def test_patch_applied_to_sync_method(self):
-        """Verify the patch was applied to LLM._handle_non_streaming_response."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        assert callable(LLM._handle_non_streaming_response)  # patched, or skipped if crewai is already correct
-
-    def test_patch_applied_to_async_method(self):
-        """Verify the patch was applied to LLM._ahandle_non_streaming_response."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        assert callable(LLM._ahandle_non_streaming_response)  # patched, or skipped if crewai is already correct
-
-    @patch("litellm.completion")
-    def test_returns_tool_calls_when_both_content_and_tools_present(
-        self, mock_completion
-    ):
-        """Core bug fix: when LLM returns both content and tool_calls, return tool_calls."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        tool_call = self._make_tool_call()
-        mock_completion.return_value = self._make_mock_response(
-            content="I'll search for that information.",
-            tool_calls=[tool_call],
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(name="my_tool", arguments="{}"),
         )
-
-        result = LLM._handle_non_streaming_response(
-            self._make_mock_llm(),
-            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
-            callbacks=None,
-            available_functions=None,
+        first = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="I'll call the tool now.", tool_calls=[tool_call]
+                    )
+                )
+            ],
+            usage=None,
         )
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0].function.name == "PerplexityTool"
-
-    @patch("litellm.completion")
-    def test_returns_text_when_no_tool_calls(self, mock_completion):
-        """When LLM returns only text (no tool_calls), return text normally."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        mock_completion.return_value = self._make_mock_response(
-            content="Here is the answer.",
-            tool_calls=[],
+        final = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="done", tool_calls=None)
+                )
+            ],
+            usage=None,
         )
-
-        result = LLM._handle_non_streaming_response(
-            self._make_mock_llm(),
-            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
-            callbacks=None,
-            available_functions=None,
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=Mock(side_effect=[first, final]))
+            )
         )
+        executed = []
 
-        assert isinstance(result, str)
-        assert result == "Here is the answer."
+        with patch.object(
+            OpenAICompletion, "client", new_callable=PropertyMock, return_value=fake_client
+        ):
+            text, usage, call_type = llm._call_completions_api(
+                [{"role": "user", "content": "hi"}],
+                [{"type": "function", "function": {"name": "my_tool", "parameters": {}}}],
+                {"my_tool": lambda **kw: executed.append(1) or "tool-result"},
+            )
 
-    @patch("litellm.completion")
-    def test_returns_tool_calls_when_no_text_content(self, mock_completion):
-        """When LLM returns tool_calls without text content, return tool_calls."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        tool_call = self._make_tool_call()
-        mock_completion.return_value = self._make_mock_response(
-            content="",
-            tool_calls=[tool_call],
-        )
-
-        result = LLM._handle_non_streaming_response(
-            self._make_mock_llm(),
-            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
-            callbacks=None,
-            available_functions=None,
-        )
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-    @patch("litellm.completion")
-    def test_executes_tools_when_available_functions_provided(self, mock_completion):
-        """When available_functions is provided, tool execution is handled by LLM internally."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        tool_call = self._make_tool_call()
-        mock_completion.return_value = self._make_mock_response(
-            content="",
-            tool_calls=[tool_call],
-        )
-
-        llm = self._make_mock_llm()
-        llm._handle_tool_call.return_value = "tool result"
-
-        result = LLM._handle_non_streaming_response(
-            llm,
-            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
-            callbacks=None,
-            available_functions={"PerplexityTool": lambda **kw: "result"},
-        )
-
-        assert result == "tool result"
-        llm._handle_tool_call.assert_called_once()
-
-    @patch("litellm.completion")
-    def test_returns_multiple_tool_calls(self, mock_completion):
-        """When LLM returns multiple tool_calls alongside text, all are returned."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        tc1 = self._make_tool_call(name="PerplexityTool")
-        tc2 = self._make_tool_call(name="WebSearchTool")
-        mock_completion.return_value = self._make_mock_response(
-            content="Let me search using multiple tools.",
-            tool_calls=[tc1, tc2],
-        )
-
-        result = LLM._handle_non_streaming_response(
-            self._make_mock_llm(),
-            params={"messages": [{"role": "user", "content": "test"}], "model": "test"},
-            callbacks=None,
-            available_functions=None,
-        )
-
-        assert isinstance(result, list)
-        assert len(result) == 2
-
-    def test_reapply_is_idempotent(self):
-        """Calling apply_tool_calls_fix again doesn't break anything."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        apply_tool_calls_fix()
-
-        # Patch should still be in place (either re-applied or skipped gracefully)
-        assert callable(LLM._handle_non_streaming_response)  # patched, or skipped if crewai is already correct
-        assert callable(LLM._ahandle_non_streaming_response)  # patched, or skipped if crewai is already correct
-
-    def test_handles_patch_failure_gracefully(self):
-        """If patching fails, existing method is preserved and error is logged."""
-        # Import via the handler module — the exact class object the patch was
-        # applied to (a runtime 'from crewai import LLM' can return a fresh,
-        # unpatched class if crewai was evicted from sys.modules mid-suite).
-        from src.core.llm_handlers.databricks_gpt_oss_handler import LLM
-
-        original_method = LLM._handle_non_streaming_response
-
-        with patch("inspect.getsource", side_effect=OSError("could not get source")):
-            apply_tool_calls_fix()
-
-        # Method should be unchanged after failed patch
-        assert LLM._handle_non_streaming_response is original_method
+        assert executed, "tool_calls were dropped despite content text being present"
+        assert text == "done"
 
 
 class TestDatabricksRetryLLMOTelTracing:
@@ -1045,49 +889,6 @@ class TestDatabricksRetryLLMRetryLogic:
                     llm.call([{"role": "user", "content": "test"}])
 
         assert str(exc_info.value) == "Connection timeout"
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_handle_non_streaming_retries_on_empty_response(self, mock_crew_log):
-        """Verify _handle_non_streaming_response retries on empty."""
-        mock_crew_log.return_value = MagicMock()
-
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        # First call returns empty, second succeeds
-        with patch.object(
-            type(llm).__bases__[0],
-            "_handle_non_streaming_response",
-            side_effect=["", "Valid response"],
-        ):
-            with patch(
-                "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
-            ) as mock_time:
-                result = llm._handle_non_streaming_response(
-                    {"messages": [{"role": "user", "content": "test"}], "model": "test"}
-                )
-
-        assert result == "Valid response"
-        mock_time.sleep.assert_called_once_with(1.0)
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_handle_non_streaming_exhausts_retries(self, mock_crew_log):
-        """Verify _handle_non_streaming_response returns empty after max retries."""
-        mock_crew_log.return_value = MagicMock()
-
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        # Always return empty
-        with patch.object(
-            type(llm).__bases__[0], "_handle_non_streaming_response", return_value=""
-        ):
-            with patch("src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"):
-                result = llm._handle_non_streaming_response(
-                    {"messages": [{"role": "user", "content": "test"}], "model": "test"}
-                )
-
-        assert result == ""
 
     @pytest.fixture
     def mock_retry_llm(self):
@@ -1630,72 +1431,6 @@ class TestCallMethodMissingCoverage:
         ):
             with pytest.raises(ValueError, match="bad input"):
                 llm.call([{"role": "user", "content": "test"}])
-
-
-class TestHandleNonStreamingMissingCoverage:
-    """Cover _handle_non_streaming_response additional paths."""
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_sanitizes_messages_in_params(self, mock_crew_log):
-        """_handle_non_streaming_response sanitizes messages in params dict."""
-        mock_crew_log.return_value = MagicMock()
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        params = {
-            "messages": [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": None},
-            ],
-            "model": "test",
-        }
-
-        with patch.object(
-            type(llm).__bases__[0], "_handle_non_streaming_response", return_value="ok"
-        ):
-            result = llm._handle_non_streaming_response(params)
-        assert result == "ok"
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_handle_non_streaming_auth_error_refresh(self, mock_crew_log):
-        """Auth error in _handle_non_streaming triggers token refresh."""
-        mock_log = MagicMock()
-        mock_crew_log.return_value = mock_log
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        call_count = [0]
-
-        def side_effect(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise Exception("401 unauthorized")
-            return "Success"
-
-        with patch.object(
-            type(llm).__bases__[0],
-            "_handle_non_streaming_response",
-            side_effect=side_effect,
-        ):
-            with patch.object(llm, "_try_refresh_token", return_value=True):
-                result = llm._handle_non_streaming_response({"model": "test"})
-        assert result == "Success"
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_handle_non_streaming_exhausted_raises_last_error(self, mock_crew_log):
-        """When retries exhausted with an error, raises the last error."""
-        mock_crew_log.return_value = MagicMock()
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        # Non-retryable error raises immediately
-        with patch.object(
-            type(llm).__bases__[0],
-            "_handle_non_streaming_response",
-            side_effect=ValueError("invalid param"),
-        ):
-            with pytest.raises(ValueError, match="invalid param"):
-                llm._handle_non_streaming_response({"model": "test"})
 
 
 class TestMergeSystemMessagesForGemini:

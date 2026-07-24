@@ -1076,74 +1076,9 @@ export const MemoryConfiguration: React.FC = () => {
     }
   };
 
-  const handleReseedDocumentation = async () => {
-    if (!savedConfig?.indexes?.document || !savedConfig?.workspace_url || !savedConfig?.backend_id) return;
-    
-    const confirmReseed = window.confirm('Are you sure you want to re-seed the documentation? This will empty the index and reload all documentation.');
-    if (!confirmReseed) return;
-    
-    setIsSettingUp(true);
-    setError('');
-    
-    try {
-      // First empty the index
-      const indexName = savedConfig.indexes.document.name;
-      const endpointName = savedConfig.endpoints?.document?.name;
-      
-      if (!endpointName) {
-        setError('Could not determine document endpoint');
-        return;
-      }
-      
-      // Get the backend configuration to find embedding dimension
-      const configResponse = await apiClient.get(`/memory-backend/configs/${savedConfig.backend_id}`);
-      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 1024;
-      
-      // Empty the index
-      const emptyResponse = await apiClient.post('/memory-backend/databricks/empty-index', {
-        workspace_url: savedConfig.workspace_url,
-        index_name: indexName,
-        endpoint_name: endpointName,
-        index_type: 'document',
-        embedding_dimension: embeddingDimension
-      });
-      
-      if (!emptyResponse.data.success) {
-        throw new Error(emptyResponse.data.message || 'Failed to empty document index');
-      }
-      
-      // Trigger documentation re-seeding
-      const seedResponse = await apiClient.post('/documentation-embeddings/seed-all');
-      
-      if (seedResponse.data.success) {
-        // Show success in result dialog
-        setSetupResult({
-          success: true,
-          message: 'Documentation re-seeding initiated successfully. This may take a few minutes to complete.',
-          info: 'The document index has been emptied and re-seeding has started. Documents will be processed in the background.'
-        });
-        setShowResultDialog(true);
-        
-        // Refresh index info after a delay to show progress
-        setTimeout(() => {
-          fetchIndexInfo(indexName, endpointName);
-        }, 5000);
-      } else {
-        setError(seedResponse.data.message || 'Failed to initiate documentation re-seeding');
-      }
-    } catch (error) {
-      console.error('Error re-seeding documentation:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to re-seed documentation';
-      if (error && typeof error === 'object' && 'response' in error) {
-        const responseError = error as { response?: { data?: { detail?: string } } };
-        setError(responseError.response?.data?.detail || errorMessage);
-      } else {
-        setError(errorMessage);
-      }
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
+  // NOTE: the "re-seed documentation" action is gone — it drove the
+  // crewai-docs scraper (/documentation-embeddings/seed-all), removed with
+  // the crewai->kasal engine migration.
 
   const handleViewDocuments = (indexType: string, indexName: string) => {
     // Determine the endpoint based on index type
@@ -1468,7 +1403,7 @@ export const MemoryConfiguration: React.FC = () => {
                         {savedConfig.indexes?.document && (
                           <IndexManagementTable
                             title="Knowledge Base"
-                            subtitle="The knowledge base contains documentation embeddings used to provide context when creating crews, agents, and tasks. This helps the AI understand available tools, patterns, and best practices."
+                            subtitle="The knowledge base holds document embeddings for knowledge search over uploaded files."
                             savedConfig={savedConfig}
                             endpointName={savedConfig.endpoints?.document?.name}
                             endpointType="document"
@@ -1478,7 +1413,6 @@ export const MemoryConfiguration: React.FC = () => {
                             indexInfoMap={indexInfoMap}
                             endpointStatuses={endpointStatuses}
                             isSettingUp={isSettingUp}
-                            onRefresh={handleReseedDocumentation}
                             onEmpty={(indexType) => handleEmptyIndex(indexType as 'memory' | 'document')}
                             onDelete={(indexType) => handleDeleteIndex(indexType as 'memory' | 'document')}
                             onViewDocuments={handleViewDocuments}
@@ -1489,7 +1423,7 @@ export const MemoryConfiguration: React.FC = () => {
                         {savedConfig.indexes?.unified && (
                           <IndexManagementTable
                             title="Unified Cognitive Memory Index"
-                            subtitle="CrewAI 1.10+ stores every memory record (short-term, long-term, and entity alike) in a single index using UNIFIED_SCHEMA. Scope paths and category tags inside metadata replace the old per-tier splits."
+                            subtitle="The Kasal engine stores every memory record (short-term, long-term, and entity alike) in a single index using UNIFIED_SCHEMA. Scope paths and category tags inside metadata replace the old per-tier splits."
                             savedConfig={savedConfig}
                             endpointName={savedConfig.endpoints?.memory?.name}
                             endpointType="memory"
@@ -1957,7 +1891,7 @@ export const MemoryConfiguration: React.FC = () => {
             </Button>
           }
         >
-          CrewAI unified cognitive memory is stored locally in LanceDB under
+          Kasal unified cognitive memory is stored locally in LanceDB under
           <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
           relative to the backend working directory — one store per teamspace, no
           external infrastructure required. Click &ldquo;Browse Memory&rdquo; to

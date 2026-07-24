@@ -499,7 +499,7 @@ The following legacy tools are still supported but deprecated:
 ## Support and Documentation
 
 - **Backend Implementation**: `src/converters/pipeline.py`
-- **Tool Implementation**: `src/engines/crewai/tools/custom/measure_conversion_pipeline_tool.py`
+- **Tool Implementation**: `src/engines/kasal/tools/custom/measure_conversion_pipeline_tool.py`
 - **Seed Configuration**: `src/seeds/tools.py` (Tool ID 74)
 - **Complete Integration Summary**: `src/converters/COMPLETE_INTEGRATION_SUMMARY.md`
 

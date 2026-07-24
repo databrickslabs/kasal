@@ -183,7 +183,7 @@ export const isKnowledgeCapableMemoryConfig = (config: unknown): boolean => {
 // Helper to get display name for backend type
 export const getBackendDisplayName = (type: MemoryBackendType): string => {
   const displayNames: Record<MemoryBackendType, string> = {
-    [MemoryBackendType.DEFAULT]: 'Local (CrewAI unified Memory / LanceDB)',
+    [MemoryBackendType.DEFAULT]: 'Local (Kasal unified Memory / LanceDB)',
     [MemoryBackendType.DATABRICKS]: 'Databricks Vector Search',
     [MemoryBackendType.LAKEBASE]: 'Lakebase (pgvector)',
   };
@@ -194,11 +194,11 @@ export const getBackendDisplayName = (type: MemoryBackendType): string => {
 export const getBackendDescription = (type: MemoryBackendType): string => {
   const descriptions: Record<MemoryBackendType, string> = {
     [MemoryBackendType.DEFAULT]:
-      'CrewAI unified cognitive memory stored on the local LanceDB instance. No external infrastructure required.',
+      'Kasal unified cognitive memory stored on the local LanceDB instance. No external infrastructure required.',
     [MemoryBackendType.DATABRICKS]:
-      'CrewAI unified cognitive memory backed by Databricks Vector Search for scalable, enterprise-grade storage with Unity Catalog governance.',
+      'Kasal unified cognitive memory backed by Databricks Vector Search for scalable, enterprise-grade storage with Unity Catalog governance.',
     [MemoryBackendType.LAKEBASE]:
-      'CrewAI unified cognitive memory backed by your configured Lakebase PostgreSQL instance with pgvector. Zero additional infrastructure required.',
+      'Kasal unified cognitive memory backed by your configured Lakebase PostgreSQL instance with pgvector. Zero additional infrastructure required.',
   };
   return descriptions[type] || '';
 };

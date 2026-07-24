@@ -48,7 +48,7 @@ Power BI REST / scan
 ```
 
 All source lives under
-`src/backend/src/engines/crewai/tools/custom/`. Tool numbers match the
+`src/backend/src/engines/kasal/tools/custom/`. Tool numbers match the
 `tool-NN-*.md` docs in this folder.
 
 ---
@@ -221,4 +221,4 @@ Unity Catalog. The Genie-facing config is assembled by
 | Understand measure quality vs `report_id` | Stage 1 above + [ucmv-migration-guide.md](./ucmv-migration-guide.md) |
 
 Tests for the generation stage live in
-`src/backend/tests/unit/engines/crewai/tools/custom/metric_view_utils/`.
+`src/backend/tests/unit/engines/kasal/tools/custom/metric_view_utils/`.

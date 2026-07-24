@@ -1,7 +1,7 @@
 """Unit tests for documentation_embeddings_router endpoints.
 
 Tests all endpoints using direct async function calls with mocked service
-dependencies and TestClient for seed-all and list-view integration tests.
+dependencies and TestClient for list-view integration tests.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,7 +18,6 @@ from src.api.documentation_embeddings_router import (
     get_recent_documentation_embeddings,
     get_documentation_embedding,
     delete_documentation_embedding,
-    seed_all_documentation_embeddings,
     router,
     get_documentation_embedding_service,
 )
@@ -335,67 +334,6 @@ class TestDeleteDocumentationEmbedding:
 
 
 # ---------------------------------------------------------------------------
-# POST /documentation-embeddings/seed-all
-# ---------------------------------------------------------------------------
-
-class TestSeedAllDocumentationEmbeddings:
-    """Tests for seed_all_documentation_embeddings endpoint."""
-
-    @pytest.mark.asyncio
-    async def test_seed_all_success(self):
-        with patch(
-            "src.api.documentation_embeddings_router.seed_documentation_embeddings",
-            new_callable=AsyncMock,
-            create=True,
-        ) as mock_seed:
-            # Patch the import inside the function
-            with patch(
-                "src.seeds.documentation.seed_documentation_embeddings",
-                new_callable=AsyncMock,
-            ) as mock_inner_seed:
-                result = await seed_all_documentation_embeddings(
-                    group_context=gc(),
-                    x_forwarded_access_token=None,
-                    x_auth_request_access_token=None,
-                )
-
-        assert result["success"] is True
-        assert "successfully" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_seed_all_with_oauth_token(self):
-        with patch(
-            "src.seeds.documentation.seed_documentation_embeddings",
-            new_callable=AsyncMock,
-        ) as mock_seed:
-            result = await seed_all_documentation_embeddings(
-                group_context=gc(),
-                x_forwarded_access_token="db-token",
-                x_auth_request_access_token="oauth-token",
-            )
-
-        assert result["success"] is True
-        mock_seed.assert_called_once_with(user_token="oauth-token")
-
-    @pytest.mark.asyncio
-    async def test_seed_all_error_returns_failure(self):
-        with patch(
-            "src.seeds.documentation.seed_documentation_embeddings",
-            new_callable=AsyncMock,
-            side_effect=Exception("Seeding error"),
-        ):
-            result = await seed_all_documentation_embeddings(
-                group_context=gc(),
-                x_forwarded_access_token=None,
-                x_auth_request_access_token=None,
-            )
-
-        assert result["success"] is False
-        assert "Failed" in result["message"]
-        assert "Seeding error" in result["message"]
-
-
-# ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
 
@@ -413,7 +351,8 @@ class TestRouterConfiguration:
             "/documentation-embeddings/search",
             "/documentation-embeddings/recent",
             "/documentation-embeddings/{embedding_id}",
-            "/documentation-embeddings/seed-all",
         ]
         for path in expected:
             assert path in route_paths, f"Missing route: {path}"
+        # seed-all is gone with the crewai-docs seeder.
+        assert "/documentation-embeddings/seed-all" not in route_paths

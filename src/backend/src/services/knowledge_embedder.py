@@ -22,7 +22,7 @@ Override with ``KNOWLEDGE_OLLAMA_EMBED_MODEL`` — set it to a 1024-dim model
 against real Postgres/pgvector without Databricks, where the column width binds.
 
 This mirrors the Databricks→Ollama fallback in
-``engines/crewai/config/embedder_config_builder.py`` so memory and knowledge stay
+``engines/kasal/config/embedder_config_builder.py`` so memory and knowledge stay
 consistent. Both the embed and search paths call
 :func:`resolve_knowledge_embedder_config` and pass the result straight to
 ``LLMManager.get_embedding(s)`` as ``embedder_config``.

@@ -2,11 +2,11 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface FlowConfigState {
-  // CrewAI Engine settings
-  crewAIFlowEnabled: boolean;
+  // Kasal Engine settings
+  kasalFlowEnabled: boolean;
 
   // Actions
-  setCrewAIFlowEnabled: (enabled: boolean) => void;
+  setKasalFlowEnabled: (enabled: boolean) => void;
 
   // Getters
   isFlowEnabled: () => boolean;
@@ -16,22 +16,22 @@ export const useFlowConfigStore = create<FlowConfigState>()(
   persist(
     (set, get) => ({
       // Default state - Flow is enabled by default
-      crewAIFlowEnabled: true,
+      kasalFlowEnabled: true,
 
       // Actions
-      setCrewAIFlowEnabled: (enabled: boolean) => {
-        set({ crewAIFlowEnabled: enabled });
+      setKasalFlowEnabled: (enabled: boolean) => {
+        set({ kasalFlowEnabled: enabled });
       },
 
       // Getters
       isFlowEnabled: () => {
-        return get().crewAIFlowEnabled;
+        return get().kasalFlowEnabled;
       }
     }),
     {
       name: 'flow-config-storage',
       partialize: (state) => ({
-        crewAIFlowEnabled: state.crewAIFlowEnabled
+        kasalFlowEnabled: state.kasalFlowEnabled
       })
     }
   )

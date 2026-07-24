@@ -11,7 +11,7 @@ const setAppMode = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   useUILayoutStore.setState({ setAppMode });
-  useFlowConfigStore.setState({ crewAIFlowEnabled: true });
+  useFlowConfigStore.setState({ kasalFlowEnabled: true });
   useExecutionStore.setState({ chatModeType: 'chat' });
 });
 
@@ -51,11 +51,11 @@ describe('ChatEmptyState', () => {
   });
 
   it('offers Flow Builder only when the flow feature is enabled', () => {
-    useFlowConfigStore.setState({ crewAIFlowEnabled: false });
+    useFlowConfigStore.setState({ kasalFlowEnabled: false });
     const { rerender } = render(<ChatEmptyState onPrefill={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Flow Builder' })).toBeNull();
 
-    useFlowConfigStore.setState({ crewAIFlowEnabled: true });
+    useFlowConfigStore.setState({ kasalFlowEnabled: true });
     rerender(<ChatEmptyState onPrefill={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Flow Builder' }));
     expect(setAppMode).toHaveBeenCalledWith('flow');

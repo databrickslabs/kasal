@@ -269,7 +269,7 @@ describe('isValidMemoryBackendConfig', () => {
 describe('getBackendDisplayName', () => {
   it('returns correct display name for DEFAULT type', () => {
     expect(getBackendDisplayName(MemoryBackendType.DEFAULT)).toBe(
-      'Local (CrewAI unified Memory / LanceDB)'
+      'Local (Kasal unified Memory / LanceDB)'
     );
   });
 

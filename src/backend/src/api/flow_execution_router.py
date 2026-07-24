@@ -10,7 +10,7 @@ from src.core.exceptions import BadRequestError, NotFoundError
 from pydantic import BaseModel
 
 from src.core.dependencies import GroupContextDep, get_db
-from src.engines.crewai.paths.flow.crewai_flow_service import CrewAIFlowService
+from src.engines.kasal.paths.flow.kasal_flow_service import KasalFlowService
 
 router = APIRouter(
     prefix="/flow-executions",
@@ -46,8 +46,8 @@ async def execute_flow(
     Returns:
         Flow execution details
     """
-    # Use the CrewAIFlowService with database session
-    service = CrewAIFlowService(db)
+    # Use the KasalFlowService with database session
+    service = KasalFlowService(db)
 
     # SECURITY: pass the caller's group context so the flow's group ownership is
     # enforced and the execution record is tagged with the caller's group_id.
@@ -83,8 +83,8 @@ async def get_flow_execution(
     Returns:
         Flow execution details
     """
-    # Use the CrewAIFlowService with database session
-    service = CrewAIFlowService(db)
+    # Use the KasalFlowService with database session
+    service = KasalFlowService(db)
 
     # SECURITY: scope to the caller's groups so a user cannot read another
     # tenant's flow execution by enumerating IDs (returns 404 on mismatch).
@@ -113,8 +113,8 @@ async def get_flow_executions_by_flow(
     Returns:
         List of flow executions
     """
-    # Use the CrewAIFlowService with database session
-    service = CrewAIFlowService(db)
+    # Use the KasalFlowService with database session
+    service = KasalFlowService(db)
 
     # SECURITY: scope to the caller's groups (cross-tenant isolation)
     group_ids = group_context.group_ids if group_context else None

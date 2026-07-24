@@ -5,9 +5,9 @@ Tests cover:
 - Module-level constants
 - _get_group_id_from_context (success, no context, exception, required vs optional)
 - completion (success, failure, threading)
-- configure_crewai_llm (all provider branches: deepseek, openai, anthropic, ollama,
+- configure_kasal_llm (all provider branches: deepseek, openai, anthropic, ollama,
   databricks standard, databricks gpt-5, databricks codex, gemini, fallback)
-- get_llm (delegates to configure_crewai_llm with UserContext)
+- get_llm (delegates to configure_kasal_llm with UserContext)
 - get_embedding circuit breaker
 """
 
@@ -66,7 +66,7 @@ class TestClassAttributes:
         LLMManager._embedding_failures.clear()
 
     def test_static_methods_exist(self):
-        for name in ("_get_group_id_from_context", "completion", "configure_crewai_llm", "get_llm", "get_embedding"):
+        for name in ("_get_group_id_from_context", "completion", "configure_kasal_llm", "get_llm", "get_embedding"):
             assert callable(getattr(LLMManager, name))
 
 
@@ -141,7 +141,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
         ):
             result = await LLMManager.completion(
@@ -157,7 +157,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, side_effect=RuntimeError("LLM error")),
         ):
             with pytest.raises(RuntimeError, match="LLM error"):
@@ -172,7 +172,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
         ):
             await LLMManager.completion(
@@ -192,7 +192,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
         ):
             await LLMManager.completion(
@@ -217,7 +217,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
             patch("mlflow.get_current_active_span", return_value=MagicMock()),
             patch("mlflow.start_span", return_value=span_cm) as mock_start_span,
@@ -244,7 +244,7 @@ class TestCompletion:
 
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
             patch("mlflow.get_current_active_span", return_value=None),
             patch("mlflow.start_span") as mock_start_span,
@@ -258,7 +258,7 @@ class TestCompletion:
 
 
 # ---------------------------------------------------------------------------
-# configure_crewai_llm — helper
+# configure_kasal_llm — helper
 # ---------------------------------------------------------------------------
 
 
@@ -279,7 +279,7 @@ def _make_model_config(name, provider, context_window=128000, max_output_tokens=
 def _patch_session_and_config(model_config_dict):
     """Create patches for request_scoped_session and ModelConfigService.
 
-    request_scoped_session is imported inside configure_crewai_llm via
+    request_scoped_session is imported inside configure_kasal_llm via
     ``from src.db.session import request_scoped_session``, so we patch
     at the original module location.
     """
@@ -298,24 +298,24 @@ def _patch_session_and_config(model_config_dict):
 
 
 # ---------------------------------------------------------------------------
-# configure_crewai_llm
+# configure_kasal_llm
 # ---------------------------------------------------------------------------
 
 
 class TestConfigureCrewaiLlm:
-    """Test configure_crewai_llm for each provider branch."""
+    """Test configure_kasal_llm for each provider branch."""
 
     @pytest.mark.asyncio
     async def test_raises_without_group_id(self):
         with pytest.raises(ValueError, match="group_id is REQUIRED"):
-            await LLMManager.configure_crewai_llm("test-model", "", None)
+            await LLMManager.configure_kasal_llm("test-model", "", None)
 
     @pytest.mark.asyncio
     async def test_raises_when_model_not_found(self):
         p_session, p_service = _patch_session_and_config(None)
         with p_session, p_service:
             with pytest.raises(ValueError, match="not found in the database"):
-                await LLMManager.configure_crewai_llm("missing-model", "group-1", None)
+                await LLMManager.configure_kasal_llm("missing-model", "group-1", None)
 
     @pytest.mark.asyncio
     async def test_deepseek_provider(self):
@@ -327,7 +327,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="ds-key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            result = await LLMManager.configure_crewai_llm("deepseek-chat", "group-1", 0.5)
+            result = await LLMManager.configure_kasal_llm("deepseek-chat", "group-1", 0.5)
             MockLLM.assert_called_once()
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "deepseek/deepseek-chat"
@@ -344,7 +344,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            result = await LLMManager.configure_crewai_llm("gpt-4o", "group-1", None)
+            result = await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "gpt-4o"
             assert call_kwargs["api_key"] == "sk-key"
@@ -359,7 +359,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_crewai_llm("gpt-5", "group-1", None)
+            await LLMManager.configure_kasal_llm("gpt-5", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["timeout"] == 300
             assert "additional_drop_params" in call_kwargs
@@ -375,7 +375,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="ant-key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_crewai_llm("claude-3-5-sonnet-20241022", "group-1", 0.3)
+            await LLMManager.configure_kasal_llm("claude-3-5-sonnet-20241022", "group-1", 0.3)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "anthropic/claude-3-5-sonnet-20241022"
 
@@ -388,7 +388,7 @@ class TestConfigureCrewaiLlm:
             p_service,
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_crewai_llm("llama3.2-latest", "group-1", None)
+            await LLMManager.configure_kasal_llm("llama3.2-latest", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             # Hyphens should be replaced with colons for Ollama
             assert call_kwargs["model"] == "ollama/llama3.2:latest"
@@ -411,7 +411,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", 0.7)
+            await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", 0.7)
             MockRetryLLM.assert_called_once()
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["model"] == "databricks/databricks-llama-4-maverick"
@@ -436,7 +436,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_crewai_llm("databricks-gpt-5", "group-1", None)
+            await LLMManager.configure_kasal_llm("databricks-gpt-5", "group-1", None)
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["timeout"] == 300  # GPT-5 gets 300s
             assert "additional_drop_params" in call_kwargs
@@ -467,7 +467,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_handlers.databricks_codex_handler.DatabricksCodexCompletion", mock_codex_cls),
         ):
-            result = await LLMManager.configure_crewai_llm("databricks-gpt-5-3-codex", "group-1", None)
+            result = await LLMManager.configure_kasal_llm("databricks-gpt-5-3-codex", "group-1", None)
             mock_codex_cls.assert_called_once()
             call_kwargs = mock_codex_cls.call_args[1]
             assert call_kwargs["model"] == "databricks-gpt-5-3-codex"
@@ -488,7 +488,7 @@ class TestConfigureCrewaiLlm:
             patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
         ):
             with pytest.raises(ValueError, match="No Databricks credentials available for workspace 'group-1'"):
-                await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", None)
+                await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", None)
 
     @pytest.mark.asyncio
     async def test_databricks_import_error_raises(self):
@@ -503,7 +503,7 @@ class TestConfigureCrewaiLlm:
             patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
         ):
             with pytest.raises(ImportError, match="databricks_auth module is required"):
-                await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", None)
+                await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", None)
 
     @pytest.mark.asyncio
     async def test_gemini_provider(self):
@@ -516,7 +516,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.LLM") as MockLLM,
             patch.dict(os.environ, {}, clear=False),
         ):
-            await LLMManager.configure_crewai_llm("gemini-2.0-flash", "group-1", None)
+            await LLMManager.configure_kasal_llm("gemini-2.0-flash", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "gemini/gemini-2.0-flash"
 
@@ -531,7 +531,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.LLM") as MockLLM,
             patch.dict(os.environ, {}, clear=False),
         ):
-            await LLMManager.configure_crewai_llm("gemini-2.0-flash", "group-1", None)
+            await LLMManager.configure_kasal_llm("gemini-2.0-flash", "group-1", None)
             # Should still create LLM without api_key
             assert MockLLM.called
 
@@ -544,7 +544,7 @@ class TestConfigureCrewaiLlm:
             p_service,
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_crewai_llm("custom-model", "group-1", None)
+            await LLMManager.configure_kasal_llm("custom-model", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "custom_provider/custom-model"
 
@@ -566,7 +566,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
             patch("src.core.llm_manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_crewai_llm("databricks-llama-4-maverick", "group-1", 0.5)
+            await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", 0.5)
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["temperature"] == 0.5
 
@@ -580,7 +580,7 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_crewai_llm("gpt-4o", "group-1", None)
+            await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs.get("max_tokens") == 4096
             assert "max_completion_tokens" not in call_kwargs
@@ -602,7 +602,7 @@ class TestGetLlm:
 
         with (
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
         ):
             result = await LLMManager.get_llm("test-model", temperature=0.5)
             assert result == mock_llm
@@ -1374,7 +1374,7 @@ class TestConfigureLiteLLMCaching:
 
 class TestCompletionMaxTokensPolicy:
     """Regression (LLM-033): completion() must not blanket-override the
-    model config's max_output_tokens (applied by configure_crewai_llm)
+    model config's max_output_tokens (applied by configure_kasal_llm)
     with a 4000 default. Explicit caller values still win; 4000 is only
     a last-resort cap when neither caller nor model config sets a budget."""
 
@@ -1387,7 +1387,7 @@ class TestCompletionMaxTokensPolicy:
     async def _run_completion(self, mock_llm, **kwargs):
         with (
             patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_crewai_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
             patch("src.core.llm_manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
         ):
             await LLMManager.completion(

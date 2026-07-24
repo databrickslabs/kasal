@@ -253,7 +253,7 @@ class TestGetVectorStorage:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_import_error(self, service):
-        with patch.dict("sys.modules", {"src.engines.crewai.memory.databricks_vector_storage": None}):
+        with patch.dict("sys.modules", {"src.engines.kasal.memory.databricks_vector_storage": None}):
             result = await service._get_vector_storage()
         assert result is None
 
@@ -431,7 +431,7 @@ class TestEmbedFile:
 # --- Legacy Vector-Search storage builder (_get_vector_storage internals) ---
 from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType  # noqa: E402
 
-_DVS = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
+_DVS = "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorStorage"
 
 
 def _databricks_backend(db_config):

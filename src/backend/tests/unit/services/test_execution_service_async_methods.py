@@ -234,8 +234,8 @@ class TestExecuteFlow:
         job_id = "job_123"
 
         mock_result = {"job_id": job_id, "status": "running"}
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.run_flow_execution = AsyncMock(
             return_value=mock_result
         )
 
@@ -253,14 +253,14 @@ class TestExecuteFlow:
         flow_id = uuid.uuid4()
 
         mock_result = {"status": "running"}
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.run_flow_execution = AsyncMock(
             return_value=mock_result
         )
 
         result = await execution_service.execute_flow(flow_id=flow_id)
 
-        call_args = execution_service.crewai_execution_service.run_flow_execution.call_args
+        call_args = execution_service.kasal_execution_service.run_flow_execution.call_args
         assert call_args.kwargs["job_id"] is not None
 
     @pytest.mark.asyncio
@@ -268,8 +268,8 @@ class TestExecuteFlow:
         """Test execute_flow re-raises KasalError."""
         from src.core.exceptions import KasalError, NotFoundError
 
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.run_flow_execution = AsyncMock(
             side_effect=NotFoundError(detail="Flow not found")
         )
 
@@ -283,8 +283,8 @@ class TestExecuteFlow:
         """Test execute_flow wraps unexpected errors in KasalError."""
         from src.core.exceptions import KasalError
 
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.run_flow_execution = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.run_flow_execution = AsyncMock(
             side_effect=ValueError("Unexpected error")
         )
 
@@ -307,8 +307,8 @@ class TestGetExecutionsByFlow:
         flow_id = uuid.uuid4()
         mock_result = {"executions": [{"id": 1}, {"id": 2}]}
 
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
             return_value=mock_result
         )
 
@@ -321,8 +321,8 @@ class TestGetExecutionsByFlow:
         """Test get_executions_by_flow handles errors gracefully."""
         from src.core.exceptions import KasalError
 
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
             side_effect=ValueError("Database error")
         )
 
@@ -337,8 +337,8 @@ class TestGetExecutionsByFlow:
         flow_id = uuid.uuid4()
         mock_result = {"executions": []}
 
-        execution_service.crewai_execution_service = MagicMock()
-        execution_service.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(
+        execution_service.kasal_execution_service = MagicMock()
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
             return_value=mock_result
         )
 
@@ -436,14 +436,14 @@ class TestExecutionServiceInit:
             service = ExecutionService(session=None)
             assert service.session is None
 
-    def test_init_creates_crewai_execution_service(self, mock_session):
-        """Test that CrewAIExecutionService is created."""
+    def test_init_creates_kasal_execution_service(self, mock_session):
+        """Test that KasalExecutionService is created."""
         with patch("src.services.execution_service.ExecutionNameService") as MockNameService:
             MockNameService.create.return_value = MagicMock()
-            with patch("src.services.execution_service.CrewAIExecutionService") as MockCrewAI:
+            with patch("src.services.execution_service.KasalExecutionService") as MockCrewAI:
                 MockCrewAI.return_value = MagicMock()
                 service = ExecutionService(session=mock_session)
-                assert service.crewai_execution_service is not None
+                assert service.kasal_execution_service is not None
 
 
 # ============================================================================

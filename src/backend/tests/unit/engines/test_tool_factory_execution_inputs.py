@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Dict, Any, Optional
 
-from src.engines.crewai.tools.tool_factory import ToolFactory
+from src.engines.kasal.tools.tool_factory import ToolFactory
 
 
 class TestExecutionInputsCleanup:

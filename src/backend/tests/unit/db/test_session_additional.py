@@ -236,7 +236,7 @@ class TestRequestScopedSession:
         Regression for the background-task bug: asyncio.create_task copies the
         request's ContextVar (a session FastAPI then closes), and reusing it
         raised 'Cannot operate on a closed database' in the model-config read
-        inside LLMManager.configure_crewai_llm.
+        inside LLMManager.configure_kasal_llm.
         """
         from src.db.session import (
             request_scoped_session,

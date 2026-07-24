@@ -10,12 +10,12 @@ from src.api.engine_config_router import (
     create_engine_config,
     toggle_engine_config,
     update_config_value,
-    get_crewai_flow_enabled,
-    set_crewai_flow_enabled,
+    get_kasal_flow_enabled,
+    set_kasal_flow_enabled,
     get_otel_app_telemetry_enabled,
     set_otel_app_telemetry_enabled,
 )
-from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpdate, EngineConfigValueUpdate, CrewAIFlowConfigUpdate, OtelAppTelemetryConfigUpdate
+from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpdate, EngineConfigValueUpdate, KasalFlowConfigUpdate, OtelAppTelemetryConfigUpdate
 
 
 class Ctx:
@@ -33,7 +33,7 @@ async def test_list_endpoints():
     with patch('src.api.engine_config_router.EngineConfigService') as svc_cls:
         svc = AsyncMock()
         item = {
-            'engine_name': 'crewai',
+            'engine_name': 'kasal',
             'engine_type': 'workflow',
             'config_key': 'flow_enabled',
             'config_value': 'true',
@@ -102,12 +102,12 @@ async def test_crewai_toggles():
     # System admin required for engine configuration endpoints
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
-    svc.get_crewai_flow_enabled = AsyncMock(return_value=True)
-    resp = await get_crewai_flow_enabled(service=svc, group_context=group_ctx)
+    svc.get_kasal_flow_enabled = AsyncMock(return_value=True)
+    resp = await get_kasal_flow_enabled(service=svc, group_context=group_ctx)
     assert resp['flow_enabled'] is True
 
-    svc.set_crewai_flow_enabled = AsyncMock(return_value=True)
-    out = await set_crewai_flow_enabled(CrewAIFlowConfigUpdate(flow_enabled=False), service=svc, group_context=group_ctx)
+    svc.set_kasal_flow_enabled = AsyncMock(return_value=True)
+    out = await set_kasal_flow_enabled(KasalFlowConfigUpdate(flow_enabled=False), service=svc, group_context=group_ctx)
     assert out['success'] is True
 
 

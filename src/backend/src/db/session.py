@@ -518,7 +518,7 @@ def detach_request_session() -> None:
     the request-scoped DB session, which FastAPI closes the instant the response
     returns. Such a background task must call this FIRST so that any later
     ``request_scoped_session()`` (e.g. the model-config read inside
-    ``LLMManager.configure_crewai_llm``) opens a fresh standalone session instead
+    ``LLMManager.configure_kasal_llm``) opens a fresh standalone session instead
     of operating on the closed one (``sqlite3.ProgrammingError: Cannot operate on
     a closed database``). Setting the var here only affects this task's copied
     context, never the originating request.
@@ -941,6 +941,24 @@ async def _heal_personal_group_names(conn) -> None:
         logger.warning(f"Could not heal personal group names: {e}")
 
 
+async def _heal_engine_config_names(conn) -> None:
+    """One-time data heal for the crewai→kasal engine rename: engine_configs
+    rows persisted engine_name='crewai' (the legacy name of the now-native
+    kasal engine). Rewrite in place so lookups keyed on 'kasal' find them.
+    Idempotent (the WHERE no longer matches after the first run) and DML-only,
+    so it also runs on deployments where DDL is unavailable."""
+    try:
+        res = await conn.exec_driver_sql(
+            "UPDATE engineconfig SET engine_name = 'kasal' "
+            "WHERE engine_name = 'crewai'"
+        )
+        renamed = getattr(res, "rowcount", 0) or 0
+        if renamed > 0:
+            logger.info(f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'")
+    except Exception as e:
+        logger.warning(f"Could not heal engine_config engine names: {e}")
+
+
 async def _ensure_crew_feedback_table(conn) -> None:
     """Idempotently create the crew_feedback table (thumbs feedback on
     cataloged crews). create_all is skipped on existing DBs."""
@@ -1031,6 +1049,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_ui_config_columns(conn)
     await _ensure_hot_polling_indexes(conn)
     await _heal_personal_group_names(conn)
+    await _heal_engine_config_names(conn)
     await _disable_bi_specialist_crew_memory(conn)
 
 

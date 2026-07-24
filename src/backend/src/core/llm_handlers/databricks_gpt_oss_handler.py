@@ -13,10 +13,8 @@ import concurrent.futures
 import re
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
-from crewai import LLM
-from crewai.utilities.exceptions.context_window_exceeding_exception import (
-    LLMContextLengthExceededError,
-)
+from kasal_engine.llm import LLM
+from kasal_engine.llm import LLMContextLengthExceededError
 import litellm
 
 # Use centralized logger
@@ -475,7 +473,7 @@ class DatabricksRetryLLM(LLM):
 
         current_window = 0
         try:
-            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+            from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
 
             current_window = LLM_CONTEXT_WINDOW_SIZES.get(getattr(self, "model", ""), 0) or 0
         except Exception:
@@ -518,7 +516,7 @@ class DatabricksRetryLLM(LLM):
             from src.core.llm_manager import LLMManager
 
             llm = _run_coro_sync(
-                LLMManager.configure_crewai_llm(candidate.name, self._group_id)
+                LLMManager.configure_kasal_llm(candidate.name, self._group_id)
             )
             self._disable_nested_fallback(llm)
             self._fallback_llm_cache[candidate.name] = llm
@@ -538,7 +536,7 @@ class DatabricksRetryLLM(LLM):
         try:
             from src.core.llm_manager import LLMManager
 
-            llm = await LLMManager.configure_crewai_llm(candidate.name, self._group_id)
+            llm = await LLMManager.configure_kasal_llm(candidate.name, self._group_id)
             self._disable_nested_fallback(llm)
             self._fallback_llm_cache[candidate.name] = llm
             return llm
@@ -1406,224 +1404,16 @@ class DatabricksRetryLLM(LLM):
                 return fb
             raise
 
-    def _handle_non_streaming_response(
-        self,
-        params,
-        callbacks=None,
-        available_functions=None,
-        from_task=None,
-        from_agent=None,
-        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
-    ):
-        """
-        Override to add retry logic for empty responses in non-streaming mode.
-
-        Rate limit errors get special treatment with longer backoffs (30s, 60s, 120s)
-        and more retries (5 vs 3) since they just need time for quota to reset.
-
-        Retry attempts are emitted as OTel spans so they appear in the trace
-        timeline.
-
-        Note: Signature updated for CrewAI 1.9.x compatibility with response_model support.
-        """
-        crew_log = self._get_crew_logger()
-        last_error = None
-        is_rate_limit = False
-        attempt = 0
-        total_backoff = 0.0
-
-        # Sanitize empty content blocks in messages that Databricks API rejects
-        if isinstance(params, dict) and "messages" in params:
-            params["messages"] = self._sanitize_messages_for_databricks(
-                params["messages"]
-            )
-
-        while True:
-            max_retries = self._get_max_retries(is_rate_limit)
-
-            if attempt >= max_retries:
-                break
-
-            try:
-                # Call parent with all arguments including kwargs (for response_model, etc.)
-                response = super()._handle_non_streaming_response(
-                    params,
-                    callbacks,
-                    available_functions,
-                    from_task,
-                    from_agent,
-                    **kwargs,
-                )
-
-                # Check if response is empty — a bare "Calling tools."
-                # placeholder echo is treated the same (it is never an answer).
-                is_placeholder = _is_placeholder_response(response)
-                if response is None or response == "" or is_placeholder:
-                    if attempt < max_retries - 1:
-                        if is_placeholder and isinstance(params, dict):
-                            _append_placeholder_nudge(params.get("messages"))
-                        backoff = self._get_backoff_time(attempt, is_rate_limit=False)
-                        crew_log.warning(
-                            f"[DatabricksRetryLLM] "
-                            f"{'Placeholder (Calling tools.)' if is_placeholder else 'Empty'} "
-                            f"in _handle_non_streaming (attempt {attempt + 1}/{max_retries}). "
-                            f"Retrying in {backoff}s..."
-                        )
-                        self._emit_retry_span(
-                            attempt=attempt,
-                            max_retries=max_retries,
-                            backoff=backoff,
-                            error_type="empty_response",
-                            error_message=(
-                                "LLM echoed the tool-call placeholder"
-                                if is_placeholder
-                                else "LLM returned empty response"
-                            ),
-                            is_rate_limit=False,
-                            method="_handle_non_streaming_response",
-                        )
-                        total_backoff += backoff
-                        attempt += 1
-                        continue
-                    else:
-                        crew_log.error(
-                            f"[DatabricksRetryLLM] Empty after {max_retries} attempts in _handle_non_streaming"
-                        )
-                        if attempt > 0:
-                            self._record_retry_summary(
-                                attempt + 1,
-                                total_backoff,
-                                "_handle_non_streaming_response",
-                            )
-                        return ""
-
-                if attempt > 0:
-                    self._record_retry_summary(
-                        attempt + 1, total_backoff, "_handle_non_streaming_response"
-                    )
-                return response
-
-            except Exception as e:
-                last_error = e
-                error_str = str(e).lower()
-
-                # Check error type
-                is_retryable = self._is_retryable_error(error_str)
-                is_rate_limit = self._is_rate_limit_error(error_str)
-
-                # Update max_retries based on error type (rate limits get more retries)
-                max_retries = self._get_max_retries(is_rate_limit)
-
-                if is_retryable and attempt < max_retries - 1:
-                    backoff = self._get_backoff_time(attempt, is_rate_limit)
-                    error_type_label = (
-                        "rate_limit" if is_rate_limit else "retryable_error"
-                    )
-                    crew_log.warning(
-                        f"[DatabricksRetryLLM] {error_type_label} in _handle_non_streaming (attempt {attempt + 1}/{max_retries}): {e}. "
-                        f"Retrying in {backoff}s..."
-                    )
-                    self._emit_retry_span(
-                        attempt=attempt,
-                        max_retries=max_retries,
-                        backoff=backoff,
-                        error_type=error_type_label,
-                        error_message=str(e),
-                        is_rate_limit=is_rate_limit,
-                        method="_handle_non_streaming_response",
-                    )
-                    total_backoff += backoff
-                    attempt += 1
-                    continue
-                else:
-                    # Auth errors: try refreshing token (OBO → PAT/SPN fallback)
-                    if self._is_auth_error(error_str) and self._try_refresh_token():
-                        crew_log.info(
-                            f"[DatabricksRetryLLM] Retrying after token refresh in _handle_non_streaming (attempt {attempt + 1})"
-                        )
-                        attempt += 1
-                        continue
-                    hint = self._context_length_hint(error_str)
-                    if hint:
-                        crew_log.error(
-                            f"[DatabricksRetryLLM] Context window exceeded in _handle_non_streaming: {e}"
-                        )
-                        # See call(): CrewAI's summarize-and-continue recovery
-                        # requires this exception type/message.
-                        raise LLMContextLengthExceededError(hint) from e
-                    crew_log.error(
-                        f"[DatabricksRetryLLM] Non-retryable error in _handle_non_streaming: {e}"
-                    )
-                    if attempt > 0:
-                        self._record_retry_summary(
-                            attempt + 1, total_backoff, "_handle_non_streaming_response"
-                        )
-                    raise
-
-        if attempt > 0:
-            self._record_retry_summary(
-                attempt, total_backoff, "_handle_non_streaming_response"
-            )
-        if last_error:
-            raise last_error
-        return ""
+    # NOTE: the crewAI-era _handle_non_streaming_response override is gone:
+    # kasal_engine's LLM funnels every completion through call()/acall(),
+    # which this class already wraps with retry + fallback logic.
 
 
-def apply_tool_calls_fix():
-    """
-    Fix CrewAI bug where tool_calls are silently dropped when the LLM returns
-    both content text and tool_calls in the same response (common with Claude).
+# NOTE: the crewAI-era apply_tool_calls_fix() patch is obsolete under
+# kasal_engine: its completions loop executes tool_calls whenever they are
+# present, even when the response also carries content text
+# (see kasal_engine.llm.completion.OpenAICompletion._call_completions_api).
 
-    Bug in LLM._handle_non_streaming_response (llm.py):
-        if (not tool_calls or not available_functions) and text_response:
-            return text_response  # Silently drops tool_calls!
-
-    Fix: Change condition to `not tool_calls and text_response` so tool_calls
-    are always returned to the executor when present.
-    """
-    import inspect
-    import textwrap
-
-    for method_name in (
-        "_handle_non_streaming_response",
-        "_ahandle_non_streaming_response",
-    ):
-        try:
-            method = getattr(LLM, method_name)
-            source = inspect.getsource(method)
-
-            if (
-                "(not tool_calls or not available_functions) and text_response"
-                not in source
-            ):
-                logger.info(
-                    f"LLM.{method_name}: tool_calls fix not needed (condition already correct)"
-                )
-                continue
-
-            fixed_source = source.replace(
-                "(not tool_calls or not available_functions) and text_response",
-                "not tool_calls and text_response",
-            )
-
-            # Compile with annotations future flag (CO_FUTURE_ANNOTATIONS = 0x100000)
-            # This matches the `from __future__ import annotations` in crewai/llm.py
-            import crewai.llm as llm_module
-
-            code = compile(
-                "from __future__ import annotations\n" + textwrap.dedent(fixed_source),
-                f"<patched {method_name}>",
-                "exec",
-            )
-            code_ns = {**llm_module.__dict__}
-            exec(code, code_ns)
-            setattr(LLM, method_name, code_ns[method_name])
-            logger.info(
-                f"Patched LLM.{method_name}: tool_calls no longer dropped when content also present"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to patch LLM.{method_name}: {e}")
 
 
 def _resolve_schema_refs(schema):
@@ -1780,5 +1570,4 @@ def apply_empty_content_fix():
 
 # Apply the monkey patches when this module is imported
 DatabricksGPTOSSHandler.apply_monkey_patch()
-apply_tool_calls_fix()
 apply_empty_content_fix()

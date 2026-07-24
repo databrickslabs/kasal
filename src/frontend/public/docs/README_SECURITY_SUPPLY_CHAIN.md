@@ -339,7 +339,7 @@ automated detection of that misconfiguration.
 **Proposal:** Run `SecretLeakDetector` once at startup against `os.environ`:
 
 ```python
-from src.engines.crewai.security.secret_leak_detector import detect
+from src.engines.kasal.security.secret_leak_detector import detect
 
 findings = detect(" ".join(f"{k}={v}" for k, v in os.environ.items()))
 if findings.detected:

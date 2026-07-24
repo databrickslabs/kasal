@@ -9,7 +9,7 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
-    CrewAIFlowConfigUpdate,
+    KasalFlowConfigUpdate,
     EngineConfigCreate,
     EngineConfigListResponse,
     EngineConfigResponse,
@@ -351,8 +351,8 @@ async def update_config_value(
     return updated_config
 
 
-@router.get("/crewai/flow-enabled")
-async def get_crewai_flow_enabled(
+@router.get("/kasal/flow-enabled")
+async def get_kasal_flow_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
@@ -370,17 +370,17 @@ async def get_crewai_flow_enabled(
     if not is_system_admin(group_context):
         raise ForbiddenError("Only system administrators can access engine configuration")
 
-    logger.info("API call: GET /engine-config/crewai/flow-enabled")
+    logger.info("API call: GET /engine-config/kasal/flow-enabled")
 
-    enabled = await service.get_crewai_flow_enabled()
+    enabled = await service.get_kasal_flow_enabled()
     logger.info(f"CrewAI flow enabled status: {enabled}")
 
     return {"flow_enabled": enabled}
 
 
-@router.patch("/crewai/flow-enabled")
-async def set_crewai_flow_enabled(
-    config_data: CrewAIFlowConfigUpdate,
+@router.patch("/kasal/flow-enabled")
+async def set_kasal_flow_enabled(
+    config_data: KasalFlowConfigUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
 ):
@@ -400,10 +400,10 @@ async def set_crewai_flow_enabled(
         raise ForbiddenError("Only system administrators can manage engine configuration")
 
     logger.info(
-        f"API call: PATCH /engine-config/crewai/flow-enabled - enabled={config_data.flow_enabled}"
+        f"API call: PATCH /engine-config/kasal/flow-enabled - enabled={config_data.flow_enabled}"
     )
 
-    success = await service.set_crewai_flow_enabled(config_data.flow_enabled)
+    success = await service.set_kasal_flow_enabled(config_data.flow_enabled)
     if not success:
         raise KasalError("Failed to update CrewAI flow configuration")
 

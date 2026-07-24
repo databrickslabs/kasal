@@ -75,9 +75,9 @@ def engine_config_repository(mock_async_session):
 def sample_engine_configs():
     """Create sample engine configs for testing."""
     return [
-        MockEngineConfig(id=1, engine_name="crewai", engine_type="workflow", 
+        MockEngineConfig(id=1, engine_name="kasal", engine_type="workflow", 
                         config_key="flow_enabled", config_value="true", enabled=True),
-        MockEngineConfig(id=2, engine_name="crewai", engine_type="workflow", 
+        MockEngineConfig(id=2, engine_name="kasal", engine_type="workflow", 
                         config_key="max_iterations", config_value="10", enabled=True),
         MockEngineConfig(id=3, engine_name="langchain", engine_type="chain", 
                         config_key="temperature", config_value="0.7", enabled=False),
@@ -143,11 +143,11 @@ class TestEngineConfigRepositoryFindByEngineName:
     @pytest.mark.asyncio
     async def test_find_by_engine_name_success(self, engine_config_repository, mock_async_session):
         """Test successful engine config search by engine name."""
-        config = MockEngineConfig(engine_name="crewai")
+        config = MockEngineConfig(engine_name="kasal")
         mock_result = MockResult([config])
         mock_async_session.execute.return_value = mock_result
         
-        result = await engine_config_repository.find_by_engine_name("crewai")
+        result = await engine_config_repository.find_by_engine_name("kasal")
         
         assert result == config
         mock_async_session.execute.assert_called_once()
@@ -173,11 +173,11 @@ class TestEngineConfigRepositoryFindByEngineAndKey:
     @pytest.mark.asyncio
     async def test_find_by_engine_and_key_success(self, engine_config_repository, mock_async_session):
         """Test successful search by engine name and config key."""
-        config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled")
+        config = MockEngineConfig(engine_name="kasal", config_key="flow_enabled")
         mock_result = MockResult([config])
         mock_async_session.execute.return_value = mock_result
         
-        result = await engine_config_repository.find_by_engine_and_key("crewai", "flow_enabled")
+        result = await engine_config_repository.find_by_engine_and_key("kasal", "flow_enabled")
         
         assert result == config
         mock_async_session.execute.assert_called_once()
@@ -191,7 +191,7 @@ class TestEngineConfigRepositoryFindByEngineAndKey:
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
         
-        result = await engine_config_repository.find_by_engine_and_key("crewai", "nonexistent_key")
+        result = await engine_config_repository.find_by_engine_and_key("kasal", "nonexistent_key")
         
         assert result is None
         mock_async_session.execute.assert_called_once()
@@ -259,10 +259,10 @@ class TestEngineConfigRepositoryToggleEnabled:
     @pytest.mark.asyncio
     async def test_toggle_enabled_success(self, engine_config_repository, mock_async_session):
         """Test successful toggling of engine enabled status."""
-        config = MockEngineConfig(engine_name="crewai", enabled=False)
+        config = MockEngineConfig(engine_name="kasal", enabled=False)
         
         with patch.object(engine_config_repository, 'find_by_engine_name', return_value=config):
-            result = await engine_config_repository.toggle_enabled("crewai", True)
+            result = await engine_config_repository.toggle_enabled("kasal", True)
             
             assert result is True
             assert config.enabled is True
@@ -280,10 +280,10 @@ class TestEngineConfigRepositoryToggleEnabled:
     @pytest.mark.asyncio
     async def test_toggle_enabled_disable(self, engine_config_repository, mock_async_session):
         """Test disabling an engine."""
-        config = MockEngineConfig(engine_name="crewai", enabled=True)
+        config = MockEngineConfig(engine_name="kasal", enabled=True)
         
         with patch.object(engine_config_repository, 'find_by_engine_name', return_value=config):
-            result = await engine_config_repository.toggle_enabled("crewai", False)
+            result = await engine_config_repository.toggle_enabled("kasal", False)
             
             assert result is True
             assert config.enabled is False
@@ -292,13 +292,13 @@ class TestEngineConfigRepositoryToggleEnabled:
     @pytest.mark.asyncio
     async def test_toggle_enabled_database_error(self, engine_config_repository, mock_async_session):
         """Test toggle enabled with database error."""
-        config = MockEngineConfig(engine_name="crewai")
+        config = MockEngineConfig(engine_name="kasal")
         
         with patch.object(engine_config_repository, 'find_by_engine_name', return_value=config):
             mock_async_session.flush.side_effect = Exception("Flush failed")
             
             with pytest.raises(Exception, match="Flush failed"):
-                await engine_config_repository.toggle_enabled("crewai", True)
+                await engine_config_repository.toggle_enabled("kasal", True)
             
             mock_async_session.rollback.assert_called_once()
 
@@ -309,10 +309,10 @@ class TestEngineConfigRepositoryUpdateConfigValue:
     @pytest.mark.asyncio
     async def test_update_config_value_success(self, engine_config_repository, mock_async_session):
         """Test successful config value update."""
-        config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled", config_value="false")
+        config = MockEngineConfig(engine_name="kasal", config_key="flow_enabled", config_value="false")
         
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
-            result = await engine_config_repository.update_config_value("crewai", "flow_enabled", "true")
+            result = await engine_config_repository.update_config_value("kasal", "flow_enabled", "true")
             
             assert result is True
             assert config.config_value == "true"
@@ -322,7 +322,7 @@ class TestEngineConfigRepositoryUpdateConfigValue:
     async def test_update_config_value_not_found(self, engine_config_repository, mock_async_session):
         """Test config value update when config not found."""
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
-            result = await engine_config_repository.update_config_value("crewai", "nonexistent", "value")
+            result = await engine_config_repository.update_config_value("kasal", "nonexistent", "value")
             
             assert result is False
             mock_async_session.commit.assert_not_called()
@@ -330,13 +330,13 @@ class TestEngineConfigRepositoryUpdateConfigValue:
     @pytest.mark.asyncio
     async def test_update_config_value_database_error(self, engine_config_repository, mock_async_session):
         """Test config value update with database error."""
-        config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled")
+        config = MockEngineConfig(engine_name="kasal", config_key="flow_enabled")
         
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
             mock_async_session.flush.side_effect = Exception("Update failed")
             
             with pytest.raises(Exception, match="Update failed"):
-                await engine_config_repository.update_config_value("crewai", "flow_enabled", "true")
+                await engine_config_repository.update_config_value("kasal", "flow_enabled", "true")
             
             mock_async_session.rollback.assert_called_once()
 
@@ -345,81 +345,81 @@ class TestEngineConfigRepositoryCrewAIFlowMethods:
     """Test cases for CrewAI flow specific methods."""
     
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_true(self, engine_config_repository, mock_async_session):
+    async def test_get_kasal_flow_enabled_true(self, engine_config_repository, mock_async_session):
         """Test get CrewAI flow enabled when config exists and is true."""
-        config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled", config_value="true")
+        config = MockEngineConfig(engine_name="kasal", config_key="flow_enabled", config_value="true")
         
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
-            result = await engine_config_repository.get_crewai_flow_enabled()
+            result = await engine_config_repository.get_kasal_flow_enabled()
             
             assert result is True
     
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_false(self, engine_config_repository, mock_async_session):
+    async def test_get_kasal_flow_enabled_false(self, engine_config_repository, mock_async_session):
         """Test get CrewAI flow enabled when config exists and is false."""
-        config = MockEngineConfig(engine_name="crewai", config_key="flow_enabled", config_value="false")
+        config = MockEngineConfig(engine_name="kasal", config_key="flow_enabled", config_value="false")
         
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
-            result = await engine_config_repository.get_crewai_flow_enabled()
+            result = await engine_config_repository.get_kasal_flow_enabled()
             
             assert result is False
     
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_case_insensitive(self, engine_config_repository, mock_async_session):
+    async def test_get_kasal_flow_enabled_case_insensitive(self, engine_config_repository, mock_async_session):
         """Test get CrewAI flow enabled with different case values."""
         # Test uppercase TRUE
         config_upper = MockEngineConfig(config_value="TRUE")
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config_upper):
-            result = await engine_config_repository.get_crewai_flow_enabled()
+            result = await engine_config_repository.get_kasal_flow_enabled()
             assert result is True
         
         # Test mixed case False
         config_mixed = MockEngineConfig(config_value="False")
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config_mixed):
-            result = await engine_config_repository.get_crewai_flow_enabled()
+            result = await engine_config_repository.get_kasal_flow_enabled()
             assert result is False
     
     @pytest.mark.asyncio
-    async def test_get_crewai_flow_enabled_not_found_defaults_true(self, engine_config_repository, mock_async_session):
+    async def test_get_kasal_flow_enabled_not_found_defaults_true(self, engine_config_repository, mock_async_session):
         """Test get CrewAI flow enabled when config not found (defaults to True)."""
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
-            result = await engine_config_repository.get_crewai_flow_enabled()
+            result = await engine_config_repository.get_kasal_flow_enabled()
 
             assert result is True
     
     @pytest.mark.asyncio
-    async def test_set_crewai_flow_enabled_update_existing(self, engine_config_repository, mock_async_session):
+    async def test_set_kasal_flow_enabled_update_existing(self, engine_config_repository, mock_async_session):
         """Test set CrewAI flow enabled by updating existing config."""
         with patch.object(engine_config_repository, 'update_config_value', return_value=True) as mock_update:
-            result = await engine_config_repository.set_crewai_flow_enabled(False)
+            result = await engine_config_repository.set_kasal_flow_enabled(False)
             
             assert result is True
-            mock_update.assert_called_once_with("crewai", "flow_enabled", "false")
+            mock_update.assert_called_once_with("kasal", "flow_enabled", "false")
     
     @pytest.mark.asyncio
-    async def test_set_crewai_flow_enabled_create_new(self, engine_config_repository, mock_async_session):
+    async def test_set_kasal_flow_enabled_create_new(self, engine_config_repository, mock_async_session):
         """Test set CrewAI flow enabled by creating new config when none exists."""
         with patch.object(engine_config_repository, 'update_config_value', return_value=False):
             with patch.object(engine_config_repository, 'create', return_value=MockEngineConfig()) as mock_create:
-                result = await engine_config_repository.set_crewai_flow_enabled(True)
+                result = await engine_config_repository.set_kasal_flow_enabled(True)
                 
                 assert result is True
                 mock_create.assert_called_once()
                 
                 # Verify the config data passed to create
                 create_call_args = mock_create.call_args[0][0]
-                assert create_call_args["engine_name"] == "crewai"
+                assert create_call_args["engine_name"] == "kasal"
                 assert create_call_args["config_key"] == "flow_enabled"
                 assert create_call_args["config_value"] == "true"
                 assert create_call_args["enabled"] is True
     
     @pytest.mark.asyncio
-    async def test_set_crewai_flow_enabled_create_error(self, engine_config_repository, mock_async_session):
+    async def test_set_kasal_flow_enabled_create_error(self, engine_config_repository, mock_async_session):
         """Test set CrewAI flow enabled with error during creation."""
         with patch.object(engine_config_repository, 'update_config_value', return_value=False):
             with patch.object(engine_config_repository, 'create', side_effect=Exception("Create failed")):
                 with pytest.raises(Exception, match="Create failed"):
-                    await engine_config_repository.set_crewai_flow_enabled(True)
+                    await engine_config_repository.set_kasal_flow_enabled(True)
                 
                 mock_async_session.rollback.assert_called_once()
 
@@ -486,27 +486,27 @@ class TestEngineConfigRepositoryIntegration:
         """Test the complete workflow of CrewAI flow configuration."""
         # Initially not configured (should default to True - flow enabled by default)
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=None):
-            initial_status = await engine_config_repository.get_crewai_flow_enabled()
+            initial_status = await engine_config_repository.get_kasal_flow_enabled()
             assert initial_status is True
 
         # Set to False (creates new config)
         with patch.object(engine_config_repository, 'update_config_value', return_value=False):
             with patch.object(engine_config_repository, 'create', return_value=MockEngineConfig()) as mock_create:
-                result = await engine_config_repository.set_crewai_flow_enabled(False)
+                result = await engine_config_repository.set_kasal_flow_enabled(False)
                 assert result is True
                 mock_create.assert_called_once()
 
         # Get status (should be False now)
         false_config = MockEngineConfig(config_value="false")
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=false_config):
-            current_status = await engine_config_repository.get_crewai_flow_enabled()
+            current_status = await engine_config_repository.get_kasal_flow_enabled()
             assert current_status is False
 
         # Set back to True (updates existing config)
         with patch.object(engine_config_repository, 'update_config_value', return_value=True) as mock_update:
-            result = await engine_config_repository.set_crewai_flow_enabled(True)
+            result = await engine_config_repository.set_kasal_flow_enabled(True)
             assert result is True
-            mock_update.assert_called_once_with("crewai", "flow_enabled", "true")
+            mock_update.assert_called_once_with("kasal", "flow_enabled", "true")
 
 
 class TestEngineConfigRepositoryErrorHandling:
@@ -518,7 +518,7 @@ class TestEngineConfigRepositoryErrorHandling:
         mock_async_session.execute.side_effect = Exception("Connection lost")
         
         with pytest.raises(Exception, match="Connection lost"):
-            await engine_config_repository.find_by_engine_name("crewai")
+            await engine_config_repository.find_by_engine_name("kasal")
     
     @pytest.mark.asyncio
     async def test_find_enabled_configs_database_error(self, engine_config_repository, mock_async_session):
@@ -533,7 +533,7 @@ class TestEngineConfigRepositoryErrorHandling:
         """Test toggle enabled when find_by_engine_name fails."""
         with patch.object(engine_config_repository, 'find_by_engine_name', side_effect=Exception("Find failed")):
             with pytest.raises(Exception, match="Find failed"):
-                await engine_config_repository.toggle_enabled("crewai", True)
+                await engine_config_repository.toggle_enabled("kasal", True)
             
             mock_async_session.rollback.assert_called_once()
     
@@ -542,7 +542,7 @@ class TestEngineConfigRepositoryErrorHandling:
         """Test update config value when find_by_engine_and_key fails."""
         with patch.object(engine_config_repository, 'find_by_engine_and_key', side_effect=Exception("Find failed")):
             with pytest.raises(Exception, match="Find failed"):
-                await engine_config_repository.update_config_value("crewai", "flow_enabled", "true")
+                await engine_config_repository.update_config_value("kasal", "flow_enabled", "true")
             
             mock_async_session.rollback.assert_called_once()
 
@@ -568,28 +568,28 @@ class TestEngineConfigRepositoryEdgeCases:
         for config_value, expected in test_cases:
             config = MockEngineConfig(config_value=config_value)
             with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
-                result = await engine_config_repository.get_crewai_flow_enabled()
+                result = await engine_config_repository.get_kasal_flow_enabled()
                 assert result is expected, f"Failed for config_value='{config_value}'"
     
     @pytest.mark.asyncio
-    async def test_set_crewai_flow_enabled_boolean_to_string_conversion(self, engine_config_repository, mock_async_session):
+    async def test_set_kasal_flow_enabled_boolean_to_string_conversion(self, engine_config_repository, mock_async_session):
         """Test that boolean values are correctly converted to strings."""
         with patch.object(engine_config_repository, 'update_config_value') as mock_update:
             mock_update.return_value = True
             
             # Test True -> "true"
-            await engine_config_repository.set_crewai_flow_enabled(True)
-            mock_update.assert_called_with("crewai", "flow_enabled", "true")
+            await engine_config_repository.set_kasal_flow_enabled(True)
+            mock_update.assert_called_with("kasal", "flow_enabled", "true")
             
             # Test False -> "false"
-            await engine_config_repository.set_crewai_flow_enabled(False)
-            mock_update.assert_called_with("crewai", "flow_enabled", "false")
+            await engine_config_repository.set_kasal_flow_enabled(False)
+            mock_update.assert_called_with("kasal", "flow_enabled", "false")
     
     @pytest.mark.asyncio
     async def test_find_by_engine_type_multiple_engines(self, engine_config_repository, mock_async_session):
         """Test finding configs by engine type with multiple matching engines."""
         workflow_configs = [
-            MockEngineConfig(engine_name="crewai", engine_type="workflow"),
+            MockEngineConfig(engine_name="kasal", engine_type="workflow"),
             MockEngineConfig(engine_name="langchain", engine_type="workflow"),
             MockEngineConfig(engine_name="custom_engine", engine_type="workflow")
         ]
@@ -604,22 +604,22 @@ class TestEngineConfigRepositoryEdgeCases:
         
         # Verify different engine names
         engine_names = {config.engine_name for config in result}
-        assert engine_names == {"crewai", "langchain", "custom_engine"}
+        assert engine_names == {"kasal", "langchain", "custom_engine"}
     
     @pytest.mark.asyncio
     async def test_multiple_configs_same_engine_different_keys(self, engine_config_repository, mock_async_session):
         """Test handling multiple configs for the same engine with different keys."""
         crewai_configs = [
-            MockEngineConfig(engine_name="crewai", config_key="flow_enabled"),
-            MockEngineConfig(engine_name="crewai", config_key="max_iterations"),
-            MockEngineConfig(engine_name="crewai", config_key="temperature")
+            MockEngineConfig(engine_name="kasal", config_key="flow_enabled"),
+            MockEngineConfig(engine_name="kasal", config_key="max_iterations"),
+            MockEngineConfig(engine_name="kasal", config_key="temperature")
         ]
         
         # Test that find_by_engine_name returns first match
         mock_result = MockResult([crewai_configs[0]])  # Returns first match
         mock_async_session.execute.return_value = mock_result
         
-        result = await engine_config_repository.find_by_engine_name("crewai")
+        result = await engine_config_repository.find_by_engine_name("kasal")
         
         assert result == crewai_configs[0]
         assert result.config_key == "flow_enabled"
@@ -643,7 +643,7 @@ class TestEngineConfigRepositoryEdgeCases:
         with patch.object(engine_config_repository, 'find_by_engine_and_key', return_value=config):
             # This should raise an AttributeError when trying to call .lower() on None
             with pytest.raises(AttributeError):
-                await engine_config_repository.get_crewai_flow_enabled()
+                await engine_config_repository.get_kasal_flow_enabled()
 
 
 class TestOtelAppTelemetryMethods:

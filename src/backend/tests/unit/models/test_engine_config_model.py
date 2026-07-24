@@ -103,7 +103,7 @@ class TestEngineConfig:
         """Test engine name field scenarios."""
         # Test valid engine names
         valid_engine_names = [
-            "crewai",
+            "kasal",
             "langchain",
             "custom_engine",
             "workflow_engine",
@@ -213,9 +213,9 @@ class TestEngineConfigEdgeCases:
     def test_engine_config_common_configurations(self):
         """Test EngineConfig for common engine configurations."""
         # CrewAI configurations
-        crewai_configs = [
+        kasal_configs = [
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "workflow",
                 "config_key": "max_iterations",
                 "config_value": "25",
@@ -223,7 +223,7 @@ class TestEngineConfigEdgeCases:
                 "description": "Maximum number of iterations for agent execution"
             },
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "workflow", 
                 "config_key": "verbose_mode",
                 "config_value": "true",
@@ -231,7 +231,7 @@ class TestEngineConfigEdgeCases:
                 "description": "Enable verbose logging for debugging"
             },
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "ai",
                 "config_key": "default_llm",
                 "config_value": "gpt-4",
@@ -240,9 +240,9 @@ class TestEngineConfigEdgeCases:
             }
         ]
         
-        for config in crewai_configs:
+        for config in kasal_configs:
             # Assert configuration structure
-            assert config["engine_name"] == "crewai"
+            assert config["engine_name"] == "kasal"
             assert config["engine_type"] in ["workflow", "ai"]
             assert isinstance(config["config_key"], str)
             assert isinstance(config["config_value"], str)
@@ -353,21 +353,21 @@ class TestEngineConfigEdgeCases:
         # Performance-related configurations
         performance_configs = [
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "performance",
                 "config_key": "max_concurrent_agents",
                 "config_value": "10",
                 "description": "Maximum number of agents that can run concurrently"
             },
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "performance",
                 "config_key": "memory_limit_mb",
                 "config_value": "2048",
                 "description": "Memory limit in megabytes for execution"
             },
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "performance",
                 "config_key": "cache_ttl_seconds",
                 "config_value": "3600",

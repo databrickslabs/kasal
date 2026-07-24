@@ -7,7 +7,7 @@ different LLM providers through CrewAI's LLM class.
 All LLM calls are routed through two main entry points:
 - ``LLMManager.completion()`` — async helper for standalone calls (intent
   detection, generation services, etc.)
-- ``LLMManager.configure_crewai_llm()`` / ``LLMManager.get_llm()`` — returns
+- ``LLMManager.configure_kasal_llm()`` / ``LLMManager.get_llm()`` — returns
   a configured CrewAI ``LLM`` instance for crew execution
 
 litellm remains as a transitive dependency (used internally by CrewAI) but is
@@ -28,7 +28,7 @@ import time
 import litellm
 from litellm import CustomLogger
 
-from crewai import LLM
+from kasal_engine.llm import LLM
 from src.schemas.model_provider import ModelProvider
 
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
@@ -181,15 +181,10 @@ import pathlib
 # Import custom model handlers (applied early for monkey patches)
 # This ensures the monkey patches are applied to handle model-specific responses
 from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksRetryLLM
-# Make CrewAI cognitive-memory models tolerate stringified-JSON metadata that
-# Databricks/Bedrock models return (avoids the "1 validation error for
-# MemoryAnalysis" retry spam). Import for its module-level patch side effect.
-import src.core.llm_handlers.crewai_memory_patch  # noqa: F401
-# Make CrewAI's InternalInstructor forward api_key/api_base to litellm on
-# structured-output calls (otherwise they fall back to SDK env auth, which
-# breaks tenant isolation and hard-fails on Databricks Apps with "more than
-# one authorization method configured"). Module-level patch side effect.
-import src.core.llm_handlers.crewai_instructor_patch  # noqa: F401
+# The former crewai_memory_patch / crewai_instructor_patch side-effect
+# imports are gone: kasal_engine's analyze models are tolerant of
+# stringified-JSON metadata by design, and InternalInstructor accepts
+# per-call api_key/base_url natively.
 
 
 # Get the absolute path to the logs directory
@@ -227,7 +222,7 @@ logger.info("Set litellm.drop_params=True to handle unsupported parameters grace
 # This causes CrewAI to not summarize when needed, leading to empty responses from
 # models like Qwen that silently fail when context is too large.
 try:
-    from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+    from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
     from src.seeds.model_configs import MODEL_CONFIGS
 
     registered_count = 0
@@ -261,7 +256,7 @@ def _context_window_for(model_name: str) -> int:
     """Best-effort context window for a litellm model id, read from the CrewAI
     registry populated above (0 when unknown). Used by the vLLM output clamp."""
     try:
-        from crewai.llm import LLM_CONTEXT_WINDOW_SIZES as _sizes
+        from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES as _sizes
         return int(_sizes.get(model_name) or 0)
     except Exception:
         return 0
@@ -276,9 +271,7 @@ def _context_window_for(model_name: str) -> int:
 # -task context grows past the window HARD-FAILS instead of summarizing — the output
 # clamp can't help once the INPUT alone nears the window.
 try:
-    from crewai.utilities.exceptions.context_window_exceeding_exception import (
-        CONTEXT_LIMIT_ERRORS as _CREWAI_CTX_ERRORS,
-    )
+    from kasal_engine.llm import CONTEXT_LIMIT_ERRORS as _CREWAI_CTX_ERRORS
     for _phrase in (
         "maximum input length",
         "please reduce the length of the input",
@@ -838,7 +831,7 @@ class LLMManager:
             temperature: Sampling temperature (default 0.7)
             max_tokens: Maximum tokens in response. None (default) inherits the
                 model config's max_output_tokens already applied by
-                configure_crewai_llm; a last-resort 4000 cap applies only when
+                configure_kasal_llm; a last-resort 4000 cap applies only when
                 neither the caller nor the model config sets a budget.
             extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
             fallback_drop_system_on_400: If True and the call raises an HTTP 400,
@@ -853,7 +846,7 @@ class LLMManager:
             Exception: For LLM call errors
         """
         group_id = LLMManager._get_group_id_from_context(required=True)
-        llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
+        llm = await LLMManager.configure_kasal_llm(model, group_id, temperature)
         if max_tokens is not None:
             # Responses-API models (the GPT-5/Codex family, whether served by
             # OpenAI or Databricks) reject max_output_tokens below 16 with
@@ -947,7 +940,7 @@ class LLMManager:
 
         Unlike ``completion()`` (which delegates to CrewAI's ``LLM.call()`` and
         returns only ``str``, discarding ``usage``), this path calls litellm
-        directly with the RESOLVED auth/base/model from ``configure_crewai_llm``,
+        directly with the RESOLVED auth/base/model from ``configure_kasal_llm``,
         so it can:
           - pass STRUCTURED content blocks (a ``list`` of ``{type,text,cache_control}``
             parts) through to the serving endpoint — required to mark a stable
@@ -964,7 +957,7 @@ class LLMManager:
         import litellm
 
         group_id = LLMManager._get_group_id_from_context(required=True)
-        llm = await LLMManager.configure_crewai_llm(model, group_id, temperature)
+        llm = await LLMManager.configure_kasal_llm(model, group_id, temperature)
 
         # Read the resolved transport params off the configured LLM so we reuse
         # the exact auth/base/model resolution (OBO/PAT/SPN) without forking it.
@@ -1015,7 +1008,7 @@ class LLMManager:
         return {"content": content, "usage": usage}
 
     @staticmethod
-    async def configure_crewai_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:
+    async def configure_kasal_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
 
@@ -1033,7 +1026,7 @@ class LLMManager:
         """
         # SECURITY: Validate group_id is provided
         if not group_id:
-            raise ValueError("group_id is REQUIRED for configure_crewai_llm (multi-tenant isolation)")
+            raise ValueError("group_id is REQUIRED for configure_kasal_llm (multi-tenant isolation)")
 
         # Get model configuration using ModelConfigService
         from src.db.session import request_scoped_session
@@ -1351,7 +1344,7 @@ class LLMManager:
             logger.error("No group_id found in UserContext for LLM creation")
             raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
 
-        return await LLMManager.configure_crewai_llm(model_name, group_id, temperature)
+        return await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
 
     @staticmethod
     async def load_fallback_candidates(current_model_key: str, group_id: Optional[str]):
@@ -1360,7 +1353,7 @@ class LLMManager:
         Returns ModelCandidate(name, context_window) for every enabled model
         other than the current one, restricted to Databricks-served, non-codex
         models — those can be rebuilt and swapped through
-        ``configure_crewai_llm`` with the same auth/endpoint. gpt-5-3-codex is
+        ``configure_kasal_llm`` with the same auth/endpoint. gpt-5-3-codex is
         excluded because it needs the Responses API (different base path).
         """
         from src.core.llm_handlers.model_fallback import candidates_from_model_configs

@@ -14,7 +14,7 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigValueUpdate,
     EngineConfigListResponse,
-    CrewAIFlowConfigUpdate,
+    KasalFlowConfigUpdate,
     CrewAIDebugTracingUpdate
 )
 
@@ -195,27 +195,27 @@ class TestEngineConfigListResponse:
         pass
 
 
-class TestCrewAIFlowConfigUpdate:
-    """Tests for CrewAIFlowConfigUpdate"""
+class TestKasalFlowConfigUpdate:
+    """Tests for KasalFlowConfigUpdate"""
 
     @pytest.fixture
     def crewaiflowconfigupdate(self):
-        """Create CrewAIFlowConfigUpdate instance for testing"""
+        """Create KasalFlowConfigUpdate instance for testing"""
         # TODO: Implement fixture
         pass
 
     def test_crewaiflowconfigupdate_initialization(self, crewaiflowconfigupdate):
-        """Test CrewAIFlowConfigUpdate initializes correctly"""
+        """Test KasalFlowConfigUpdate initializes correctly"""
         # TODO: Implement test
         pass
 
     def test_crewaiflowconfigupdate_basic_functionality(self, crewaiflowconfigupdate):
-        """Test CrewAIFlowConfigUpdate basic functionality"""
+        """Test KasalFlowConfigUpdate basic functionality"""
         # TODO: Implement test
         pass
 
     def test_crewaiflowconfigupdate_error_handling(self, crewaiflowconfigupdate):
-        """Test CrewAIFlowConfigUpdate handles errors correctly"""
+        """Test KasalFlowConfigUpdate handles errors correctly"""
         # TODO: Implement test
         pass
 

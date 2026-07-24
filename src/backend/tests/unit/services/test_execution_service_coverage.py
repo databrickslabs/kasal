@@ -30,11 +30,11 @@ def make_group_context(**kw):
 
 def make_service(session=None):
     with patch("src.services.execution_service.ExecutionNameService") as ns, \
-         patch("src.services.execution_service.CrewAIExecutionService"):
+         patch("src.services.execution_service.KasalExecutionService"):
         ns.create.return_value = AsyncMock()
         svc = ExecutionService(session=session)
         svc.execution_name_service = AsyncMock()
-        svc.crewai_execution_service = AsyncMock()
+        svc.kasal_execution_service = AsyncMock()
     return svc
 
 
@@ -119,34 +119,34 @@ class TestExecuteFlow:
     @pytest.mark.asyncio
     async def test_generates_job_id_when_not_provided(self):
         svc = make_service()
-        svc.crewai_execution_service.run_flow_execution = AsyncMock(return_value={"job_id": "x"})
+        svc.kasal_execution_service.run_flow_execution = AsyncMock(return_value={"job_id": "x"})
         result = await svc.execute_flow(flow_id=uuid.uuid4())
         assert result == {"job_id": "x"}
 
     @pytest.mark.asyncio
     async def test_uses_provided_job_id(self):
         svc = make_service()
-        svc.crewai_execution_service.run_flow_execution = AsyncMock(return_value={"ok": True})
+        svc.kasal_execution_service.run_flow_execution = AsyncMock(return_value={"ok": True})
         result = await svc.execute_flow(job_id="my-job")
-        svc.crewai_execution_service.run_flow_execution.assert_called_once()
-        call_kwargs = svc.crewai_execution_service.run_flow_execution.call_args[1]
+        svc.kasal_execution_service.run_flow_execution.assert_called_once()
+        call_kwargs = svc.kasal_execution_service.run_flow_execution.call_args[1]
         assert call_kwargs["job_id"] == "my-job"
 
     @pytest.mark.asyncio
     async def test_passes_nodes_edges(self):
         svc = make_service()
-        svc.crewai_execution_service.run_flow_execution = AsyncMock(return_value={})
+        svc.kasal_execution_service.run_flow_execution = AsyncMock(return_value={})
         nodes = [{"id": "n1"}]
         edges = [{"source": "n1"}]
         await svc.execute_flow(nodes=nodes, edges=edges, job_id="j1")
-        call_kwargs = svc.crewai_execution_service.run_flow_execution.call_args[1]
+        call_kwargs = svc.kasal_execution_service.run_flow_execution.call_args[1]
         assert call_kwargs["nodes"] == nodes
         assert call_kwargs["edges"] == edges
 
     @pytest.mark.asyncio
     async def test_reraises_kasal_error(self):
         svc = make_service()
-        svc.crewai_execution_service.run_flow_execution = AsyncMock(
+        svc.kasal_execution_service.run_flow_execution = AsyncMock(
             side_effect=KasalError(detail="boom")
         )
         with pytest.raises(KasalError):
@@ -155,7 +155,7 @@ class TestExecuteFlow:
     @pytest.mark.asyncio
     async def test_wraps_unexpected_error_in_kasal_error(self):
         svc = make_service()
-        svc.crewai_execution_service.run_flow_execution = AsyncMock(
+        svc.kasal_execution_service.run_flow_execution = AsyncMock(
             side_effect=RuntimeError("unexpected")
         )
         with pytest.raises(KasalError, match="Unexpected error"):
@@ -169,10 +169,10 @@ class TestExecuteFlow:
 class TestGetExecution:
     @pytest.mark.asyncio
     async def test_get_flow_execution_success(self):
-        """Test crewai_execution_service.get_flow_execution delegation."""
+        """Test kasal_execution_service.get_flow_execution delegation."""
         svc = make_service()
-        svc.crewai_execution_service.get_flow_execution = AsyncMock(return_value={"id": 1})
-        result = await svc.crewai_execution_service.get_flow_execution(1)
+        svc.kasal_execution_service.get_flow_execution = AsyncMock(return_value={"id": 1})
+        result = await svc.kasal_execution_service.get_flow_execution(1)
         assert result == {"id": 1}
 
     def test_get_execution_static_returns_from_memory(self):
@@ -187,14 +187,14 @@ class TestGetExecution:
     async def test_get_executions_by_flow_success(self):
         svc = make_service()
         fid = uuid.uuid4()
-        svc.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(return_value=[])
+        svc.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(return_value=[])
         result = await svc.get_executions_by_flow(fid)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_get_executions_by_flow_error(self):
         svc = make_service()
-        svc.crewai_execution_service.get_flow_executions_by_flow = AsyncMock(side_effect=Exception("fail"))
+        svc.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(side_effect=Exception("fail"))
         with pytest.raises(KasalError):
             await svc.get_executions_by_flow(uuid.uuid4())
 
@@ -275,7 +275,7 @@ class TestRunCrewExecutionFlow:
         config.nodes = [{"id": "n1"}]
         config.edges = []
 
-        with patch("src.services.execution_service.CrewAIExecutionService") as cls:
+        with patch("src.services.execution_service.KasalExecutionService") as cls:
             mock_svc = AsyncMock()
             mock_svc.run_flow_execution = AsyncMock(return_value={"status": "started"})
             cls.return_value = mock_svc
@@ -295,7 +295,7 @@ class TestRunCrewExecutionFlow:
         config.flow_config = None
         config.model_dump = Mock(side_effect=Exception("dump failed"))
 
-        with patch("src.services.execution_service.CrewAIExecutionService") as cls:
+        with patch("src.services.execution_service.KasalExecutionService") as cls:
             mock_svc = AsyncMock()
             mock_svc.run_flow_execution = AsyncMock(return_value={"status": "ok"})
             cls.return_value = mock_svc
@@ -309,7 +309,7 @@ class TestRunCrewExecutionFlow:
     @pytest.mark.asyncio
     async def test_crew_execution_delegates(self):
         config = make_crew_config(execution_type="crew")
-        with patch("src.services.execution_service.CrewAIExecutionService") as cls:
+        with patch("src.services.execution_service.KasalExecutionService") as cls:
             mock_svc = AsyncMock()
             mock_svc.run_crew_execution = AsyncMock(return_value={"status": "running"})
             cls.return_value = mock_svc
@@ -323,7 +323,7 @@ class TestRunCrewExecutionFlow:
     @pytest.mark.asyncio
     async def test_other_execution_type_uses_thread_pool(self):
         config = make_crew_config(execution_type="custom")
-        with patch("src.services.execution_service.CrewAIExecutionService"):
+        with patch("src.services.execution_service.KasalExecutionService"):
             with patch.object(ExecutionService, "_thread_pool") as pool:
                 pool.submit = Mock(return_value=Mock())
                 result = await ExecutionService.run_crew_execution(
@@ -337,7 +337,7 @@ class TestRunCrewExecutionFlow:
     @pytest.mark.asyncio
     async def test_error_updates_status_to_failed_and_reraises(self):
         config = make_crew_config(execution_type="crew")
-        with patch("src.services.execution_service.CrewAIExecutionService") as cls:
+        with patch("src.services.execution_service.KasalExecutionService") as cls:
             mock_svc = AsyncMock()
             mock_svc.run_crew_execution = AsyncMock(side_effect=RuntimeError("big fail"))
             cls.return_value = mock_svc
@@ -1563,7 +1563,7 @@ class TestRunCrewExecutionExtra:
         config.resume_from_execution_id = None
         config.resume_from_crew_sequence = None
 
-        with patch("src.services.execution_service.CrewAIExecutionService") as cls:
+        with patch("src.services.execution_service.KasalExecutionService") as cls:
             mock_svc = AsyncMock()
             mock_svc.run_flow_execution = AsyncMock(return_value={"status": "ok"})
             cls.return_value = mock_svc

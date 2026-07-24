@@ -199,7 +199,7 @@ def run_flow_in_process(
         }
 
     # Configure logging
-    from src.engines.crewai.infra.logging_config import (
+    from src.engines.kasal.infra.logging_config import (
         configure_subprocess_logging,
         suppress_stdout_stderr,
         restore_stdout_stderr
@@ -324,12 +324,12 @@ def run_flow_in_process(
             try:
                 async_logger.info(f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}")
 
-                from src.engines.crewai.infra.trace_management import TraceManager
-                from src.engines.crewai.callbacks.logging_callbacks import (
+                from src.engines.kasal.infra.trace_management import TraceManager
+                from src.engines.kasal.callbacks.logging_callbacks import (
                     AgentTraceEventListener,
                     TaskCompletionEventListener
                 )
-                from crewai.events import crewai_event_bus
+                from kasal_engine.events import crewai_event_bus
 
                 # Start trace and logs writers
                 await TraceManager.ensure_writer_started()
@@ -545,7 +545,7 @@ def run_flow_in_process(
 
             # Reset MCP warnings at the start of each flow execution
             try:
-                from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                from src.engines.kasal.tools.mcp_integration import MCPIntegration
                 MCPIntegration.reset_warnings()
             except Exception:
                 pass
@@ -553,7 +553,7 @@ def run_flow_in_process(
             # Now run the actual flow execution
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.engines.crewai.paths.flow.flow_runner_service import FlowRunnerService
+                from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
 
                 async for session in get_smart_db_session():
                     flow_runner = FlowRunnerService(session)
@@ -596,7 +596,7 @@ def run_flow_in_process(
                     # (agent execution started/completed, tool usage, etc.) complete their
                     # work before we return.
                     try:
-                        from crewai.events import crewai_event_bus as _event_bus
+                        from kasal_engine.events import crewai_event_bus as _event_bus
                         async_logger.info("[FLOW_SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete...")
                         flushed = _event_bus.flush(timeout=30.0)
                         if flushed:
@@ -620,7 +620,7 @@ def run_flow_in_process(
                 async_logger.error(f"[FLOW_SUBPROCESS] Flow execution error: {e}", exc_info=True)
                 # Flush event bus even on error to capture partial traces
                 try:
-                    from crewai.events import crewai_event_bus as _event_bus
+                    from kasal_engine.events import crewai_event_bus as _event_bus
                     _event_bus.flush(timeout=10.0)
                 except Exception:
                     pass
@@ -744,7 +744,7 @@ def run_flow_in_process(
                 # Collect MCP warnings to surface in the execution trace/UI
                 mcp_warnings = []
                 try:
-                    from src.engines.crewai.tools.mcp_integration import MCPIntegration
+                    from src.engines.kasal.tools.mcp_integration import MCPIntegration
                     mcp_warnings = MCPIntegration.get_warnings()
                     if mcp_warnings:
                         async_logger.warning(f"[FLOW_SUBPROCESS] [MCP_WARNINGS] {'; '.join(mcp_warnings)}")
@@ -770,7 +770,7 @@ def run_flow_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from crewai.events import crewai_event_bus as _cleanup_event_bus
+                    from kasal_engine.events import crewai_event_bus as _cleanup_event_bus
                     async_logger.info("[FLOW_SUBPROCESS] Final event bus flush before cleanup...")
                     _cleanup_event_bus.flush(timeout=15.0)
                     async_logger.info("[FLOW_SUBPROCESS] Event bus flush completed")
@@ -786,7 +786,7 @@ def run_flow_in_process(
 
                 # CRITICAL: Stop TraceManager writer tasks first - these keep the subprocess alive
                 try:
-                    from src.engines.crewai.infra.trace_management import TraceManager
+                    from src.engines.kasal.infra.trace_management import TraceManager
                     async_logger.info("[FLOW_SUBPROCESS] Stopping TraceManager writer tasks...")
                     loop.run_until_complete(TraceManager.stop_writer())
                     async_logger.info("[FLOW_SUBPROCESS] TraceManager writer tasks stopped")

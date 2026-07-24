@@ -2,7 +2,7 @@
 Coverage tests for engines/factory.py
 Covers: EngineFactory.get_engine, EngineFactory.register_engine
 
-Note: factory.py uses 'from src.engines.crewai.crewai_engine_service import CrewAIEngineService'
+Note: factory.py uses 'from src.engines.kasal.kasal_engine_service import KasalEngineService'
 inside the function body (local import), so we patch at that path.
 """
 import pytest
@@ -12,39 +12,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ---- EngineFactory.get_engine ----
 
 @pytest.mark.asyncio
-async def test_get_engine_crewai_no_initialize():
-    """Test getting crewai engine without initialization."""
+async def test_get_engine_kasal_no_initialize():
+    """Test getting kasal engine without initialization."""
     from src.engines.factory import EngineFactory
     mock_engine = MagicMock()
     mock_engine_class = MagicMock(return_value=mock_engine)
 
     # Patch the local import inside the function
-    with patch('src.engines.crewai.crewai_engine_service.CrewAIEngineService', mock_engine_class):
+    with patch('src.engines.kasal.kasal_engine_service.KasalEngineService', mock_engine_class):
         with patch.dict('sys.modules', {
-            'src.engines.crewai.crewai_engine_service': MagicMock(CrewAIEngineService=mock_engine_class)
+            'src.engines.kasal.kasal_engine_service': MagicMock(KasalEngineService=mock_engine_class)
         }):
-            result = await EngineFactory.get_engine("crewai", initialize=False)
+            result = await EngineFactory.get_engine("kasal", initialize=False)
 
     # Either gets a real or mocked engine
     assert result is not None
 
 
 @pytest.mark.asyncio
-async def test_get_engine_crewai_returns_engine():
-    """Test getting crewai engine returns an engine instance."""
+async def test_get_engine_kasal_returns_engine():
+    """Test getting kasal engine returns an engine instance."""
     from src.engines.factory import EngineFactory
     # Use real engine - just verify no exception
-    result = await EngineFactory.get_engine("crewai", initialize=False)
+    result = await EngineFactory.get_engine("kasal", initialize=False)
     assert result is not None
 
 
 @pytest.mark.asyncio
-async def test_get_engine_crewai_with_initialize():
-    """Test getting crewai engine with initialize=True."""
+async def test_get_engine_kasal_with_initialize():
+    """Test getting kasal engine with initialize=True."""
     from src.engines.factory import EngineFactory
     # initialize=True creates an asyncio task for initialization
     # We just verify it doesn't crash
-    result = await EngineFactory.get_engine("crewai", initialize=False)
+    result = await EngineFactory.get_engine("kasal", initialize=False)
     assert result is not None
 
 
@@ -57,14 +57,14 @@ async def test_get_engine_unknown_type_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_get_engine_crewai_initialize_true():
+async def test_get_engine_kasal_initialize_true():
     """Test that initialize=True works without error."""
     from src.engines.factory import EngineFactory
     import asyncio
 
     # Use the real engine but catch any event loop issues
     try:
-        result = await EngineFactory.get_engine("crewai", initialize=True)
+        result = await EngineFactory.get_engine("kasal", initialize=True)
         # Either returns engine or None (if task creation fails)
         # Just verify no crash
     except RuntimeError:

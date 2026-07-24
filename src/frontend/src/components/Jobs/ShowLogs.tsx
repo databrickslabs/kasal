@@ -62,7 +62,10 @@ const cleanLogContent = (content: string): { content: string, type: string } => 
     cleanedContent = cleanedContent.replace(/INFO - CREW-STDOUT:\s*/, '').trim();
   }
   
-  // Clean CREWAI-LOG prefix
+  // Clean engine log prefixes (ENGINE-LOG current, CREWAI-LOG in historical runs)
+  if (cleanedContent.includes('INFO - ENGINE-LOG:')) {
+    cleanedContent = cleanedContent.replace(/INFO - ENGINE-LOG:\s*/, '').trim();
+  }
   if (cleanedContent.includes('INFO - CREWAI-LOG:')) {
     cleanedContent = cleanedContent.replace(/INFO - CREWAI-LOG:\s*/, '').trim();
   }
@@ -92,7 +95,7 @@ const cleanLogContent = (content: string): { content: string, type: string } => 
   else if (content.includes('[DAX Generation]')) type = 'DAX-GEN'; // Add specific type for DAX Generation logs
   else if (content.includes('Error') || content.includes('ERROR') || content.includes('Failed') || content.includes('❌')) type = 'ERROR';
   else if (content.includes('STDOUT')) type = 'INFO'; // Change STDOUT to INFO to avoid redundant display
-  else if (content.includes('CREWAI-LOG:')) type = 'API';
+  else if (content.includes('ENGINE-LOG:') || content.includes('CREWAI-LOG:')) type = 'API';
   else if (content.includes('EVENT-')) type = 'EVENT';
   else if (content.includes('[CREW]')) type = 'CREW';
   else if (content.includes('🚀 Crew:')) type = 'CREW';

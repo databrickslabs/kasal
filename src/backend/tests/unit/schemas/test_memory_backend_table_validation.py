@@ -8,7 +8,7 @@ group_id tenant filter. It must be a strict SQL identifier.
 import pytest
 
 from src.schemas.memory_backend import LakebaseMemoryConfig
-from src.engines.crewai.memory.lakebase_storage_backend import _validate_table_name
+from src.engines.kasal.memory.lakebase_storage_backend import _validate_table_name
 
 
 class TestMemoryTableSchemaValidation:

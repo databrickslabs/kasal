@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 
 from src.engines.base.base_engine_service import BaseEngineService
-from src.engines.crewai.crewai_engine_service import CrewAIEngineService
+from src.engines.kasal.kasal_engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,10 @@ class EngineFactory:
             Engine instance or None if not found
         """
         try:
-            if engine_type == "crewai":
-                from src.engines.crewai.crewai_engine_service import CrewAIEngineService
-                engine = CrewAIEngineService()
+            # "crewai" is the legacy name for the kasal engine (old DB rows/payloads)
+            if engine_type in ("kasal", "crewai"):
+                from src.engines.kasal.kasal_engine_service import KasalEngineService
+                engine = KasalEngineService()
                 if initialize:
                     # Create initialization task but don't await it
                     init_task = asyncio.create_task(engine.initialize(llm_provider=llm_provider, model=model))
@@ -59,7 +60,7 @@ class EngineFactory:
         Register a new engine type with the factory.
         
         Args:
-            engine_type: Type of engine (e.g., "crewai")
+            engine_type: Type of engine (e.g., "kasal")
             engine_class: Class implementing BaseEngineService
         """
         # This method is no longer used in the new implementation

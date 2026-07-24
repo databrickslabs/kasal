@@ -95,7 +95,7 @@ Legacy tools (71, 72, 73) remain functional for backwards compatibility but shou
 ```
 
 ### 5. **CrewAI Tool Wrapper** ✅
-- **Location**: `src/engines/crewai/tools/custom/powerbi_connector_tool.py`
+- **Location**: `src/engines/kasal/tools/custom/powerbi_connector_tool.py`
 - **Files Created**: `powerbi_connector_tool.py`
 
 **Key Features**:
@@ -107,7 +107,7 @@ Legacy tools (71, 72, 73) remain functional for backwards compatibility but shou
 - Detailed logging
 
 ### 6. **Tool Factory Registration** ✅
-- **Location**: `src/engines/crewai/tools/tool_factory.py`
+- **Location**: `src/engines/kasal/tools/tool_factory.py`
 - **Changes**:
   - Imported converter tools (YAML and Power BI)
   - Added to `_tool_implementations` dictionary
@@ -190,7 +190,7 @@ src/
 ├── seeds/
 │   └── tools.py                              # ✅ Modified (added tool #74)
 │
-└── engines/crewai/tools/
+└── engines/kasal/tools/
     ├── custom/
     │   ├── __init__.py                       # ✅ Modified
     │   └── powerbi_connector_tool.py         # ✅ Created
@@ -293,7 +293,7 @@ print(result["measure_count"])  # Number of measures extracted
 ### Via CrewAI Tool
 
 ```python
-from src.engines.crewai.tools.custom.powerbi_connector_tool import PowerBIConnectorTool
+from src.engines.kasal.tools.custom.powerbi_connector_tool import PowerBIConnectorTool
 
 tool = PowerBIConnectorTool()
 

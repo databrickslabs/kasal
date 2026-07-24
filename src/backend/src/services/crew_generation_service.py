@@ -369,129 +369,9 @@ class CrewGenerationService:
         else:
             return default
 
-    async def _get_relevant_documentation(self, user_prompt: str, limit: int = 8) -> str:
-        """
-        Retrieve relevant documentation embeddings based on the user's prompt.
-
-        Args:
-            user_prompt: The user's prompt
-            limit: Maximum number of documentation chunks to retrieve
-
-        Returns:
-            String containing relevant documentation formatted for context
-        """
-        try:
-            # Enhance the search query if specific tools are mentioned
-            search_query = user_prompt
-
-            # Check for specific tool mentions and enhance the query
-            if 'genie' in user_prompt.lower():
-                search_query += " Databricks Genie Tool best practices task description expected output"
-                logger.info("Enhanced search query with Genie-specific keywords")
-
-            if 'reveal' in user_prompt.lower() or 'presentation' in user_prompt.lower():
-                search_query += " Reveal.js presentation markdown slides best practices"
-                logger.info("Enhanced search query with Reveal.js keywords")
-
-            # Create embedding for the enhanced search query
-            logger.info("Creating embedding for user prompt to find relevant documentation")
-
-            # Initialize the LLM manager
-            llm_manager = LLMManager()
-
-            # Configure embedder (default to Databricks for consistency with crew configuration)
-            embedder_config = {
-                'provider': 'databricks',
-                'config': {'model': 'databricks-gte-large-en'}
-            }
-
-            # Get the embedding for the enhanced search query
-            embedding_response = await llm_manager.get_embedding(search_query, embedder_config=embedder_config)
-            if not embedding_response:
-                logger.warning("Failed to create embedding for user prompt")
-                return ""
-
-            # Get the embedding vector
-            query_embedding = embedding_response
-
-            # Retrieve similar documentation based on the embedding
-            logger.info(f"Searching for {limit} most relevant documentation chunks")
-            # Initialize the documentation service with the session
-            doc_service = DocumentationEmbeddingService(self.session)
-
-            # First, get general documentation
-            similar_docs = await doc_service.search_similar_embeddings(
-                query_embedding=query_embedding,
-                limit=limit
-            )
-
-            # If specific tools are mentioned, do an additional targeted search
-            tool_specific_docs = []
-            if 'genie' in user_prompt.lower():
-                # Create a very specific embedding for Genie
-                genie_query = "Databricks Genie Tool best practices task description expected output CrewAI"
-                genie_embedding = await LLMManager.get_embedding(genie_query, embedder_config=embedder_config)
-                if genie_embedding:
-                    genie_docs = await doc_service.search_similar_embeddings(
-                        query_embedding=genie_embedding,
-                        limit=3  # Get top 3 Genie-specific docs
-                    )
-                    tool_specific_docs.extend(genie_docs)
-                    logger.info(f"Found {len(genie_docs)} Genie-specific documentation chunks")
-
-            if 'reveal' in user_prompt.lower() or 'presentation' in user_prompt.lower():
-                # Create a specific embedding for Reveal.js
-                reveal_query = "Reveal.js presentation markdown slides best practices CrewAI tasks"
-                reveal_embedding = await LLMManager.get_embedding(reveal_query, embedder_config=embedder_config)
-                if reveal_embedding:
-                    reveal_docs = await doc_service.search_similar_embeddings(
-                        query_embedding=reveal_embedding,
-                        limit=3  # Get top 3 Reveal-specific docs
-                    )
-                    tool_specific_docs.extend(reveal_docs)
-                    logger.info(f"Found {len(reveal_docs)} Reveal.js-specific documentation chunks")
-
-            # Combine and deduplicate docs (tool-specific first, then general)
-            all_docs = []
-            seen_ids = set()
-
-            # Add tool-specific docs first (higher priority)
-            for doc in tool_specific_docs:
-                if doc.id not in seen_ids:
-                    all_docs.append(doc)
-                    seen_ids.add(doc.id)
-
-            # Then add general docs
-            for doc in similar_docs:
-                if doc.id not in seen_ids and len(all_docs) < limit:
-                    all_docs.append(doc)
-                    seen_ids.add(doc.id)
-
-            if not all_docs:
-                logger.warning("No relevant documentation found")
-                return ""
-
-            # Format the documentation for context
-            docs_context = "\n\n## CrewAI Relevant Documentation\n\n"
-
-            for i, doc in enumerate(all_docs):
-                source = doc.source.split('/')[-1].capitalize() if doc.source else "Unknown"
-                # Mark tool-specific docs
-                if 'genie' in doc.title.lower() or 'genie' in doc.source.lower():
-                    docs_context += f"### [GENIE TOOL] {doc.title}\n\n"
-                elif 'reveal' in doc.title.lower() or 'reveal' in doc.source.lower():
-                    docs_context += f"### [REVEAL.JS] {doc.title}\n\n"
-                else:
-                    docs_context += f"### {source} - {doc.title}\n\n"
-                docs_context += f"{doc.content}\n\n"
-
-            logger.info(f"Retrieved {len(all_docs)} relevant documentation chunks (including {len(tool_specific_docs)} tool-specific)")
-            return docs_context
-
-        except Exception as e:
-            logger.error(f"Error retrieving documentation: {str(e)}")
-            logger.error(traceback.format_exc())
-            return ""
+    # NOTE: the crewai-docs retrieval helper (_get_relevant_documentation)
+    # was removed with the crewai->kasal migration: it was never invoked and
+    # the docs.crewai.com seeder that fed it is gone.
 
     async def create_crew_complete(self, request: CrewGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> Dict[str, Any]:
         """Public entrypoint — wraps crew generation in an MLflow root trace so
@@ -1196,7 +1076,7 @@ class CrewGenerationService:
         # dispatch request's context — including the request-scoped DB session,
         # which FastAPI has already closed. Detach it so every
         # request_scoped_session() below (notably the model-config read inside
-        # LLMManager.configure_crewai_llm during planning) opens a fresh session
+        # LLMManager.configure_kasal_llm during planning) opens a fresh session
         # instead of failing with "Cannot operate on a closed database".
         detach_request_session()
 

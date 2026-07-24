@@ -12,7 +12,7 @@ from typing import List
 from src.schemas.engine_config import (
     EngineConfigBase, EngineConfigCreate, EngineConfigUpdate, EngineConfigResponse,
     EngineConfigToggleUpdate, EngineConfigValueUpdate, EngineConfigListResponse,
-    CrewAIFlowConfigUpdate
+    KasalFlowConfigUpdate
 )
 
 
@@ -22,13 +22,13 @@ class TestEngineConfigBase:
     def test_valid_engine_config_base_minimal(self):
         """Test EngineConfigBase with minimal required fields."""
         config_data = {
-            "engine_name": "crewai",
+            "engine_name": "kasal",
             "engine_type": "workflow",
             "config_key": "flow_enabled",
             "config_value": "true"
         }
         config = EngineConfigBase(**config_data)
-        assert config.engine_name == "crewai"
+        assert config.engine_name == "kasal"
         assert config.engine_type == "workflow"
         assert config.config_key == "flow_enabled"
         assert config.config_value == "true"
@@ -84,7 +84,7 @@ class TestEngineConfigBase:
         """Test EngineConfigBase with various engine configurations."""
         engine_configs = [
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "workflow",
                 "config_key": "parallel_execution",
                 "config_value": "true",
@@ -208,7 +208,7 @@ class TestEngineConfigCreate:
             {
                 "name": "crewai_flow_enable",
                 "data": {
-                    "engine_name": "crewai",
+                    "engine_name": "kasal",
                     "engine_type": "workflow",
                     "config_key": "flow_enabled",
                     "config_value": "true",
@@ -325,7 +325,7 @@ class TestEngineConfigResponse:
         now = datetime.now()
         response_data = {
             "id": 1,
-            "engine_name": "crewai",
+            "engine_name": "kasal",
             "engine_type": "workflow",
             "config_key": "flow_enabled",
             "config_value": "true",
@@ -336,7 +336,7 @@ class TestEngineConfigResponse:
         }
         response = EngineConfigResponse(**response_data)
         assert response.id == 1
-        assert response.engine_name == "crewai"
+        assert response.engine_name == "kasal"
         assert response.engine_type == "workflow"
         assert response.config_key == "flow_enabled"
         assert response.config_value == "true"
@@ -515,7 +515,7 @@ class TestEngineConfigListResponse:
         configs = [
             EngineConfigResponse(
                 id=1,
-                engine_name="crewai",
+                engine_name="kasal",
                 engine_type="workflow",
                 config_key="flow_enabled",
                 config_value="true",
@@ -597,40 +597,40 @@ class TestEngineConfigListResponse:
         assert "configs" in missing_fields
 
 
-class TestCrewAIFlowConfigUpdate:
-    """Test cases for CrewAIFlowConfigUpdate schema."""
+class TestKasalFlowConfigUpdate:
+    """Test cases for KasalFlowConfigUpdate schema."""
     
     def test_valid_crewai_flow_config_update(self):
-        """Test CrewAIFlowConfigUpdate with valid data."""
+        """Test KasalFlowConfigUpdate with valid data."""
         flow_data = {"flow_enabled": True}
-        flow_update = CrewAIFlowConfigUpdate(**flow_data)
+        flow_update = KasalFlowConfigUpdate(**flow_data)
         assert flow_update.flow_enabled is True
         
         flow_data = {"flow_enabled": False}
-        flow_update = CrewAIFlowConfigUpdate(**flow_data)
+        flow_update = KasalFlowConfigUpdate(**flow_data)
         assert flow_update.flow_enabled is False
     
     def test_crewai_flow_config_update_missing_field(self):
-        """Test CrewAIFlowConfigUpdate validation with missing flow_enabled field."""
+        """Test KasalFlowConfigUpdate validation with missing flow_enabled field."""
         with pytest.raises(ValidationError) as exc_info:
-            CrewAIFlowConfigUpdate()
+            KasalFlowConfigUpdate()
         
         errors = exc_info.value.errors()
         missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
         assert "flow_enabled" in missing_fields
     
     def test_crewai_flow_config_update_boolean_conversion(self):
-        """Test CrewAIFlowConfigUpdate boolean field conversion."""
+        """Test KasalFlowConfigUpdate boolean field conversion."""
         flow_data = {"flow_enabled": "true"}
-        flow_update = CrewAIFlowConfigUpdate(**flow_data)
+        flow_update = KasalFlowConfigUpdate(**flow_data)
         assert flow_update.flow_enabled is True
         
         flow_data = {"flow_enabled": 0}
-        flow_update = CrewAIFlowConfigUpdate(**flow_data)
+        flow_update = KasalFlowConfigUpdate(**flow_data)
         assert flow_update.flow_enabled is False
         
         flow_data = {"flow_enabled": 1}
-        flow_update = CrewAIFlowConfigUpdate(**flow_data)
+        flow_update = KasalFlowConfigUpdate(**flow_data)
         assert flow_update.flow_enabled is True
 
 
@@ -641,7 +641,7 @@ class TestSchemaIntegration:
         """Test complete engine configuration lifecycle."""
         # Create config
         create_data = {
-            "engine_name": "crewai",
+            "engine_name": "kasal",
             "engine_type": "workflow",
             "config_key": "flow_enabled",
             "config_value": "false",
@@ -678,7 +678,7 @@ class TestSchemaIntegration:
         config_response = EngineConfigResponse(**response_data)
         
         # Verify lifecycle
-        assert create_config.engine_name == "crewai"
+        assert create_config.engine_name == "kasal"
         assert create_config.config_value == "false"  # Original value
         assert value_update.config_value == "true"
         assert toggle_update.enabled is True
@@ -694,7 +694,7 @@ class TestSchemaIntegration:
         # Multiple engine configurations
         configs = [
             {
-                "engine_name": "crewai",
+                "engine_name": "kasal",
                 "engine_type": "workflow",
                 "configs": [
                     {"key": "flow_enabled", "value": "true"},
@@ -759,13 +759,13 @@ class TestSchemaIntegration:
                 by_engine[config.engine_name] = []
             by_engine[config.engine_name].append(config)
         
-        assert len(by_engine["crewai"]) == 3
+        assert len(by_engine["kasal"]) == 3
         assert len(by_engine["databricks"]) == 3
         assert len(by_engine["processor"]) == 3
         
         # Check specific configurations
-        crewai_configs = by_engine["crewai"]
-        flow_config = next(c for c in crewai_configs if c.config_key == "flow_enabled")
+        kasal_configs = by_engine["kasal"]
+        flow_config = next(c for c in kasal_configs if c.config_key == "flow_enabled")
         assert flow_config.config_value == "true"
     
     def test_crewai_flow_configuration_workflow(self):
@@ -773,7 +773,7 @@ class TestSchemaIntegration:
         # Initial flow disabled
         initial_config = EngineConfigResponse(
             id=1,
-            engine_name="crewai",
+            engine_name="kasal",
             engine_type="workflow",
             config_key="flow_enabled",
             config_value="false",
@@ -784,7 +784,7 @@ class TestSchemaIntegration:
         )
         
         # Enable flow using specific CrewAI update
-        flow_update = CrewAIFlowConfigUpdate(flow_enabled=True)
+        flow_update = KasalFlowConfigUpdate(flow_enabled=True)
         
         # Updated config after flow enable
         updated_config = EngineConfigResponse(
@@ -804,7 +804,7 @@ class TestSchemaIntegration:
         assert flow_update.flow_enabled is True
         assert updated_config.config_value == "true"
         assert updated_config.updated_at > initial_config.updated_at
-        assert updated_config.engine_name == "crewai"
+        assert updated_config.engine_name == "kasal"
         assert updated_config.config_key == "flow_enabled"
     
     def test_engine_config_filtering_scenarios(self):
@@ -814,12 +814,12 @@ class TestSchemaIntegration:
         # Mixed configurations - enabled and disabled
         mixed_configs = [
             EngineConfigResponse(
-                id=1, engine_name="crewai", engine_type="workflow",
+                id=1, engine_name="kasal", engine_type="workflow",
                 config_key="flow_enabled", config_value="true", enabled=True,
                 created_at=now, updated_at=now
             ),
             EngineConfigResponse(
-                id=2, engine_name="crewai", engine_type="workflow",
+                id=2, engine_name="kasal", engine_type="workflow",
                 config_key="debug_mode", config_value="false", enabled=False,
                 created_at=now, updated_at=now
             ),
@@ -855,14 +855,14 @@ class TestSchemaIntegration:
         assert len(ai_configs) == 2
         
         # Filter by engine name
-        crewai_configs = [c for c in list_response.configs if c.engine_name == "crewai"]
+        kasal_configs = [c for c in list_response.configs if c.engine_name == "kasal"]
         databricks_configs = [c for c in list_response.configs if c.engine_name == "databricks"]
         
-        assert len(crewai_configs) == 2
+        assert len(kasal_configs) == 2
         assert len(databricks_configs) == 2
         
         # Complex filtering - enabled CrewAI configs
         enabled_crewai = [c for c in list_response.configs 
-                         if c.engine_name == "crewai" and c.enabled]
+                         if c.engine_name == "kasal" and c.enabled]
         assert len(enabled_crewai) == 1
         assert enabled_crewai[0].config_key == "flow_enabled"

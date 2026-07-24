@@ -63,77 +63,10 @@ class AgentGenerationService:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
-    async def _get_relevant_documentation(self, user_prompt: str, tools: List[str] = None, limit: int = 5) -> str:
-        """
-        Retrieve relevant documentation embeddings based on the agent generation request.
-        Specifically looks for agent patterns and tool-specific best practices.
+    # NOTE: the crewai-docs retrieval helper (_get_relevant_documentation)
+    # was removed with the crewai->kasal migration: it was never invoked and
+    # the docs.crewai.com seeder that fed it is gone.
 
-        Args:
-            user_prompt: The user's prompt for agent generation
-            tools: Optional list of tools to find specific tool documentation
-            limit: Maximum number of documentation chunks to retrieve (default 5 for agents)
-
-        Returns:
-            String containing relevant documentation formatted for context
-        """
-        try:
-            # Build enhanced query including tool context if available
-            search_query = user_prompt
-
-            # Add tool names to search for tool-specific best practices
-            if tools and len(tools) > 0:
-                tool_names = ", ".join(tools) if isinstance(tools[0], str) else ", ".join([t.get('name', '') for t in tools])
-                search_query += f"\n\nTools: {tool_names}"
-
-            # Add keywords to find agent-specific best practices
-            search_query += "\n\nAgent role goal backstory tools capabilities best practices"
-
-            logger.info("Creating embedding for agent generation query to find relevant documentation")
-
-            # Configure embedder (default to Databricks for consistency)
-            embedder_config = {
-                'provider': 'databricks',
-                'config': {'model': 'databricks-gte-large-en'}
-            }
-
-            # Get the embedding for the search query
-            embedding_response = await LLMManager.get_embedding(search_query, embedder_config=embedder_config)
-            if not embedding_response:
-                logger.warning("Failed to create embedding for agent generation query")
-                return ""
-
-            query_embedding = embedding_response
-
-            # Retrieve similar documentation based on the embedding
-            logger.info(f"Searching for {limit} most relevant documentation chunks for agent generation")
-            doc_service = DocumentationEmbeddingService(self.session)
-            similar_docs = await doc_service.search_similar_embeddings(
-                query_embedding=query_embedding,
-                limit=limit
-            )
-
-            if not similar_docs or len(similar_docs) == 0:
-                logger.warning("No relevant documentation found for agent generation")
-                return ""
-
-            # Format the documentation for context, emphasizing agent patterns
-            docs_context = "\n\n## Agent Generation Best Practices and Examples\n\n"
-
-            for doc in similar_docs:
-                # Prioritize agent and tool best practices
-                if 'agent' in doc.title.lower() or 'tool' in doc.source.lower() or 'best_practices' in doc.source:
-                    docs_context = f"### {doc.title}\n\n{doc.content}\n\n" + docs_context
-                else:
-                    docs_context += f"### {doc.title}\n\n{doc.content}\n\n"
-
-            logger.info(f"Retrieved {len(similar_docs)} relevant documentation chunks for agent generation")
-            return docs_context
-
-        except Exception as e:
-            logger.error(f"Error retrieving documentation for agent generation: {str(e)}")
-            logger.error(traceback.format_exc())
-            return ""
-    
     async def generate_agent(self, prompt_text: str, model: str = None, tools: List[str] = None,
                             group_context: Optional[GroupContext] = None, fast_planning: bool = True,
                             available_tools: Optional[List[Dict]] = None) -> Dict[str, Any]:

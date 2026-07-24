@@ -14,13 +14,13 @@ The knowledge search functionality in Kasal has been redesigned from a CrewAI kn
    - Handles authentication, filtering, and result formatting
    - Can be used by any AI engine or API endpoint
 
-2. **DatabricksKnowledgeSearchTool** (`src/engines/crewai/tools/custom/databricks_knowledge_search_tool.py`)
+2. **DatabricksKnowledgeSearchTool** (`src/engines/kasal/tools/custom/databricks_knowledge_search_tool.py`)
    - Lightweight CrewAI tool wrapper
    - Inherits from `BaseTool`
    - Calls the service layer for actual search
    - Handles async/sync conversion for CrewAI
 
-3. **Tool Factory** (`src/engines/crewai/tools/tool_factory.py`)
+3. **Tool Factory** (`src/engines/kasal/tools/tool_factory.py`)
    - Registers the tool for agent use
    - Configures with group_id, execution_id, and user_token
 

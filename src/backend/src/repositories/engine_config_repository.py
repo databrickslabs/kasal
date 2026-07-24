@@ -157,14 +157,14 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
             await self.session.rollback()
             raise
     
-    async def get_crewai_flow_enabled(self) -> bool:
+    async def get_kasal_flow_enabled(self) -> bool:
         """
         Get the CrewAI flow enabled status.
 
         Returns:
             True if flow is enabled (defaults to True if not found)
         """
-        config = await self.find_by_engine_and_key("crewai", "flow_enabled")
+        config = await self.find_by_engine_and_key("kasal", "flow_enabled")
         if not config:
             return True  # Default to enabled if not configured
         return config.config_value.lower() == "true"
@@ -255,7 +255,7 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
 
         return success
 
-    async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
+    async def set_kasal_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
         
@@ -268,13 +268,13 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
         config_value = "true" if enabled else "false"
         
         # Try to update existing config first
-        success = await self.update_config_value("crewai", "flow_enabled", config_value)
+        success = await self.update_config_value("kasal", "flow_enabled", config_value)
         
         if not success:
             # Create new config if it doesn't exist
             try:
                 new_config_data = {
-                    "engine_name": "crewai",
+                    "engine_name": "kasal",
                     "engine_type": "workflow",
                     "config_key": "flow_enabled",
                     "config_value": config_value,

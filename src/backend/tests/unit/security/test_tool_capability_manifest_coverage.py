@@ -1,5 +1,5 @@
 """
-Coverage tests for engines/crewai/security/tool_capability_manifest.py
+Coverage tests for engines/kasal/security/tool_capability_manifest.py
 Covers: assess_mixed_task, log_mixed_task_warning, apply_spotlighting_wrappers, run_crew_security_checks
 """
 import pytest
@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 # ---- assess_mixed_task ----
 
 def test_assess_mixed_task_no_tools():
-    from src.engines.crewai.security.tool_capability_manifest import assess_mixed_task
+    from src.engines.kasal.security.tool_capability_manifest import assess_mixed_task
     result = assess_mixed_task([])
     assert result.is_mixed is False
 
 
 def test_assess_mixed_task_only_untrusted():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
@@ -36,7 +36,7 @@ def test_assess_mixed_task_only_untrusted():
 
 
 def test_assess_mixed_task_is_mixed():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
@@ -54,7 +54,7 @@ def test_assess_mixed_task_is_mixed():
 
     if not untrusted or not sensitive:
         # Manually test with mocked TOOL_CAPABILITIES
-        from src.engines.crewai.security import tool_capability_manifest as mod
+        from src.engines.kasal.security import tool_capability_manifest as mod
         original = mod.TOOL_CAPABILITIES.copy()
         mod.TOOL_CAPABILITIES["fake_untrusted"] = ToolCapability.INGESTS_UNTRUSTED_CONTENT
         mod.TOOL_CAPABILITIES["fake_sensitive"] = ToolCapability.READS_SENSITIVE_DATA
@@ -72,12 +72,12 @@ def test_assess_mixed_task_is_mixed():
 
 
 def test_assess_mixed_task_with_destructive():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
     )
-    from src.engines.crewai.security import tool_capability_manifest as mod
+    from src.engines.kasal.security import tool_capability_manifest as mod
     original = mod.TOOL_CAPABILITIES.copy()
     mod.TOOL_CAPABILITIES["fake_untrusted"] = ToolCapability.INGESTS_UNTRUSTED_CONTENT
     mod.TOOL_CAPABILITIES["fake_destructive"] = ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
@@ -94,7 +94,7 @@ def test_assess_mixed_task_with_destructive():
 # ---- log_mixed_task_warning ----
 
 def test_log_mixed_task_warning_not_mixed():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         log_mixed_task_warning,
         MixedTaskAssessment,
     )
@@ -110,7 +110,7 @@ def test_log_mixed_task_warning_not_mixed():
 
 
 def test_log_mixed_task_warning_is_mixed():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         log_mixed_task_warning,
         MixedTaskAssessment,
     )
@@ -128,7 +128,7 @@ def test_log_mixed_task_warning_is_mixed():
 # ---- apply_spotlighting_wrappers ----
 
 def test_apply_spotlighting_no_agents():
-    from src.engines.crewai.security.tool_capability_manifest import apply_spotlighting_wrappers
+    from src.engines.kasal.security.tool_capability_manifest import apply_spotlighting_wrappers
     crew = MagicMock()
     crew.agents = []
     result = apply_spotlighting_wrappers(crew)
@@ -136,7 +136,7 @@ def test_apply_spotlighting_no_agents():
 
 
 def test_apply_spotlighting_agent_no_untrusted_tools():
-    from src.engines.crewai.security.tool_capability_manifest import apply_spotlighting_wrappers
+    from src.engines.kasal.security.tool_capability_manifest import apply_spotlighting_wrappers
 
     class FakeAgent:
         def __init__(self):
@@ -153,12 +153,12 @@ def test_apply_spotlighting_agent_no_untrusted_tools():
 
 
 def test_apply_spotlighting_with_untrusted_tool():
-    from src.engines.crewai.security.tool_capability_manifest import (
+    from src.engines.kasal.security.tool_capability_manifest import (
         apply_spotlighting_wrappers,
         TOOL_CAPABILITIES,
         ToolCapability,
     )
-    from src.engines.crewai.security import tool_capability_manifest as mod
+    from src.engines.kasal.security import tool_capability_manifest as mod
 
     # Inject a fake untrusted tool
     original = mod.TOOL_CAPABILITIES.copy()
@@ -188,7 +188,7 @@ def test_apply_spotlighting_with_untrusted_tool():
 # ---- run_crew_security_checks ----
 
 def test_run_crew_security_checks_empty_crew():
-    from src.engines.crewai.security.tool_capability_manifest import run_crew_security_checks
+    from src.engines.kasal.security.tool_capability_manifest import run_crew_security_checks
     crew = MagicMock()
     crew.agents = []
     crew.tasks = []
@@ -197,7 +197,7 @@ def test_run_crew_security_checks_empty_crew():
 
 
 def test_run_crew_security_checks_with_tasks():
-    from src.engines.crewai.security.tool_capability_manifest import run_crew_security_checks
+    from src.engines.kasal.security.tool_capability_manifest import run_crew_security_checks
     crew = MagicMock()
 
     task = MagicMock()
@@ -215,7 +215,7 @@ def test_run_crew_security_checks_with_tasks():
 
 
 def test_run_crew_security_checks_exception_handled():
-    from src.engines.crewai.security.tool_capability_manifest import run_crew_security_checks
+    from src.engines.kasal.security.tool_capability_manifest import run_crew_security_checks
     crew = MagicMock()
     crew.agents = MagicMock(side_effect=Exception("Crew access failed"))
     crew.tasks = MagicMock(side_effect=Exception("Tasks access failed"))
@@ -224,11 +224,11 @@ def test_run_crew_security_checks_exception_handled():
 
 
 def test_run_crew_security_checks_spotlighting_exception():
-    from src.engines.crewai.security.tool_capability_manifest import run_crew_security_checks
+    from src.engines.kasal.security.tool_capability_manifest import run_crew_security_checks
     crew = MagicMock()
     crew.agents = []
     crew.tasks = []
-    with patch('src.engines.crewai.security.tool_capability_manifest.apply_spotlighting_wrappers',
+    with patch('src.engines.kasal.security.tool_capability_manifest.apply_spotlighting_wrappers',
                side_effect=Exception("spotlighting error")):
         # Should not raise
         run_crew_security_checks(crew)

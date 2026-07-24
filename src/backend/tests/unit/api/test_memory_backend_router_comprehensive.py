@@ -688,7 +688,7 @@ class TestLocalDefaultStoreReadDelete:
             "src.api.memory_backend_router.local_memory_store_dir", return_value=store
         ), patch.dict(
             "sys.modules",
-            {"crewai.memory": MagicMock(Memory=MagicMock(return_value=memory_obj))},
+            {"kasal_engine.memory": MagicMock(Memory=MagicMock(return_value=memory_obj))},
         ), patch(
             "src.api.memory_backend_router._memory_record_to_dict",
             return_value={"created_at": "2026-01-01", "metadata": {}},

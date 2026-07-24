@@ -34,7 +34,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, documentation, groups, api_keys, dspy_examples, example_crews, bi_specialist_crews
+    from src.seeds import tools, schemas, prompt_templates, model_configs, groups, api_keys, dspy_examples, example_crews, bi_specialist_crews
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -70,21 +70,12 @@ try:
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding model_configs seeder: {e}")
 
-# Documentation embeddings seeder is intentionally DISABLED.
-# Reasons: (1) the three generators (agent/crew/task) already disabled
-# documentation retrieval, so the documentation_embeddings table is no longer
-# read during generation; (2) the seeder is append-only and its idempotency
-# guard checks the Databricks index (not the local table that writes now go to),
-# so it re-seeded the full chunk set on every restart and bloated the table
-# ~96x. Leaving it unregistered keeps it from running while preserving the
-# module/table/service/router and the separate KnowledgeEmbedding logic.
-# To re-enable: SEEDERS["documentation"] = documentation.seed
-#
-# try:
-#     SEEDERS["documentation"] = documentation.seed
-#     debug_log("Added documentation.seed to SEEDERS")
-# except (NameError, AttributeError) as e:
-#     logger.error(f"Error adding documentation seeder: {e}")
+# The documentation seeder (crewai-docs scraper/embedder) was REMOVED with the
+# crewai→kasal engine migration: it had been disabled for a while (generation
+# retrieval was off; its idempotency bug bloated the table ~96x) and its content
+# documented the retired crewAI framework. The documentation_embeddings table,
+# model, repository, and DocumentationEmbeddingService all stay — the knowledge
+# file-upload feature (KnowledgeEmbedding) stores its vectors there.
 
 # Roles seeder removed - using simplified 3-tier role system
 
@@ -146,9 +137,11 @@ async def run_all_seeders() -> None:
         logger.warning("No seeders are registered! Check if seeder modules were imported correctly.")
         return
     
-    # Separate fast seeders from slow ones
+    # Separate fast seeders from slow ones. Anything not explicitly fast runs
+    # in the background so a slow seeder can never block startup (the removed
+    # documentation seeder used to be the only slow one).
     fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs', 'dspy_examples', 'example_crews', 'bi_specialist_crews']
-    slow_seeders = ['documentation']  # Documentation seeder is slow due to embeddings
+    slow_seeders = [name for name in SEEDERS if name not in fast_seeders]
 
     # Run fast seeders first (sequentially as they're quick)
     for seeder_name, seeder_func in SEEDERS.items():
@@ -248,7 +241,7 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
 
     Args:
         factory: async_sessionmaker to use for database connections
-        exclude: set of seeder names to skip (e.g., {'documentation'})
+        exclude: set of seeder names to skip (e.g., {'tools'})
     """
     exclude = exclude or set()
 
@@ -261,7 +254,7 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
     seeder_modules = []
     seed_module_names = [
         'src.seeds.tools', 'src.seeds.schemas', 'src.seeds.prompt_templates',
-        'src.seeds.model_configs', 'src.seeds.documentation', 'src.seeds.groups',
+        'src.seeds.model_configs', 'src.seeds.groups',
         'src.seeds.api_keys', 'src.seeds.dspy_examples', 'src.seeds.example_crews',
         'src.seeds.bi_specialist_crews',
     ]

@@ -8,7 +8,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.crewai_execution_service import CrewAIExecutionService
+from src.services.kasal_execution_service import KasalExecutionService
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def test_agent_and_task_lookup_is_id_first():
     session_cm.__aenter__ = AsyncMock(return_value=MagicMock())
     session_cm.__aexit__ = AsyncMock(return_value=None)
 
-    service = CrewAIExecutionService.__new__(CrewAIExecutionService)
+    service = KasalExecutionService.__new__(KasalExecutionService)
 
     mock_engine = MagicMock()
     mock_engine._init_task = MagicMock()
@@ -54,10 +54,10 @@ async def test_agent_and_task_lookup_is_id_first():
     # Stop right after enrichment: the engine's run_execution is the next step.
     mock_engine.run_execution = AsyncMock(side_effect=RuntimeError("stop-after-enrichment"))
 
-    with patch("src.services.crewai_execution_service.request_scoped_session", return_value=session_cm), \
-         patch("src.services.crewai_execution_service.AgentService", return_value=agent_service), \
-         patch("src.services.crewai_execution_service.TaskService", return_value=task_service), \
-         patch.object(CrewAIExecutionService, "_prepare_engine", new_callable=AsyncMock,
+    with patch("src.services.kasal_execution_service.request_scoped_session", return_value=session_cm), \
+         patch("src.services.kasal_execution_service.AgentService", return_value=agent_service), \
+         patch("src.services.kasal_execution_service.TaskService", return_value=task_service), \
+         patch.object(KasalExecutionService, "_prepare_engine", new_callable=AsyncMock,
                       return_value=mock_engine, create=True):
         try:
             await service.prepare_and_run_crew(

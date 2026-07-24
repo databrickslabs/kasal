@@ -45,7 +45,7 @@ class MockCrewConfig:
 def execution_service():
     """Create an ExecutionService instance with mocked dependencies."""
     with patch('src.services.execution_service.ExecutionNameService') as mock_name_service, \
-         patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service:
+         patch('src.services.execution_service.KasalExecutionService') as mock_crew_service:
         
         mock_name_service.create.return_value = AsyncMock()
         mock_crew_instance = AsyncMock()
@@ -58,8 +58,8 @@ def execution_service():
         mock_crew_service.return_value = mock_crew_instance
         
         service = ExecutionService()
-        # Ensure the service's crewai_execution_service is properly mocked
-        service.crewai_execution_service = mock_crew_instance
+        # Ensure the service's kasal_execution_service is properly mocked
+        service.kasal_execution_service = mock_crew_instance
         return service
 
 
@@ -90,7 +90,7 @@ class TestExecutionService:
         config = {"param": "value"}
         
         mock_result = {"execution_id": "exec-123", "status": "running"}
-        execution_service.crewai_execution_service.run_flow_execution.return_value = mock_result
+        execution_service.kasal_execution_service.run_flow_execution.return_value = mock_result
         
         result = await execution_service.execute_flow(
             flow_id=flow_id,
@@ -99,7 +99,7 @@ class TestExecutionService:
         )
         
         assert result == mock_result
-        execution_service.crewai_execution_service.run_flow_execution.assert_called_once_with(
+        execution_service.kasal_execution_service.run_flow_execution.assert_called_once_with(
             flow_id=str(flow_id),
             nodes=None,
             edges=None,
@@ -114,7 +114,7 @@ class TestExecutionService:
         edges = [{"source": "1", "target": "2"}]
         
         mock_result = {"execution_id": "exec-456", "status": "running"}
-        execution_service.crewai_execution_service.run_flow_execution.return_value = mock_result
+        execution_service.kasal_execution_service.run_flow_execution.return_value = mock_result
         
         result = await execution_service.execute_flow(
             nodes=nodes,
@@ -123,7 +123,7 @@ class TestExecutionService:
         
         assert result == mock_result
         # Verify a job_id was generated
-        call_args = execution_service.crewai_execution_service.run_flow_execution.call_args
+        call_args = execution_service.kasal_execution_service.run_flow_execution.call_args
         assert call_args[1]["job_id"] is not None
         assert call_args[1]["nodes"] == nodes
         assert call_args[1]["edges"] == edges
@@ -131,11 +131,11 @@ class TestExecutionService:
     @pytest.mark.asyncio
     async def test_execute_flow_generates_job_id(self, execution_service):
         """Test that flow execution generates job_id when not provided."""
-        execution_service.crewai_execution_service.run_flow_execution.return_value = {"status": "running"}
+        execution_service.kasal_execution_service.run_flow_execution.return_value = {"status": "running"}
         
         await execution_service.execute_flow()
         
-        call_args = execution_service.crewai_execution_service.run_flow_execution.call_args
+        call_args = execution_service.kasal_execution_service.run_flow_execution.call_args
         job_id = call_args[1]["job_id"]
         assert job_id is not None
         # Verify it's a valid UUID string
@@ -145,7 +145,7 @@ class TestExecutionService:
     async def test_execute_flow_http_exception_propagation(self, execution_service):
         """Test that KasalErrors are propagated."""
         kasal_error = BadRequestError(detail="Bad request")
-        execution_service.crewai_execution_service.run_flow_execution.side_effect = kasal_error
+        execution_service.kasal_execution_service.run_flow_execution.side_effect = kasal_error
 
         with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow()
@@ -156,7 +156,7 @@ class TestExecutionService:
     @pytest.mark.asyncio
     async def test_execute_flow_general_exception_handling(self, execution_service):
         """Test general exception handling in flow execution."""
-        execution_service.crewai_execution_service.run_flow_execution.side_effect = Exception("Database error")
+        execution_service.kasal_execution_service.run_flow_execution.side_effect = Exception("Database error")
 
         with pytest.raises(KasalError) as exc_info:
             await execution_service.execute_flow()
@@ -179,18 +179,18 @@ class TestExecutionService:
         """Test successful retrieval of executions by flow."""
         flow_id = uuid.uuid4()
         mock_executions = [{"id": 1, "status": "completed"}, {"id": 2, "status": "running"}]
-        execution_service.crewai_execution_service.get_flow_executions_by_flow.return_value = mock_executions
+        execution_service.kasal_execution_service.get_flow_executions_by_flow.return_value = mock_executions
         
         result = await execution_service.get_executions_by_flow(flow_id)
         
         assert result == mock_executions
-        execution_service.crewai_execution_service.get_flow_executions_by_flow.assert_called_once_with(str(flow_id))
+        execution_service.kasal_execution_service.get_flow_executions_by_flow.assert_called_once_with(str(flow_id))
     
     @pytest.mark.asyncio
     async def test_get_executions_by_flow_error_handling(self, execution_service):
         """Test error handling in get_executions_by_flow."""
         flow_id = uuid.uuid4()
-        execution_service.crewai_execution_service.get_flow_executions_by_flow.side_effect = Exception("Database error")
+        execution_service.kasal_execution_service.get_flow_executions_by_flow.side_effect = Exception("Database error")
 
         with pytest.raises(KasalError) as exc_info:
             await execution_service.get_executions_by_flow(flow_id)
@@ -332,7 +332,7 @@ class TestExecutionService:
     def test_execution_service_initialization(self, execution_service):
         """Test ExecutionService initialization."""
         assert execution_service.execution_name_service is not None
-        assert execution_service.crewai_execution_service is not None
+        assert execution_service.kasal_execution_service is not None
         assert hasattr(ExecutionService, 'executions')
         assert hasattr(ExecutionService, '_thread_pool')
     
@@ -391,15 +391,15 @@ class TestExecutionService:
         flow_id = uuid.uuid4()
         
         # Configure the mock method
-        execution_service.crewai_execution_service.run_flow_execution.return_value = {"status": "running"}
+        execution_service.kasal_execution_service.run_flow_execution.return_value = {"status": "running"}
         
         # Test execute_flow delegation
         result = await execution_service.execute_flow(flow_id=flow_id)
         assert result["status"] == "running"
-        execution_service.crewai_execution_service.run_flow_execution.assert_called_once()
+        execution_service.kasal_execution_service.run_flow_execution.assert_called_once()
         
         # Verify call arguments contain the flow_id
-        call_args = execution_service.crewai_execution_service.run_flow_execution.call_args
+        call_args = execution_service.kasal_execution_service.run_flow_execution.call_args
         assert str(flow_id) in call_args[1]["flow_id"]
     
     def test_execution_id_generation_uniqueness(self):
@@ -710,10 +710,10 @@ class TestAdHocFlowValidation:
 @pytest.mark.asyncio
 async def test_run_crew_execution_agent_branch_delegates_to_light_runner():
     """execution_type='agent' (chat/light mode) routes run_crew_execution to
-    CrewAIExecutionService.run_light_agent_execution — NOT the crew path or the
+    KasalExecutionService.run_light_agent_execution — NOT the crew path or the
     no-op thread-pool stub."""
     config = MockCrewConfig()
-    with patch('src.services.execution_service.CrewAIExecutionService') as mock_cls:
+    with patch('src.services.execution_service.KasalExecutionService') as mock_cls:
         inst = mock_cls.return_value
         inst.run_light_agent_execution = AsyncMock(
             return_value={"execution_id": "e-agent", "status": ExecutionStatus.COMPLETED.value}

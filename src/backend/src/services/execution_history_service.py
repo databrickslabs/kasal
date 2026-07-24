@@ -396,10 +396,10 @@ class ExecutionHistoryService:
             # Delete executions and associated data (with group filtering)
             result = await self.history_repo.delete_all_executions(group_ids=group_ids)
 
-            # Clear in-memory executions from ExecutionService and CrewAIExecutionService
+            # Clear in-memory executions from ExecutionService and KasalExecutionService
             # Note: For group-filtered deletes, we only clear matching job_ids
             from src.services.execution_service import ExecutionService
-            from src.services.crewai_execution_service import executions as crewai_executions
+            from src.services.kasal_execution_service import executions as crewai_executions
 
             if group_ids and len(group_ids) > 0:
                 # Only clear in-memory executions that match the deleted job_ids
@@ -420,7 +420,7 @@ class ExecutionHistoryService:
                 crewai_executions.clear()
 
             logger.info(f"Cleared {execution_count_before} in-memory executions from ExecutionService")
-            logger.info(f"Cleared {crewai_execution_count_before} in-memory executions from CrewAIExecutionService")
+            logger.info(f"Cleared {crewai_execution_count_before} in-memory executions from KasalExecutionService")
 
             return DeleteResponse(
                 success=True,
@@ -479,19 +479,19 @@ class ExecutionHistoryService:
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution(execution_id)
             
-            # Clear in-memory execution from ExecutionService and CrewAIExecutionService
+            # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution_service import ExecutionService
-            from src.services.crewai_execution_service import executions as crewai_executions
+            from src.services.kasal_execution_service import executions as crewai_executions
             
             # Remove from ExecutionService memory
             if job_id in ExecutionService.executions:
                 del ExecutionService.executions[job_id]
                 logger.info(f"Removed execution {job_id} from ExecutionService memory")
             
-            # Remove from CrewAIExecutionService memory
+            # Remove from KasalExecutionService memory
             if job_id in crewai_executions:
                 del crewai_executions[job_id]
-                logger.info(f"Removed execution {job_id} from CrewAIExecutionService memory")
+                logger.info(f"Removed execution {job_id} from KasalExecutionService memory")
             
             return DeleteResponse(
                 success=True,
@@ -551,19 +551,19 @@ class ExecutionHistoryService:
             # Delete execution using repository (after dependent records are gone)
             result = await self.history_repo.delete_execution_by_job_id(job_id)
             
-            # Clear in-memory execution from ExecutionService and CrewAIExecutionService
+            # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution_service import ExecutionService
-            from src.services.crewai_execution_service import executions as crewai_executions
+            from src.services.kasal_execution_service import executions as crewai_executions
             
             # Remove from ExecutionService memory
             if job_id in ExecutionService.executions:
                 del ExecutionService.executions[job_id]
                 logger.info(f"Removed execution {job_id} from ExecutionService memory")
             
-            # Remove from CrewAIExecutionService memory
+            # Remove from KasalExecutionService memory
             if job_id in crewai_executions:
                 del crewai_executions[job_id]
-                logger.info(f"Removed execution {job_id} from CrewAIExecutionService memory")
+                logger.info(f"Removed execution {job_id} from KasalExecutionService memory")
             
             return DeleteResponse(
                 success=True,

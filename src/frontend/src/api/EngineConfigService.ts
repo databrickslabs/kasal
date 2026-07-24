@@ -17,11 +17,11 @@ export interface EngineConfigListResponse {
   count: number;
 }
 
-export interface CrewAIFlowConfigUpdate {
+export interface KasalFlowConfigUpdate {
   flow_enabled: boolean;
 }
 
-export interface CrewAIFlowStatusResponse {
+export interface KasalFlowStatusResponse {
   flow_enabled: boolean;
 }
 
@@ -65,17 +65,17 @@ export class EngineConfigService {
   /**
    * Get CrewAI flow enabled status
    */
-  static async getCrewAIFlowEnabled(): Promise<CrewAIFlowStatusResponse> {
-    const response = await apiClient.get<CrewAIFlowStatusResponse>(`${this.baseUrl}/crewai/flow-enabled`);
+  static async getKasalFlowEnabled(): Promise<KasalFlowStatusResponse> {
+    const response = await apiClient.get<KasalFlowStatusResponse>(`${this.baseUrl}/kasal/flow-enabled`);
     return response.data;
   }
 
   /**
    * Set CrewAI flow enabled status
    */
-  static async setCrewAIFlowEnabled(enabled: boolean): Promise<{ success: boolean; flow_enabled: boolean }> {
+  static async setKasalFlowEnabled(enabled: boolean): Promise<{ success: boolean; flow_enabled: boolean }> {
     const response = await apiClient.patch<{ success: boolean; flow_enabled: boolean }>(
-      `${this.baseUrl}/crewai/flow-enabled`,
+      `${this.baseUrl}/kasal/flow-enabled`,
       { flow_enabled: enabled }
     );
     return response.data;

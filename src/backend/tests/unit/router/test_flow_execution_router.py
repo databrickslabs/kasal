@@ -59,7 +59,7 @@ def client(app, mock_current_user):
 class TestFlowExecutionRouter:
     """Test cases for flow execution endpoints."""
     
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_success(self, mock_service_class, client):
         """Test successful flow execution."""
         mock_service = AsyncMock()
@@ -98,7 +98,7 @@ class TestFlowExecutionRouter:
             resume_from_execution_id=None
         )
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_success_false_returned(self, mock_service_class, client):
         """Test flow execution when success is False."""
         mock_service = AsyncMock()
@@ -122,7 +122,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Flow execution failed"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_success_false_no_error_message(self, mock_service_class, client):
         """Test flow execution when success is False and no error message."""
         mock_service = AsyncMock()
@@ -144,7 +144,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Flow execution failed"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_service_exception(self, mock_service_class, client):
         """Test flow execution with service exception."""
         mock_service = AsyncMock()
@@ -164,7 +164,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Internal server error"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_http_exception_passthrough(self, mock_service_class, client):
         """Test that HTTPExceptions are passed through unchanged."""
         mock_service = AsyncMock()
@@ -184,7 +184,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Not found"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_success(self, mock_service_class, client):
         """Test getting flow execution status."""
         mock_service = AsyncMock()
@@ -205,7 +205,7 @@ class TestFlowExecutionRouter:
         # group_ids derived from caller's group context (multi-tenant isolation)
         mock_service.get_flow_execution.assert_called_once_with(123, group_ids=ANY)
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_with_execution_key(self, mock_service_class, client):
         """Test getting flow execution when result has execution key."""
         mock_service = AsyncMock()
@@ -227,7 +227,7 @@ class TestFlowExecutionRouter:
         assert data["status"] == "completed"
         assert data["execution_id"] == 123
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_success_false(self, mock_service_class, client):
         """Test getting flow execution when success is False."""
         mock_service = AsyncMock()
@@ -244,7 +244,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Execution not found"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_success_false_no_error(self, mock_service_class, client):
         """Test getting flow execution when success is False and no error message."""
         mock_service = AsyncMock()
@@ -260,7 +260,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Flow execution not found"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_service_exception(self, mock_service_class, client):
         """Test getting flow execution with service exception."""
         mock_service = AsyncMock()
@@ -274,7 +274,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Internal server error"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_http_exception_passthrough(self, mock_service_class, client):
         """Test that HTTPExceptions are passed through unchanged in get_flow_execution."""
         mock_service = AsyncMock()
@@ -288,7 +288,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Forbidden"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_success(self, mock_service_class, client):
         """Test getting flow executions by flow ID."""
         mock_service = AsyncMock()
@@ -314,7 +314,7 @@ class TestFlowExecutionRouter:
         assert data["data"][1]["execution_id"] == 2
         mock_service.get_flow_executions_by_flow.assert_called_once_with("flow-123", group_ids=ANY)
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_with_executions_key(self, mock_service_class, client):
         """Test getting flow executions when result has executions key."""
         mock_service = AsyncMock()
@@ -335,7 +335,7 @@ class TestFlowExecutionRouter:
         assert len(data) == 2
         assert data[0]["execution_id"] == 1
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_success_false(self, mock_service_class, client):
         """Test getting flow executions when success is False."""
         mock_service = AsyncMock()
@@ -352,7 +352,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Flow not found"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_success_false_no_error(self, mock_service_class, client):
         """Test getting flow executions when success is False and no error message."""
         mock_service = AsyncMock()
@@ -368,7 +368,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Flow not found"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_service_exception(self, mock_service_class, client):
         """Test getting flow executions with service exception."""
         mock_service = AsyncMock()
@@ -382,7 +382,7 @@ class TestFlowExecutionRouter:
         data = response.json()
         assert data["detail"] == "Internal server error"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_http_exception_passthrough(self, mock_service_class, client):
         """Test that HTTPExceptions are passed through unchanged in get_flow_executions_by_flow."""
         mock_service = AsyncMock()
@@ -409,7 +409,7 @@ class TestFlowExecutionRouter:
         }
         
         # This will fail at the service level, but should pass validation
-        with patch('src.api.flow_execution_router.CrewAIFlowService') as mock_service_class:
+        with patch('src.api.flow_execution_router.KasalFlowService') as mock_service_class:
             mock_service = AsyncMock()
             mock_service_class.return_value = mock_service
             mock_service.run_flow.return_value = {"status": "ok"}
@@ -417,7 +417,7 @@ class TestFlowExecutionRouter:
             response = client.post("/flow-executions", json=execution_data)
             assert response.status_code == 202
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_execute_flow_exception_returns_500(self, mock_service_class, client):
         """Test that exceptions return 500 in execute_flow."""
         mock_service = AsyncMock()
@@ -435,7 +435,7 @@ class TestFlowExecutionRouter:
         assert response.status_code == 500
         assert response.json()["detail"] == "Internal server error"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_execution_exception_returns_500(self, mock_service_class, client):
         """Test that exceptions return 500 in get_flow_execution."""
         mock_service = AsyncMock()
@@ -448,7 +448,7 @@ class TestFlowExecutionRouter:
         assert response.status_code == 500
         assert response.json()["detail"] == "Internal server error"
 
-    @patch('src.api.flow_execution_router.CrewAIFlowService')
+    @patch('src.api.flow_execution_router.KasalFlowService')
     def test_get_flow_executions_by_flow_exception_returns_500(self, mock_service_class, client):
         """Test that exceptions return 500 in get_flow_executions_by_flow."""
         mock_service = AsyncMock()

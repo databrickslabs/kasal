@@ -311,7 +311,7 @@ class TestEmbedStampingAndPurge:
 
 class TestToolUserEmailWiring:
     def test_tool_stores_the_executing_user(self):
-        from src.engines.crewai.tools.custom.databricks_knowledge_search_tool import (
+        from src.engines.kasal.tools.custom.databricks_knowledge_search_tool import (
             DatabricksKnowledgeSearchTool,
         )
 
@@ -319,7 +319,7 @@ class TestToolUserEmailWiring:
         assert tool._user_email == ALICE
 
     def test_tool_defaults_to_no_user(self):
-        from src.engines.crewai.tools.custom.databricks_knowledge_search_tool import (
+        from src.engines.kasal.tools.custom.databricks_knowledge_search_tool import (
             DatabricksKnowledgeSearchTool,
         )
 

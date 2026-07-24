@@ -27,8 +27,8 @@ import { useCrewExecutionStore } from '../../../store/crewExecution';
 
 const EnginesConfiguration: React.FC = () => {
   const {
-    crewAIFlowEnabled,
-    setCrewAIFlowEnabled
+    kasalFlowEnabled,
+    setKasalFlowEnabled
   } = useFlowConfigStore();
   const { inputMode, setInputMode } = useCrewExecutionStore();
   const [loading, setLoading] = useState(true);
@@ -44,10 +44,10 @@ const EnginesConfiguration: React.FC = () => {
       try {
         setLoading(true);
         const [flowResp, otelResp] = await Promise.all([
-          EngineConfigService.getCrewAIFlowEnabled(),
+          EngineConfigService.getKasalFlowEnabled(),
           EngineConfigService.getOtelAppTelemetryConfig().catch(() => ({ otel_app_telemetry_enabled: false, otel_app_telemetry_log_level: 'INFO' })),
         ]);
-        setCrewAIFlowEnabled(flowResp.flow_enabled);
+        setKasalFlowEnabled(flowResp.flow_enabled);
         setOtelEnabled(otelResp.otel_app_telemetry_enabled);
         setOtelLogLevel(otelResp.otel_app_telemetry_log_level || 'INFO');
       } catch (err) {
@@ -59,7 +59,7 @@ const EnginesConfiguration: React.FC = () => {
     };
 
     loadConfig();
-  }, [setCrewAIFlowEnabled]);
+  }, [setKasalFlowEnabled]);
 
   const handleFlowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = event.target.checked;
@@ -69,10 +69,10 @@ const EnginesConfiguration: React.FC = () => {
       setError(null);
 
       // Update backend first
-      await EngineConfigService.setCrewAIFlowEnabled(newValue);
+      await EngineConfigService.setKasalFlowEnabled(newValue);
 
       // Update local state only after successful backend update
-      setCrewAIFlowEnabled(newValue);
+      setKasalFlowEnabled(newValue);
     } catch (err) {
       console.error('Failed to update flow configuration:', err);
       setError('Failed to save configuration to server');
@@ -150,7 +150,7 @@ const EnginesConfiguration: React.FC = () => {
         Configure execution engines and their features. Disabling features will hide related UI components.
       </Alert>
 
-      {/* CrewAI Engine Section */}
+      {/* Kasal Engine Section */}
       <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
         <Box sx={{
           display: 'flex',
@@ -159,7 +159,7 @@ const EnginesConfiguration: React.FC = () => {
         }}>
           <SmartToyIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
           <Typography variant="subtitle1" fontWeight="medium">
-            CrewAI Engine
+            Kasal Engine
           </Typography>
         </Box>
 
@@ -171,7 +171,7 @@ const EnginesConfiguration: React.FC = () => {
               control={
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Switch
-                    checked={crewAIFlowEnabled}
+                    checked={kasalFlowEnabled}
                     onChange={handleFlowToggle}
                     color="primary"
                     disabled={syncing}
@@ -194,7 +194,7 @@ const EnginesConfiguration: React.FC = () => {
             />
           </Box>
 
-          {!crewAIFlowEnabled && (
+          {!kasalFlowEnabled && (
             <Alert severity="warning" sx={{ mt: 1 }}>
               Flow feature is disabled. The following UI components will be hidden:
               <ul style={{ margin: '8px 0 0 16px', paddingLeft: '16px' }}>

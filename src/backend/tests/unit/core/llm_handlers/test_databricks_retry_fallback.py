@@ -2,7 +2,7 @@
 to another enabled model, and once switched, later calls stick to it.
 
 The candidate cache is pre-seeded so the test never rebuilds a real LLM
-(configure_crewai_llm is not exercised here — that path is covered elsewhere).
+(configure_kasal_llm is not exercised here — that path is covered elsewhere).
 """
 
 import asyncio

@@ -124,7 +124,7 @@ from .services.sql import SQLGenerator
 from .services.uc_metrics import UCMetricsGenerator
 ```
 
-#### Tools (engines/crewai/tools/custom/)
+#### Tools (engines/kasal/tools/custom/)
 Updated all tool imports:
 - `yaml_to_dax.py`
 - `yaml_to_sql.py`
@@ -183,11 +183,11 @@ from converters.services.powerbi import PowerBIConnector, DAXGenerator
 - `converters/services/uc_metrics/*` - All files
 
 **Tools:**
-- `engines/crewai/tools/custom/yaml_to_dax.py`
-- `engines/crewai/tools/custom/yaml_to_sql.py`
-- `engines/crewai/tools/custom/yaml_to_uc_metrics.py`
-- `engines/crewai/tools/custom/powerbi_connector_tool.py`
-- `engines/crewai/tools/custom/measure_conversion_pipeline_tool.py`
+- `engines/kasal/tools/custom/yaml_to_dax.py`
+- `engines/kasal/tools/custom/yaml_to_sql.py`
+- `engines/kasal/tools/custom/yaml_to_uc_metrics.py`
+- `engines/kasal/tools/custom/powerbi_connector_tool.py`
+- `engines/kasal/tools/custom/measure_conversion_pipeline_tool.py`
 
 ### Phase 2: DAX Consolidation (2026-01-05)
 
@@ -207,7 +207,7 @@ from converters.services.powerbi import PowerBIConnector, DAXGenerator
 3. **Updated all external references** from `services.dax` to `services.powerbi`:
    - `converters/pipeline.py`
    - `converters/__init__.py`
-   - `engines/crewai/tools/custom/yaml_to_dax.py`
+   - `engines/kasal/tools/custom/yaml_to_dax.py`
 
 4. **Enhanced PowerBI service exports** in `services/powerbi/__init__.py`:
    ```python

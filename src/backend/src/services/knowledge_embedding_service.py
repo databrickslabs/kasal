@@ -454,7 +454,7 @@ class KnowledgeEmbeddingService:
             DatabricksVectorStorage instance or None
         """
         try:
-            from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
+            from src.engines.kasal.memory.databricks_vector_storage import DatabricksVectorStorage
             from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
             # Lazy initialization of memory backend service

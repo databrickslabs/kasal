@@ -14,7 +14,7 @@ vi.mock('../../store/uiLayout', () => ({
 }));
 
 vi.mock('../../store/flowConfig', () => ({
-  useFlowConfigStore: () => ({ crewAIFlowEnabled: mockFlowEnabled }),
+  useFlowConfigStore: () => ({ kasalFlowEnabled: mockFlowEnabled }),
 }));
 
 describe('ModeSwitcher', () => {
@@ -40,7 +40,7 @@ describe('ModeSwitcher', () => {
     expect(within(menu).getByText('Chat')).toBeInTheDocument();
   });
 
-  it('hides the Flow option when crewAIFlowEnabled is false', () => {
+  it('hides the Flow option when kasalFlowEnabled is false', () => {
     mockFlowEnabled = false;
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));

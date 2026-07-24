@@ -17,8 +17,8 @@ from src.api.engine_config_router import (
     update_engine_config,
     toggle_engine_config,
     update_config_value,
-    get_crewai_flow_enabled,
-    set_crewai_flow_enabled,
+    get_kasal_flow_enabled,
+    set_kasal_flow_enabled,
     get_otel_app_telemetry_enabled,
     set_otel_app_telemetry_enabled,
     delete_engine_config,
@@ -28,7 +28,7 @@ from src.schemas.engine_config import (
     EngineConfigUpdate,
     EngineConfigToggleUpdate,
     EngineConfigValueUpdate,
-    CrewAIFlowConfigUpdate,
+    KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
@@ -48,7 +48,7 @@ def make_ctx(user_role="admin", is_system=False):
     })()
 
 
-def make_config_obj(engine_name="crewai", engine_type="crew", enabled=True):
+def make_config_obj(engine_name="kasal", engine_type="crew", enabled=True):
     from datetime import datetime
     return SimpleNamespace(
         id=1,
@@ -98,7 +98,7 @@ async def test_get_engine_config_by_key_found():
     svc.find_by_engine_and_key = AsyncMock(return_value=config)
 
     out = await get_engine_config_by_key(
-        "crewai", "key1", service=svc, group_context=make_ctx()
+        "kasal", "key1", service=svc, group_context=make_ctx()
     )
     assert out == config
 
@@ -150,7 +150,7 @@ async def test_update_engine_config_success():
     svc.update_engine_config = AsyncMock(return_value=config)
 
     out = await update_engine_config(
-        "crewai",
+        "kasal",
         EngineConfigUpdate(config_value="updated"),
         service=svc,
         group_context=make_ctx(user_role="admin"),
@@ -183,7 +183,7 @@ async def test_toggle_engine_config_success():
     svc.toggle_engine_enabled = AsyncMock(return_value=config)
 
     out = await toggle_engine_config(
-        "crewai",
+        "kasal",
         EngineConfigToggleUpdate(enabled=False),
         service=svc,
         group_context=make_ctx(user_role="admin"),
@@ -217,7 +217,7 @@ async def test_update_config_value_success():
     svc.update_config_value = AsyncMock(return_value=config)
 
     out = await update_config_value(
-        "crewai",
+        "kasal",
         "key1",
         EngineConfigValueUpdate(config_value="new_value"),
         service=svc,
@@ -244,8 +244,8 @@ async def test_delete_engine_config_success():
     svc = AsyncMock()
     svc.delete_engine_config = AsyncMock(return_value=True)
 
-    await delete_engine_config("crewai", service=svc, group_context=make_ctx(user_role="admin"))
-    svc.delete_engine_config.assert_called_once_with("crewai")
+    await delete_engine_config("kasal", service=svc, group_context=make_ctx(user_role="admin"))
+    svc.delete_engine_config.assert_called_once_with("kasal")
 
 
 # ── create_engine_config success (line 218+) ─────────────────────────────────
@@ -259,7 +259,7 @@ async def test_create_engine_config_success():
 
     out = await create_engine_config(
         EngineConfigCreate(
-            engine_name="crewai",
+            engine_name="kasal",
             engine_type="crew",
             config_key="k",
             config_value="v",

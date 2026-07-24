@@ -42,7 +42,7 @@ You **must** configure both SPs. See [Authentication Setup](./01-authentication-
 | `client_secret` | Yes | Non-Admin SP Client Secret |
 | `admin_client_id` | Yes | Admin SP Client ID |
 | `admin_client_secret` | Yes | Admin SP Client Secret |
-| `report_id` | No | PBIR Report GUID (adds synonym metadata) |
+| `report_id` | Recommended | PBIR Report GUID. **Strongly affects measure quality** — the report's visual bindings carry the full measure DAX; without it, measure extraction is degraded (bare column names, ~half the measures translatable). Auto-discovered from `dataset_id` when omitted; the tool warns if none is found. |
 | `catalog` | No | Target UC catalog (default: `main`) |
 | `schema_name` | No | Target UC schema (default: `default`) |
 

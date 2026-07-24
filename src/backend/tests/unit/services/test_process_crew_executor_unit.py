@@ -47,8 +47,8 @@ class TestCrewAIContextWindowPatching:
             }
         }
 
-        with patch.dict('sys.modules', {'crewai': MagicMock(), 'crewai.llm': MagicMock()}):
-            with patch('crewai.llm.LLM_CONTEXT_WINDOW_SIZES', mock_llm_context):
+        with patch.dict('sys.modules', {'crewai': MagicMock(), 'kasal_engine.llm': MagicMock()}):
+            with patch('kasal_engine.llm.LLM_CONTEXT_WINDOW_SIZES', mock_llm_context):
                 # Simulate the patching logic
                 for model_name, config in mock_model_configs.items():
                     if config.get('provider') == 'databricks':
@@ -431,13 +431,13 @@ class TestOtelShutdownOnError:
         mock_otel_tracing.shutdown_provider = mock_shutdown_provider
 
         with patch.dict("sys.modules", {
-            "src.engines.crewai.infra.logging_config": mock_logging_config,
+            "src.engines.kasal.infra.logging_config": mock_logging_config,
             "crewai": MagicMock(),
-            "crewai.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
-            "crewai.events": MagicMock(),
+            "kasal_engine.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
+            "kasal_engine.events": MagicMock(),
             "crewai.utilities": MagicMock(),
             "crewai.utilities.exceptions": MagicMock(),
-            "crewai.utilities.exceptions.context_window_exceeding_exception": MagicMock(
+            "kasal_engine.llm": MagicMock(
                 CONTEXT_LIMIT_ERRORS=[]
             ),
             "src.services.otel_tracing": mock_otel_tracing,
@@ -445,7 +445,7 @@ class TestOtelShutdownOnError:
             with patch("src.seeds.model_configs.MODEL_CONFIGS", {}):
                 # Force an exception during the inner try block
                 # by making Crew(...) raise when instantiated
-                with patch("crewai.Crew", side_effect=RuntimeError("Boom")):
+                with patch("kasal_engine.core.Crew", side_effect=RuntimeError("Boom")):
                     result = run_crew_in_process(
                         execution_id="e-otel-err",
                         crew_config=crew_config,
@@ -508,7 +508,7 @@ class TestMcpAdaptersStoppedOnSuccess:
             mock_shutdown_provider,
         ):
             with patch(
-                "src.engines.crewai.tools.mcp_handler.stop_all_adapters",
+                "src.engines.kasal.tools.mcp_handler.stop_all_adapters",
                 mock_stop_all,
             ):
                 # --- Reproduce the exact cleanup sequence ---
@@ -521,7 +521,7 @@ class TestMcpAdaptersStoppedOnSuccess:
 
                 # Step 2: Stop MCP adapters to close streaming HTTP connections
                 try:
-                    from src.engines.crewai.tools.mcp_handler import stop_all_adapters
+                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
                     await stop_all_adapters()
                 except Exception:
                     pass
@@ -545,7 +545,7 @@ class TestMcpAdaptersStoppedOnSuccess:
             mock_shutdown_provider,
         ):
             with patch(
-                "src.engines.crewai.tools.mcp_handler.stop_all_adapters",
+                "src.engines.kasal.tools.mcp_handler.stop_all_adapters",
                 mock_stop_all,
             ):
                 # Reproduce cleanup logic with error resilience
@@ -560,7 +560,7 @@ class TestMcpAdaptersStoppedOnSuccess:
                     pass
 
                 try:
-                    from src.engines.crewai.tools.mcp_handler import stop_all_adapters
+                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
                     await stop_all_adapters()
                     mcp_called = True
                 except Exception:

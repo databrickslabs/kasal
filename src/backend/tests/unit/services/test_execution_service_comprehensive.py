@@ -18,7 +18,7 @@ class TestExecutionServiceInit:
         mock_session = Mock()
 
         with patch('src.services.execution_service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service:
+            with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service:
                 mock_name_instance = Mock()
                 mock_crew_instance = Mock()
                 mock_name_service.create.return_value = mock_name_instance
@@ -28,12 +28,12 @@ class TestExecutionServiceInit:
 
                 assert service.session == mock_session
                 assert service.execution_name_service == mock_name_instance
-                assert service.crewai_execution_service == mock_crew_instance
+                assert service.kasal_execution_service == mock_crew_instance
 
     def test_execution_service_init_without_session(self):
         """Test ExecutionService __init__ without session parameter"""
         with patch('src.services.execution_service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service:
+            with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service:
                 mock_name_instance = Mock()
                 mock_crew_instance = Mock()
                 mock_name_service.create.return_value = mock_name_instance
@@ -43,14 +43,14 @@ class TestExecutionServiceInit:
 
                 assert service.session is None
                 assert service.execution_name_service == mock_name_instance
-                assert service.crewai_execution_service == mock_crew_instance
+                assert service.kasal_execution_service == mock_crew_instance
 
     def test_execution_service_init_creates_services(self):
         """Test ExecutionService __init__ creates service instances"""
         mock_session = Mock()
 
         with patch('src.services.execution_service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service:
+            with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service:
                 service = ExecutionService(mock_session)
 
                 # Verify services were created properly
@@ -60,7 +60,7 @@ class TestExecutionServiceInit:
     def test_execution_service_init_class_attributes(self):
         """Test ExecutionService __init__ uses class attributes"""
         with patch('src.services.execution_service.ExecutionNameService'):
-            with patch('src.services.execution_service.CrewAIExecutionService'):
+            with patch('src.services.execution_service.KasalExecutionService'):
                 service = ExecutionService()
 
                 # Should have access to class-level attributes
@@ -341,10 +341,10 @@ class TestExecutionServiceConstants:
     def test_service_imports(self):
         """Test service imports"""
         from src.services.execution_service import (
-            CrewAIExecutionService, ExecutionStatusService, ExecutionNameService
+            KasalExecutionService, ExecutionStatusService, ExecutionNameService
         )
         
-        assert CrewAIExecutionService is not None
+        assert KasalExecutionService is not None
         assert ExecutionStatusService is not None
         assert ExecutionNameService is not None
 
@@ -366,7 +366,7 @@ class TestExecutionServiceAttributes:
         """Set up test fixtures"""
         self.mock_session = Mock()
         with patch('src.services.execution_service.ExecutionNameService'):
-            with patch('src.services.execution_service.CrewAIExecutionService'):
+            with patch('src.services.execution_service.KasalExecutionService'):
                 self.service = ExecutionService(self.mock_session)
 
     def test_service_has_required_attributes(self):
@@ -374,12 +374,12 @@ class TestExecutionServiceAttributes:
         # Check all required attributes exist
         assert hasattr(self.service, 'session')
         assert hasattr(self.service, 'execution_name_service')
-        assert hasattr(self.service, 'crewai_execution_service')
+        assert hasattr(self.service, 'kasal_execution_service')
 
         # Check attribute values
         assert self.service.session == self.mock_session
         assert self.service.execution_name_service is not None
-        assert self.service.crewai_execution_service is not None
+        assert self.service.kasal_execution_service is not None
 
     def test_service_session_storage(self):
         """Test service stores session correctly"""
@@ -388,13 +388,13 @@ class TestExecutionServiceAttributes:
         # Test with different session
         new_mock_session = Mock()
         with patch('src.services.execution_service.ExecutionNameService'):
-            with patch('src.services.execution_service.CrewAIExecutionService'):
+            with patch('src.services.execution_service.KasalExecutionService'):
                 new_service = ExecutionService(new_mock_session)
                 assert new_service.session == new_mock_session
                 assert new_service.session != self.mock_session
 
     def test_service_services_are_separate(self):
         """Test that services are separate instances"""
-        assert self.service.execution_name_service is not self.service.crewai_execution_service
+        assert self.service.execution_name_service is not self.service.kasal_execution_service
         assert self.service.execution_name_service is not None
-        assert self.service.crewai_execution_service is not None
+        assert self.service.kasal_execution_service is not None

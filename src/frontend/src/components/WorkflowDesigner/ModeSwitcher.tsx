@@ -34,7 +34,7 @@ interface ModeOption {
 const ModeSwitcher: React.FC = () => {
   const appMode = useUILayoutStore((s) => s.appMode);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
-  const { crewAIFlowEnabled } = useFlowConfigStore();
+  const { kasalFlowEnabled } = useFlowConfigStore();
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
@@ -62,7 +62,7 @@ const ModeSwitcher: React.FC = () => {
 
   // Hide the Flow option when the CrewAI flow feature is disabled.
   const options = allOptions.filter(
-    (opt) => opt.mode !== 'flow' || crewAIFlowEnabled,
+    (opt) => opt.mode !== 'flow' || kasalFlowEnabled,
   );
 
   const activeOption = options.find((o) => o.mode === appMode) || options[0];

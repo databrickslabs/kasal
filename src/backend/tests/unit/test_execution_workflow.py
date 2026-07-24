@@ -14,7 +14,7 @@ from typing import Dict, Any, List
 
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionStatus, CrewConfig, ExecutionCreateResponse
-from src.services.crewai_execution_service import CrewAIExecutionService
+from src.services.kasal_execution_service import KasalExecutionService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.execution_name_service import ExecutionNameService
 from src.utils.user_context import GroupContext
@@ -88,10 +88,10 @@ def sample_flow_config():
 def execution_service():
     """Create ExecutionService instance for testing."""
     with patch('src.services.execution_service.ExecutionNameService.create') as mock_name_service, \
-         patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service:
+         patch('src.services.execution_service.KasalExecutionService') as mock_crew_service:
 
         mock_name_service.return_value = MagicMock(spec=ExecutionNameService)
-        mock_crew_service.return_value = MagicMock(spec=CrewAIExecutionService)
+        mock_crew_service.return_value = MagicMock(spec=KasalExecutionService)
 
         service = ExecutionService()
         return service
@@ -153,7 +153,7 @@ class TestExecutionService:
     async def test_execute_flow_kasal_error_passthrough(self, execution_service):
         """Test that KasalErrors are re-raised in execute_flow."""
         from src.core.exceptions import KasalError
-        with patch.object(execution_service.crewai_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
             mock_run_flow.side_effect = KasalError(detail="Bad request")
 
             with pytest.raises(KasalError):
@@ -165,7 +165,7 @@ class TestExecutionService:
         from src.core.exceptions import KasalError
 
         flow_id = uuid.uuid4()
-        with patch.object(execution_service.crewai_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
+        with patch.object(execution_service.kasal_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
             mock_get_executions.side_effect = Exception("Database error")
 
             with pytest.raises(KasalError) as exc_info:
@@ -344,7 +344,7 @@ class TestExecutionService:
         """Test crew execution with crew type."""
         execution_id = "test-crew-exec"
 
-        with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service_class:
+        with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service_class:
             mock_crew_service = MagicMock()
             mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed", "result": {"output": "crew success"}})
             mock_crew_service_class.return_value = mock_crew_service
@@ -362,7 +362,7 @@ class TestExecutionService:
         """Test crew execution with flow type."""
         execution_id = "test-flow-exec"
 
-        with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service_class:
+        with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service_class:
             mock_crew_service = MagicMock()
             mock_crew_service.run_flow_execution = AsyncMock(return_value={"status": "completed", "result": {"output": "flow success"}})
             mock_crew_service_class.return_value = mock_crew_service
@@ -393,7 +393,7 @@ class TestExecutionService:
         """Test crew execution with error handling."""
         execution_id = "test-error-exec"
 
-        with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service_class, \
+        with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service_class, \
              patch('src.services.execution_status_service.ExecutionStatusService.update_status') as mock_update_status:
 
             mock_crew_service = MagicMock()
@@ -414,7 +414,7 @@ class TestExecutionService:
         """Test crew execution when status update fails after error."""
         execution_id = "test-status-fail-exec"
 
-        with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service_class, \
+        with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service_class, \
              patch('src.services.execution_status_service.ExecutionStatusService.update_status', new_callable=AsyncMock) as mock_update_status, \
              patch('src.services.execution_service.LoggerManager.get_instance') as mock_logger_manager:
 
@@ -863,7 +863,7 @@ class TestExecutionService:
         job_id = "test-job-123"
         config = {"key": "value"}
 
-        with patch.object(execution_service.crewai_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
             mock_run_flow.return_value = {"status": "started", "execution_id": job_id}
 
             result = await execution_service.execute_flow(
@@ -889,7 +889,7 @@ class TestExecutionService:
         nodes = [{"id": "node1", "type": "agent"}]
         edges = [{"source": "node1", "target": "node2"}]
 
-        with patch.object(execution_service.crewai_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
             mock_run_flow.return_value = {"status": "started"}
 
             result = await execution_service.execute_flow(
@@ -909,7 +909,7 @@ class TestExecutionService:
         """Test execute_flow exception handling."""
         from src.core.exceptions import KasalError
 
-        with patch.object(execution_service.crewai_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
             mock_run_flow.side_effect = Exception("Flow execution failed")
 
             with pytest.raises(KasalError) as exc_info:
@@ -923,7 +923,7 @@ class TestExecutionService:
         flow_id = uuid.uuid4()
         expected_result = {"executions": [{"id": 1}, {"id": 2}]}
 
-        with patch.object(execution_service.crewai_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
+        with patch.object(execution_service.kasal_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
             mock_get_executions.return_value = expected_result
 
             result = await execution_service.get_executions_by_flow(flow_id)
@@ -962,7 +962,7 @@ class TestExecutionService:
         mock_config.inputs = {"flow_id": str(flow_id)}
         mock_config.flow_id = None  # No direct flow_id attribute
 
-        with patch('src.services.execution_service.CrewAIExecutionService') as mock_crew_service_class:
+        with patch('src.services.execution_service.KasalExecutionService') as mock_crew_service_class:
             mock_crew_service = MagicMock()
             mock_crew_service.run_flow_execution = AsyncMock(return_value={"status": "completed"})
             mock_crew_service_class.return_value = mock_crew_service

@@ -1,6 +1,6 @@
 """
 Coverage tests for services/agent_generation_service.py
-Covers: _log_llm_interaction (exception), _get_relevant_documentation,
+Covers: _log_llm_interaction (exception),
 generate_agent, _prepare_prompt_template, _generate_agent_config, _process_agent_config
 """
 import pytest
@@ -29,102 +29,6 @@ async def test_log_llm_interaction_exception():
     await svc._log_llm_interaction(
         endpoint="test", prompt="p", response="r", model="m"
     )
-
-
-# ---- _get_relevant_documentation ----
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_no_embedding():
-    """Test _get_relevant_documentation returns empty when no embedding."""
-    svc = make_service()
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(return_value=None)
-        result = await svc._get_relevant_documentation("make an agent")
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_no_similar_docs():
-    """Test _get_relevant_documentation returns empty when no similar docs."""
-    svc = make_service()
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(return_value=[0.1, 0.2])
-        # DocumentationEmbeddingService is used as a global name in the function
-        # inject it into the module's namespace
-        mock_doc_instance = AsyncMock()
-        mock_doc_instance.search_similar_embeddings = AsyncMock(return_value=[])
-        MockDocSvc = MagicMock(return_value=mock_doc_instance)
-        import src.services.agent_generation_service as ags_mod
-        ags_mod.DocumentationEmbeddingService = MockDocSvc
-        try:
-            result = await svc._get_relevant_documentation("make an agent")
-        finally:
-            if hasattr(ags_mod, 'DocumentationEmbeddingService'):
-                del ags_mod.DocumentationEmbeddingService
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_with_tools_list():
-    """Test _get_relevant_documentation with tool list."""
-    svc = make_service()
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(return_value=None)
-        # With string tools
-        result = await svc._get_relevant_documentation("make an agent", tools=["search_tool", "api_tool"])
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_with_dict_tools():
-    """Test _get_relevant_documentation with dict tool list."""
-    svc = make_service()
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(return_value=None)
-        result = await svc._get_relevant_documentation(
-            "make an agent",
-            tools=[{"name": "search_tool", "desc": "A search tool"}]
-        )
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_with_results():
-    """Test _get_relevant_documentation returns formatted docs."""
-    svc = make_service()
-    doc1 = MagicMock()
-    doc1.title = "Agent Best Practices"
-    doc1.source = "best_practices"
-    doc1.content = "Use proper role and goal."
-
-    doc2 = MagicMock()
-    doc2.title = "General Docs"
-    doc2.source = "general"
-    doc2.content = "Some general content."
-
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
-        mock_instance = AsyncMock()
-        mock_instance.search_similar_embeddings = AsyncMock(return_value=[doc1, doc2])
-        MockDocSvc = MagicMock(return_value=mock_instance)
-        import src.services.agent_generation_service as ags_mod
-        ags_mod.DocumentationEmbeddingService = MockDocSvc
-        try:
-            result = await svc._get_relevant_documentation("make a research agent")
-        finally:
-            if hasattr(ags_mod, 'DocumentationEmbeddingService'):
-                del ags_mod.DocumentationEmbeddingService
-    assert "Best Practices" in result or "General" in result
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_docs_exception():
-    """Test _get_relevant_documentation returns empty on exception."""
-    svc = make_service()
-    with patch('src.services.agent_generation_service.LLMManager') as MockLLM:
-        MockLLM.get_embedding = AsyncMock(side_effect=Exception("embedding error"))
-        result = await svc._get_relevant_documentation("make an agent")
-    assert result == ""
 
 
 # ---- _prepare_prompt_template ----

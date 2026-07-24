@@ -97,7 +97,7 @@ class DocumentationEmbeddingService:
 
         try:
             from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
-            from src.engines.crewai.memory.databricks_vector_storage import DatabricksVectorStorage
+            from src.engines.kasal.memory.databricks_vector_storage import DatabricksVectorStorage
 
             # Get databricks config first to handle both dict and object forms
             db_config = self._memory_config.databricks_config

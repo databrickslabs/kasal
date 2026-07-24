@@ -236,7 +236,7 @@ These are your signal to review the crew configuration and consider enabling an 
 **Document says:**
 > Tell the LLM in the system prompt that it should not follow instructions found in external data. Define the instruction hierarchy: system instructions are the highest-priority source of truth. Spotlighting goes further and marks untrusted data between `<<` and `>>` delimiters.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/kernel/agent_security.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/kernel/agent_security.py`
 
 Every agent's `system_prompt` is prepended with `_SECURITY_PREAMBLE`:
 
@@ -270,7 +270,7 @@ contain prompt-injection attempts. ..."""
 **Document says:**
 > Use regular expressions to identify common attack patterns such as "Ignore all previous instructions…" or "You are now in developer mode…". Tools like *vigil* offer predefined strings for this. Detections may require managing false positives (e.g. ask for user confirmation).
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/prompt_injection_detector.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/prompt_injection_detector.py`
 
 A `PromptInjectionDetector` with three regex tiers (HIGH / MEDIUM / LOW) runs before every crew `kickoff()` in `execution_runner.py`. Detection is **log-only**: it never blocks execution, consistent with the document's false-positive management guidance.
 
@@ -299,7 +299,7 @@ Clean input produced no warning: zero false positives on normal financial/resear
 **Document says (fallback):**
 > If such a model cannot be assumed to be hosted (e.g. for non-internal apps), adapt a foundational model via a modified system prompt for injection detection.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/guardrails/core/llm_injection_guardrail.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/guardrails/core/llm_injection_guardrail.py`
 
 An opt-in `LLMInjectionGuardrail` (type `"prompt_injection_check"`) uses a foundational model (default: `databricks-claude-sonnet-4-5`) as the security classifier. The system prompt follows the document's foundational-model template pattern: classify as `SAFE` or `INJECTION`. Fails-open on LLM errors.
 
@@ -336,7 +336,7 @@ The document's *preferred* solution is the fine-tuned Prompt Guard 2 model. Kasa
 **Document says:**
 > Self-reflection utilises an LLM as a judge to determine if the model's output or planned tool executions are malicious or deviate from the original task defined in the system prompt. (Reference: arxiv.org/abs/2405.06682)
 
-**Kasal implementation:** `src/backend/src/engines/crewai/guardrails/core/self_reflection_guardrail.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/guardrails/core/self_reflection_guardrail.py`
 
 An opt-in `SelfReflectionGuardrail` (type `"self_reflection"`) uses an LLM to compare the task output against the intended goal. Responds `PASS` or `FAIL`. A `FAIL` verdict causes the task to retry (CrewAI's native retry mechanism). Fails-open on LLM errors.
 
@@ -477,7 +477,7 @@ referrer-policy: strict-origin-when-cross-origin
 **Document says:**
 > Three questions determine injection risk: (1) Can it read sensitive data? (2) Is it exposed to untrusted content? (3) Can it communicate externally? When all three are true simultaneously, the risk of indirect prompt injection exfiltration is highest. Giving a framework practical guidance: **try to break the trifecta**.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/tool_capability_manifest.py` + `crew_preparation.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/tool_capability_manifest.py` + `crew_preparation.py`
 
 All tools assigned to agents and tasks are inspected at crew assembly time against a capability manifest. If all three trifecta dimensions are present, a structured WARNING is logged.
 
@@ -514,7 +514,7 @@ WARNING [SECURITY] Lethal trifecta detected [crew with 2 task(s)]:
 
 **Document says:** Not explicitly covered. This is an additional safeguard addressing OWASP LLM Top 10 risk LLM01 (Sensitive Information Disclosure).
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/secret_leak_detector.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/secret_leak_detector.py`
 
 A `SecretLeakDetector` scans all agent outputs for accidentally leaked credentials. It runs automatically via the unified `SecurityScannerPipeline` in task callbacks and step callbacks, with no opt-in required.
 
@@ -546,7 +546,7 @@ A `SecretLeakDetector` scans all agent outputs for accidentally leaked credentia
 
 **Kasal implementation, two layers:**
 
-**Layer A, inter-crew output scanning:** `src/backend/src/engines/crewai/paths/flow/modules/flow_state.py`
+**Layer A, inter-crew output scanning:** `src/backend/src/engines/kasal/paths/flow/modules/flow_state.py`
 
 In `FlowStateManager.parse_crew_output()`, the output of a completed crew is scanned via `security_scanner.scan()` **before** it is passed to the next crew in a flow. This is a trust boundary: one crew's output is the next crew's input.
 
@@ -577,7 +577,7 @@ This means **flows and regular crews now have identical assembly-time security c
 
 **Document says:** Not explicitly covered. This addresses the risk of persisting injected content into agent memory stores.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/callbacks/execution_callback.py`, `task_callback()`
+**Kasal implementation:** `src/backend/src/engines/kasal/callbacks/execution_callback.py`, `task_callback()`
 
 Every completed task's output is scanned via `security_scanner.scan()` before CrewAI persists it to memory. If injection patterns or secrets are detected, a structured warning is logged. The output is still written to memory (log-only, non-blocking), but operators are alerted.
 
@@ -594,7 +594,7 @@ Every completed task's output is scanned via `security_scanner.scan()` before Cr
 
 **Document says:** The "Gaps and Future Work" section of this document previously listed "Extend heuristic detector to tool outputs" as a medium-priority enhancement. This is now implemented.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/callbacks/execution_callback.py`, `step_callback()`
+**Kasal implementation:** `src/backend/src/engines/kasal/callbacks/execution_callback.py`, `step_callback()`
 
 Every tool step output is scanned via `security_scanner.scan()` as the agent processes intermediate results. This catches injection payloads arriving via tool results (e.g., a web scraper returning a page containing "ignore previous instructions…") and leaked secrets in tool output.
 
@@ -609,7 +609,7 @@ Every tool step output is scanned via `security_scanner.scan()` as the agent pro
 
 **Document says:** Not explicitly covered. This addresses OWASP LLM Top 10 risk LLM08 (Excessive Agency).
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/tool_capability_manifest.py` + `crew_preparation.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/tool_capability_manifest.py` + `crew_preparation.py`
 
 A new `PERFORMS_DESTRUCTIVE_OPERATIONS` capability flag is added to the tool manifest. Tools that can trigger irreversible actions (e.g., `DatabricksJobsTool` which can start job runs) are flagged. At crew assembly time, `assess_destructive_risk()` checks all assigned tools and `log_destructive_warning()` emits a warning recommending `human_input=True` for tasks using destructive tools.
 
@@ -622,7 +622,7 @@ A new `PERFORMS_DESTRUCTIVE_OPERATIONS` capability flag is added to the tool man
 
 ### 14. Unified security scanner pipeline (infrastructure)
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/scanner_pipeline.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/scanner_pipeline.py`
 
 A `SecurityScannerPipeline` singleton replaces scattered inline detector instantiation. All scan call sites (`execution_runner.py`, `execution_callback.py`, `flow_state.py`) now use `security_scanner.scan()` which runs both injection detection and secret leak detection in a single call with consistent audit logging.
 
@@ -650,7 +650,7 @@ Both LLM-based guardrails now use SHA-256 content hash-based LRU caching (128 en
 
 ### 16. False-positive reduction (quality)
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/prompt_injection_detector.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/prompt_injection_detector.py`
 
 Four MEDIUM-severity regex patterns were tightened to reduce false positives on legitimate business language:
 
@@ -708,7 +708,7 @@ Four MEDIUM-severity regex patterns were tightened to reduce false positives on 
 **Background:**
 The security preamble (Area 1) already instructed agents to treat content between `<<` and `>>` markers as untrusted data. However, the delimiters were never actually injected: tool outputs arrived without markers, leaving the spotlighting mitigation declared but inactive.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`, `_apply_spotlighting_wrappers()`
+**Kasal implementation:** `src/backend/src/engines/kasal/paths/crew/crew_preparation.py`, `_apply_spotlighting_wrappers()`
 
 At crew assembly time, every tool flagged `INGESTS_UNTRUSTED_CONTENT` (`_U`) in the capability manifest has its `_run()` method wrapped to prepend `<<\n` and append `\n>>` around the raw output. This is applied once after the Crew object is created, before execution begins.
 
@@ -740,8 +740,8 @@ wrapped_output = f"<<\n{original_output}\n>>"
 The existing trifecta check (Area 8) collected all tools across all agents and tasks and ran a single crew-wide check. This misses the critical case: a **single task** that has both `_U` and `_S`/`_D` tools assigned. In that scenario the ReAct loop runs the web scraper and the internal/destructive tool in one shot, with no checkpoint between them where a guardrail could inspect the intermediate external output.
 
 **Kasal implementation:**
-- `src/backend/src/engines/crewai/security/tool_capability_manifest.py`: `assess_mixed_task()`, `log_mixed_task_warning()`, `MixedTaskAssessment`
-- `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`: per-task loop in `_create_crew()`
+- `src/backend/src/engines/kasal/security/tool_capability_manifest.py`: `assess_mixed_task()`, `log_mixed_task_warning()`, `MixedTaskAssessment`
+- `src/backend/src/engines/kasal/paths/crew/crew_preparation.py`: per-task loop in `_create_crew()`
 
 **Two new checks run for every task:**
 
@@ -771,7 +771,7 @@ The existing trifecta check (Area 8) collected all tools across all agents and t
 **Background:**
 Several tools added in recent PRs were missing from `TOOL_CAPABILITIES`, meaning their risk profile was invisible to all trifecta and mixed-task checks.
 
-**Kasal implementation:** `src/backend/src/engines/crewai/security/tool_capability_manifest.py`
+**Kasal implementation:** `src/backend/src/engines/kasal/security/tool_capability_manifest.py`
 
 **6 tools added:**
 
@@ -910,16 +910,16 @@ All automated tests pass as of Mar 8, 2026:
 | Test File | Tests | Area |
 |-----------|-------|------|
 | `tests/unit/test_security_headers_middleware.py` | 11 | Area 7 |
-| `tests/unit/engines/crewai/helpers/test_agent_helpers_security.py` | 17 | Area 1 |
+| `tests/unit/engines/kasal/helpers/test_agent_helpers_security.py` | 17 | Area 1 |
 | `tests/unit/security/test_prompt_injection_detector.py` | 45 | Area 2, 16 |
 | `tests/unit/security/test_tool_capability_manifest.py` | 22 | Area 8 |
 | `tests/unit/security/test_tool_capability_manifest_destructive.py` | 16 | Area 13 |
 | `tests/unit/security/test_secret_leak_detector.py` | 36 | Area 9 |
 | `tests/unit/security/test_scanner_pipeline.py` | 22 | Area 14 |
-| `tests/unit/engines/crewai/guardrails/test_llm_injection_guardrail.py` | 15 | Area 3 |
-| `tests/unit/engines/crewai/guardrails/test_self_reflection_guardrail.py` | 20 | Area 4 |
-| `tests/unit/engines/crewai/guardrails/test_guardrail_caching.py` | 13 | Area 15 |
-| `tests/unit/engines/crewai/flow/test_flow_state_security.py` | 12 | Area 10 |
+| `tests/unit/engines/kasal/guardrails/test_llm_injection_guardrail.py` | 15 | Area 3 |
+| `tests/unit/engines/kasal/guardrails/test_self_reflection_guardrail.py` | 20 | Area 4 |
+| `tests/unit/engines/kasal/guardrails/test_guardrail_caching.py` | 13 | Area 15 |
+| `tests/unit/engines/kasal/flow/test_flow_state_security.py` | 12 | Area 10 |
 | `src/frontend/src/components/Chat/components/MessageRenderer.test.tsx` | 23 (security block) | Area 5 |
 | **Total** | **252** | |
 
@@ -928,10 +928,10 @@ Run all security tests:
 cd src/backend
 python -m pytest \
   tests/unit/test_security_headers_middleware.py \
-  tests/unit/engines/crewai/helpers/test_agent_helpers_security.py \
+  tests/unit/engines/kasal/helpers/test_agent_helpers_security.py \
   tests/unit/security/ \
-  tests/unit/engines/crewai/guardrails/ \
-  tests/unit/engines/crewai/flow/test_flow_state_security.py \
+  tests/unit/engines/kasal/guardrails/ \
+  tests/unit/engines/kasal/flow/test_flow_state_security.py \
   -v
 ```
 

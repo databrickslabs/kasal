@@ -60,13 +60,13 @@ def _run_with_prepare_false(crew_config):
             patch.dict(
                 "sys.modules",
                 {
-                    "src.engines.crewai.infra.logging_config": mock_logging_config,
+                    "src.engines.kasal.infra.logging_config": mock_logging_config,
                     "crewai": MagicMock(),
-                    "crewai.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
-                    "crewai.events": MagicMock(),
+                    "kasal_engine.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
+                    "kasal_engine.events": MagicMock(),
                     "crewai.utilities": MagicMock(),
                     "crewai.utilities.exceptions": MagicMock(),
-                    "crewai.utilities.exceptions.context_window_exceeding_exception": MagicMock(
+                    "kasal_engine.llm": MagicMock(
                         CONTEXT_LIMIT_ERRORS=[]
                     ),
                 },
@@ -93,13 +93,13 @@ def _run_with_prepare_false(crew_config):
         )
         stack.enter_context(
             patch(
-                "src.engines.crewai.tools.tool_factory.ToolFactory.create",
+                "src.engines.kasal.tools.tool_factory.ToolFactory.create",
                 new=AsyncMock(return_value=MagicMock()),
             )
         )
         stack.enter_context(
             patch(
-                "src.engines.crewai.paths.crew.crew_preparation.CrewPreparation",
+                "src.engines.kasal.paths.crew.crew_preparation.CrewPreparation",
                 mock_crew_preparation_cls,
             )
         )

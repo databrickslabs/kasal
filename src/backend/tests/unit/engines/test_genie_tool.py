@@ -1,58 +1,12 @@
-import sys
-import types as _types_mod
-from unittest.mock import Mock, MagicMock
-from importlib.abc import MetaPathFinder
-from importlib.machinery import ModuleSpec
-from pydantic import BaseModel, ConfigDict
+"""GenieTool tests.
 
-
-# Provide a real BaseTool stand-in so GenieTool can inherit from a proper class.
-class _FakeBaseTool(BaseModel):
-    """Minimal stand-in for crewai.tools.BaseTool."""
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def __init__(self, **kwargs):
-        # Accept and discard any unknown kwargs (e.g. result_as_answer)
-        known = {k: v for k, v in kwargs.items() if k in type(self).model_fields}
-        super().__init__(**known)
-
-
-# Pre-create the crewai.tools module with a real BaseTool
-_crewai_tools_mod = _types_mod.ModuleType("crewai.tools")
-_crewai_tools_mod.BaseTool = _FakeBaseTool
-sys.modules["crewai.tools"] = _crewai_tools_mod
-
-
-# Install a meta-path finder that intercepts ALL other crewai / crewai_tools imports.
-class _CrewAIMockFinder(MetaPathFinder):
-    """Intercept any import of crewai.* or crewai_tools.* and return a MagicMock."""
-
-    _PREFIXES = ("crewai", "crewai_tools")
-
-    def find_module(self, fullname, path=None):
-        # Skip crewai.tools — already handled above
-        if fullname == "crewai.tools":
-            return None
-        if any(fullname == p or fullname.startswith(p + ".") for p in self._PREFIXES):
-            return self
-        return None
-
-    def load_module(self, fullname):
-        if fullname in sys.modules:
-            return sys.modules[fullname]
-        mod = MagicMock()
-        mod.__path__ = []
-        mod.__name__ = fullname
-        mod.__spec__ = ModuleSpec(fullname, None)
-        sys.modules[fullname] = mod
-        return mod
-
-
-sys.meta_path.insert(0, _CrewAIMockFinder())
-
+The former crewai stub machinery (fake crewai.tools module + meta-path
+finder returning MagicMocks for all crewai imports) is gone: kasal_engine
+is lightweight (pydantic only), so the real BaseTool imports directly.
+"""
 import pytest
-from unittest.mock import patch, AsyncMock
-from src.engines.crewai.tools.custom.genie_tool import GenieTool, GenieInput
+from unittest.mock import patch, AsyncMock, Mock, MagicMock
+from src.engines.kasal.tools.custom.genie_tool import GenieTool, GenieInput
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,13 +1,13 @@
 """
 Unit tests for the unified SecurityScannerPipeline.
 """
-from src.engines.crewai.security.scanner_pipeline import (
+from src.engines.kasal.security.scanner_pipeline import (
     SecurityScannerPipeline,
     ScanResult,
     security_scanner,
 )
-from src.engines.crewai.security.prompt_injection_detector import DetectionResult
-from src.engines.crewai.security.secret_leak_detector import SecretLeakResult
+from src.engines.kasal.security.prompt_injection_detector import DetectionResult
+from src.engines.kasal.security.secret_leak_detector import SecretLeakResult
 
 
 class TestModuleSingleton:
@@ -16,7 +16,7 @@ class TestModuleSingleton:
         assert isinstance(security_scanner, SecurityScannerPipeline)
 
     def test_singleton_is_same_instance_on_reimport(self):
-        from src.engines.crewai.security.scanner_pipeline import security_scanner as s2
+        from src.engines.kasal.security.scanner_pipeline import security_scanner as s2
         assert security_scanner is s2
 
     def test_singleton_uses_same_detector(self):

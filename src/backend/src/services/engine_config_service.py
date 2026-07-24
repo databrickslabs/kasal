@@ -192,7 +192,7 @@ class EngineConfigService:
             # Re-raise for controller layer to handle
             raise
     
-    async def get_crewai_flow_enabled(self) -> bool:
+    async def get_kasal_flow_enabled(self) -> bool:
         """
         Get the CrewAI flow enabled status.
 
@@ -200,12 +200,12 @@ class EngineConfigService:
             True if flow is enabled (defaults to True if not found or on error)
         """
         try:
-            return await self.repository.get_crewai_flow_enabled()
+            return await self.repository.get_kasal_flow_enabled()
         except Exception as e:
             logger.error(f"Error getting CrewAI flow enabled status: {str(e)}")
             return True  # Default to enabled on error
     
-    async def set_crewai_flow_enabled(self, enabled: bool) -> bool:
+    async def set_kasal_flow_enabled(self, enabled: bool) -> bool:
         """
         Set the CrewAI flow enabled status.
 
@@ -216,7 +216,7 @@ class EngineConfigService:
             True if successful
         """
         try:
-            return await self.repository.set_crewai_flow_enabled(enabled)
+            return await self.repository.set_kasal_flow_enabled(enabled)
         except Exception as e:
             logger.error(f"Error setting CrewAI flow enabled status: {str(e)}")
             raise

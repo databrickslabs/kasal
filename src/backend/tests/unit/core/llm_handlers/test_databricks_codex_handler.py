@@ -118,10 +118,10 @@ import sys
 # pollute other test files.
 # ---------------------------------------------------------------------------
 _MOCK_MODULES = {
-    "crewai.llms.providers.openai.completion": MagicMock(
+    "kasal_engine.llm": MagicMock(
         OpenAICompletion=_FakeOpenAICompletion,
     ),
-    "crewai.events.types.llm_events": MagicMock(
+    "kasal_engine.events": MagicMock(
         LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
     ),
 }

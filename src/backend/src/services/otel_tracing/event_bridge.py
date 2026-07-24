@@ -247,56 +247,56 @@ class OTelEventBridge:
         # Each tuple: (module_path, class_name)
         _EVENT_CLASSES = [
             # Crew lifecycle
-            ("crewai.events", "CrewKickoffStartedEvent"),
-            ("crewai.events", "CrewKickoffCompletedEvent"),
+            ("kasal_engine.events", "CrewKickoffStartedEvent"),
+            ("kasal_engine.events", "CrewKickoffCompletedEvent"),
             # Agent execution
-            ("crewai.events", "AgentExecutionStartedEvent"),
-            ("crewai.events", "AgentExecutionCompletedEvent"),
+            ("kasal_engine.events", "AgentExecutionStartedEvent"),
+            ("kasal_engine.events", "AgentExecutionCompletedEvent"),
             # Task lifecycle
-            ("crewai.events.types.task_events", "TaskStartedEvent"),
-            ("crewai.events.types.task_events", "TaskCompletedEvent"),
-            ("crewai.events.types.task_events", "TaskFailedEvent"),
+            ("kasal_engine.events", "TaskStartedEvent"),
+            ("kasal_engine.events", "TaskCompletedEvent"),
+            ("kasal_engine.events", "TaskFailedEvent"),
             # Tool usage
-            ("crewai.events.types.tool_usage_events", "ToolUsageStartedEvent"),
-            ("crewai.events.types.tool_usage_events", "ToolUsageFinishedEvent"),
-            ("crewai.events.types.tool_usage_events", "ToolUsageErrorEvent"),
+            ("kasal_engine.events", "ToolUsageStartedEvent"),
+            ("kasal_engine.events", "ToolUsageFinishedEvent"),
+            ("kasal_engine.events", "ToolUsageErrorEvent"),
             # LLM calls
-            ("crewai.events", "LLMCallStartedEvent"),
-            ("crewai.events", "LLMCallCompletedEvent"),
-            ("crewai.events", "LLMCallFailedEvent"),
-            ("crewai.events", "LLMStreamChunkEvent"),
+            ("kasal_engine.events", "LLMCallStartedEvent"),
+            ("kasal_engine.events", "LLMCallCompletedEvent"),
+            ("kasal_engine.events", "LLMCallFailedEvent"),
+            ("kasal_engine.events", "LLMStreamChunkEvent"),
             # Memory
-            ("crewai.events", "MemorySaveStartedEvent"),
-            ("crewai.events", "MemorySaveCompletedEvent"),
-            ("crewai.events", "MemorySaveFailedEvent"),
-            ("crewai.events", "MemoryQueryStartedEvent"),
-            ("crewai.events", "MemoryQueryCompletedEvent"),
-            ("crewai.events", "MemoryQueryFailedEvent"),
-            ("crewai.events", "MemoryRetrievalCompletedEvent"),
-            ("crewai.events", "MemoryRetrievalFailedEvent"),
+            ("kasal_engine.events", "MemorySaveStartedEvent"),
+            ("kasal_engine.events", "MemorySaveCompletedEvent"),
+            ("kasal_engine.events", "MemorySaveFailedEvent"),
+            ("kasal_engine.events", "MemoryQueryStartedEvent"),
+            ("kasal_engine.events", "MemoryQueryCompletedEvent"),
+            ("kasal_engine.events", "MemoryQueryFailedEvent"),
+            ("kasal_engine.events", "MemoryRetrievalCompletedEvent"),
+            ("kasal_engine.events", "MemoryRetrievalFailedEvent"),
             # Knowledge
-            ("crewai.events", "KnowledgeRetrievalStartedEvent"),
-            ("crewai.events", "KnowledgeRetrievalCompletedEvent"),
+            ("kasal_engine.events", "KnowledgeRetrievalStartedEvent"),
+            ("kasal_engine.events", "KnowledgeRetrievalCompletedEvent"),
             # Reasoning
-            ("crewai.events.types.reasoning_events", "AgentReasoningStartedEvent"),
-            ("crewai.events.types.reasoning_events", "AgentReasoningCompletedEvent"),
-            ("crewai.events.types.reasoning_events", "AgentReasoningFailedEvent"),
+            ("kasal_engine.events", "AgentReasoningStartedEvent"),
+            ("kasal_engine.events", "AgentReasoningCompletedEvent"),
+            ("kasal_engine.events", "AgentReasoningFailedEvent"),
             # Guardrails
-            ("crewai.events.types.llm_guardrail_events", "LLMGuardrailStartedEvent"),
-            ("crewai.events.types.llm_guardrail_events", "LLMGuardrailCompletedEvent"),
-            ("crewai.events.types.llm_guardrail_events", "LLMGuardrailFailedEvent"),
+            ("kasal_engine.events", "LLMGuardrailStartedEvent"),
+            ("kasal_engine.events", "LLMGuardrailCompletedEvent"),
+            ("kasal_engine.events", "LLMGuardrailFailedEvent"),
             # Flow
-            ("crewai.events.types.flow_events", "FlowStartedEvent"),
-            ("crewai.events.types.flow_events", "FlowFinishedEvent"),
-            ("crewai.events.types.flow_events", "FlowCreatedEvent"),
+            ("kasal_engine.events", "FlowStartedEvent"),
+            ("kasal_engine.events", "FlowFinishedEvent"),
+            ("kasal_engine.events", "FlowCreatedEvent"),
             # MCP
-            ("crewai.events", "MCPConnectionStartedEvent"),
-            ("crewai.events", "MCPConnectionCompletedEvent"),
-            ("crewai.events", "MCPToolExecutionStartedEvent"),
-            ("crewai.events", "MCPToolExecutionCompletedEvent"),
+            ("kasal_engine.events", "MCPConnectionStartedEvent"),
+            ("kasal_engine.events", "MCPConnectionCompletedEvent"),
+            ("kasal_engine.events", "MCPToolExecutionStartedEvent"),
+            ("kasal_engine.events", "MCPToolExecutionCompletedEvent"),
             # HITL
-            ("crewai.events", "HumanFeedbackRequestedEvent"),
-            ("crewai.events", "HumanFeedbackReceivedEvent"),
+            ("kasal_engine.events", "HumanFeedbackRequestedEvent"),
+            ("kasal_engine.events", "HumanFeedbackReceivedEvent"),
         ]
 
         import importlib
@@ -411,15 +411,14 @@ class OTelEventBridge:
                         if started_task_id:
                             event_task_id = started_task_id
 
-            # Publish agent/task provenance to the memory-event ContextVar so
-            # that upcoming ``Memory.remember_many()`` saves (which snapshot
-            # the caller's contextvars when submitting to their bg thread
-            # pool) emit ``MemorySaveCompletedEvent`` with proper attribution.
-            # This runs synchronously in the crew's execution context, so the
-            # updates are visible to code executed after this handler.
+            # Publish agent/task provenance to the engine's ambient event
+            # context so that upcoming ``Memory.remember_many()`` saves
+            # (which snapshot the caller's contextvars when submitting to
+            # their bg thread pool) emit ``MemorySaveCompletedEvent`` with
+            # proper attribution. Explicit event values always win.
             try:
-                from src.core.crewai_patches import update_memory_event_context
-                update_memory_event_context(
+                from kasal_engine.events import set_event_context
+                set_event_context(
                     agent_role=agent_name or None,
                     agent_id=getattr(event, "agent_id", None)
                     or getattr(getattr(event, "agent", None), "id", None)

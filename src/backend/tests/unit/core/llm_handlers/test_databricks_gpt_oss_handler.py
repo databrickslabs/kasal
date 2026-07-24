@@ -14,10 +14,8 @@ phrase-matcher recognizes.
 import pytest
 from unittest.mock import patch
 
-from crewai.utilities.agent_utils import is_context_length_exceeded
-from crewai.utilities.exceptions.context_window_exceeding_exception import (
-    LLMContextLengthExceededError,
-)
+from kasal_engine.llm import is_context_length_exceeded
+from kasal_engine.llm import LLMContextLengthExceededError
 
 from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
 
@@ -57,12 +55,12 @@ class TestContextLengthHint:
     def test_non_overflow_errors_return_none(self, error_str):
         assert _bare_handler()._context_length_hint(error_str) is None
 
-    def test_hint_is_recognized_by_crewai_phrase_matcher(self):
-        """The hint itself must match CONTEXT_LIMIT_ERRORS — CrewAI's recovery
-        phrase-matches str(exception), not the exception type alone."""
+    def test_hint_is_recognized_by_engine_phrase_matcher(self):
+        """The hint itself must match CONTEXT_LIMIT_ERRORS — the engine's
+        recovery phrase-matches str(exception), not the exception type alone."""
         hint = _bare_handler()._context_length_hint("prompt is too long")
         assert hint is not None
-        assert LLMContextLengthExceededError._is_context_limit_error(hint)
+        assert is_context_length_exceeded(Exception(hint))
 
 
 class TestCallRaisesRecognizableOverflow:
@@ -218,19 +216,41 @@ class TestCoerceToResponseModel:
         assert out == bad
 
 
-class TestDoesNotClaimNativeStructuredOutput:
-    """DatabricksRetryLLM must NOT report native structured output: enforcing
-    output_pydantic on the litellm path routes through instructor/response_model,
-    which suppresses the ReAct tool loop (Claude crews stopped calling their MCP
-    tools). Databricks chat models therefore keep the output_json downgrade so
-    tool-calling stays intact; only the codex Responses-API handler enforces."""
+class TestStructuredOutputKeepsToolLoop:
+    """Under crewAI, claiming native structured output routed output_pydantic
+    through instructor/response_model, which suppressed the ReAct tool loop
+    (Claude crews stopped calling their MCP tools) — so DatabricksRetryLLM had
+    to hide the capability. kasal_engine enforces structured output by
+    appending a JSON-schema instruction to expected_output and post-parsing
+    the result (Task._execute_core) — the tool loop is never suppressed, so
+    claiming support is now correct and the output_json downgrade is gone."""
 
     def _make(self, model: str) -> DatabricksRetryLLM:
         with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
             return DatabricksRetryLLM(model=model)
 
-    def test_attribute_absent(self):
-        # The converter probes via getattr(...); the attribute must be absent so
-        # the model is downgraded to output_json (tool loop preserved).
+    def test_claims_native_structured_output(self):
         handler = self._make("databricks/databricks-claude-opus-4-8")
-        assert not hasattr(handler, "supports_native_structured_output")
+        assert handler.supports_native_structured_output() is True
+
+    def test_converter_keeps_output_pydantic(self):
+        # With native support claimed, the kernel keeps output_pydantic
+        # (no output_json downgrade) — schema stays enforced and validated.
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        from src.engines.kasal.kernel.model_conversion_handler import (
+            get_compatible_converter_for_model,
+        )
+
+        class OutModel(BaseModel):
+            answer: str
+
+        agent = Mock()
+        agent.llm = self._make("databricks/databricks-claude-opus-4-8")
+        converter_cls, output_pydantic, use_output_json, is_compatible = (
+            get_compatible_converter_for_model(agent, OutModel)
+        )
+        assert output_pydantic is OutModel
+        assert use_output_json is False

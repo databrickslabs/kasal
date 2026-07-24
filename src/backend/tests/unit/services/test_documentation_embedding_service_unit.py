@@ -40,7 +40,7 @@ _EMBEDDING_QUEUE = f"{_SVC}.embedding_queue"
 _DOC_EMBEDDING_REPO_CLS = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 _ASYNC_SESSION_FACTORY = "src.db.session.request_scoped_session"
 _DATABRICKS_INDEX_SERVICE = "src.services.databricks_index_service.DatabricksIndexService"
-_DATABRICKS_VECTOR_STORAGE = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
+_DATABRICKS_VECTOR_STORAGE = "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorStorage"
 _DATABRICKS_VECTOR_INDEX_REPO = "src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository"
 
 

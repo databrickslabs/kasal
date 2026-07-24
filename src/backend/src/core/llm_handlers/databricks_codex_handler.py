@@ -8,7 +8,7 @@ The Responses API base path differs from chat/embeddings:
 - AI Gateway on:  /ai-gateway/openai/v1  (→ /ai-gateway/openai/v1/responses)
 - AI Gateway off: /serving-endpoints     (→ /serving-endpoints/responses)
 The correct base_url is computed by DatabricksURLUtils.construct_responses_base_url()
-in llm_manager.configure_crewai_llm — do NOT pass the chat base (/ai-gateway/mlflow/v1),
+in llm_manager.configure_kasal_llm — do NOT pass the chat base (/ai-gateway/mlflow/v1),
 which has no /responses route and returns 404 "Supervisor API is not enabled".
 
 Key differences from the base OpenAICompletion:
@@ -37,8 +37,8 @@ import json
 import logging
 from typing import Any
 
-from crewai.llms.providers.openai.completion import OpenAICompletion
-from crewai.events.types.llm_events import LLMCallType
+from kasal_engine.llm import OpenAICompletion
+from kasal_engine.events import LLMCallType
 
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).

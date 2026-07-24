@@ -10,7 +10,7 @@ class EngineConfig(Base):
     """
     
     id = Column(Integer, primary_key=True)
-    engine_name = Column(String, nullable=False)  # e.g., 'crewai'
+    engine_name = Column(String, nullable=False)  # e.g., 'kasal'
     engine_type = Column(String, nullable=False)  # e.g., 'workflow', 'ai', 'processing'
     config_key = Column(String, nullable=False)  # e.g., 'flow_enabled'
     config_value = Column(String, nullable=False)  # JSON string or simple value

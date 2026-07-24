@@ -54,7 +54,7 @@ uc_gen = UCMetricsGenerator()
 ```
 
 ### CrewAI Tools:
-Use front-end facing tools in engines/crewai/tools/custom/:
+Use front-end facing tools in engines/kasal/tools/custom/:
 - MeasureConversionPipelineTool (universal converter for all formats)
 - PowerBIConnectorTool
 """

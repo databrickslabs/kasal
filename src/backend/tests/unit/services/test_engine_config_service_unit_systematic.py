@@ -15,7 +15,7 @@ class FakeRepo:
         self.deleted = []
         self.toggle_enabled_calls = []
         self.update_config_value_calls = []
-        self.crewai_flow_enabled = True  # Default to enabled
+        self.kasal_flow_enabled = True  # Default to enabled
         self.otel_app_telemetry_enabled = False  # Default to disabled
         self.otel_app_telemetry_log_level = "INFO"
     async def find_all(self):
@@ -43,10 +43,10 @@ class FakeRepo:
     async def update_config_value(self, engine_name, config_key, config_value):
         self.update_config_value_calls.append((engine_name, config_key, config_value))
         return True
-    async def get_crewai_flow_enabled(self):
-        return self.crewai_flow_enabled
-    async def set_crewai_flow_enabled(self, enabled):
-        self.crewai_flow_enabled = enabled
+    async def get_kasal_flow_enabled(self):
+        return self.kasal_flow_enabled
+    async def set_kasal_flow_enabled(self, enabled):
+        self.kasal_flow_enabled = enabled
         return True
     async def get_otel_app_telemetry_enabled(self):
         return self.otel_app_telemetry_enabled
@@ -146,21 +146,21 @@ async def test_update_config_value_success():
 
 
 @pytest.mark.asyncio
-async def test_get_crewai_flow_enabled_delegates():
+async def test_get_kasal_flow_enabled_delegates():
     svc = Svc(SimpleNamespace())
     svc.repository = FakeRepo(None)
-    svc.repository.crewai_flow_enabled = True
-    out = await svc.get_crewai_flow_enabled()
+    svc.repository.kasal_flow_enabled = True
+    out = await svc.get_kasal_flow_enabled()
     assert out is True
 
 
 @pytest.mark.asyncio
-async def test_set_crewai_flow_enabled_delegates():
+async def test_set_kasal_flow_enabled_delegates():
     svc = Svc(SimpleNamespace())
     svc.repository = FakeRepo(None)
-    ok = await svc.set_crewai_flow_enabled(True)
+    ok = await svc.set_kasal_flow_enabled(True)
     assert ok is True
-    assert svc.repository.crewai_flow_enabled is True
+    assert svc.repository.kasal_flow_enabled is True
 
 
 @pytest.mark.asyncio

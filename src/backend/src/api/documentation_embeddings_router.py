@@ -173,46 +173,7 @@ async def delete_documentation_embedding(
     return {"message": "Documentation embedding deleted successfully"}
 
 
-@router.post("/seed-all")
-async def seed_all_documentation_embeddings(
-    group_context: GroupContextDep,
-    x_forwarded_access_token: Optional[str] = Header(
-        None, alias="X-Forwarded-Access-Token"
-    ),
-    x_auth_request_access_token: Optional[str] = Header(
-        None, alias="X-Auth-Request-Access-Token"
-    ),
-):
-    """Re-seed all documentation embeddings from the docs directory."""
-    # SECURITY: bulk re-seeding is an admin operation.
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can re-seed documentation embeddings")
-    try:
-        # Import the seeding function
-        from src.seeds.documentation import seed_documentation_embeddings
-
-        logger.info("Starting documentation embeddings re-seeding...")
-
-        # Extract user token from headers (OAuth2-Proxy takes priority)
-        user_token = x_auth_request_access_token or x_forwarded_access_token
-
-        # Run the seeding process with user token
-        await seed_documentation_embeddings(user_token=user_token)
-
-        logger.info("Documentation embeddings re-seeding completed successfully")
-
-        return {
-            "success": True,
-            "message": "Documentation embeddings re-seeding completed successfully",
-        }
-    except Exception as e:
-        logger.error(f"Error re-seeding documentation embeddings: {e}")
-        import traceback
-
-        error_trace = traceback.format_exc()
-        logger.error(f"Full error trace: {error_trace}")
-
-        return {
-            "success": False,
-            "message": f"Failed to re-seed documentation embeddings: {str(e)}",
-        }
+# NOTE: the /seed-all endpoint is gone — it ran the crewai-docs scraper
+# (src/seeds/documentation.py), removed with the crewai→kasal engine migration.
+# The CRUD/search endpoints above stay: the knowledge file-upload feature
+# stores its vectors in the same documentation_embeddings table.

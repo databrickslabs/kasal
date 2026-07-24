@@ -1671,7 +1671,7 @@ def _browse_default_records(
     from pathlib import Path
 
     try:
-        from crewai.memory import Memory  # type: ignore
+        from kasal_engine.memory import Memory
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Default memory browse failed (crewai.memory missing): %s", exc)
         return [], 0
@@ -1949,7 +1949,7 @@ def _delete_default_records(
     # intact in each store.
     if scope:
         try:
-            from crewai.memory import Memory  # type: ignore
+            from kasal_engine.memory import Memory
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Default memory delete failed (crewai.memory missing): %s", exc)
             return 0

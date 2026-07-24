@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 from src.core.logger import LoggerManager
 from src.schemas.execution import ExecutionStatus, CrewConfig, ExecutionNameGenerationRequest, ExecutionCreateResponse
 from src.utils.asyncio_utils import run_in_thread_with_loop, create_and_run_loop
-from src.services.crewai_execution_service import CrewAIExecutionService
+from src.services.kasal_execution_service import KasalExecutionService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.execution_name_service import ExecutionNameService
 from src.utils.user_context import GroupContext
@@ -65,7 +65,7 @@ class ExecutionService:
         executions: Class-level dictionary tracking all active executions
         _thread_pool: Thread pool executor for concurrent operations (10 workers)
         execution_name_service: Service for generating descriptive execution names
-        crewai_execution_service: Service for CrewAI-specific execution logic
+        kasal_execution_service: Service for CrewAI-specific execution logic
     
     Note:
         The service uses class-level attributes for shared state across instances,
@@ -97,8 +97,8 @@ class ExecutionService:
 
         # Use factory method to create properly configured ExecutionNameService
         self.execution_name_service = ExecutionNameService.create(session)
-        # Create a CrewAIExecutionService instance for all execution operations
-        self.crewai_execution_service = CrewAIExecutionService()
+        # Create a KasalExecutionService instance for all execution operations
+        self.kasal_execution_service = KasalExecutionService()
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -191,9 +191,9 @@ class ExecutionService:
             # Prepare the execution config
             execution_config = config or {}
 
-            # Delegate to CrewAIExecutionService for flow execution
-            logger.info(f"Delegating flow execution to CrewAIExecutionService")
-            result = await self.crewai_execution_service.run_flow_execution(
+            # Delegate to KasalExecutionService for flow execution
+            logger.info(f"Delegating flow execution to KasalExecutionService")
+            result = await self.kasal_execution_service.run_flow_execution(
                 flow_id=str(flow_id) if flow_id else None,
                 nodes=nodes,
                 edges=edges,
@@ -223,7 +223,7 @@ class ExecutionService:
             Dictionary with execution details
         """
         try:
-            return await self.crewai_execution_service.get_flow_execution(execution_id)
+            return await self.kasal_execution_service.get_flow_execution(execution_id)
         except Exception as e:
             logger.error(f"Error getting execution: {str(e)}", exc_info=True)
             raise KasalError(
@@ -241,7 +241,7 @@ class ExecutionService:
             Dictionary with execution details
         """
         try:
-            return await self.crewai_execution_service.get_flow_executions_by_flow(str(flow_id))
+            return await self.kasal_execution_service.get_flow_executions_by_flow(str(flow_id))
         except Exception as e:
             logger.error(f"Error getting executions: {str(e)}", exc_info=True)
             raise KasalError(
@@ -446,12 +446,12 @@ class ExecutionService:
             # Execution is already created with RUNNING status, no need to update to PREPARING
             exec_logger.info(f"[run_crew_execution] Execution {execution_id} already has RUNNING status from creation")
             
-            # Create an instance of CrewAIExecutionService
-            crew_execution_service = CrewAIExecutionService()
+            # Create an instance of KasalExecutionService
+            crew_execution_service = KasalExecutionService()
             
             # Process different execution types
             if execution_type.lower() == "flow":
-                exec_logger.info(f"[run_crew_execution] This is a FLOW execution - delegating to CrewAIExecutionService")
+                exec_logger.info(f"[run_crew_execution] This is a FLOW execution - delegating to KasalExecutionService")
                 
                 # Convert config to dictionary
                 execution_config = {}
@@ -486,7 +486,7 @@ class ExecutionService:
                 # Sanitize the config for database
                 sanitized_config = ExecutionService.sanitize_for_database(execution_config)
                 
-                # Delegate flow execution to CrewAIExecutionService
+                # Delegate flow execution to KasalExecutionService
                 result = await crew_execution_service.run_flow_execution(
                     flow_id=str(flow_id) if flow_id else None,
                     nodes=sanitized_config.get('nodes'),
@@ -498,9 +498,9 @@ class ExecutionService:
                 exec_logger.info(f"[run_crew_execution] Flow execution initiated: {result}")
                 return result
                 
-            # For crew executions, use the proper method from CrewAIExecutionService
+            # For crew executions, use the proper method from KasalExecutionService
             elif execution_type.lower() == "crew":
-                exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to CrewAIExecutionService")
+                exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to KasalExecutionService")
                 
                 # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
                 # No need to set up environment variables here - each component uses unified auth
@@ -513,13 +513,13 @@ class ExecutionService:
                     group_context=group_context,
                     session=session
                 )
-                exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via CrewAIExecutionService for job_id: {execution_id}. Result: {result}")
+                exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via KasalExecutionService for job_id: {execution_id}. Result: {result}")
                 return result # Return result from run_crew_execution
 
             # Light "chat" mode: run a SINGLE agent via Agent.kickoff_async (no crew,
             # no tasks/process). Reuses the same RUNNING row + status/SSE plumbing.
             elif execution_type.lower() == "agent":
-                exec_logger.info(f"[run_crew_execution] This is a LIGHT AGENT execution - delegating to CrewAIExecutionService for job_id: {execution_id}")
+                exec_logger.info(f"[run_crew_execution] This is a LIGHT AGENT execution - delegating to KasalExecutionService for job_id: {execution_id}")
                 result = await crew_execution_service.run_light_agent_execution(
                     execution_id=execution_id,
                     config=config,
@@ -1672,15 +1672,15 @@ class ExecutionService:
                 except Exception as executor_error:
                     crew_logger.warning(f"Could not stop via CrewExecutor: {executor_error}")
             
-            # Also try to cancel via CrewAIEngineService
+            # Also try to cancel via KasalEngineService
             try:
-                from src.engines.crewai.crewai_engine_service import CrewAIEngineService
-                crew_service = CrewAIEngineService()
+                from src.engines.kasal.kasal_engine_service import KasalEngineService
+                crew_service = KasalEngineService()
                 cancelled = await crew_service.cancel_execution(execution_id)
                 if cancelled:
-                    crew_logger.info(f"Successfully cancelled execution {execution_id} via CrewAIEngineService")
+                    crew_logger.info(f"Successfully cancelled execution {execution_id} via KasalEngineService")
             except Exception as cancel_error:
-                crew_logger.warning(f"Could not cancel via CrewAIEngineService: {cancel_error}")
+                crew_logger.warning(f"Could not cancel via KasalEngineService: {cancel_error}")
             
             # Remove from active executions to stop tracking it
             if execution_id in self.executions:

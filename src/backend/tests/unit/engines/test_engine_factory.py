@@ -11,14 +11,14 @@ class TestEngineFactory:
     def setup_method(self):
         """Setup before each test method."""
         # Clear the registry and cache before each test
-        EngineFactory._registry = {"crewai": MagicMock}
+        EngineFactory._registry = {"kasal": MagicMock}
         EngineFactory._instances = {}
     
     def teardown_method(self):
         """Cleanup after each test method."""
         # Reset to original state
-        from src.engines.crewai.crewai_engine_service import CrewAIEngineService
-        EngineFactory._registry = {"crewai": CrewAIEngineService}
+        from src.engines.kasal.kasal_engine_service import KasalEngineService
+        EngineFactory._registry = {"kasal": KasalEngineService}
         EngineFactory._instances = {}
     
     def test_register_engine(self):
@@ -123,7 +123,7 @@ class TestEngineFactory:
         
         available = EngineFactory.get_available_engines()
         
-        assert "crewai" in available  # Default engine
+        assert "kasal" in available  # Default engine
         assert "engine1" in available
         assert "engine2" in available
         assert len(available) >= 3
@@ -204,11 +204,29 @@ class TestEngineFactory:
         with pytest.raises(Exception, match="Constructor error"):
             await EngineFactory.get_engine("error_engine")
     
-    def test_default_registry_contains_crewai(self):
-        """Test that default registry contains CrewAI engine."""
+    def test_default_registry_contains_kasal(self):
+        """Test that default registry contains the kasal engine."""
         # Reset to verify default state
-        from src.engines.crewai.crewai_engine_service import CrewAIEngineService
-        EngineFactory._registry = {"crewai": CrewAIEngineService}
-        
-        assert "crewai" in EngineFactory._registry
-        assert EngineFactory._registry["crewai"] == CrewAIEngineService
+        from src.engines.kasal.kasal_engine_service import KasalEngineService
+        EngineFactory._registry = {"kasal": KasalEngineService}
+
+        assert "kasal" in EngineFactory._registry
+        assert EngineFactory._registry["kasal"] == KasalEngineService
+
+    @pytest.mark.asyncio
+    async def test_legacy_crewai_alias_resolves_to_kasal(self):
+        """Old DB rows / payloads still say engine_type='crewai'; the factory
+        must resolve the legacy name to the kasal engine."""
+        mock_engine = AsyncMock()
+        mock_engine.initialize = AsyncMock(return_value=True)
+        mock_engine_class = MagicMock(return_value=mock_engine)
+
+        EngineFactory._registry = {"kasal": mock_engine_class}
+        EngineFactory._instances = {}
+        try:
+            engine = await EngineFactory.get_engine("crewai")
+            assert engine is mock_engine
+            # The alias shares the cache slot with the canonical name.
+            assert "kasal" in EngineFactory._instances
+        finally:
+            EngineFactory._instances = {}

@@ -101,8 +101,8 @@ How executions are prepared, run, and observed using the engine.
 - Entry via executions_router.py to execution_service.py
 - Service prepares agents/tools/memory and selects engine (engines/engine_factory.py)
 - CrewAI path:
-  - Prep: engines/crewai/paths/crew/crew_preparation.py and engines/crewai/paths/flow/ (flow services/runners)
-  - Run: engines/crewai/paths/crew/execution_runner.py with callbacks/guardrails
+  - Prep: engines/kasal/paths/crew/crew_preparation.py and engines/kasal/paths/flow/ (flow services/runners)
+  - Run: engines/kasal/paths/crew/execution_runner.py with callbacks/guardrails
   - Observability: execution_logs_service.py, execution_trace_service.py
 - Persist status/history: execution_repository.py, execution_history_repository.py
 

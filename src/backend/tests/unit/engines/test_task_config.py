@@ -139,7 +139,7 @@ class TestTaskConfig:
                         expected_output += "\n\nThe output should be formatted using Markdown."
                     
                     # Import Task and create instance - this will use any existing patch
-                    from crewai import Task
+                    from kasal_engine.core import Task
                     mock_task = Task(
                         description=description,
                         expected_output=expected_output,
@@ -299,7 +299,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_success(self, task_config_class, mock_task_data, mock_agent):
         """Test successful task configuration."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -317,7 +317,7 @@ class TestTaskConfig:
     async def test_configure_task_no_agent_provided(self, task_config_class, mock_task_data, mock_agent):
         """Test task configuration without agent provided - should resolve agent."""
         with patch.object(task_config_class, '_resolve_agent_for_task', new_callable=AsyncMock) as mock_resolve, \
-             patch('crewai.Task') as mock_task_class:
+             patch('kasal_engine.core.Task') as mock_task_class:
             
             mock_resolve.return_value = mock_agent
             mock_task = Mock()
@@ -341,7 +341,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_markdown(self, task_config_class, mock_task_data_markdown, mock_agent):
         """Test task configuration with markdown enabled."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -357,7 +357,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_advanced_properties(self, task_config_class, mock_task_data_markdown, mock_agent):
         """Test task configuration with advanced properties."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -370,7 +370,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -384,7 +384,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback_and_process_output_handler(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback and process output handler."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task.process = Mock()  # Mock process attribute
             mock_task_class.return_value = mock_task
@@ -399,7 +399,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback_no_process_attribute(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback when task has no process attribute."""
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             # Remove process attribute
             if hasattr(mock_task, 'process'):
@@ -429,7 +429,7 @@ class TestTaskConfig:
         if hasattr(mock_task_data, 'expected_output'):
             delattr(mock_task_data, 'expected_output')
 
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -454,7 +454,7 @@ class TestTaskConfig:
         mock_task_data.human_input = False
         mock_task_data.tools = None
 
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -491,7 +491,7 @@ class TestTaskConfig:
         mock_task_data.human_input = False
         mock_task_data.tools = None
 
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task_class.side_effect = Exception("Task creation error")
 
             result = await task_config_class.configure_task(mock_task_data, mock_agent)
@@ -779,7 +779,7 @@ class TestTaskConfig:
     async def test_configure_task_with_tools_integration(self, task_config_class, mock_task_data_with_tools, mock_agent):
         """Test full task configuration integration with tools."""
         with patch.object(task_config_class, '_configure_task_tools', new_callable=AsyncMock) as mock_configure_tools, \
-             patch('crewai.Task') as mock_task_class:
+             patch('kasal_engine.core.Task') as mock_task_class:
             
             mock_configure_tools.return_value = None
             mock_task = Mock()
@@ -910,7 +910,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_with_code_guardrail(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test configuring task with code-based guardrail."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         mock_guardrail = Mock()
         mock_guardrail.validate.return_value = {"valid": True, "feedback": ""}
@@ -922,9 +922,9 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('crewai.Task', side_effect=_ctor), \
-             patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.crewai.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
+        with patch('kasal_engine.core.Task', side_effect=_ctor), \
+             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
 
@@ -945,7 +945,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_with_llm_guardrail(self, mock_task_data_with_llm_guardrail, mock_agent):
         """Test configuring task with LLM guardrail."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
@@ -958,9 +958,9 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('crewai.Task', side_effect=_ctor), \
-             patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()) as mock_configure_llm, \
+        with patch('kasal_engine.core.Task', side_effect=_ctor), \
+             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+             patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()) as mock_configure_llm, \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
             mock_llm_guardrail = Mock()
@@ -980,7 +980,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_takes_priority(self, mock_task_data_with_both_guardrails, mock_agent):
         """Test that LLM guardrail takes priority over code guardrail."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         mock_code_guardrail = Mock()
         mock_gc = Mock()
@@ -994,11 +994,11 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('crewai.Task', side_effect=_ctor), \
-             patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.crewai.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
-             patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()), \
+        with patch('kasal_engine.core.Task', side_effect=_ctor), \
+             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
+             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+             patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc), \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
@@ -1019,10 +1019,10 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_creation_fails(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test task creation continues when guardrail creation fails."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
-        with patch('crewai.Task') as mock_task_class, \
-             patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+        with patch('kasal_engine.core.Task') as mock_task_class, \
+             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
             mock_task_class.return_value = mock_task
@@ -1040,10 +1040,10 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_setup_exception(self, mock_task_data_with_code_guardrail, mock_agent):
         """Test task creation continues when guardrail setup raises exception."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
-        with patch('crewai.Task') as mock_task_class, \
-             patch('src.engines.crewai.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+        with patch('kasal_engine.core.Task') as mock_task_class, \
+             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
             mock_task_class.return_value = mock_task
@@ -1061,14 +1061,14 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_augments_description(self, mock_task_data_with_llm_guardrail, mock_agent):
         """Test that LLM guardrail augments task description with validation requirements."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch('crewai.Task') as mock_task_class, \
-             patch('crewai.tasks.llm_guardrail.LLMGuardrail') as mock_llm_guardrail_class, \
-             patch('src.core.llm_manager.LLMManager.configure_crewai_llm', new_callable=AsyncMock, return_value=Mock()), \
+        with patch('kasal_engine.core.Task') as mock_task_class, \
+             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+             patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
             mock_task = Mock()
@@ -1089,7 +1089,7 @@ class TestTaskConfigGuardrails:
     @pytest.mark.asyncio
     async def test_configure_task_no_guardrail(self, mock_agent):
         """Test configuring task without any guardrail."""
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         mock_task_data = Mock()
         mock_task_data.name = "No Guardrail Task"
@@ -1105,7 +1105,7 @@ class TestTaskConfigGuardrails:
         mock_task_data.llm_guardrail = None
         mock_task_data.config = {}
 
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -1127,9 +1127,9 @@ class TestTaskConfigGuardrails:
         database column but NOT in config. The execution should respect the
         config (user's explicit choice) and NOT apply the guardrail.
         """
-        from src.engines.crewai.paths.flow.modules.task_adapter import TaskConfig
+        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
-        with patch('crewai.Task') as mock_task_class:
+        with patch('kasal_engine.core.Task') as mock_task_class:
             mock_task = Mock()
             mock_task.description = "Test description"
             mock_task_class.return_value = mock_task

@@ -340,7 +340,7 @@ async def test_delete_execution_not_found():
 @pytest.mark.asyncio
 async def test_delete_execution_success():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     svc = make_service()
     run = make_run(job_id="job-123")
@@ -370,7 +370,7 @@ async def test_delete_execution_success():
 @pytest.mark.asyncio
 async def test_delete_execution_with_job_in_memory():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     svc = make_service()
     run = make_run(job_id="job-mem")
@@ -420,7 +420,7 @@ async def test_delete_execution_by_job_id_not_found():
 @pytest.mark.asyncio
 async def test_delete_execution_by_job_id_success():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     svc = make_service()
     run = make_run(job_id="job-xyz", id=42)
@@ -449,7 +449,7 @@ async def test_delete_execution_by_job_id_success():
 @pytest.mark.asyncio
 async def test_delete_execution_by_job_id_with_memory_cleanup():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     svc = make_service()
     run = make_run(job_id="job-abc", id=10)
@@ -729,7 +729,7 @@ async def test_get_execution_groups_with_counts_error():
 @pytest.mark.asyncio
 async def test_delete_all_executions_no_group():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     session = AsyncMock()
     svc = make_service(session=session)
@@ -780,7 +780,7 @@ async def test_delete_all_executions_with_group_no_jobs():
 @pytest.mark.asyncio
 async def test_delete_all_executions_with_group_and_jobs():
     from src.services.execution_service import ExecutionService
-    import src.services.crewai_execution_service as crewai_mod
+    import src.services.kasal_execution_service as crewai_mod
 
     session = AsyncMock()
     svc = make_service(session=session)

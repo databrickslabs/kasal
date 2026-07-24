@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List, Type
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.engines.base.base_engine_service import BaseEngineService
-from src.engines.crewai.crewai_engine_service import CrewAIEngineService
+from src.engines.kasal.kasal_engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 
@@ -23,40 +23,46 @@ class EngineFactory:
     
     # Registry of available engine types
     _registry: Dict[str, Type[BaseEngineService]] = {
-        "crewai": CrewAIEngineService,
+        "kasal": KasalEngineService,
     }
-    
+
+    # Legacy engine-type names still found in old DB rows / payloads.
+    _legacy_aliases: Dict[str, str] = {
+        "crewai": "kasal",
+    }
+
     # Cache of engine instances
     _instances: Dict[str, BaseEngineService] = {}
-    
+
     @classmethod
     def register_engine(cls, engine_type: str, engine_class: Type[BaseEngineService]) -> None:
         """
         Register a new engine type
-        
+
         Args:
             engine_type: The type name of the engine
             engine_class: The engine class to register
         """
         cls._registry[engine_type] = engine_class
         logger.info(f"Registered engine type: {engine_type}")
-    
+
     @classmethod
-    async def get_engine(cls, 
-                       engine_type: str, 
-                       db: AsyncSession = None, 
+    async def get_engine(cls,
+                       engine_type: str,
+                       db: AsyncSession = None,
                        init_params: Dict[str, Any] = None) -> Optional[BaseEngineService]:
         """
         Get an engine instance by type
-        
+
         Args:
             engine_type: The type of engine to create
             db: Database session
             init_params: Parameters for engine initialization
-            
+
         Returns:
             Engine instance or None if engine type not found
         """
+        engine_type = cls._legacy_aliases.get(engine_type, engine_type)
         # Use cached instance if available
         if engine_type in cls._instances:
             return cls._instances[engine_type]

@@ -268,7 +268,7 @@ async def _prepare_memory(self):
 ### Initialize Memory Backend
 
 ```python
-from src.engines.crewai.memory.memory_backend_factory import MemoryBackendFactory
+from src.engines.kasal.memory.memory_backend_factory import MemoryBackendFactory
 
 # Create memory backends for a crew
 memory_backends = await MemoryBackendFactory.create_memory_backends(

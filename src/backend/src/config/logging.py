@@ -209,7 +209,7 @@ class CentralizedLoggingConfig:
         'uvicorn': ['uvicorn', 'uvicorn.error', 'uvicorn.access'],
         'httpx': ['httpx', 'httpcore'],
         'urllib3': ['urllib3', 'requests'],
-        'crewai': ['crewai'],
+        'crewai': ['crewai', 'kasal_engine'],
         'mlflow': ['mlflow', 'mlflow.tracing', 'mlflow.models'],
         'litellm': ['litellm', 'LiteLLM'],
     }
@@ -275,7 +275,7 @@ class CentralizedLoggingConfig:
             'sqlalchemy', 'sqlalchemy.engine', 'sqlalchemy.pool', 'aiosqlite',
             'uvicorn', 'uvicorn.error', 'uvicorn.access',
             'httpx', 'httpcore', 'urllib3', 'requests',
-            'crewai', 'mlflow', 'litellm', 'LiteLLM',
+            'crewai', 'kasal_engine', 'mlflow', 'litellm', 'LiteLLM',
             'asyncio', 'PIL', 'matplotlib', 'langchain', 'opentelemetry',
             'chromadb', 'websockets'
         ]

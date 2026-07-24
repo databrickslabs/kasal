@@ -583,7 +583,7 @@ class HITLService:
         try:
             # Import here to avoid circular imports
             from src.repositories.execution_history_repository import ExecutionHistoryRepository
-            from src.services.crewai_execution_service import CrewAIExecutionService
+            from src.services.kasal_execution_service import KasalExecutionService
             from src.services.execution_status_service import ExecutionStatusService
             from src.utils.user_context import GroupContext
             import asyncio
@@ -635,7 +635,7 @@ class HITLService:
             # This ensures we don't block the approval response
             async def _trigger_resume():
                 try:
-                    crewai_service = CrewAIExecutionService()
+                    crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
                         flow_id=flow_id,
                         nodes=original_inputs.get('nodes'),
@@ -676,7 +676,7 @@ class HITLService:
         try:
             # Import here to avoid circular imports
             from src.repositories.execution_history_repository import ExecutionHistoryRepository
-            from src.services.crewai_execution_service import CrewAIExecutionService
+            from src.services.kasal_execution_service import KasalExecutionService
             from src.services.execution_status_service import ExecutionStatusService
             from src.utils.user_context import GroupContext
             import asyncio
@@ -725,7 +725,7 @@ class HITLService:
             # Trigger the flow execution asynchronously in a background task
             async def _trigger_retry():
                 try:
-                    crewai_service = CrewAIExecutionService()
+                    crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
                         flow_id=flow_id,
                         nodes=original_inputs.get('nodes'),

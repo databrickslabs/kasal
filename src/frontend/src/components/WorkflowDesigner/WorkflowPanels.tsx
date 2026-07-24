@@ -105,8 +105,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onPlayPlan,
   onPlayFlow
 }) => {
-  const { crewAIFlowEnabled } = useFlowConfigStore();
-  if (areFlowsVisible && crewAIFlowEnabled) {
+  const { kasalFlowEnabled } = useFlowConfigStore();
+  if (areFlowsVisible && kasalFlowEnabled) {
       // Show ONLY FlowCanvas when flows are visible
       return (
     <Box sx={{

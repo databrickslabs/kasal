@@ -151,15 +151,8 @@ def run_crew_in_process(
         os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
         print(f"[SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
-    # Install CrewAI monkey-patches in this subprocess too — the parent
-    # install doesn't cross the 'spawn' boundary. Must run before any
-    # CrewAI memory event is emitted so the patched __init__ is visible.
-    try:
-        from src.core.crewai_patches import install_all_patches
-
-        install_all_patches()
-    except Exception as _patch_exc:  # pragma: no cover - defensive
-        print(f"[SUBPROCESS] Failed to install CrewAI patches: {_patch_exc}", file=sys.stderr)
+    # No monkey-patches to install: kasal_engine carries the patched
+    # behavior natively in both the parent and this spawned subprocess.
 
     # Configure logging to only go to file, not stdout
     # Early validation of parameters to catch type errors
@@ -213,7 +206,7 @@ def run_crew_in_process(
         }
 
     # This must be done early before any other imports that might configure logging
-    from src.engines.crewai.infra.logging_config import (
+    from src.engines.kasal.infra.logging_config import (
         configure_subprocess_logging,
         restore_stdout_stderr,
         suppress_stdout_stderr,
@@ -296,7 +289,7 @@ def run_crew_in_process(
         # to not trigger summarization when needed. This leads to empty responses from
         # models like Qwen that silently fail when context is too large.
         try:
-            from crewai.llm import LLM_CONTEXT_WINDOW_SIZES
+            from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
 
             from src.seeds.model_configs import MODEL_CONFIGS
 
@@ -320,7 +313,6 @@ def run_crew_in_process(
         # default error patterns. Without this patch, CrewAI won't trigger summarization
         # when Databricks returns a context length error.
         try:
-            from crewai.utilities.exceptions import context_window_exceeding_exception
 
             databricks_error_patterns = [
                 "exceeds maximum allowed content length",  # Databricks specific
@@ -345,7 +337,7 @@ def run_crew_in_process(
                 file=sys.stderr,
             )
 
-        from crewai import Crew
+        from kasal_engine.core import Crew
 
         # Configure subprocess logging with execution ID
         subprocess_logger = configure_subprocess_logging(execution_id)
@@ -499,9 +491,9 @@ def run_crew_in_process(
             # Suppress any stdout/stderr from CrewAI
             import warnings
 
-            from src.engines.crewai.paths.crew.crew_preparation import CrewPreparation
-            from src.engines.crewai.tools.mcp_integration import MCPIntegration
-            from src.engines.crewai.tools.tool_factory import ToolFactory
+            from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
+            from src.engines.kasal.tools.mcp_integration import MCPIntegration
+            from src.engines.kasal.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
             from src.services.tool_service import ToolService
 
@@ -993,14 +985,14 @@ def run_crew_in_process(
 
                 # Initialize event listeners in the subprocess BEFORE kickoff
                 # These must be created and connected to the crew
-                from src.engines.crewai.callbacks.execution_callback import (
+                from src.engines.kasal.callbacks.execution_callback import (
                     create_execution_callbacks,
                 )
-                from src.engines.crewai.callbacks.logging_callbacks import (
+                from src.engines.kasal.callbacks.logging_callbacks import (
                     AgentTraceEventListener,
                     TaskCompletionEventListener,
                 )
-                from src.engines.crewai.infra.trace_management import TraceManager
+                from src.engines.kasal.infra.trace_management import TraceManager
 
                 async_logger.info(
                     f"Process {os.getpid()} initializing event listeners for {execution_id}"
@@ -1024,7 +1016,7 @@ def run_crew_in_process(
 
                     # Create the event listeners in this subprocess
                     # Import the event bus from crewai
-                    from crewai.events import crewai_event_bus
+                    from kasal_engine.events import crewai_event_bus
 
                     # Create and register the event listeners with group_context
                     agent_trace_listener = AgentTraceEventListener(
@@ -1101,7 +1093,7 @@ def run_crew_in_process(
                     crew_log_path = os.path.join(log_dir, "crew.log")
 
                     # Create file handler for crew.log
-                    from src.engines.crewai.infra.logging_config import (
+                    from src.engines.kasal.infra.logging_config import (
                         ExecutionContextFormatter,
                         set_execution_context,
                     )
@@ -1122,12 +1114,12 @@ def run_crew_in_process(
                     loggers_to_configure = [
                         logging.getLogger("crew"),  # Main crew logger
                         logging.getLogger(
-                            "src.engines.crewai.callbacks.logging_callbacks"
+                            "src.engines.kasal.callbacks.logging_callbacks"
                         ),
                         logging.getLogger(
-                            "src.engines.crewai.callbacks.execution_callback"
+                            "src.engines.kasal.callbacks.execution_callback"
                         ),
-                        logging.getLogger("src.engines.crewai"),
+                        logging.getLogger("src.engines.kasal"),
                         logging.getLogger("mlflow"),
                         logging.getLogger("mlflow.tracing"),
                         logging.getLogger("__main__"),
@@ -1374,7 +1366,7 @@ def run_crew_in_process(
                 # thread pool, so without an explicit flush, DB writes for llm_request/
                 # llm_response traces may not complete before subprocess cleanup begins.
                 try:
-                    from crewai.events import crewai_event_bus as _event_bus
+                    from kasal_engine.events import crewai_event_bus as _event_bus
 
                     async_logger.info(
                         "[SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete..."
@@ -1404,7 +1396,7 @@ def run_crew_in_process(
 
                 # Stop MCP adapters to close streaming HTTP connections
                 try:
-                    from src.engines.crewai.tools.mcp_handler import stop_all_adapters
+                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
                     await stop_all_adapters()
                 except Exception as mcp_err:
                     async_logger.debug(
@@ -1425,7 +1417,7 @@ def run_crew_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from crewai.events import crewai_event_bus as _cleanup_event_bus
+                    from kasal_engine.events import crewai_event_bus as _cleanup_event_bus
 
                     _cleanup_event_bus.flush(timeout=15.0)
                 except Exception:
@@ -1511,7 +1503,7 @@ def run_crew_in_process(
         # Collect MCP warnings to surface in the execution trace/UI
         mcp_warnings = []
         try:
-            from src.engines.crewai.tools.mcp_integration import MCPIntegration
+            from src.engines.kasal.tools.mcp_integration import MCPIntegration
             mcp_warnings = MCPIntegration.get_warnings()
             if mcp_warnings:
                 crew_logger = logging.getLogger("crew")
@@ -1537,7 +1529,7 @@ def run_crew_in_process(
 
         # Flush event bus even on error to capture partial traces
         try:
-            from crewai.events import crewai_event_bus as _event_bus
+            from kasal_engine.events import crewai_event_bus as _event_bus
 
             _event_bus.flush(timeout=10.0)
         except Exception:

@@ -27,36 +27,36 @@ _crewai_mock.__path__ = []  # Mark it as a package so sub-imports work
 _STUBS: dict[str, object] = {}
 for _mod_name in [
     "crewai",
-    "crewai.llm",
+    "kasal_engine.llm",
     "crewai.llms",
     "crewai.llms.providers",
     "crewai.llms.providers.openai",
-    "crewai.llms.providers.openai.completion",
-    "crewai.tools",
-    "crewai.events",
+    "kasal_engine.llm",
+    "kasal_engine.tools",
+    "kasal_engine.events",
     "crewai.events.types",
-    "crewai.events.types.llm_events",
+    "kasal_engine.events",
     "crewai.flow",
-    "crewai.flow.flow",
-    "crewai.flow.persistence",
+    "kasal_engine.flow",
+    "kasal_engine.flow",
     "crewai.utilities",
     "crewai.utilities.exceptions",
-    "crewai.utilities.exceptions.context_window_exceeding_exception",
-    "crewai.utilities.printer",
+    "kasal_engine.llm",
+    "kasal_engine.utils",
     "crewai.utilities.converter",
     "crewai.utilities.evaluators",
     "crewai.utilities.evaluators.task_evaluator",
-    "crewai.utilities.internal_instructor",
-    "crewai.utilities.paths",
+    "kasal_engine.llm",
+    "kasal_engine.utils",
     "crewai.project",
-    "crewai.memory",
+    "kasal_engine.memory",
     "crewai.memory.storage",
     "crewai.memory.storage.rag_storage",
     "crewai.memory.storage.ltm_sqlite_storage",
     "crewai.tasks",
-    "crewai.tasks.task_output",
-    "crewai.tasks.llm_guardrail",
-    "crewai_tools",
+    "kasal_engine.core",
+    "kasal_engine.core",
+    "kasal_engine.tools",
 ]:
     if _mod_name not in sys.modules:
         _mock = MagicMock()
@@ -65,7 +65,7 @@ for _mod_name in [
         _STUBS[_mod_name] = _mock
 
 import pytest
-from src.engines.crewai.tools.mcp_integration import MCPIntegration
+from src.engines.kasal.tools.mcp_integration import MCPIntegration
 
 
 class TestMCPWarningLifecycle:

@@ -15,11 +15,11 @@ from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, Sc
 from src.schemas.execution import CrewConfig
 from src.schemas.scheduler import SchedulerJobCreate, SchedulerJobUpdate, SchedulerJobResponse
 from src.utils.cron_utils import ensure_utc, calculate_next_run_from_last
-from src.services.crewai_execution_service import CrewAIExecutionService, JobStatus
+from src.services.kasal_execution_service import KasalExecutionService, JobStatus
 from src.db.session import async_session_factory
 from src.models.execution_history import ExecutionHistory as Run
 from src.config.settings import settings
-from src.engines.crewai.callbacks import JobOutputCallback
+from src.engines.kasal.callbacks import JobOutputCallback
 from src.core.logger import LoggerManager
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest
@@ -572,7 +572,7 @@ class SchedulerService:
                 )
 
                 # Add execution to memory
-                CrewAIExecutionService.add_execution_to_memory(
+                KasalExecutionService.add_execution_to_memory(
                     execution_id=job_id,
                     status=JobStatus.PENDING.value,
                     run_name=run_name,

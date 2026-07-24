@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from typing import Dict, Any
 import os
 
-from src.engines.crewai.paths.crew.execution_runner import update_execution_status_with_retry
+from src.engines.kasal.paths.crew.execution_runner import update_execution_status_with_retry
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
 
@@ -182,7 +182,7 @@ class TestSubprocessTracebackSurfacing:
 
     @pytest.mark.asyncio
     async def test_failed_result_traceback_is_logged(self, caplog):
-        from src.engines.crewai.paths.crew.execution_runner import run_crew_in_process
+        from src.engines.kasal.paths.crew.execution_runner import run_crew_in_process
 
         failed_result = {
             "status": "FAILED",
@@ -192,16 +192,16 @@ class TestSubprocessTracebackSurfacing:
         }
 
         with patch(
-            "src.engines.crewai.paths.crew.execution_runner.process_crew_executor.run_crew_isolated",
+            "src.engines.kasal.paths.crew.execution_runner.process_crew_executor.run_crew_isolated",
             new_callable=AsyncMock,
             return_value=failed_result,
         ), patch(
-            "src.engines.crewai.paths.crew.execution_runner.update_execution_status_with_retry",
+            "src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry",
             new_callable=AsyncMock,
             return_value=True,
         ):
             import logging as _logging
-            with caplog.at_level(_logging.ERROR, logger="src.engines.crewai.paths.crew.execution_runner"):
+            with caplog.at_level(_logging.ERROR, logger="src.engines.kasal.paths.crew.execution_runner"):
                 await run_crew_in_process("exec-tb", {"agents": {}}, {})
 
         log_text = caplog.text

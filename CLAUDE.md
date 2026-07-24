@@ -14,8 +14,8 @@ you are editing wins on specifics:
   - `src/backend/src/services/CLAUDE.md` — business logic
   - `src/backend/src/repositories/CLAUDE.md` — data access
   - `src/backend/src/models/CLAUDE.md` — SQLAlchemy models + migrations
-  - `src/backend/src/engines/crewai/CLAUDE.md` — the CrewAI engine (post-refactor)
-  - `src/backend/src/engines/crewai/tools/CLAUDE.md` — custom tools
+  - `src/backend/src/engines/kasal/CLAUDE.md` — the Kasal native engine (post-refactor)
+  - `src/backend/src/engines/kasal/tools/CLAUDE.md` — custom tools
   - `src/frontend/src/api/CLAUDE.md` — frontend service layer
   - `src/frontend/src/components/CLAUDE.md` — React components
   - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
@@ -30,7 +30,7 @@ you are editing wins on specifics:
 - Install dependencies: `cd src/backend && uv sync`
 - To change a dependency: edit `pyproject.toml`, run `uv lock` (regenerates `uv.lock`), then `uv sync`. Never hand-edit `uv.lock`.
 - The Databricks App deploy (`src/deploy.py`) ships `pyproject.toml` + `uv.lock` at the bundle root so the build runs `uv sync` (a `requirements.txt` at the root would take precedence and bypass uv).
-- Key dependencies include: psutil (for process management), crewai, litellm, databricks-sdk
+- Key dependencies include: psutil (for process management), litellm, databricks-sdk (the agent engine is the vendored `src/backend/kasal_engine` package)
 
 ### Documentation Location
 - **ALWAYS create documentation in `src/docs/` directory**
@@ -70,7 +70,7 @@ Kasal is an AI agent workflow orchestration platform with a **clean architecture
 ### Technology Stack
 - **Backend**: FastAPI + SQLAlchemy 2.0 (async) + Alembic (Python 3.11, pinned `>=3.11,<3.12`)
 - **Frontend**: React 18 + TypeScript + Material-UI + ReactFlow, built with **Vite**
-- **AI Engine**: CrewAI framework for agent orchestration
+- **AI Engine**: Kasal native engine (vendored `kasal_engine` package) for agent orchestration
 - **Database**: SQLite (dev) / PostgreSQL / Databricks Lakebase (prod)
 - **Authentication**: Databricks OAuth (OBO / SPN); JWT for app sessions
 
@@ -102,7 +102,7 @@ src/
 ## Special Considerations
 
 ### Memory and Persistence
-- CrewAI crews generate deterministic IDs for memory persistence
+- Crews generate deterministic IDs for memory persistence
 - Group isolation ensures tenant data separation
 - Databricks Vector Search integration for advanced memory backends
 

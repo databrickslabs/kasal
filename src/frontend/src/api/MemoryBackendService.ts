@@ -475,7 +475,7 @@ export class MemoryBackendService {
   /**
    * Get entity data from the unified Lakebase memory table for graph visualization.
    *
-   * CrewAI 1.10+ stores every memory record in one unified table; entity-like
+   * The Kasal engine stores every memory record in one unified table; entity-like
    * records are identified by their category tags in ``metadata``.
    */
   static async getLakebaseEntityData(

@@ -130,7 +130,7 @@ class TestRunScheduleJob:
         with patch("src.services.scheduler_service.async_session_factory") as mock_factory, \
              patch("src.services.scheduler_service.ScheduleRepository", return_value=mock_repo), \
              patch("src.services.scheduler_service.ExecutionService") as mock_es_cls, \
-             patch("src.services.scheduler_service.CrewAIExecutionService") as mock_crewai, \
+             patch("src.services.scheduler_service.KasalExecutionService") as mock_crewai, \
              patch("src.services.scheduler_service.Run") as mock_run_cls, \
              patch("src.services.scheduler_service.GroupContext") as mock_gc_cls:
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)

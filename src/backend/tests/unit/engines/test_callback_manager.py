@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any
 
-from src.engines.crewai.paths.flow.modules.callback_manager import CallbackManager
+from src.engines.kasal.paths.flow.modules.callback_manager import CallbackManager
 
 
 class TestCallbackManager:
@@ -29,15 +29,15 @@ class TestCallbackManager:
     @pytest.fixture
     def mock_crewai_event_bus(self):
         """Mock CrewAI event bus."""
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.crewai_event_bus') as mock_bus:
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.crewai_event_bus') as mock_bus:
             mock_bus.register = Mock()
             yield mock_bus
 
     def test_init_callbacks_success(self, mock_job_id, mock_config, mock_group_context, mock_crewai_event_bus):
         """Test successful callback initialization."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             # Mock callback instances
             job_cb = Mock()
@@ -95,9 +95,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_job_output_callback_error(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when JobOutputCallback creation fails."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             # Make JobOutputCallback creation fail
             mock_job_callback.side_effect = Exception("JobOutputCallback error")
@@ -119,9 +119,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_event_streaming_callback_error(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when EventStreamingCallback creation fails."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             job_cb = Mock()
             trace_cb = Mock()
@@ -141,9 +141,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_agent_trace_callback_error(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when AgentTraceEventListener creation fails."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             job_cb = Mock()
             event_cb = Mock()
@@ -163,9 +163,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_all_creation_errors(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when all callback creations fail."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             # Make all callback creations fail
             mock_job_callback.side_effect = Exception("JobOutputCallback error")
@@ -181,13 +181,13 @@ class TestCallbackManager:
     def test_init_callbacks_general_exception(self, mock_job_id):
         """Test callback initialization with general exception."""
         # Patch the handlers list initialization to raise an exception in the try block
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.CallbackManager.ensure_event_listeners_registered') as mock_ensure:
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.CallbackManager.ensure_event_listeners_registered') as mock_ensure:
             mock_ensure.side_effect = Exception("General error during initialization")
             
             # Mock callbacks to be created successfully
-            with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-                 patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-                 patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+            with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+                 patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+                 patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
                 
                 job_cb = Mock(spec=['event_bus'])
                 event_cb = Mock(spec=['event_bus'])
@@ -302,7 +302,7 @@ class TestCallbackManager:
 
     def test_ensure_event_listeners_registered_general_error(self, mock_crewai_event_bus):
         """Test event listeners registration with general error."""
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.crewai_event_bus', side_effect=Exception("General error")):
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.crewai_event_bus', side_effect=Exception("General error")):
             listener = Mock()
             listeners = [listener]
             
@@ -382,9 +382,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_with_base_event_listeners(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization with listeners that inherit from BaseEventListener."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
             
             # Mock callback instances with setup_listeners (inheriting from BaseEventListener)
@@ -410,9 +410,9 @@ class TestCallbackManager:
 
     def test_init_callbacks_all_base_event_listeners(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when all listeners inherit from BaseEventListener."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
             
             # Mock all callback instances with setup_listeners (all inherit from BaseEventListener)
@@ -455,9 +455,9 @@ class TestCallbackManager:
     def test_init_callbacks_import_level_exception(self, mock_job_id):
         """Test callback initialization when import-level exception occurs."""
         # Simulate an import exception that happens in the try block
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             # Make all imports fail to trigger the outer exception handler
             mock_job_callback.side_effect = ImportError("Cannot import callback modules")
@@ -471,9 +471,9 @@ class TestCallbackManager:
     
     def test_init_callbacks_with_config_none(self, mock_job_id):
         """Test callback initialization with None config."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             job_cb = Mock()
             event_cb = Mock()
@@ -500,9 +500,9 @@ class TestCallbackManager:
     
     def test_init_callbacks_partial_failures(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization with partial failures and non-base listeners."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
             
             # Create callbacks where some inherit from BaseEventListener and some don't
@@ -530,9 +530,9 @@ class TestCallbackManager:
     
     def test_init_callbacks_none_handlers(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when some handlers are None."""
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
             
             # Set some callbacks to return None by making them raise exceptions
@@ -610,7 +610,7 @@ class TestCallbackManager:
         }
         
         # Simulate the trace cleanup logic path
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
             CallbackManager.cleanup_callbacks(callbacks)
             
             # Should call cleanup on event streaming callback
@@ -628,7 +628,7 @@ class TestCallbackManager:
             'agent_trace': agent_trace_cb
         }
         
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
             CallbackManager.cleanup_callbacks(callbacks)
             
             # Should log info about trace processing
@@ -647,7 +647,7 @@ class TestCallbackManager:
         }
         
         # Mock logger to raise exception in trace cleanup section
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.logger') as mock_logger:
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
             # Make the trace processing line raise an exception
             mock_logger.info.side_effect = [None, None, Exception("Trace error")]
             
@@ -659,9 +659,9 @@ class TestCallbackManager:
     def test_init_callbacks_major_exception_in_try_block(self, mock_job_id):
         """Test callback initialization when major exception occurs in main try block."""
         # Test when a major exception occurs in the try block after callback creation
-        with patch('src.engines.crewai.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.crewai.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.crewai.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
+             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
             
             # Mock successful callback creation
             job_cb = Mock(spec=['event_bus'])
@@ -707,7 +707,7 @@ class TestCallbackManager:
         # Create listener that will cause exception during enumeration
         listeners = ["invalid_listener"]  # String instead of proper object
         
-        with patch('src.engines.crewai.paths.flow.modules.callback_manager.enumerate', side_effect=Exception("Major enumeration error")):
+        with patch('src.engines.kasal.paths.flow.modules.callback_manager.enumerate', side_effect=Exception("Major enumeration error")):
             CallbackManager.ensure_event_listeners_registered(listeners)
             
             # Should handle major exception gracefully without crashing

@@ -4,7 +4,7 @@ Kasal gives agents a unified cognitive memory: a single store where crews captur
 
 ## Memory backends
 
-The backend is chosen by `MemoryBackendType` in `src/backend/src/engines/crewai/memory/memory_backend_factory.py`. Kasal offers two memory backends:
+The backend is chosen by `MemoryBackendType` in `src/backend/src/engines/kasal/memory/memory_backend_factory.py`. Kasal offers two memory backends:
 
 | Backend | Type value | Storage | When to use |
 | --- | --- | --- | --- |

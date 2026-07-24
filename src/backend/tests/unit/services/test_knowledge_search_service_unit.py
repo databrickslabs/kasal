@@ -44,7 +44,7 @@ LLM_MODULE = "src.core.llm_manager.LLMManager"
 # DocumentationEmbeddingService instead of the Databricks Vector Search index.
 # Knowledge search reads via DocumentationEmbeddingRepository(model=KnowledgeEmbedding).
 DOC_SVC_MODULE = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
-DVS_MODULE = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
+DVS_MODULE = "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorStorage"
 MBS_MODULE = "src.services.memory_backend_service.MemoryBackendService"
 MBC_MODULE = "src.schemas.memory_backend.MemoryBackendConfig"
 MBT_MODULE = "src.schemas.memory_backend.MemoryBackendType"
@@ -884,7 +884,7 @@ class TestResolveFilePaths:
 from datetime import datetime as _dt  # noqa: E402
 from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType  # noqa: E402
 
-_SEARCH_DVS = "src.engines.crewai.memory.databricks_vector_storage.DatabricksVectorStorage"
+_SEARCH_DVS = "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorStorage"
 
 
 def _search_databricks_backend(db_config):

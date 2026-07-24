@@ -42,7 +42,7 @@ Kasal implements a sophisticated event capture and tracing system that provides 
 The callback system is the primary mechanism for capturing events during CrewAI execution.
 
 #### Step Callback
-**Location**: `src/backend/src/engines/crewai/callbacks/execution_callback.py`
+**Location**: `src/backend/src/engines/kasal/callbacks/execution_callback.py`
 
 Captures every agent step during execution:
 
@@ -83,7 +83,7 @@ def task_callback(task_output):
 
 ### 2. LLM Event Router
 
-**Location**: `src/backend/src/engines/crewai/callbacks/llm_event_router.py`
+**Location**: `src/backend/src/engines/kasal/callbacks/llm_event_router.py`
 
 Captures LLM events from the global CrewAI event bus while maintaining execution isolation:
 

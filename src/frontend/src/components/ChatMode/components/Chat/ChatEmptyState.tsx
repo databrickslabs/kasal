@@ -85,7 +85,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
   const chatModeType = useExecutionStore((s) => s.chatModeType);
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
-  const crewAIFlowEnabled = useFlowConfigStore((s) => s.crewAIFlowEnabled);
+  const kasalFlowEnabled = useFlowConfigStore((s) => s.kasalFlowEnabled);
 
   // Picking a chip selects that answer mode (so the composer's mode pill matches)
   // and seeds an editable starter prompt.
@@ -159,7 +159,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
           >
             Agent Builder
           </button>
-          {crewAIFlowEnabled && (
+          {kasalFlowEnabled && (
             <>
               {' '}or sequence crews into a workflow in the{' '}
               <button

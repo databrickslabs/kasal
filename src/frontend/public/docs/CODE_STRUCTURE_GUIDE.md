@@ -24,7 +24,7 @@ A fast, skimmable map of the repository to help you find the right place quickly
 - main.py: FastAPI app bootstrap, CORS, middleware, startup/shutdown, scheduler, API router registration
 - api/: HTTP routers per domain (agents, crews, executions, tools, models, engine-config, etc.)
 - services/: Business logic & orchestration
-  - Orchestration: execution_service.py, crewai_execution_service.py, process_crew_executor.py, scheduler_service.py
+  - Orchestration: execution_service.py, kasal_execution_service.py, process_crew_executor.py, scheduler_service.py
   - Integrations: databricks_*_service.py, mlflow_service.py
   - Observability: execution_logs_service.py, execution_trace_service.py, documentation_embedding_service.py
 - repositories/: Data access (SQL/external/vector/mlflow)
@@ -69,14 +69,14 @@ Common examples under src/backend/src/api/:
 
 ## Core and engines
 - src/backend/src/core/llm_manager.py: provider/model selection, streaming options
-- src/backend/src/engines/crewai/*: crew preparation, execution runner, callbacks, memory/tool adapters
+- src/backend/src/engines/kasal/*: crew preparation, execution runner, callbacks, memory/tool adapters
 
 ## How to trace a feature
 1) Start at the router file for the endpoint.
 2) Open the called service and scan business logic.
 3) Inspect repository methods and related models.
 4) Check Pydantic schemas for request/response contracts.
-5) Search for engine usage under engines/crewai if orchestration is involved.
+5) Search for engine usage under engines/kasal if orchestration is involved.
 
 ---
 
@@ -124,7 +124,7 @@ Common examples under src/backend/src/api/:
 
 ### Services (selected)
 - services/execution_service.py: high-level execution orchestration
-- services/crewai_execution_service.py, engines/crewai/paths/crew/execution_runner.py: CrewAI integration points
+- services/kasal_execution_service.py, engines/kasal/paths/crew/execution_runner.py: CrewAI integration points
 - services/scheduler_service.py: background scheduling
 - services/documentation_embedding_service.py: embeddings for better generation
 
@@ -162,7 +162,7 @@ Notes:
 ## Engines and orchestration
 
 - Engine selection: src/backend/src/engines/engine_factory.py
-- CrewAI integration lives under src/backend/src/engines/crewai/, organized into:
+- CrewAI integration lives under src/backend/src/engines/kasal/, organized into:
   paths/ (per-execution flavours), kernel/ (agent/task builders, security, tooling helpers),
   infra/ (logging, tracing, mlflow), memory/, guardrails/, callbacks/, config/, tools/, exporters/
   - paths/crew/crew_preparation.py: build agents, tools, memory for a run
@@ -199,7 +199,7 @@ Memory/model caveat:
 
 1) Router (executions_router.py) accepts POST /executions with schema
 2) Service (execution_service.py) validates logic, kicks off orchestration
-3) Engine (engines/crewai/...) prepares crew and runs execution
+3) Engine (engines/kasal/...) prepares crew and runs execution
 4) Logs/Traces recorded via services and repositories
 5) Repositories (execution_repository.py) persist status/history
 6) Client polls GET /executions/{id} and GET /execution-logs/{id}
@@ -219,7 +219,7 @@ Memory/model caveat:
 - Compose routers: src/backend/src/api/__init__.py
 - Settings: src/backend/src/config/settings.py
 - Sessions: src/backend/src/db/session.py
-- CrewAI runner: src/backend/src/engines/crewai/paths/crew/execution_runner.py
+- CrewAI runner: src/backend/src/engines/kasal/paths/crew/execution_runner.py
 
 ---
 

@@ -452,7 +452,7 @@ class TestEngineConfigurationSecurity:
         """Test that regular users cannot view flow enabled status."""
         # Regular user should get 403
         response = await async_client.get(
-            "/api/v1/engine-config/crewai/flow-enabled",
+            "/api/v1/engine-config/kasal/flow-enabled",
             headers={"X-Forwarded-Email": "regular_user@example.com"},
         )
 
@@ -467,7 +467,7 @@ class TestEngineConfigurationSecurity:
         """Test that regular users cannot modify flow enabled status."""
         # Regular user should get 403
         response = await async_client.patch(
-            "/api/v1/engine-config/crewai/flow-enabled",
+            "/api/v1/engine-config/kasal/flow-enabled",
             json={"flow_enabled": True},
             headers={"X-Forwarded-Email": "regular_user@example.com"},
         )

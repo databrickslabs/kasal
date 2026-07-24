@@ -1,0 +1,351 @@
+"""
+Unit tests for EmbedderConfigBuilder
+
+Includes regression test for critical bug fix where crew_kwargs was replaced with empty dict.
+"""
+import os
+import sys
+from unittest.mock import MagicMock
+
+# Set database type to sqlite for testing
+os.environ.setdefault("DATABASE_TYPE", "sqlite")
+os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
+
+# Mock heavy third-party modules that are not available in the test environment.
+# Must be done BEFORE any src.engines imports due to deep import chains.
+_crewai_mock = MagicMock()
+_crewai_tools_mock = MagicMock()
+
+_MODULES_TO_MOCK = {
+    'crewai': _crewai_mock,
+    'kasal_engine.tools': _crewai_mock.tools,
+    'kasal_engine.events': _crewai_mock.events,
+    'crewai.flow': _crewai_mock.flow,
+    'kasal_engine.flow': _crewai_mock.flow.flow,
+    'kasal_engine.flow': _crewai_mock.flow.persistence,
+    'kasal_engine.llm': _crewai_mock.llm,
+    'kasal_engine.memory': _crewai_mock.memory,
+    'crewai.memory.storage': _crewai_mock.memory.storage,
+    'crewai.memory.storage.rag_storage': _crewai_mock.memory.storage.rag_storage,
+    'crewai.project': _crewai_mock.project,
+    'crewai.tasks': _crewai_mock.tasks,
+    'kasal_engine.core': _crewai_mock.tasks.llm_guardrail,
+    'kasal_engine.core': _crewai_mock.tasks.task_output,
+    'crewai.utilities': _crewai_mock.utilities,
+    'crewai.utilities.converter': _crewai_mock.utilities.converter,
+    'crewai.utilities.evaluators': _crewai_mock.utilities.evaluators,
+    'crewai.utilities.evaluators.task_evaluator': _crewai_mock.utilities.evaluators.task_evaluator,
+    'crewai.utilities.exceptions': _crewai_mock.utilities.exceptions,
+    'kasal_engine.llm': _crewai_mock.utilities.internal_instructor,
+    'kasal_engine.utils': _crewai_mock.utilities.paths,
+    'kasal_engine.utils': _crewai_mock.utilities.printer,
+    'crewai.knowledge': _crewai_mock.knowledge,
+    'crewai.llms': _crewai_mock.llms,
+    'crewai.llms.providers': _crewai_mock.llms.providers,
+    'crewai.llms.providers.openai': _crewai_mock.llms.providers.openai,
+    'kasal_engine.llm': _crewai_mock.llms.providers.openai.completion,
+    'crewai.events.types': _crewai_mock.events.types,
+    'kasal_engine.events': _crewai_mock.events.types.llm_events,
+    'kasal_engine.tools': _crewai_tools_mock,
+    'asyncpg': MagicMock(),
+    'chromadb': MagicMock(),
+}
+
+_originals = {}
+for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
+    _originals[_mod_name] = sys.modules.get(_mod_name)
+    sys.modules[_mod_name] = _mock_obj
+
+import pytest
+from unittest.mock import patch, AsyncMock
+from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
+
+# Immediately restore original modules after our import so that other test
+# files collected later by pytest do not see the mocked crewai modules.
+for _mod_name, _original in _originals.items():
+    if _original is None:
+        sys.modules.pop(_mod_name, None)
+    else:
+        sys.modules[_mod_name] = _original
+
+
+class TestEmbedderConfigBuilder:
+    """Test EmbedderConfigBuilder class"""
+
+    @pytest.mark.asyncio
+    async def test_configure_databricks_embedder_preserves_crew_kwargs(self):
+        """
+        REGRESSION TEST: Verify that _configure_databricks_embedder preserves crew_kwargs.
+
+        This tests the fix for a critical bug where crew_kwargs was replaced with an empty dict {},
+        causing all base fields (agents, tasks, process, verbose, memory) to be lost, which resulted
+        in "1 validation error for Crew" when trying to create the Crew instance.
+
+        The bug was in embedder_config_builder.py where _configure_databricks_embedder returned
+        `return {}, databricks_embedder, embedder_config` instead of returning the crew_kwargs it received.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'databricks',
+                        'config': {'model': 'databricks-gte-large-en'}
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        # Initial crew_kwargs with all required base fields
+        initial_crew_kwargs = {
+            'agents': ['agent1', 'agent2'],
+            'tasks': ['task1', 'task2'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        # Mock the auth and database calls
+        with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
+            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+                with patch.object(builder, '_get_databricks_endpoint', new_callable=AsyncMock, return_value='https://example.databricks.com'):
+                    # Setup mocks
+                    mock_auth.return_value = ({'Authorization': 'Bearer token'}, None)
+                    mock_api_key.return_value = 'test_key'
+
+                    # Call configure_embedder
+                    result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+                    # CRITICAL ASSERTIONS: Verify that ALL base fields are preserved
+                    assert 'agents' in result_kwargs, "agents field was lost - regression detected!"
+                    assert 'tasks' in result_kwargs, "tasks field was lost - regression detected!"
+                    assert 'process' in result_kwargs, "process field was lost - regression detected!"
+                    assert 'verbose' in result_kwargs, "verbose field was lost - regression detected!"
+                    assert 'memory' in result_kwargs, "memory field was lost - regression detected!"
+
+                    # Verify values are unchanged
+                    assert result_kwargs['agents'] == ['agent1', 'agent2']
+                    assert result_kwargs['tasks'] == ['task1', 'task2']
+                    assert result_kwargs['process'] == 'sequential'
+                    assert result_kwargs['verbose'] is True
+                    assert result_kwargs['memory'] is True
+
+                    # Verify custom embedder was created
+                    assert custom_embedder is not None
+                    assert embedder_config is not None
+
+    @pytest.mark.asyncio
+    async def test_configure_databricks_embedder_error_path_preserves_crew_kwargs(self):
+        """
+        REGRESSION TEST: Verify error paths also preserve crew_kwargs.
+
+        Even when errors occur (auth failure, no API key), the method must return
+        crew_kwargs instead of an empty dict to prevent losing base fields.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'databricks',
+                        'config': {'model': 'databricks-gte-large-en'}
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token=None)
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        # Mock auth to fail (no token, no API key)
+        with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
+            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+                mock_auth.return_value = (None, "Auth failed")
+                mock_api_key.return_value = None
+
+                # Call configure_embedder - should fail gracefully
+                result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+                # CRITICAL: Even on error, crew_kwargs must be preserved
+                assert 'agents' in result_kwargs, "agents field was lost on error path - regression detected!"
+                assert 'tasks' in result_kwargs, "tasks field was lost on error path - regression detected!"
+                assert 'process' in result_kwargs, "process field was lost on error path - regression detected!"
+                assert result_kwargs['agents'] == ['agent1']
+                assert result_kwargs['tasks'] == ['task1']
+
+                # No Databricks embedder could be built…
+                assert custom_embedder is None
+                # …so the builder falls back to a LOCAL Ollama embedder (the
+                # FastEmbed fallback was retired — this CrewAI build has no
+                # "fastembed" provider, so memory init crashed). Model/host are
+                # env-driven, never hardcoded.
+                assert embedder_config is not None
+                assert embedder_config['provider'] == 'ollama'
+                assert result_kwargs['embedder'] == embedder_config
+
+    @pytest.mark.asyncio
+    async def test_configure_embedder_with_no_embedder_config(self):
+        """
+        Test that configure_embedder defaults to Databricks when no embedder config found.
+
+        The system always defaults to Databricks embedder if no valid embedder config is provided.
+        This test verifies that crew_kwargs base fields are preserved even when defaulting.
+        """
+        config = {
+            'agents': [
+                {'role': 'test_agent'}  # No embedder_config
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
+            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+                with patch.object(builder, '_get_databricks_endpoint', new_callable=AsyncMock, return_value='https://example.databricks.com'):
+                    mock_auth.return_value = ({'Authorization': 'Bearer token'}, None)
+                    mock_api_key.return_value = 'test_key'
+
+                    result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+                    # Base fields must be preserved
+                    assert 'agents' in result_kwargs, "agents field lost with default embedder"
+                    assert 'tasks' in result_kwargs, "tasks field lost with default embedder"
+                    assert result_kwargs['agents'] == ['agent1']
+                    assert result_kwargs['tasks'] == ['task1']
+
+                    # Databricks embedder should be created as default
+                    assert custom_embedder is not None
+                    assert embedder_config is not None
+
+    @pytest.mark.asyncio
+    async def test_configure_embedder_with_openai_provider(self):
+        """Test that configure_embedder preserves crew_kwargs with OpenAI provider."""
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'openai',
+                        'config': {'model': 'text-embedding-ada-002'}
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            mock_api_key.return_value = 'test_openai_key'
+
+            result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+            # Base fields must be preserved
+            assert 'agents' in result_kwargs
+            assert 'tasks' in result_kwargs
+            assert 'process' in result_kwargs
+            assert result_kwargs['agents'] == ['agent1']
+
+            # Embedder should be configured
+            assert 'embedder' in result_kwargs
+            assert result_kwargs['embedder']['provider'] == 'openai'
+
+    @pytest.mark.asyncio
+    async def test_openai_embedder_default_model_is_text_embedding_3_large(self):
+        """
+        Verify the default OpenAI embedding model is 'text-embedding-3-large'
+        (changed from 'text-embedding-3-small').
+
+        When no model is specified in the embedder config, the OpenAI embedder
+        should default to 'text-embedding-3-large' for higher quality embeddings.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'openai',
+                        'config': {}  # No model specified - should use default
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            mock_api_key.return_value = 'test_openai_key'
+
+            result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+            # Embedder should be configured with the new default model
+            assert 'embedder' in result_kwargs
+            assert result_kwargs['embedder']['provider'] == 'openai'
+            assert result_kwargs['embedder']['config']['model'] == 'text-embedding-3-large'
+
+    @pytest.mark.asyncio
+    async def test_openai_embedder_explicit_model_overrides_default(self):
+        """
+        Verify that an explicitly specified OpenAI model overrides the default.
+        """
+        config = {
+            'agents': [
+                {
+                    'role': 'test_agent',
+                    'embedder_config': {
+                        'provider': 'openai',
+                        'config': {'model': 'text-embedding-ada-002'}
+                    }
+                }
+            ]
+        }
+
+        builder = EmbedderConfigBuilder(config, user_token="test_token")
+
+        initial_crew_kwargs = {
+            'agents': ['agent1'],
+            'tasks': ['task1'],
+            'process': 'sequential',
+            'verbose': True,
+            'memory': True
+        }
+
+        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            mock_api_key.return_value = 'test_openai_key'
+
+            result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
+
+            # Explicit model should be used, not the default
+            assert result_kwargs['embedder']['config']['model'] == 'text-embedding-ada-002'

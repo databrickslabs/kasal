@@ -26,7 +26,7 @@ Tools are assigned to agents, not to tasks. In an agent's configuration you list
 }
 ```
 
-At execution time the tool factory (`src/engines/crewai/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
+At execution time the tool factory (`src/engines/kasal/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
 
 ### The registry
 
@@ -35,7 +35,7 @@ The set of available tools is seeded into the `tools` table from `src/backend/sr
 ### Native vs custom tools
 
 - Native tools wrap capabilities provided by the CrewAI framework or third-party SDKs (for example `SerperDevTool`, `ScrapeWebsiteTool`, `Dall-E Tool`).
-- Custom tools are implemented in this codebase under `src/backend/src/engines/crewai/tools/custom/` (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools). They follow CrewAI's `BaseTool` interface and call into Kasal's own service layer.
+- Custom tools are implemented in this codebase under `src/backend/src/engines/kasal/tools/custom/` (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools). They follow CrewAI's `BaseTool` interface and call into Kasal's own service layer.
 
 ## Tool categories
 

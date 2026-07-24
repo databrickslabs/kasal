@@ -40,11 +40,11 @@ src/
 ├── schemas/         # Pydantic validation schemas
 ├── services/        # Business logic layer (see services/CLAUDE.md)
 ├── repositories/    # Data access layer (see repositories/CLAUDE.md)
-├── engines/crewai/  # CrewAI engine — POST-REFACTOR layout (see engines/crewai/CLAUDE.md)
+├── engines/kasal/   # Kasal native engine — POST-REFACTOR layout (see engines/kasal/CLAUDE.md)
 └── main.py          # Application entry point (uvicorn target: src.main:app)
 ```
 
-### CrewAI engine (three execution paths)
+### Kasal engine (three execution paths)
 The engine has three answer paths selected by `execution_type`:
 - `"agent"` → **light** path = **ChatMode / chat answer mode**, a single agent run
   in-process (`Agent.kickoff_async`) for sub-second latency.
@@ -54,7 +54,7 @@ The engine has three answer paths selected by `execution_type`:
 The engine was restructured into `paths/{light_agent,crew,flow}/` over a shared
 `kernel/`, plus `infra/`, `memory/`, `guardrails/{core,demo}/`. The old
 `common/`, `helpers/`, `utils/`, `services/`, `mcp/` packages are gone. See
-`src/backend/src/engines/crewai/CLAUDE.md` for details.
+`src/backend/src/engines/kasal/CLAUDE.md` for details.
 
 ## Database Patterns
 
@@ -184,7 +184,7 @@ Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
 - NOTE: run_name is NOT included - this ensures memory persists across all runs of the same crew structure
 - Same crew configuration (agents, tasks, model) gets same ID across ALL runs
 - Group_id ensures complete tenant isolation
-- Long-Term Memory uses EXACT TEXT MATCH on task_description (CrewAI design decision)
+- Long-Term Memory uses EXACT TEXT MATCH on task_description (engine design, inherited from crewAI)
 
 ## Testing Requirements
 
@@ -207,14 +207,14 @@ Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
 
 ## AI Engine Integration
 
-### CrewAI Integration Points
-- **Engine Service** (`engines/crewai/crewai_engine_service.py`): the hub that dispatches to one of three paths.
-- **Three execution paths** (`engines/crewai/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
-- **Kernel** (`engines/crewai/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
-- **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to CrewAI shape.
-- **Tool Factory** (`engines/crewai/tools/`): extensible tool system (see tools/CLAUDE.md).
+### Kasal Engine Integration Points
+- **Engine Service** (`engines/kasal/kasal_engine_service.py`): the hub that dispatches to one of three paths.
+- **Three execution paths** (`engines/kasal/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
+- **Kernel** (`engines/kasal/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
+- **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to engine shape.
+- **Tool Factory** (`engines/kasal/tools/`): extensible tool system (see tools/CLAUDE.md).
 
-See `engines/crewai/CLAUDE.md` for the full path model and the subprocess-boundary rules.
+See `engines/kasal/CLAUDE.md` for the full path model and the subprocess-boundary rules.
 
 ## Environment
 

@@ -1103,7 +1103,7 @@ class TestResumeFlowExecution:
         with patch(
             'src.repositories.execution_history_repository.ExecutionHistoryRepository'
         ) as mock_repo_class, \
-             patch('src.services.crewai_execution_service.CrewAIExecutionService'), \
+             patch('src.services.kasal_execution_service.KasalExecutionService'), \
              patch('src.services.execution_status_service.ExecutionStatusService'), \
              patch('src.utils.user_context.GroupContext'), \
              patch('asyncio.create_task') as mock_create_task, \
@@ -1181,7 +1181,7 @@ class TestRetryPreviousCrew:
         with patch(
             'src.repositories.execution_history_repository.ExecutionHistoryRepository'
         ) as mock_repo_class, \
-             patch('src.services.crewai_execution_service.CrewAIExecutionService'), \
+             patch('src.services.kasal_execution_service.KasalExecutionService'), \
              patch('src.services.execution_status_service.ExecutionStatusService'), \
              patch('src.utils.user_context.GroupContext'), \
              patch('asyncio.create_task') as mock_create_task, \

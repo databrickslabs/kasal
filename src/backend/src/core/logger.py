@@ -753,7 +753,7 @@ class LoggerManager:
                     logger.setLevel(global_level)
         else:
             # Check if it's a third-party library
-            third_party_patterns = ["sqlalchemy", "uvicorn", "httpx", "crewai", "mlflow", "litellm"]
+            third_party_patterns = ["sqlalchemy", "uvicorn", "httpx", "crewai", "kasal_engine", "engines.kasal", "mlflow", "litellm"]
             is_third_party = any(pattern in name.lower() for pattern in third_party_patterns)
 
             if is_third_party:

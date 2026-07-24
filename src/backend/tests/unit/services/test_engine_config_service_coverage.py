@@ -19,7 +19,7 @@ def make_service():
     return svc
 
 
-def make_config(id=1, engine_name="crewai", config_key="llm", config_value="gpt4"):
+def make_config(id=1, engine_name="kasal", config_key="llm", config_value="gpt4"):
     cfg = MagicMock()
     cfg.id = id
     cfg.engine_name = engine_name
@@ -57,7 +57,7 @@ async def test_find_by_engine_name():
     svc = make_service()
     cfg = make_config()
     svc.repository.find_by_engine_name = AsyncMock(return_value=cfg)
-    result = await svc.find_by_engine_name("crewai")
+    result = await svc.find_by_engine_name("kasal")
     assert result is cfg
 
 
@@ -68,7 +68,7 @@ async def test_find_by_engine_and_key():
     svc = make_service()
     cfg = make_config()
     svc.repository.find_by_engine_and_key = AsyncMock(return_value=cfg)
-    result = await svc.find_by_engine_and_key("crewai", "llm")
+    result = await svc.find_by_engine_and_key("kasal", "llm")
     assert result is cfg
 
 
@@ -91,7 +91,7 @@ async def test_create_already_exists():
     existing = make_config()
     svc.repository.find_by_engine_and_key = AsyncMock(return_value=existing)
     config_data = MagicMock()
-    config_data.engine_name = "crewai"
+    config_data.engine_name = "kasal"
     config_data.config_key = "llm"
     with pytest.raises(ValueError, match="already exists"):
         await svc.create_engine_config(config_data)
@@ -103,9 +103,9 @@ async def test_create_with_model_dump():
     svc.repository.find_by_engine_and_key = AsyncMock(return_value=None)
     svc.repository.create = AsyncMock(return_value=make_config())
     config_data = MagicMock()
-    config_data.engine_name = "crewai"
+    config_data.engine_name = "kasal"
     config_data.config_key = "llm"
-    config_data.model_dump = MagicMock(return_value={"engine_name": "crewai", "config_key": "llm"})
+    config_data.model_dump = MagicMock(return_value={"engine_name": "kasal", "config_key": "llm"})
     result = await svc.create_engine_config(config_data)
     assert result is not None
 
@@ -120,9 +120,9 @@ async def test_create_no_model_dump_no_dict():
 
     # Object with 'dict' attribute but model_dump() also works (exercising hasattr(dict) branch)
     config_data = MagicMock(spec=['engine_name', 'config_key', 'dict', 'model_dump'])
-    config_data.engine_name = "crewai"
+    config_data.engine_name = "kasal"
     config_data.config_key = "timeout"
-    config_data.model_dump = MagicMock(return_value={"engine_name": "crewai", "config_key": "timeout"})
+    config_data.model_dump = MagicMock(return_value={"engine_name": "kasal", "config_key": "timeout"})
     # hasattr(config_data, 'dict') is True but hasattr(config_data, 'model_dump') is also True
     # So it goes to the first branch
     result = await svc.create_engine_config(config_data)
@@ -135,7 +135,7 @@ async def test_create_no_model_dump_no_dict():
 async def test_update_engine_config_not_found():
     svc = make_service()
     svc.repository.find_by_engine_name = AsyncMock(return_value=None)
-    result = await svc.update_engine_config("crewai", MagicMock())
+    result = await svc.update_engine_config("kasal", MagicMock())
     assert result is None
 
 
@@ -144,11 +144,11 @@ async def test_update_engine_config_with_model_dump():
     svc = make_service()
     existing = make_config()
     svc.repository.find_by_engine_name = AsyncMock(return_value=existing)
-    updated = make_config(engine_name="crewai")
+    updated = make_config(engine_name="kasal")
     svc.repository.update = AsyncMock(return_value=updated)
     config_data = MagicMock()
     config_data.model_dump.return_value = {"config_key": "llm", "config_value": "gpt4"}
-    result = await svc.update_engine_config("crewai", config_data)
+    result = await svc.update_engine_config("kasal", config_data)
     assert result is updated
 
 
@@ -158,7 +158,7 @@ async def test_update_engine_config_with_model_dump():
 async def test_toggle_engine_enabled_not_found():
     svc = make_service()
     svc.repository.toggle_enabled = AsyncMock(return_value=None)
-    result = await svc.toggle_engine_enabled("crewai", True)
+    result = await svc.toggle_engine_enabled("kasal", True)
     assert result is None
 
 
@@ -168,7 +168,7 @@ async def test_toggle_engine_enabled_success():
     cfg = make_config()
     svc.repository.toggle_enabled = AsyncMock(return_value=cfg)
     svc.repository.find_by_engine_name = AsyncMock(return_value=cfg)
-    result = await svc.toggle_engine_enabled("crewai", True)
+    result = await svc.toggle_engine_enabled("kasal", True)
     assert result is cfg
 
 
@@ -177,7 +177,7 @@ async def test_toggle_engine_enabled_exception_reraises():
     svc = make_service()
     svc.repository.toggle_enabled = AsyncMock(side_effect=Exception("DB error"))
     with pytest.raises(Exception, match="DB error"):
-        await svc.toggle_engine_enabled("crewai", True)
+        await svc.toggle_engine_enabled("kasal", True)
 
 
 # ---- update_config_value ----
@@ -186,7 +186,7 @@ async def test_toggle_engine_enabled_exception_reraises():
 async def test_update_config_value_not_found():
     svc = make_service()
     svc.repository.update_config_value = AsyncMock(return_value=None)
-    result = await svc.update_config_value("crewai", "llm", "gpt4")
+    result = await svc.update_config_value("kasal", "llm", "gpt4")
     assert result is None
 
 
@@ -196,7 +196,7 @@ async def test_update_config_value_success():
     cfg = make_config()
     svc.repository.update_config_value = AsyncMock(return_value=cfg)
     svc.repository.find_by_engine_and_key = AsyncMock(return_value=cfg)
-    result = await svc.update_config_value("crewai", "llm", "gpt4")
+    result = await svc.update_config_value("kasal", "llm", "gpt4")
     assert result is cfg
 
 
@@ -205,32 +205,32 @@ async def test_update_config_value_exception_reraises():
     svc = make_service()
     svc.repository.update_config_value = AsyncMock(side_effect=Exception("update error"))
     with pytest.raises(Exception, match="update error"):
-        await svc.update_config_value("crewai", "llm", "gpt4")
+        await svc.update_config_value("kasal", "llm", "gpt4")
 
 
-# ---- get_crewai_flow_enabled ----
+# ---- get_kasal_flow_enabled ----
 
 @pytest.mark.asyncio
-async def test_get_crewai_flow_enabled_success():
+async def test_get_kasal_flow_enabled_success():
     svc = make_service()
-    svc.repository.get_crewai_flow_enabled = AsyncMock(return_value=True)
-    result = await svc.get_crewai_flow_enabled()
+    svc.repository.get_kasal_flow_enabled = AsyncMock(return_value=True)
+    result = await svc.get_kasal_flow_enabled()
     assert result is True
 
 
 @pytest.mark.asyncio
-async def test_get_crewai_flow_enabled_exception():
+async def test_get_kasal_flow_enabled_exception():
     svc = make_service()
-    svc.repository.get_crewai_flow_enabled = AsyncMock(side_effect=Exception("repo error"))
-    result = await svc.get_crewai_flow_enabled()
+    svc.repository.get_kasal_flow_enabled = AsyncMock(side_effect=Exception("repo error"))
+    result = await svc.get_kasal_flow_enabled()
     assert result is True  # Defaults to True
 
 
-# ---- set_crewai_flow_enabled ----
+# ---- set_kasal_flow_enabled ----
 
 @pytest.mark.asyncio
-async def test_set_crewai_flow_enabled():
+async def test_set_kasal_flow_enabled():
     svc = make_service()
-    svc.repository.set_crewai_flow_enabled = AsyncMock(return_value=True)
-    result = await svc.set_crewai_flow_enabled(True)
+    svc.repository.set_kasal_flow_enabled = AsyncMock(return_value=True)
+    result = await svc.set_kasal_flow_enabled(True)
     assert result is True

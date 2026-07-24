@@ -5,7 +5,7 @@ import asyncio
 
 # Test ToolFactory class - based on actual code inspection
 
-from src.engines.crewai.tools.tool_factory import ToolFactory
+from src.engines.kasal.tools.tool_factory import ToolFactory
 
 
 class TestToolFactoryInit:

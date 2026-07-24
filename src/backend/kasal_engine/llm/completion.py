@@ -1,0 +1,401 @@
+"""OpenAICompletion — OpenAI-compatible provider (Chat Completions + Responses).
+
+Authored module; surface validated against the kasal_engine datamodel
+(the 33 kasal-required members of crewAI 1.15.5's 84; kasal's
+DatabricksCodexCompletion subclasses this and overrides the Responses
+plumbing). Uses the ``openai`` SDK — an optional dependency; a clear
+ImportError is raised on first use if it is missing.
+"""
+
+import logging
+import os
+from collections.abc import Callable
+from typing import Any, Literal
+
+from pydantic import BaseModel, PrivateAttr
+
+from ..events.types import LLMCallType
+from .base import BaseLLM
+from .exceptions import LLMContextLengthExceededError, is_context_length_exceeded
+
+logger = logging.getLogger(__name__)
+
+_MAX_TOOL_ROUNDS = 15
+
+
+class OpenAICompletion(BaseLLM):
+    llm_type: Literal["openai"] = "openai"
+
+    model: str = "gpt-4o"
+    timeout: float | None = None
+    max_retries: int = 2
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    max_tokens: int | None = None
+    max_completion_tokens: int | None = None
+    stream: bool = False
+    response_format: Any | None = None
+    reasoning_effort: str | None = None
+    api: Literal["completions", "responses"] = "completions"
+    instructions: str | None = None
+    store: bool | None = None
+    parse_tool_outputs: bool = False
+    auto_chain: bool = False
+    auto_chain_reasoning: bool = False
+    api_base: str | None = None
+
+    _client: Any = PrivateAttr(default=None)
+    _last_response_id: str | None = PrivateAttr(default=None)
+    _last_reasoning_items: list[Any] | None = PrivateAttr(default=None)
+
+    @property
+    def client(self) -> Any:
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ImportError as e:
+                raise ImportError(
+                    "kasal_engine.llm.OpenAICompletion requires the 'openai' "
+                    "package: pip install openai"
+                ) from e
+            self._client = OpenAI(
+                api_key=self.api_key or os.environ.get("OPENAI_API_KEY"),
+                base_url=self.base_url or self.api_base,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+            )
+        return self._client
+
+    def supports_native_structured_output(self) -> bool:
+        return True
+
+    def supports_function_calling(self) -> bool:
+        return True
+
+    def supports_stop_words(self) -> bool:
+        model = self.model.lower()
+        if "gpt-5" in model:
+            return False
+        return not model.startswith(("o1", "o3", "o4"))
+
+    async def acall(
+        self,
+        messages: str | list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        callbacks: list[Any] | None = None,
+        available_functions: dict[str, Callable[..., Any]] | None = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        response_model: type[BaseModel] | None = None,
+    ) -> str:
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.call, messages, tools, callbacks, available_functions,
+            from_task, from_agent, response_model,
+        )
+
+    # ------------------------------- call -------------------------------
+
+    def call(
+        self,
+        messages: str | list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        callbacks: list[Any] | None = None,
+        available_functions: dict[str, Callable[..., Any]] | None = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        response_model: type[BaseModel] | None = None,
+    ) -> str:
+        conversation = self._normalize_messages(messages)
+        self._emit_call_started_event(conversation, tools, from_task, from_agent)
+        try:
+            if self.api == "responses":
+                text, usage, call_type = self._call_responses_api(
+                    conversation, tools, available_functions
+                )
+            else:
+                text, usage, call_type = self._call_completions_api(
+                    conversation, tools, available_functions
+                )
+        except LLMContextLengthExceededError:
+            raise
+        except Exception as e:
+            self._emit_call_failed_event(str(e), from_task, from_agent)
+            if is_context_length_exceeded(e):
+                raise LLMContextLengthExceededError(str(e)) from e
+            raise
+
+        if self.supports_stop_words():
+            text = self._apply_stop_words(text)
+        self._emit_call_completed_event(
+            text, call_type, usage, conversation, from_task, from_agent
+        )
+        return text
+
+    # --------------------------- chat completions ---------------------------
+
+    def _prepare_completion_params(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        skip_file_processing: bool = False,
+    ) -> dict[str, Any]:
+        # skip_file_processing: crewAI 1.14.5 signature compatibility — kasal's
+        # LLM subclasses pass it through; the engine has no file-input
+        # processing path, so it is accepted and inert.
+        params: dict[str, Any] = {"model": self.model, "messages": messages}
+        for key, value in (
+            ("temperature", self.temperature),
+            ("top_p", self.top_p),
+            ("frequency_penalty", self.frequency_penalty),
+            ("presence_penalty", self.presence_penalty),
+            ("reasoning_effort", self.reasoning_effort),
+            ("stop", self.stop if self.supports_stop_words() else None),
+            ("tools", tools),
+        ):
+            if value is not None:
+                params[key] = value
+        if self.max_completion_tokens is not None:
+            params["max_completion_tokens"] = self.max_completion_tokens
+        elif self.max_tokens is not None:
+            params["max_tokens"] = self.max_tokens
+        if isinstance(self.response_format, type) and issubclass(
+            self.response_format, BaseModel
+        ):
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": self.response_format.__name__,
+                    "schema": self.response_format.model_json_schema(),
+                },
+            }
+        elif self.response_format is not None:
+            params["response_format"] = self.response_format
+        params.update(self.additional_params)
+        return params
+
+    def _call_completions_api(
+        self,
+        conversation: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        available_functions: dict[str, Callable[..., Any]] | None,
+    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+        call_type = LLMCallType.LLM_CALL
+        usage: dict[str, Any] | None = None
+        for _round in range(_MAX_TOOL_ROUNDS):
+            response = self.client.chat.completions.create(
+                **self._prepare_completion_params(conversation, tools)
+            )
+            usage = self._extract_chat_token_usage(response)
+            self._track_token_usage_internal(usage)
+            function_calls = self._extract_function_calls_from_response(response)
+            message = response.choices[0].message
+            if function_calls and available_functions:
+                call_type = LLMCallType.TOOL_CALL
+                conversation.append(
+                    {
+                        "role": "assistant",
+                        "content": message.content,
+                        "tool_calls": [
+                            {
+                                "id": fc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": fc["name"],
+                                    "arguments": fc["arguments"],
+                                },
+                            }
+                            for fc in function_calls
+                        ],
+                    }
+                )
+                for fc in function_calls:
+                    result = self._handle_tool_execution(
+                        fc["name"], fc["arguments"], available_functions
+                    )
+                    conversation.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": fc["id"],
+                            "content": result if result is not None else "Tool not found.",
+                        }
+                    )
+                continue
+            return message.content or "", usage, call_type
+        raise RuntimeError(
+            f"Tool-calling did not converge within {_MAX_TOOL_ROUNDS} rounds "
+            f"for model {self.model}."
+        )
+
+    def _extract_chat_token_usage(self, response: Any) -> dict[str, Any] | None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        details = getattr(usage, "prompt_tokens_details", None)
+        return {
+            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+            "completion_tokens": getattr(usage, "completion_tokens", 0),
+            "total_tokens": getattr(usage, "total_tokens", 0),
+            "cached_prompt_tokens": getattr(details, "cached_tokens", 0) if details else 0,
+        }
+
+    def _extract_function_calls_from_response(self, response: Any) -> list[dict[str, Any]]:
+        """Normalized tool calls from a chat completion or a Responses object."""
+        calls: list[dict[str, Any]] = []
+        choices = getattr(response, "choices", None)
+        if choices:
+            tool_calls = getattr(choices[0].message, "tool_calls", None) or []
+            for tc in tool_calls:
+                function = getattr(tc, "function", None)
+                if function is not None:
+                    calls.append(
+                        {
+                            "id": tc.id,
+                            "name": function.name,
+                            "arguments": function.arguments,
+                        }
+                    )
+            return calls
+        for item in getattr(response, "output", None) or []:
+            if getattr(item, "type", None) == "function_call":
+                calls.append(
+                    {
+                        "id": getattr(item, "call_id", None) or getattr(item, "id", None),
+                        "name": item.name,
+                        "arguments": item.arguments,
+                    }
+                )
+        return calls
+
+    # ----------------------------- responses api -----------------------------
+
+    def _prepare_responses_params(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_model: type[BaseModel] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"model": self.model, "input": messages}
+        if self.instructions is not None:
+            params["instructions"] = self.instructions
+        if self.store is not None:
+            params["store"] = self.store
+        if self.auto_chain and self._last_response_id:
+            params["previous_response_id"] = self._last_response_id
+        if self.max_completion_tokens or self.max_tokens:
+            params["max_output_tokens"] = self.max_completion_tokens or self.max_tokens
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.reasoning_effort is not None:
+            params["reasoning"] = {"effort": self.reasoning_effort}
+        if tools:
+            params["tools"] = [
+                {
+                    "type": "function",
+                    "name": t["function"]["name"],
+                    "description": t["function"].get("description", ""),
+                    "parameters": t["function"].get("parameters", {}),
+                }
+                if t.get("type") == "function" and "function" in t
+                else t
+                for t in tools
+            ]
+        params.update(self.additional_params)
+        return params
+
+    def _call_responses_api(
+        self,
+        conversation: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        available_functions: dict[str, Callable[..., Any]] | None,
+    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+        call_type = LLMCallType.LLM_CALL
+        usage: dict[str, Any] | None = None
+        for _round in range(_MAX_TOOL_ROUNDS):
+            response = self.client.responses.create(
+                **self._prepare_responses_params(conversation, tools)
+            )
+            usage = self._extract_responses_token_usage(response)
+            self._track_token_usage_internal(usage)
+            text, function_calls = self._handle_responses(response)
+            if function_calls and available_functions:
+                call_type = LLMCallType.TOOL_CALL
+                for fc in function_calls:
+                    result = self._handle_tool_execution(
+                        fc["name"], fc["arguments"], available_functions
+                    )
+                    conversation.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": fc["id"],
+                            "output": result if result is not None else "Tool not found.",
+                        }
+                    )
+                continue
+            return text, usage, call_type
+        raise RuntimeError(
+            f"Tool-calling did not converge within {_MAX_TOOL_ROUNDS} rounds "
+            f"for model {self.model}."
+        )
+
+    def _handle_responses(
+        self,
+        response: Any,
+        params: dict[str, Any] | None = None,
+        available_functions: dict[str, Any] | None = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        response_model: type[BaseModel] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Extract output text + function calls; track chaining state."""
+        self._last_response_id = getattr(response, "id", None)
+        if self.auto_chain_reasoning:
+            self._last_reasoning_items = self._extract_reasoning_items(response)
+        text = getattr(response, "output_text", None)
+        if text is None:
+            chunks = []
+            for item in getattr(response, "output", None) or []:
+                for part in getattr(item, "content", None) or []:
+                    part_text = getattr(part, "text", None)
+                    if part_text:
+                        chunks.append(part_text)
+            text = "".join(chunks)
+        return text, self._extract_function_calls_from_response(response)
+
+    def _extract_responses_token_usage(self, response: Any) -> dict[str, Any] | None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        return {
+            "prompt_tokens": getattr(usage, "input_tokens", 0),
+            "completion_tokens": getattr(usage, "output_tokens", 0),
+            "total_tokens": getattr(usage, "total_tokens", 0),
+        }
+
+    def _extract_reasoning_items(self, response: Any) -> list[Any]:
+        return [
+            item
+            for item in (getattr(response, "output", None) or [])
+            if getattr(item, "type", None) == "reasoning"
+        ]
+
+    def _extract_builtin_tool_outputs(self, response: Any) -> list[dict[str, Any]]:
+        outputs = []
+        for item in getattr(response, "output", None) or []:
+            item_type = getattr(item, "type", "")
+            if item_type in (
+                "web_search_call",
+                "file_search_call",
+                "code_interpreter_call",
+                "computer_call",
+            ):
+                outputs.append(
+                    {
+                        "id": getattr(item, "id", None),
+                        "status": getattr(item, "status", None),
+                        "type": item_type,
+                    }
+                )
+        return outputs

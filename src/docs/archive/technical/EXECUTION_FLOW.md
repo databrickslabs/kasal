@@ -195,7 +195,7 @@ async def execute_agents(
 
 ### Step 5: Crew Preparation
 
-**Location**: `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`
+**Location**: `src/backend/src/engines/kasal/paths/crew/crew_preparation.py`
 
 ```python
 class CrewPreparation:
@@ -224,7 +224,7 @@ class CrewPreparation:
 
 ### Step 6: Execution Runner
 
-**Location**: `src/backend/src/engines/crewai/paths/crew/execution_runner.py`
+**Location**: `src/backend/src/engines/kasal/paths/crew/execution_runner.py`
 
 ```python
 async def run_crew(
@@ -291,7 +291,7 @@ async def run_crew(
 
 ### Step 7: Event Capture
 
-**Location**: `src/backend/src/engines/crewai/callbacks/execution_callback.py`
+**Location**: `src/backend/src/engines/kasal/callbacks/execution_callback.py`
 
 ```python
 def create_execution_callbacks(job_id, config, group_context, crew):

@@ -133,7 +133,7 @@ export const ManualConfigurationForm: React.FC<ManualConfigurationFormProps> = (
         </Typography>
 
         <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-          CrewAI&apos;s unified cognitive memory stores every record in a single index.
+          Kasal&apos;s unified cognitive memory stores every record in a single index.
         </Typography>
 
         <TextField

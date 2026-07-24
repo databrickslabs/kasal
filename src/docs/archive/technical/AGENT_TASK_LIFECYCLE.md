@@ -64,7 +64,7 @@ class Agent(Base):
 
 ### CrewAI Agents (Runtime Objects)
 
-**Location**: `src/backend/src/engines/crewai/paths/crew/agent_adapter.py`
+**Location**: `src/backend/src/engines/kasal/paths/crew/agent_adapter.py`
 
 ```python
 from crewai import Agent
@@ -132,7 +132,7 @@ Frontend sends agent configuration:
 
 ### 2. Preparation Phase
 
-**Location**: `src/backend/src/engines/crewai/paths/crew/crew_preparation.py`
+**Location**: `src/backend/src/engines/kasal/paths/crew/crew_preparation.py`
 
 ```python
 async def _prepare_agents(self):
@@ -207,7 +207,7 @@ Frontend sends task configuration:
 
 ### 2. Task Creation
 
-**Location**: `src/backend/src/engines/crewai/paths/crew/task_adapter.py`
+**Location**: `src/backend/src/engines/kasal/paths/crew/task_adapter.py`
 
 ```python
 async def create_task(task_key, task_config, agent, tools):

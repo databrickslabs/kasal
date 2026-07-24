@@ -374,7 +374,7 @@ describe('MemoryConfiguration', () => {
     await act(async () => renderComponent());
     await waitForLoaded();
     expect(
-      screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/),
+      screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/),
     ).toBeInTheDocument();
   });
 
@@ -452,7 +452,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
+      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
     });
 
     it('handles 404 error with fallback to all configs that have data', async () => {
@@ -542,7 +542,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/CrewAI unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
+      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
     });
 
     it('detectWorkspaceUrl handles error gracefully', async () => {
@@ -1590,82 +1590,6 @@ describe('MemoryConfiguration', () => {
       expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
     });
 
-    it('handleReseedDocumentation via Knowledge Base table', async () => {
-      mockApiClient.post.mockImplementation((url: string) => {
-        if (url === '/memory-backend/databricks/empty-index') return Promise.resolve({ data: { success: true } });
-        if (url === '/documentation-embeddings/seed-all') return Promise.resolve({ data: { success: true } });
-        return Promise.resolve({ data: {} });
-      });
-
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      await waitFor(() => {
-        expect(mockApiClient.post).toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
-        expect(mockApiClient.post).toHaveBeenCalledWith('/documentation-embeddings/seed-all');
-      });
-    });
-
-    it('handleReseedDocumentation handles empty-index failure', async () => {
-      mockApiClient.post.mockResolvedValue({ data: { success: false, message: 'Empty failed' } });
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      await waitFor(() => expect(screen.getByText(/Empty failed/)).toBeInTheDocument());
-    });
-
-    it('handleReseedDocumentation handles seed-all failure', async () => {
-      mockApiClient.post.mockImplementation((url: string) => {
-        if (url === '/memory-backend/databricks/empty-index') return Promise.resolve({ data: { success: true } });
-        if (url === '/documentation-embeddings/seed-all') return Promise.resolve({ data: { success: false, message: 'Seed failed' } });
-        return Promise.resolve({ data: {} });
-      });
-
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      await waitFor(() => expect(screen.getByText('Seed failed')).toBeInTheDocument());
-    });
-
-    it('handleReseedDocumentation handles thrown error', async () => {
-      mockApiClient.post.mockRejectedValue(new Error('seed error'));
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      await waitFor(() => expect(screen.getByText(/seed error/)).toBeInTheDocument());
-    });
-
-    it('handleReseedDocumentation handles AxiosError with response detail', async () => {
-      const axErr = new AxiosError('fail', '500', undefined, undefined, {
-        status: 500, data: { detail: 'Server error detail' }, statusText: 'Error', headers: {}, config: {} as never,
-      } as never);
-      mockApiClient.post.mockRejectedValue(axErr);
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      await waitFor(() => expect(screen.getByText('Server error detail')).toBeInTheDocument());
-    });
-
-    it('handleReseedDocumentation cancelled by user does nothing', async () => {
-      confirmSpy.mockReturnValueOnce(false);
-      await renderAndWaitForDatabricks();
-
-      await waitFor(() => expect(capturedProps.current[KB_TABLE]).toBeDefined());
-      await act(async () => (capturedProps.current[KB_TABLE].onRefresh as Function)());
-
-      expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
-    });
-
     it('handleViewDocuments via IndexManagementTable', async () => {
       await renderAndWaitForDatabricks();
 
@@ -2516,51 +2440,6 @@ describe('MemoryConfiguration', () => {
       });
     });
 
-    it('handleReseedDocumentation returns early when no document endpoint', async () => {
-      // Has document index but no document endpoint
-      mockApiClient.get.mockImplementation((url: string) => {
-        if (url === '/memory-backend/configs/default') {
-          return Promise.resolve({
-            data: {
-              id: 'db-1', backend_type: 'databricks',
-              databricks_config: {
-                workspace_url: 'https://test.databricks.com',
-                endpoint_name: 'mem-ep',
-                memory_index: 'ml.agents.mem',
-                document_index: 'ml.agents.doc',
-              },
-            },
-          });
-        }
-        if (url === '/databricks/environment') return Promise.resolve({ data: { databricks_host: 'https://test.databricks.com' } });
-        if (url === '/memory-backend/databricks/verify-resources') {
-          return Promise.resolve({
-            data: {
-              success: true,
-              resources: {
-                endpoints: { 'mem-ep': { name: 'mem-ep', state: 'ONLINE', ready: true } },
-                indexes: { 'ml.agents.mem': { name: 'ml.agents.mem' }, 'ml.agents.doc': { name: 'ml.agents.doc' } },
-              },
-            },
-          });
-        }
-        if (url === '/memory-backend/databricks/index-info') return Promise.resolve({ data: { success: true, doc_count: 5, status: 'ONLINE', ready: true } });
-        if (url.startsWith('/memory-backend/configs/')) return Promise.resolve({ data: { databricks_config: { embedding_dimension: 1024 } } });
-        if (url === '/database-management/lakebase/instances') return Promise.resolve(paginatedInstances([]));
-        return Promise.resolve({ data: {} });
-      });
-      mockApiClient.put.mockResolvedValue({ data: {} });
-
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
-
-      // Should set error about document endpoint
-      await waitFor(() => expect(screen.getByText(/Could not determine document endpoint/)).toBeInTheDocument());
-    });
-
     it('handleEditChange clears endpoint and unified index when value is undefined', async () => {
       setupDatabricksMocks();
       await act(async () => renderComponent());
@@ -2938,59 +2817,6 @@ describe('MemoryConfiguration', () => {
       // onEmpty: the saved config has no backend_id → early return (no POST).
       await act(async () => (capturedProps.current['IndexManagementTable_Unified Cognitive Memory Index'].onEmpty as Function)('memory'));
       expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
-    });
-
-    it('handleReseedDocumentation returns early when config has no backend_id', async () => {
-      // Setup-built config has a document index (so the Knowledge Base table
-      // renders) but no backend_id → reseed returns at the guard.
-      mockDVSService.performOneClickSetup.mockResolvedValueOnce({
-        success: true,
-        catalog: 'ml',
-        schema: 'agents',
-        endpoints: { document: { name: 'doc-ep' } },
-        indexes: { document: { name: 'ml.agents.doc' } },
-      });
-
-      await act(async () => renderComponent());
-      await waitForLoaded();
-
-      expect(capturedProps.current.AutomaticSetupForm).toBeDefined();
-      await act(async () => (capturedProps.current.AutomaticSetupForm.onSetup as Function)());
-
-      await waitFor(() => expect(screen.getByTestId('configuration-display')).toBeInTheDocument());
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-
-      mockApiClient.post.mockClear();
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
-      // Guard return: no empty-index POST.
-      expect(mockApiClient.post).not.toHaveBeenCalledWith('/memory-backend/databricks/empty-index', expect.anything());
-    });
-
-    it('handleReseedDocumentation refreshes index info after success (timer)', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      setupDatabricksMocks();
-      mockApiClient.post.mockImplementation((url: string) => {
-        if (url === '/memory-backend/databricks/empty-index') return Promise.resolve({ data: { success: true } });
-        if (url === '/documentation-embeddings/seed-all') return Promise.resolve({ data: { success: true } });
-        return Promise.resolve({ data: {} });
-      });
-
-      await act(async () => renderComponent());
-      await act(async () => vi.advanceTimersByTime(100));
-      await waitForLoaded();
-      await waitFor(() => expect(capturedProps.current['IndexManagementTable_Knowledge Base']).toBeDefined());
-
-      await act(async () => (capturedProps.current['IndexManagementTable_Knowledge Base'].onRefresh as Function)());
-
-      // Advance past the 5000ms timer that re-fetches index info.
-      mockApiClient.get.mockClear();
-      await act(async () => vi.advanceTimersByTime(5500));
-
-      await waitFor(() => {
-        expect(mockApiClient.get).toHaveBeenCalledWith('/memory-backend/databricks/index-info', expect.anything());
-      });
-
-      vi.useRealTimers();
     });
 
     it('Initialize Tables shows error when the service reports failure', async () => {

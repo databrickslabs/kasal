@@ -317,7 +317,7 @@ async def get_tool_configuration_schema(
     logger.info(f"Getting configuration schema for tool: {tool_name}")
     # Get the CrewAI engine
     engine = await EngineFactory.get_engine(
-        engine_type="crewai", db=session, initialize=True
+        engine_type="kasal", db=session, initialize=True
     )
 
     # Get tool registry from engine
@@ -350,7 +350,7 @@ async def update_tool_configuration_in_memory(
     logger.info(f"Updating in-memory configuration for tool: {tool_name}")
     # Get the CrewAI engine
     engine = await EngineFactory.get_engine(
-        engine_type="crewai", db=session, initialize=True
+        engine_type="kasal", db=session, initialize=True
     )
 
     # Get tool registry from engine
