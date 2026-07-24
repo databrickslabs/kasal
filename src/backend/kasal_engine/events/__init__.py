@@ -9,7 +9,9 @@ from .bus import (
     crewai_event_bus,
     current_event_context,
     event_context,
+    reset_event_causality,
     set_event_context,
+    triggering_event,
 )
 from .types import (
     AgentExecutionCompletedEvent,
@@ -81,5 +83,7 @@ __all__ = [
     "crewai_event_bus",
     "current_event_context",
     "event_context",
+    "reset_event_causality",
     "set_event_context",
+    "triggering_event",
 ]
