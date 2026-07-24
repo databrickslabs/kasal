@@ -1082,6 +1082,21 @@ def run_crew_in_process(
                                 f"[SUBPROCESS] OTel Event Bridge registration failed (non-fatal): {bridge_err}"
                             )
 
+                    # Live event pipe: forward coalesced LLM token chunks to the
+                    # parent over the (previously producer-less) log_queue so the
+                    # UI streams subprocess runs like the in-process light path.
+                    try:
+                        from src.services.execution_event_pipe import EventPipeWriter
+
+                        EventPipeWriter(log_queue, execution_id).register(crewai_event_bus)
+                        async_logger.info(
+                            f"[SUBPROCESS] Event pipe writer registered for {execution_id}"
+                        )
+                    except Exception as pipe_err:
+                        async_logger.warning(
+                            f"[SUBPROCESS] Event pipe registration failed (non-fatal): {pipe_err}"
+                        )
+
                     # Debug: Print that we're about to configure logging
                     import sys  # Import sys for stderr debugging
 
@@ -1490,6 +1505,15 @@ def run_crew_in_process(
             try:
                 result = loop.run_until_complete(prepare_and_run())
             finally:
+                # Flush remaining token chunks + EOF sentinel so the parent's
+                # relay ends cleanly instead of being cancelled mid-stream.
+                try:
+                    from src.services.execution_event_pipe import close_active_pipe_writer
+
+                    close_active_pipe_writer()
+                except Exception:
+                    pass
+
                 # CRITICAL: Final flush of event bus to ensure all trace handlers complete
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
@@ -2032,12 +2056,16 @@ class ProcessCrewExecutor:
             if old_lakebase_instance is not None:
                 os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
+        # Start a background task to relay live events (LLM token chunks)
+        # from the subprocess to the main process for real-time SSE. Created
+        # before the try so the finally below can always reference it.
+        from src.services.execution_event_pipe import relay_execution_events
+
+        relay_task = asyncio.create_task(
+            relay_execution_events(log_queue, execution_id)
+        )
+
         try:
-            # Start a background task to relay task lifecycle events from subprocess
-            # to the main process for real-time SSE broadcasting
-            relay_task = asyncio.create_task(
-                self._relay_task_events(log_queue, execution_id)
-            )
 
             # Wait for the process to complete, draining result_queue concurrently.
             #
@@ -2073,12 +2101,21 @@ class ProcessCrewExecutor:
 
             drain_thread.join(timeout=10)  # give it a moment to finish
 
-            # Stop the relay task now that the subprocess has finished
-            relay_task.cancel()
+            # The child has exited, so everything it wrote is already in the
+            # queue. Append a parent-side EOF so the relay drains the final
+            # frames and stops deterministically (no grace-timeout burn even
+            # when the child was killed before sending its own sentinel).
+            from src.services.execution_event_pipe import put_parent_eof
+
+            put_parent_eof(log_queue)
             try:
-                await relay_task
-            except asyncio.CancelledError:
-                pass
+                await asyncio.wait_for(relay_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                relay_task.cancel()
+                try:
+                    await relay_task
+                except asyncio.CancelledError:
+                    pass
 
             # Process logs from crew.log file and write to database
             # This reads the crew.log file after execution to capture ALL logs
@@ -2308,6 +2345,17 @@ class ProcessCrewExecutor:
             if execution_id in self._running_executors:
                 # Should already be deleted above, but ensure cleanup
                 del self._running_executors[execution_id]
+
+            # The event relay must be finished before log_queue closes —
+            # error paths (timeout/exception) skip the graceful drain above.
+            if not relay_task.done():
+                relay_task.cancel()
+                try:
+                    await relay_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
             # CRITICAL: Close the per-execution multiprocessing queues so their
             # internal semaphores (rlock/wlock/sem -> 3 named POSIX semaphores

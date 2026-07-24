@@ -14,6 +14,7 @@ The security preamble is injected by the CALLER
 returns, so each path keeps its own ``[SECURITY]`` log line while the injection
 itself stays shared (Phase 1).
 """
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -173,6 +174,23 @@ async def build_agent_llm(
         logger.error(f"Error configuring LLM: {e}")
         llm = spec.get('llm', default_model)
         logger.warning(f"Using string model name as fallback for agent {label}: {llm}")
+
+    # In an execution subprocess, opt the LLM into streamed completions so the
+    # engine emits LLMStreamChunkEvent per delta — the event pipe forwards
+    # coalesced chunks to the parent's SSE for live typing in the UI. Only
+    # meaningful on the Chat Completions branch (the Responses-API branch
+    # ignores the flag). Kill-switch: CREW_TOKEN_STREAMING=false.
+    if (
+        os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true"
+        and os.environ.get("CREW_TOKEN_STREAMING", "true").strip().lower()
+        not in ("0", "false", "no")
+        and llm is not None
+        and not isinstance(llm, str)
+    ):
+        try:
+            llm.stream = True
+        except Exception as stream_err:  # noqa: BLE001
+            logger.debug(f"Token streaming not enabled for agent {label}: {stream_err}")
 
     return llm
 

@@ -471,6 +471,20 @@ def run_flow_in_process(
                             f"[FLOW_SUBPROCESS] OTel Event Bridge registration failed (non-fatal): {bridge_err}"
                         )
 
+                    # Live event pipe: forward coalesced LLM token chunks to the
+                    # parent over log_queue (same channel the crew path uses).
+                    try:
+                        from src.services.execution_event_pipe import EventPipeWriter
+
+                        EventPipeWriter(log_queue, execution_id).register(crewai_event_bus)
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] Event pipe writer registered for {execution_id}"
+                        )
+                    except Exception as pipe_err:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] Event pipe registration failed (non-fatal): {pipe_err}"
+                        )
+
                     # Route OTel tracing loggers to flow.log for visibility
                     for otel_logger_name in [
                         "src.services.otel_tracing",
@@ -908,6 +922,14 @@ def run_flow_in_process(
                     )
 
                 # Shutdown OTel TracerProvider to flush remaining spans
+                # Flush remaining token chunks + EOF sentinel so the parent's
+                # relay ends cleanly instead of waiting out its grace period.
+                try:
+                    from src.services.execution_event_pipe import close_active_pipe_writer
+                    close_active_pipe_writer()
+                except Exception:
+                    pass
+
                 try:
                     from src.services.otel_tracing import shutdown_provider
 
@@ -1371,8 +1393,28 @@ class ProcessFlowExecutor:
         )
         self._running_futures[execution_id] = future
 
+        # Live event relay (LLM token chunks → SSE). The flow path never had a
+        # child→parent reader; the crew path's relay is reused here.
+        from src.services.execution_event_pipe import relay_execution_events
+
+        relay_task = asyncio.create_task(relay_execution_events(log_queue, execution_id))
+
         try:
             result = await future
+
+            # The child has exited; append a parent-side EOF so the relay
+            # drains the final frames and stops deterministically.
+            from src.services.execution_event_pipe import put_parent_eof
+
+            put_parent_eof(log_queue)
+            try:
+                await asyncio.wait_for(relay_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                relay_task.cancel()
+                try:
+                    await relay_task
+                except asyncio.CancelledError:
+                    pass
 
             # Process logs from flow.log file and write to database
             # This reads the flow.log file after execution to capture ALL logs
@@ -1400,6 +1442,17 @@ class ProcessFlowExecutor:
             self._metrics["failed_executions"] += 1
             return {"status": "FAILED", "execution_id": execution_id, "error": str(e)}
         finally:
+            # The relay must be finished before log_queue is closed below —
+            # error paths (timeout/exception) skip the graceful drain above.
+            if not relay_task.done():
+                relay_task.cancel()
+                try:
+                    await relay_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
             self._metrics["active_executions"] -= 1
             # Clean up tracking
             self._running_processes.pop(execution_id, None)
