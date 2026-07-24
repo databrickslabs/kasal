@@ -20,6 +20,7 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -177,6 +178,69 @@ def _judge_value_to_grade(value: Any) -> Optional[float]:
             if text in words:
                 return grade
     return None
+
+
+def _distill_requirements(raw_notes: List[str], limit: int = 8) -> List[str]:
+    """Collapse harvested human feedback into a deduplicated requirements list.
+
+    The raw harvest repeats the same complaint many times ("french side" x8)
+    and carries the grade numbers. Feeding that litany to the judge ANCHORED
+    it — a compliant answer was graded 0/10 because every historical line said
+    0.0 (verified live with an A/B judge experiment: same answer, litany
+    rubric -> 0, requirements checklist -> 6). The judge needs constraints,
+    not grade history.
+    """
+    requirements: List[str] = []
+    seen: set = set()
+    for note in raw_notes:
+        text = str(note or "").strip()
+        if not text:
+            continue
+        normalized = re.sub(r"[^a-z0-9 ]", "", text.lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        requirements.append(text)
+    return requirements[:limit]
+
+
+def _parse_requirement_lines(text: str) -> List[str]:
+    """Parse 'R1. ...' numbered requirement lines from a distillation reply."""
+    return [
+        m.group(1).strip()
+        for m in re.finditer(r"^\s*R\d+[.:]\s*(.+)$", text or "", re.MULTILINE)
+        if m.group(1).strip()
+    ]
+
+
+def _checklist_grade(verdict: str, n_requirements: int) -> Optional[float]:
+    """Compute a 0-1 grade from a checklist verdict's PASS/FAIL marks.
+
+    The grade is COMPUTED from the marks, never taken from the model's own
+    arithmetic — a judge writing "40" as its final number would clamp to a
+    perfect 10/10 (observed live). Blend: 0.8 x fraction of requirements
+    passed + 0.2 x the judge's base-quality Q mark (default 5 when absent),
+    so requirement-equal candidates still order by answer quality.
+
+    Returns None when no marks are found (caller falls back to last-number
+    parsing).
+    """
+    marks = re.findall(r"\bR(\d+)\s*[:.]?\s*(PASS|FAIL)", verdict or "", re.IGNORECASE)
+    if not marks or n_requirements <= 0:
+        return None
+    seen_marks: Dict[str, bool] = {}
+    for num, mark in marks:
+        # First mark per requirement wins (models sometimes restate at the end).
+        seen_marks.setdefault(num, mark.upper() == "PASS")
+    passed = sum(1 for ok in seen_marks.values() if ok)
+    fraction = passed / max(n_requirements, len(seen_marks))
+    quality = 0.5
+    q_match = re.search(r"\bQ\s*[:.]?\s*(\d+(?:\.\d+)?)", verdict or "", re.IGNORECASE)
+    if q_match:
+        q_value = float(q_match.group(1))
+        quality = max(0.0, min(10.0, q_value)) / 10.0
+    return max(0.0, min(1.0, 0.8 * fraction + 0.2 * quality))
 
 
 def _job_name_score(outputs: Any) -> float:
@@ -1347,6 +1411,7 @@ class PromptOptimizationService:
             judge_rubric = rubric
             objective_for_training = objective
             train_expectations: Dict[str, str] = {}
+            human_requirements: List[str] = []
             if local_mode and crew_id:
                 try:
                     prior = mlflow.search_traces(
@@ -1358,7 +1423,7 @@ class PromptOptimizationService:
                     # the NEWEST notes (search order is not guaranteed).
                     prior.sort(key=lambda t: t.info.request_time or 0)
                     notes: List[str] = []
-                    expect_notes: List[str] = []
+                    req_texts: List[str] = []
                     for trace in prior:
                         for assessment in trace.search_assessments() or []:
                             name = getattr(assessment, "name", "") or ""
@@ -1371,50 +1436,96 @@ class PromptOptimizationService:
                                 None,
                             )
                             if exp_value is not None:
-                                expect_notes.append(str(exp_value))
+                                req_texts.append(str(exp_value))
                             if value is None:
                                 value = exp_value
                             rationale = getattr(assessment, "rationale", None) or ""
+                            if rationale:
+                                req_texts.append(rationale)
                             if value is not None or rationale:
                                 notes.append(
                                     f"- {name}: {value if value is not None else ''} {rationale}".strip()
                                 )
-                    if expect_notes:
-                        # Ground truth rides GEPA's expectations channel too —
-                        # the reflective dataset surfaces it to the mutator as
-                        # explicit targets, not just prose inside the request.
-                        train_expectations = {
-                            "human_requirements": "\n".join(
-                                dict.fromkeys(expect_notes)
-                            )[:2000]
-                        }
+                    # Deduplicated constraints, NOT the grade litany: repeating
+                    # "human_grade: 0.0 ..." thirteen times anchored the judge
+                    # to zero even for a compliant answer (verified live A/B).
+                    human_requirements = _distill_requirements(req_texts)
                     harvest_entry = _RUNS.get(cancel_run_id) if cancel_run_id else None
                     if harvest_entry is not None:
                         harvest_entry["human_feedback_count"] = len(notes)
-                    if notes:
-                        human_notes = "\n".join(notes[-12:])
-                        judge_rubric += (
-                            "\nHuman assessments on previous optimization answers "
-                            "(treat as authoritative grading guidance):\n" + human_notes
-                        )
-                        # CRITICAL: the requirements must ALSO reach GEPA's
-                        # reflection model, which only sees training inputs and
-                        # scorer feedback — a judge that grades 0 "because
-                        # wrong region" is useless to a mutator that never
-                        # learns the region requirement (observed live: flat
-                        # 0-scores with mutations blind to the human's why).
-                        objective_for_training = (
-                            objective
-                            + "\nHard requirements from human review of past answers:\n"
-                            + human_notes
-                        )
-                        logger.info(
-                            f"Crew optimization: folded {len(notes)} human assessments into the rubric"
-                        )
                 except Exception as assess_err:
                     logger.warning(
                         f"Could not harvest MLflow assessments: {assess_err}"
                     )
+
+            if human_requirements:
+                # LLM-refine the raw complaints into testable imperatives —
+                # verified live: a 30B judge fed the raw complaint sentences
+                # ("it is giving french side...") as checklist items failed
+                # EVERY mark by quoting the requirement itself as evidence;
+                # the same judge with cleanly phrased requirements graded a
+                # compliant answer 0.96 and a Geneva-containing one 0.60 with
+                # correct verbatim quotes. One cheap call per run.
+                try:
+                    refined_text = _sync_llm_completion(
+                        loop,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You convert raw human review notes about an "
+                                    "AI crew's answers into a clean requirements "
+                                    "checklist for FUTURE answers.\n"
+                                    "- Merge duplicate and overlapping notes into "
+                                    "one requirement.\n"
+                                    "- Phrase each as a positive, testable "
+                                    "requirement about the answer content.\n"
+                                    "- Notes describing one-off failures (e.g. "
+                                    "'nothing delivered') become a standing "
+                                    "requirement only if sensible.\n"
+                                    "- Output ONLY numbered lines 'R1. ...', "
+                                    "'R2. ...' — at most 5 requirements, nothing "
+                                    "else."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": "\n".join(
+                                    f"- {r}" for r in human_requirements
+                                ),
+                            },
+                        ],
+                        model=judge_model,
+                        max_tokens=800,
+                        group_context=group_context,
+                        user_token=user_token,
+                    )
+                    refined = _parse_requirement_lines(refined_text)
+                    if refined:
+                        human_requirements = refined[:5]
+                except Exception as distill_err:
+                    logger.warning(
+                        f"Requirement distillation failed; using raw notes: {distill_err}"
+                    )
+                req_block = "\n".join(f"- {r}" for r in human_requirements)
+                # Ground truth rides GEPA's expectations channel too — the
+                # reflective dataset surfaces it to the mutator as explicit
+                # targets, not just prose inside the request.
+                train_expectations = {"human_requirements": req_block[:2000]}
+                # The requirements must ALSO reach GEPA's reflection model,
+                # which only sees training inputs and scorer feedback — a
+                # judge that grades 0 "because wrong region" is useless to a
+                # mutator that never learns the region requirement (observed
+                # live: flat 0-scores with mutations blind to the human's why).
+                objective_for_training = (
+                    objective
+                    + "\nHard requirements from human review of past answers:\n"
+                    + req_block
+                )
+                logger.info(
+                    "Crew optimization: using "
+                    f"{len(human_requirements)} distilled human requirements"
+                )
 
             # CUSTOM JUDGES: LLM judges registered on the local MLflow
             # experiment ("Create LLM judge" in the MLflow UI) participate in
@@ -1485,6 +1596,13 @@ class PromptOptimizationService:
             # against the baseline are stable within the run.
             deliverable_cache: Dict[str, str] = {}
             judge_cache: Dict[str, Any] = {}
+            # Serializes check-then-execute: mlflow's eval harness runs batch
+            # records through a thread pool, and concurrent calls for the SAME
+            # candidate all missed the cache and each ran the crew (observed
+            # live: two executions of one candidate finishing in the same
+            # second). GEPA itself steps sequentially, so the lock costs
+            # nothing in wall-clock.
+            execute_lock = threading.Lock()
 
             def predict_fn(**inputs) -> str:
                 run_entry = _RUNS.get(cancel_run_id, {}) if cancel_run_id else {}
@@ -1495,6 +1613,10 @@ class PromptOptimizationService:
                 doc_key = hashlib.sha256(
                     candidate.template.encode("utf-8")
                 ).hexdigest()
+                with execute_lock:
+                    return _predict_locked(doc_key, candidate, run_entry, inputs)
+
+            def _predict_locked(doc_key, candidate, run_entry, inputs) -> str:
                 # Cache lookup BEFORE the cap check: re-evaluations of an
                 # already-executed candidate (usually the baseline) stay
                 # truthful even after the budget is spent.
@@ -1548,7 +1670,10 @@ class PromptOptimizationService:
                             span.set_outputs({"deliverable": deliverable[:8000]})
                             mlflow.update_current_trace(tags={"kasal_crew_id": crew_id})
                     except Exception as trace_err:
-                        logger.debug(f"Eval trace logging failed: {trace_err}")
+                        # Warning, not debug: a lost trace means the user
+                        # cannot grade that answer (a baseline eval vanished
+                        # silently this way, observed live).
+                        logger.warning(f"Eval trace logging failed: {trace_err}")
                 return deliverable
 
             @scorer
@@ -1585,37 +1710,85 @@ class PromptOptimizationService:
                     return Feedback(
                         name="output_correct", value=cached[0], rationale=cached[1]
                     )
+                if human_requirements:
+                    # CHECKLIST mode: per-requirement PASS/FAIL gives GEPA a
+                    # gradient to climb — the all-or-nothing harsh grader
+                    # produced a flat 0.0 landscape where a fully compliant
+                    # candidate could only ever TIE the baseline. The verbatim
+                    # -quote rule counters judge hallucination (observed live:
+                    # a FAIL claiming Geneva rows in an answer containing
+                    # none), and the objective line is deliberately withheld —
+                    # the crew's own task text may contradict the human
+                    # requirements (it said "cities like Zurich, Geneva" while
+                    # the human demanded German-side only).
+                    req_lines = "\n".join(
+                        f"R{i + 1}. {r}" for i, r in enumerate(human_requirements)
+                    )
+                    judge_messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are grading an AI crew's final deliverable "
+                                "against a numbered requirements checklist distilled "
+                                "from human review of PREVIOUS answers.\n"
+                                "Rules:\n"
+                                "- Judge ONLY the answer shown below. Failures of "
+                                "previous answers are irrelevant.\n"
+                                "- Each requirement states what the human demanded "
+                                "(sometimes phrased as a complaint about an older "
+                                "answer); decide whether THIS answer satisfies it.\n"
+                                "- For EACH requirement output one line: "
+                                "'R<n>: PASS' or 'R<n>: FAIL — ' followed by a "
+                                "VERBATIM quote from the answer proving the "
+                                "violation.\n"
+                                "- If you cannot quote a violating passage from the "
+                                "answer, the mark is PASS.\n"
+                                "- Then output 'Q: <0-10>' rating base quality "
+                                "(completeness, specificity, format) of the answer "
+                                "against the task expectations. 10 is rare.\n"
+                                "- Output nothing else."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Task expectations:\n{judge_rubric}\n\n"
+                                f"Requirements from human review:\n{req_lines}\n\n"
+                                f"Answer to grade:\n{text[:6000]}"
+                            ),
+                        },
+                    ]
+                else:
+                    judge_messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a HARSH grader of an AI crew's final deliverable. "
+                                "Score 0-10 against the per-task expectations:\n"
+                                "- completeness: every expectation addressed, none skipped\n"
+                                "- specificity: concrete facts/sources/structure, no filler\n"
+                                "- fidelity: matches the requested format and scope exactly\n"
+                                "10 = flawless and exceptional (rare). 7 = solid with minor "
+                                "gaps. 5 = acceptable but generic. 3 = major omissions. "
+                                "0 = failed.\n"
+                                "First, in one or two sentences, name the SPECIFIC "
+                                "failures, quoting the exact expectation that was "
+                                "violated. Then write the final grade alone on the "
+                                "LAST line as a bare number."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Objective: {inputs.get('request', objective)}\n"
+                                f"Expectations:\n{judge_rubric}\n\nFinal output:\n{text[:6000]}"
+                            ),
+                        },
+                    ]
                 try:
                     verdict = _sync_llm_completion(
                         loop,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a HARSH grader of an AI crew's final deliverable. "
-                                    "Score 0-10 against the per-task expectations:\n"
-                                    "- completeness: every expectation addressed, none skipped\n"
-                                    "- specificity: concrete facts/sources/structure, no filler\n"
-                                    "- fidelity: matches the requested format and scope exactly\n"
-                                    "10 = flawless and exceptional (rare). 7 = solid with minor "
-                                    "gaps. 5 = acceptable but generic. 3 = major omissions. "
-                                    "0 = failed.\n"
-                                    "First, in one or two sentences, name the SPECIFIC "
-                                    "failures, quoting the exact expectation or human "
-                                    "requirement that was violated (e.g. wrong region, "
-                                    "rentals instead of sales, missing sources). Then "
-                                    "write the final grade alone on the LAST line as a "
-                                    "bare number."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": (
-                                    f"Objective: {inputs.get('request', objective)}\n"
-                                    f"Expectations:\n{judge_rubric}\n\nFinal output:\n{text[:6000]}"
-                                ),
-                            },
-                        ],
+                        messages=judge_messages,
                         model=judge_model,
                         # Room for forced-thinking models (Kimi K2.x): even 300
                         # tokens were consumed entirely by reasoning, leaving
@@ -1635,15 +1808,28 @@ class PromptOptimizationService:
                 rationale_parts: List[str] = []
                 if verdict and str(verdict).strip():
                     rationale_parts.append(str(verdict).strip())
-                # LAST number wins: thinking models may reason (with incidental
-                # numbers) before stating the final grade.
-                matches = re.findall(r"\d+(?:\.\d+)?", verdict or "")
-                if matches:
-                    grades.append(max(0.0, min(10.0, float(matches[-1]))) / 10.0)
+                checklist_value = (
+                    _checklist_grade(verdict or "", len(human_requirements))
+                    if human_requirements
+                    else None
+                )
+                if checklist_value is not None:
+                    grades.append(checklist_value)
                 else:
-                    logger.warning(
-                        f"Crew optimization judge reply not numeric: {verdict!r}"
-                    )
+                    # LAST number wins: thinking models may reason (with
+                    # incidental numbers) before stating the final grade. A
+                    # number above 10 is treated as a percentage — clamping
+                    # alone turned a hallucinated "40" into a perfect 10/10.
+                    matches = re.findall(r"\d+(?:\.\d+)?", verdict or "")
+                    if matches:
+                        number = float(matches[-1])
+                        if 10.0 < number <= 100.0:
+                            number /= 10.0
+                        grades.append(max(0.0, min(10.0, number)) / 10.0)
+                    else:
+                        logger.warning(
+                            f"Crew optimization judge reply not numeric: {verdict!r}"
+                        )
                 # Registered judges grade the SAME deliverable here rather than
                 # running as separate MLflow scorers — trace-based scorers were
                 # each re-triggering their own crew execution (observed live as
@@ -1707,7 +1893,31 @@ class PromptOptimizationService:
                 prompt_uris=[prompt_uri],
                 optimizer=GepaPromptOptimizer(
                     reflection_model=reflection_uri,
-                    max_metric_calls=max_metric_calls,
+                    # METRIC calls are decoupled from crew EXECUTIONS: with
+                    # the caches (ours + gepa's) most metric calls are free
+                    # re-scores, so the user's number stays a hard cap on real
+                    # executions while GEPA gets iteration headroom. Observed
+                    # live without this: a 10-execution budget stopped after 4
+                    # executions because cached re-evaluations had consumed
+                    # the metric budget.
+                    max_metric_calls=max_metric_calls * 2 + 3,
+                    gepa_kwargs={
+                        # Default minibatch of 3 sampled our SINGLE training
+                        # example three times per step — every candidate cost
+                        # 3 crew executions racing the cache (two finished the
+                        # same second, observed live).
+                        "reflection_minibatch_size": 1,
+                        # Strict improvement rejected TIES: a candidate that
+                        # fully incorporated the human requirements scored
+                        # 0.9 vs 0.9 on the minibatch and was discarded
+                        # (proposals.json, observed live). Lateral moves must
+                        # survive so the search can leave a flat region.
+                        "acceptance_criterion": "improvement_or_equal",
+                        # gepa-side (candidate, example) result cache: skips
+                        # the metric call entirely on repeats, preserving the
+                        # metric budget for NEW candidates.
+                        "cache_evaluation": True,
+                    },
                 ),
                 scorers=[output_format, output_correct],
                 aggregation=aggregation,
