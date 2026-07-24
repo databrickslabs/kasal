@@ -10,6 +10,7 @@ stored inside the ``metadata`` JSONB column and queried with ``->>`` accessors.
 A future migration can promote them to first-class columns if query patterns
 demand it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +38,7 @@ def _validate_table_name(name: str) -> str:
     if not name or not _SAFE_TABLE_NAME.match(str(name)):
         raise ValueError(f"Invalid memory table name: {name!r}")
     return name
+
 
 # CrewAI 1.10+ runs memory saves on a background thread pool; each save runs its
 # coroutine in a *fresh* event loop (see ``_run_sync``). A pooled async engine
@@ -71,6 +73,11 @@ class LakebaseStorageBackend:
         embedding_dimension: int = 1024,
         instance_name: str | None = None,
         workspace_wide: bool = True,
+        semantic_weight: float = 0.6,
+        keyword_weight: float = 0.15,
+        recency_weight: float = 0.15,
+        importance_weight: float = 0.10,
+        recency_half_life_days: float = 30.0,
     ) -> None:
         # SECURITY: validate before it reaches any interpolated raw SQL.
         self.table_name = _validate_table_name(table_name)
@@ -80,6 +87,13 @@ class LakebaseStorageBackend:
         self.embedder = embedder
         self.embedding_dimension = embedding_dimension
         self.instance_name = instance_name
+        # Hybrid-scoring weights (see asearch): semantic similarity dominates,
+        # keyword/recency/importance re-rank the candidate pool.
+        self.semantic_weight = semantic_weight
+        self.keyword_weight = keyword_weight
+        self.recency_weight = recency_weight
+        self.importance_weight = importance_weight
+        self.recency_half_life_days = recency_half_life_days
         # Default READ scope: True = workspace-wide (group_id), False = this
         # chat session only (session_id). Toggled per execution from the chat
         # "Workspace memory" switch. crew_id is NOT a scoping key — it only tags
@@ -111,6 +125,7 @@ class LakebaseStorageBackend:
         metadata_filter: dict[str, Any] | None = None,
         limit: int = 10,
         min_score: float = 0.0,
+        query_text: str | None = None,
     ) -> list[tuple[MemoryRecord, float]]:
         return self._run_sync(
             self.asearch(
@@ -120,6 +135,7 @@ class LakebaseStorageBackend:
                 metadata_filter=metadata_filter,
                 limit=limit,
                 min_score=min_score,
+                query_text=query_text,
             )
         )
 
@@ -165,6 +181,7 @@ class LakebaseStorageBackend:
                 )
                 row = result.fetchone()
                 return self._row_to_record(row) if row else None
+
         return self._run_sync(_fetch())
 
     def list_records(
@@ -192,6 +209,7 @@ class LakebaseStorageBackend:
                 params["offset"] = offset
                 result = await session.execute(sql, params)
                 return [self._row_to_record(row) for row in result.fetchall()]
+
         return self._run_sync(_list())
 
     def get_scope_info(self, scope: str) -> ScopeInfo:
@@ -212,7 +230,11 @@ class LakebaseStorageBackend:
                 oldest: datetime | None = None
                 newest: datetime | None = None
                 for metadata_val, created_at in rows:
-                    md = metadata_val if isinstance(metadata_val, dict) else _loads_or_empty(metadata_val)
+                    md = (
+                        metadata_val
+                        if isinstance(metadata_val, dict)
+                        else _loads_or_empty(metadata_val)
+                    )
                     categories.update(md.get("categories") or [])
                     if oldest is None or created_at < oldest:
                         oldest = created_at
@@ -227,6 +249,7 @@ class LakebaseStorageBackend:
                 newest_record=newest,
                 child_scopes=children,
             )
+
         return self._run_sync(_info())
 
     def list_scopes(self, parent: str = "/") -> list[str]:
@@ -247,10 +270,15 @@ class LakebaseStorageBackend:
                 result = await session.execute(sql, params)
                 counts: dict[str, int] = {}
                 for (metadata_val,) in result.fetchall():
-                    md = metadata_val if isinstance(metadata_val, dict) else _loads_or_empty(metadata_val)
+                    md = (
+                        metadata_val
+                        if isinstance(metadata_val, dict)
+                        else _loads_or_empty(metadata_val)
+                    )
                     for category in md.get("categories") or []:
                         counts[category] = counts.get(category, 0) + 1
                 return counts
+
         return self._run_sync(_categories())
 
     def count(self, scope_prefix: str | None = None) -> int:
@@ -262,9 +290,12 @@ class LakebaseStorageBackend:
             async with get_lakebase_session(
                 instance_name=self.instance_name, group_id=self.group_id
             ) as session:
-                sql = text(f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}")
+                sql = text(
+                    f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"
+                )
                 result = await session.execute(sql, params)
                 return int(result.scalar() or 0)
+
         return self._run_sync(_count())
 
     def reset(self, scope_prefix: str | None = None) -> None:
@@ -296,8 +327,7 @@ class LakebaseStorageBackend:
                         "last_accessed": record.last_accessed.isoformat(),
                     }
                 )
-                sql = text(
-                    f"""
+                sql = text(f"""
                     INSERT INTO {self.table_name}
                         (id, crew_id, group_id, session_id, agent, content, metadata,
                          score, embedding, created_at, updated_at)
@@ -311,8 +341,7 @@ class LakebaseStorageBackend:
                         score = EXCLUDED.score,
                         embedding = EXCLUDED.embedding,
                         updated_at = EXCLUDED.updated_at
-                    """
-                )
+                    """)
                 await session.execute(
                     sql,
                     {
@@ -347,7 +376,16 @@ class LakebaseStorageBackend:
         metadata_filter: dict[str, Any] | None = None,
         limit: int = 10,
         min_score: float = 0.0,
+        query_text: str | None = None,
     ) -> list[tuple[MemoryRecord, float]]:
+        """Hybrid-scored search: semantic + keyword + recency + importance.
+
+        Two stages so the pgvector HNSW index stays in play: the inner query
+        pulls the top candidates by pure vector distance (index-accelerated),
+        the outer query re-ranks that small set with the blended score
+        (mem0-style fused scoring, native to Postgres — ts_rank_cd for
+        keywords, exponential recency decay, stored importance).
+        """
         where, params = self._tenant_where()
         if scope_prefix:
             where.append("metadata->>'scope' LIKE :scope_prefix")
@@ -364,20 +402,53 @@ class LakebaseStorageBackend:
 
         params["query_embedding"] = _vector_to_pg(query_embedding)
         params["limit"] = limit
+        # Re-rank pool: enough candidates that keyword/recency can promote a
+        # non-top-cosine hit, small enough that the outer pass is negligible.
+        params["candidate_limit"] = max(limit * 5, 25)
+        params["half_life_days"] = float(self.recency_half_life_days)
+        params["w_semantic"] = float(self.semantic_weight)
+        params["w_recency"] = float(self.recency_weight)
+        params["w_importance"] = float(self.importance_weight)
+
+        keyword_term = "0.0"
+        text_query = " ".join((query_text or "").split())
+        if text_query and self.keyword_weight > 0:
+            params["query_text"] = text_query[:500]
+            params["w_keyword"] = float(self.keyword_weight)
+            keyword_term = (
+                ":w_keyword * LEAST(ts_rank_cd(to_tsvector('simple', c.content), "
+                "plainto_tsquery('simple', :query_text)), 1.0)"
+            )
 
         async with get_lakebase_session(
             instance_name=self.instance_name, group_id=self.group_id
         ) as session:
-            sql = text(
-                f"""
-                SELECT id, content, metadata, created_at, updated_at, agent,
-                       1.0 - (embedding <=> CAST(:query_embedding AS vector)) AS score
-                FROM {self.table_name}
-                WHERE {' AND '.join(where)}
-                ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
+            sql = text(f"""
+                SELECT c.id, c.content, c.metadata, c.created_at, c.updated_at,
+                       c.agent,
+                       (
+                           :w_semantic * c.semantic
+                           + {keyword_term}
+                           + :w_recency * EXP(
+                               -0.6931471805599453
+                               * GREATEST(EXTRACT(EPOCH FROM (NOW() - c.created_at)), 0)
+                               / (:half_life_days * 86400.0)
+                           )
+                           + :w_importance
+                             * COALESCE((c.metadata->>'importance')::float, 0.5)
+                       ) AS score
+                FROM (
+                    SELECT id, content, metadata, created_at, updated_at, agent,
+                           1.0 - (embedding <=> CAST(:query_embedding AS vector))
+                               AS semantic
+                    FROM {self.table_name}
+                    WHERE {' AND '.join(where)}
+                    ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
+                    LIMIT :candidate_limit
+                ) AS c
+                ORDER BY score DESC
                 LIMIT :limit
-                """
-            )
+                """)
             result = await session.execute(sql, params)
             out: list[tuple[MemoryRecord, float]] = []
             for row in result.fetchall():
@@ -387,7 +458,10 @@ class LakebaseStorageBackend:
                 record = self._row_to_record(row)
                 if record is None:
                     continue
-                if record.private and record.source not in (self.session_id, self.crew_id):
+                if record.private and record.source not in (
+                    self.session_id,
+                    self.crew_id,
+                ):
                     continue
                 out.append((record, score))
             return out
@@ -432,7 +506,9 @@ class LakebaseStorageBackend:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _tenant_where(self, workspace_wide: bool | None = None) -> tuple[list[str], dict[str, Any]]:
+    def _tenant_where(
+        self, workspace_wide: bool | None = None
+    ) -> tuple[list[str], dict[str, Any]]:
         """WHERE fragment + params scoping a READ to this tenant.
 
         Uses ``self.workspace_wide`` (the per-execution default from the chat
@@ -485,7 +561,7 @@ class LakebaseStorageBackend:
             for (scope_val,) in result.fetchall():
                 if not scope_val or not scope_val.startswith(prefix):
                     continue
-                remainder = scope_val[len(prefix):]
+                remainder = scope_val[len(prefix) :]
                 first_segment = remainder.split("/", 1)[0]
                 if first_segment:
                     children.add(f"{prefix}{first_segment}")
@@ -494,16 +570,24 @@ class LakebaseStorageBackend:
     def _row_to_record(self, row: Any) -> MemoryRecord | None:
         if row is None:
             return None
-        id_val, content, metadata_val, created_at, updated_at, agent, *_ = list(row) + [None] * 6
-        metadata = metadata_val if isinstance(metadata_val, dict) else _loads_or_empty(metadata_val)
+        id_val, content, metadata_val, created_at, updated_at, agent, *_ = (
+            list(row) + [None] * 6
+        )
+        metadata = (
+            metadata_val
+            if isinstance(metadata_val, dict)
+            else _loads_or_empty(metadata_val)
+        )
         scope = metadata.pop("scope", "/") or "/"
         categories = metadata.pop("categories", []) or []
         importance = float(metadata.pop("importance", 0.5) or 0.5)
         source = metadata.pop("source", agent) or None
         private = bool(metadata.pop("private", False))
         last_accessed_raw = metadata.pop("last_accessed", None)
-        last_accessed = _parse_datetime(last_accessed_raw) if last_accessed_raw else (
-            updated_at or created_at or datetime.utcnow()
+        last_accessed = (
+            _parse_datetime(last_accessed_raw)
+            if last_accessed_raw
+            else (updated_at or created_at or datetime.utcnow())
         )
         # CrewAI's recency scoring does ``datetime.utcnow() - record.created_at``
         # (offset-naive). Postgres ``timestamptz`` columns come back offset-aware,
@@ -559,6 +643,7 @@ class LakebaseStorageBackend:
         if not asyncio.iscoroutine(coro):
             return coro
         from src.engines.kasal.memory.databricks_storage_backend import _get_bridge_loop
+
         return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
 
 

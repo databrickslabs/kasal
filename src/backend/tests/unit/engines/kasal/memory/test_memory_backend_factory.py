@@ -12,6 +12,7 @@ Key changes in the new API:
 - LakebaseMemoryConfig uses memory_table (not short_term/long_term/entity tables)
 - MemoryBackendConfig no longer has enable_short_term/long_term/entity fields
 """
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
@@ -25,7 +26,6 @@ from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DatabricksIndexValidationError
@@ -42,7 +42,11 @@ class TestDatabricksIndexValidationError:
         assert str(err) == "some error"
 
     def test_validation_result_stored(self):
-        vr = {"error_type": "provisioning_indexes", "missing_indexes": [], "provisioning_indexes": ["b"]}
+        vr = {
+            "error_type": "provisioning_indexes",
+            "missing_indexes": [],
+            "provisioning_indexes": ["b"],
+        }
         err = DatabricksIndexValidationError("msg", vr)
         assert err.validation_result is vr
 
@@ -282,7 +286,9 @@ class TestCreateMemoryBackendsLakebase:
             },
         ):
             result = await MemoryBackendFactory.create_memory_backends(
-                config=config, crew_id="simple_crew_id_without_pattern", embedder=MagicMock()
+                config=config,
+                crew_id="simple_crew_id_without_pattern",
+                embedder=MagicMock(),
             )
 
         assert "unified" in result
@@ -635,7 +641,9 @@ class TestValidateDatabricksIndex:
     @pytest.mark.asyncio
     async def test_raises_when_describe_fails(self):
         mock_repo = MagicMock()
-        mock_repo.describe_index = AsyncMock(side_effect=RuntimeError("Connection refused"))
+        mock_repo.describe_index = AsyncMock(
+            side_effect=RuntimeError("Connection refused")
+        )
 
         with patch.dict(
             "sys.modules",
@@ -707,7 +715,7 @@ class TestDatabricksIndexValidationErrorEdgeCases:
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             raise DatabricksIndexValidationError(
                 "test error",
-                {"error_type": "missing_indexes", "missing_indexes": ["idx1"]}
+                {"error_type": "missing_indexes", "missing_indexes": ["idx1"]},
             )
         assert exc_info.value.error_type == "missing_indexes"
         assert "idx1" in exc_info.value.missing_indexes

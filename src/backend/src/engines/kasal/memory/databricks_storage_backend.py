@@ -10,6 +10,7 @@ Kasal's existing ``UNIFIED_MEMORY_SCHEMA`` columns in a Databricks Vector Search
 index and preserves multi-tenant isolation via ``crew_id`` / ``group_id`` /
 ``session_id`` filters on every operation.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -158,6 +159,7 @@ class DatabricksStorageBackend:
     def get_record(self, record_id: str) -> MemoryRecord | None:
         filters = self._tenant_filters()
         filters["id"] = record_id
+
         async def _fetch() -> MemoryRecord | None:
             rows = await self._similarity_query(
                 query_vector=self._zero_vector(),
@@ -167,6 +169,7 @@ class DatabricksStorageBackend:
             for record, _ in rows:
                 return record
             return None
+
         return self._run_sync(_fetch())
 
     def list_records(
@@ -187,6 +190,7 @@ class DatabricksStorageBackend:
             records = [record for record, _ in rows]
             records.sort(key=lambda r: r.created_at, reverse=True)
             return records[offset : offset + limit]
+
         return self._run_sync(_list())
 
     def get_scope_info(self, scope: str) -> ScopeInfo:
@@ -217,6 +221,7 @@ class DatabricksStorageBackend:
                 newest_record=newest,
                 child_scopes=children,
             )
+
         return self._run_sync(_info())
 
     def list_scopes(self, parent: str = "/") -> list[str]:
@@ -237,6 +242,7 @@ class DatabricksStorageBackend:
                 for category in record.categories:
                     counts[category] = counts.get(category, 0) + 1
             return counts
+
         return self._run_sync(_categories())
 
     def count(self, scope_prefix: str | None = None) -> int:
@@ -253,6 +259,7 @@ class DatabricksStorageBackend:
             if isinstance(result, dict):
                 return int(result.get("count", 0))
             return int(result or 0)
+
         return self._run_sync(_count())
 
     def reset(self, scope_prefix: str | None = None) -> None:
@@ -495,7 +502,7 @@ class DatabricksStorageBackend:
         for record, _ in rows:
             if not record.scope.startswith(prefix):
                 continue
-            remainder = record.scope[len(prefix):]
+            remainder = record.scope[len(prefix) :]
             if not remainder:
                 continue
             first_segment = remainder.split("/", 1)[0]

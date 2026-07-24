@@ -6,6 +6,7 @@ single ``Memory`` class backed by one ``StorageBackend``, so this factory now
 returns a single instance (or ``None`` to signal that the CrewAI default
 LanceDB backend should be used).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -175,9 +176,7 @@ class MemoryBackendFactory:
         session_scope_id: Optional[str] = None,
     ) -> Any:
         if not config.lakebase_config:
-            raise ValueError(
-                "Lakebase configuration is required for Lakebase backend"
-            )
+            raise ValueError("Lakebase configuration is required for Lakebase backend")
 
         lakebase_cfg = config.lakebase_config
         table_name = lakebase_cfg.memory_table
@@ -209,7 +208,30 @@ class MemoryBackendFactory:
             embedding_dimension=lakebase_cfg.embedding_dimension or 1024,
             instance_name=getattr(lakebase_cfg, "instance_name", None),
             workspace_wide=workspace_wide,
+            **MemoryBackendFactory._cognitive_scoring_kwargs(config),
         )
+
+    @staticmethod
+    def _cognitive_scoring_kwargs(config: MemoryBackendConfig) -> Dict[str, Any]:
+        """Map the UI's cognitive tuning knobs onto hybrid-scoring ctor params.
+
+        Values left unset in the config fall through to the backend defaults
+        (keyword_weight has no UI knob yet and always uses the default).
+        """
+        cognitive = getattr(config, "cognitive_config", None)
+        if cognitive is None:
+            return {}
+        kwargs: Dict[str, Any] = {}
+        for field in (
+            "semantic_weight",
+            "recency_weight",
+            "importance_weight",
+            "recency_half_life_days",
+        ):
+            value = getattr(cognitive, field, None)
+            if value is not None:
+                kwargs[field] = float(value)
+        return kwargs
 
     # ------------------------------------------------------------------
     # Validation
@@ -238,9 +260,7 @@ class MemoryBackendFactory:
                 index_name, endpoint_name, user_token
             )
         except Exception as exc:  # pragma: no cover - defensive
-            logger.error(
-                "Failed to describe Databricks index %s: %s", index_name, exc
-            )
+            logger.error("Failed to describe Databricks index %s: %s", index_name, exc)
             validation_result = {
                 "error_type": "describe_failed",
                 "missing_indexes": [index_name],

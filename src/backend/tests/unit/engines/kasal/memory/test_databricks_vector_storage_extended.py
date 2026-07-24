@@ -16,6 +16,7 @@ Covers missing lines:
 - clear: document memory type filter (line 577)
 - count_documents: document type (line 684)
 """
+
 import os
 import sys
 import pytest
@@ -68,7 +69,9 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
     sys.modules[_mod_name] = _mock_obj
 
 # Import while mocks are active so the module is loaded properly
-from src.engines.kasal.memory.databricks_vector_storage import DatabricksVectorStorage as _DVS
+from src.engines.kasal.memory.databricks_vector_storage import (
+    DatabricksVectorStorage as _DVS,
+)
 
 for _mod_name, _original in _originals.items():
     if _original is None:
@@ -120,9 +123,12 @@ class TestInitEdgeCases:
         mock_auth.workspace_url = "https://auth-provided.databricks.com"
         mock_auth.auth_method = "obo"
 
-        with patch(
-            "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
-        ) as mock_repo_cls, patch("asyncio.run", return_value=mock_auth):
+        with (
+            patch(
+                "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+            ) as mock_repo_cls,
+            patch("asyncio.run", return_value=mock_auth),
+        ):
             mock_repo_cls.return_value = MagicMock()
             storage = _DVS(
                 endpoint_name="ep",
@@ -135,9 +141,12 @@ class TestInitEdgeCases:
 
     def test_init_without_workspace_url_handles_auth_exception(self):
         """When get_auth_context fails, workspace_url defaults to empty string."""
-        with patch(
-            "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
-        ) as mock_repo_cls, patch("asyncio.run", side_effect=RuntimeError("no loop")):
+        with (
+            patch(
+                "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+            ) as mock_repo_cls,
+            patch("asyncio.run", side_effect=RuntimeError("no loop")),
+        ):
             mock_repo_cls.return_value = MagicMock()
             storage = _DVS(
                 endpoint_name="ep",
@@ -160,6 +169,7 @@ class TestSaveAllSchemaFields:
 
     def _full_schema(self, memory_type):
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+
         return DatabricksIndexSchemas.get_schema(memory_type)
 
     @pytest.mark.asyncio
@@ -193,13 +203,15 @@ class TestSaveAllSchemaFields:
             "query_text": "str",
         }
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "content": "test",
-                "embedding": [0.1] * 1024,
-                "metadata": {"key": "val"},
-                "tools_used": ["tool1"],
-                "llm_model": "gpt-4",
-            })
+            await storage.save(
+                {
+                    "content": "test",
+                    "embedding": [0.1] * 1024,
+                    "metadata": {"key": "val"},
+                    "tools_used": ["tool1"],
+                    "llm_model": "gpt-4",
+                }
+            )
 
         repo.upsert.assert_called_once()
         record = repo.upsert.call_args[0][2][0]
@@ -254,13 +266,15 @@ class TestSaveAllSchemaFields:
             "tools_used": "str",
         }
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "content": "long term result",
-                "embedding": [0.2] * 1024,
-                "task_description": "Do research",
-                "quality": 0.95,
-                "tools_used": ["search"],
-            })
+            await storage.save(
+                {
+                    "content": "long term result",
+                    "embedding": [0.2] * 1024,
+                    "task_description": "Do research",
+                    "quality": 0.95,
+                    "tools_used": ["search"],
+                }
+            )
 
         repo.upsert.assert_called_once()
         record = repo.upsert.call_args[0][2][0]
@@ -296,14 +310,16 @@ class TestSaveAllSchemaFields:
         mock_agent.role = "Researcher"
         # agent_id=None explicitly so fallback to agent object triggers
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "entity_name": "Alice",
-                "entity_type": "person",
-                "description": "A researcher",
-                "agent_id": None,  # Explicitly None to trigger agent object fallback
-                "agent": mock_agent,
-                "embedding": [0.3] * 1024,
-            })
+            await storage.save(
+                {
+                    "entity_name": "Alice",
+                    "entity_type": "person",
+                    "description": "A researcher",
+                    "agent_id": None,  # Explicitly None to trigger agent object fallback
+                    "agent": mock_agent,
+                    "embedding": [0.3] * 1024,
+                }
+            )
 
         record = repo.upsert.call_args[0][2][0]
         assert record.get("agent_id") == "Researcher"
@@ -329,14 +345,16 @@ class TestSaveAllSchemaFields:
         mock_agent = MagicMock(spec=["id"])
         mock_agent.id = "agent_uuid_123"
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "entity_name": "Bob",
-                "entity_type": "person",
-                "description": "A person",
-                "agent_id": None,  # Explicitly None so agent object fallback triggers
-                "agent": mock_agent,
-                "embedding": [0.3] * 1024,
-            })
+            await storage.save(
+                {
+                    "entity_name": "Bob",
+                    "entity_type": "person",
+                    "description": "A person",
+                    "agent_id": None,  # Explicitly None so agent object fallback triggers
+                    "agent": mock_agent,
+                    "embedding": [0.3] * 1024,
+                }
+            )
 
         record = repo.upsert.call_args[0][2][0]
         assert record.get("agent_id") == "agent_uuid_123"
@@ -370,21 +388,23 @@ class TestSaveAllSchemaFields:
             "version": "int",
         }
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "content": "Document content",
-                "embedding": [0.4] * 1024,
-                "agent_ids": '["agent1", "agent2"]',
-                "group_id": "grp_specific",
-                "metadata": {
-                    "source": "wiki",
-                    "type": "documentation",
-                    "section": "intro",
-                    "chunk_index": 0,
-                    "parent_document_id": "doc_1",
-                    "embedding_model": "custom-emb",
-                },
-                "context": {"query_text": "My Document"},
-            })
+            await storage.save(
+                {
+                    "content": "Document content",
+                    "embedding": [0.4] * 1024,
+                    "agent_ids": '["agent1", "agent2"]',
+                    "group_id": "grp_specific",
+                    "metadata": {
+                        "source": "wiki",
+                        "type": "documentation",
+                        "section": "intro",
+                        "chunk_index": 0,
+                        "parent_document_id": "doc_1",
+                        "embedding_model": "custom-emb",
+                    },
+                    "context": {"query_text": "My Document"},
+                }
+            )
 
         repo.upsert.assert_called_once()
         record = repo.upsert.call_args[0][2][0]
@@ -400,7 +420,12 @@ class TestSaveAllSchemaFields:
 
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        schema = {"id": "str", "content": "str", "embedding": "list", "agent_ids": "str"}
+        schema = {
+            "id": "str",
+            "content": "str",
+            "embedding": "list",
+            "agent_ids": "str",
+        }
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
             await storage.save({"content": "Doc", "embedding": [0.1] * 1024})
 
@@ -427,10 +452,12 @@ class TestSaveEmbeddingConversion:
 
         schema = {"id": "str", "content": "str", "embedding": "list"}
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save({
-                "content": "test",
-                "embedding": np.array([0.1] * 1024),
-            })
+            await storage.save(
+                {
+                    "content": "test",
+                    "embedding": np.array([0.1] * 1024),
+                }
+            )
 
         record = repo.upsert.call_args[0][2][0]
         assert isinstance(record["embedding"], list)
@@ -447,10 +474,12 @@ class TestSaveEmbeddingConversion:
         schema = {"id": "str", "content": "str", "embedding": "list"}
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
             # Use a tuple - iterable but not list/ndarray
-            await storage.save({
-                "content": "test",
-                "embedding": tuple([0.1] * 1024),
-            })
+            await storage.save(
+                {
+                    "content": "test",
+                    "embedding": tuple([0.1] * 1024),
+                }
+            )
 
         record = repo.upsert.call_args[0][2][0]
         assert isinstance(record["embedding"], list)
@@ -467,9 +496,7 @@ class TestSaveUserContext:
     @pytest.mark.asyncio
     async def test_save_sets_user_context_when_group_id(self):
         """When group_id is set, save should try to set UserContext."""
-        storage, repo = _build_storage(
-            memory_type="short_term", group_id="grp_123"
-        )
+        storage, repo = _build_storage(memory_type="short_term", group_id="grp_123")
         repo.get_index = AsyncMock(return_value=MagicMock(success=False))
         repo.upsert = AsyncMock(return_value={"success": True})
 
@@ -477,7 +504,9 @@ class TestSaveUserContext:
 
         schema = {"id": "str", "content": "str", "embedding": "list"}
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            with patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx:
+            with patch(
+                "src.utils.user_context.UserContext.set_group_context"
+            ) as mock_set_ctx:
                 await storage.save({"content": "test", "embedding": [0.1] * 1024})
 
         # UserContext.set_group_context should have been called
@@ -486,9 +515,7 @@ class TestSaveUserContext:
     @pytest.mark.asyncio
     async def test_save_user_context_exception_is_handled(self):
         """UserContext setting failure should not prevent save."""
-        storage, repo = _build_storage(
-            memory_type="short_term", group_id="grp_xyz"
-        )
+        storage, repo = _build_storage(memory_type="short_term", group_id="grp_xyz")
         repo.get_index = AsyncMock(return_value=MagicMock(success=False))
         repo.upsert = AsyncMock(return_value={"success": True})
 
@@ -532,12 +559,17 @@ class TestSearchEdgeCases:
 
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(
-            DatabricksIndexSchemas, "get_search_columns", return_value=["id", "content", "metadata"]
-        ), patch.object(
-            DatabricksIndexSchemas,
-            "get_column_positions",
-            return_value={"id": 0, "content": 1, "metadata": 2},
+        with (
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_search_columns",
+                return_value=["id", "content", "metadata"],
+            ),
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_column_positions",
+                return_value={"id": 0, "content": 1, "metadata": 2},
+            ),
         ):
             results = await storage.search([0.1] * 1024, k=1)
 
@@ -562,12 +594,17 @@ class TestSearchEdgeCases:
 
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(
-            DatabricksIndexSchemas, "get_search_columns", return_value=["id", "content", "metadata"]
-        ), patch.object(
-            DatabricksIndexSchemas,
-            "get_column_positions",
-            return_value={"id": 0, "content": 1, "metadata": 2},
+        with (
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_search_columns",
+                return_value=["id", "content", "metadata"],
+            ),
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_column_positions",
+                return_value={"id": 0, "content": 1, "metadata": 2},
+            ),
         ):
             results = await storage.search([0.1] * 1024, k=1)
 
@@ -584,11 +621,17 @@ class TestSearchEdgeCases:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             await storage.search([0.0] * 1024, k=3, filters={"agent_id": "agent_99"})
 
         call_args = repo.similarity_search.call_args
-        filters = call_args[0][5] if len(call_args[0]) > 5 else call_args[1].get("filters", {})
+        filters = (
+            call_args[0][5]
+            if len(call_args[0]) > 5
+            else call_args[1].get("filters", {})
+        )
         assert filters.get("crew_id") == "crew_m"
         assert filters.get("agent_id") == "agent_99"
 
@@ -601,11 +644,17 @@ class TestSearchEdgeCases:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             await storage.search([0.0] * 1024)
 
         call_args = repo.similarity_search.call_args
-        filters = call_args[0][5] if len(call_args[0]) > 5 else call_args[1].get("filters", {})
+        filters = (
+            call_args[0][5]
+            if len(call_args[0]) > 5
+            else call_args[1].get("filters", {})
+        )
         assert filters.get("group_id") == "doc_grp"
         assert "crew_id" not in filters
 
@@ -630,7 +679,11 @@ class TestClearEdgeCases:
         assert result is True
 
         call_args = repo.similarity_search.call_args
-        filters = call_args[0][5] if len(call_args[0]) > 5 else call_args[1].get("filters", {})
+        filters = (
+            call_args[0][5]
+            if len(call_args[0]) > 5
+            else call_args[1].get("filters", {})
+        )
         assert filters.get("group_id") == "doc_crew"
 
     @pytest.mark.asyncio
@@ -703,7 +756,9 @@ class TestCountDocumentsEdgeCases:
         count = await storage.count_documents()
 
         call_args = repo.count_documents.call_args
-        filters = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        filters = (
+            call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        )
         if filters:
             assert filters.get("group_id") == "doc_crew"
         assert count == 5
@@ -717,5 +772,7 @@ class TestCountDocumentsEdgeCases:
         count = await storage.count_documents()
 
         call_args = repo.count_documents.call_args
-        filters = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        filters = (
+            call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        )
         assert filters is None

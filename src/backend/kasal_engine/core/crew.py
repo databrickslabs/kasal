@@ -30,7 +30,7 @@ from ..events.bus import crewai_event_bus
 from ..events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
 from .agent import Agent, BaseAgent
 from .executor import delegation_tools, interpolate_text
-from .task import NOT_SPECIFIED, Task
+from .task import Task
 from .types import CrewOutput, Process, TaskOutput, UsageMetrics
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,25 @@ class Crew(BaseModel):
         default=False,
         description="kasal compatibility flag (suppressed interactive prompt); inert.",
     )
+    context_providers: list[Any] = Field(
+        default_factory=list,
+        exclude=True,
+        description=(
+            "Callables ``(task, agent, context) -> str | None`` invoked when a "
+            "task's context is assembled; non-empty returns are appended. The "
+            "memory subsystem wires recall here. Provider errors are logged "
+            "and never break the run."
+        ),
+    )
+    output_sinks: list[Any] = Field(
+        default_factory=list,
+        exclude=True,
+        description=(
+            "Callables ``(task, output)`` invoked after every finished task "
+            "(all processes, sync and async). The memory subsystem wires "
+            "persistence here. Sink errors are logged and never break the run."
+        ),
+    )
     token_usage: UsageMetrics | None = None
 
     @property
@@ -115,8 +134,10 @@ class Crew(BaseModel):
 
         usage = self._aggregate_token_usage()
         self.token_usage = usage
-        last = task_outputs[-1] if task_outputs else TaskOutput(
-            description="", raw="", agent=""
+        last = (
+            task_outputs[-1]
+            if task_outputs
+            else TaskOutput(description="", raw="", agent="")
         )
         crew_output = CrewOutput(
             raw=last.raw,
@@ -141,10 +162,14 @@ class Crew(BaseModel):
         input_files: dict[str, Any] | None = None,
         from_checkpoint: Any | None = None,
     ) -> CrewOutput:
-        return await asyncio.to_thread(self.kickoff, inputs, input_files, from_checkpoint)
+        return await asyncio.to_thread(
+            self.kickoff, inputs, input_files, from_checkpoint
+        )
 
     def copy(self) -> "Crew":
-        cloned_agents = [agent.model_copy(update={"id": uuid.uuid4()}) for agent in self.agents]
+        cloned_agents = [
+            agent.model_copy(update={"id": uuid.uuid4()}) for agent in self.agents
+        ]
         task_mapping: dict[str, Task] = {}
         cloned_tasks: list[Task] = []
         for task in self.tasks:
@@ -154,15 +179,15 @@ class Crew(BaseModel):
         # second pass: context lists referring to later tasks
         for original, cloned in zip(self.tasks, cloned_tasks):
             if isinstance(original.context, list):
-                cloned.context = [
-                    task_mapping.get(t.key, t) for t in original.context
-                ]
+                cloned.context = [task_mapping.get(t.key, t) for t in original.context]
         data = self.model_dump(
             exclude={"id", "agents", "tasks", "manager_agent", "token_usage"}
         )
         data.update(
             manager_llm=self.manager_llm,
             step_callback=self.step_callback,
+            context_providers=list(self.context_providers),
+            output_sinks=list(self.output_sinks),
             task_callback=self.task_callback,
             planning_llm=self.planning_llm,
             memory=self.memory,
@@ -205,11 +230,28 @@ class Crew(BaseModel):
                     completed.append((context_task, context_task.output))
                 elif context_task.output is not None:
                     outputs.append(context_task.output)
-            return self._join([o.raw for o in outputs]) or None
-        if task.context is None:
-            return None
-        # NOT_SPECIFIED: all prior outputs
-        return self._join([output.raw for _, output in completed]) or None
+            base = self._join([o.raw for o in outputs]) or None
+        elif task.context is None:
+            base = None
+        else:
+            # NOT_SPECIFIED: all prior outputs
+            base = self._join([output.raw for _, output in completed]) or None
+        return self._apply_context_providers(task, base)
+
+    def _apply_context_providers(self, task: Task, base: str | None) -> str | None:
+        """Append each provider's contribution to the task context (best-effort)."""
+        if not self.context_providers:
+            return base
+        chunks: list[str] = [base] if base else []
+        for provider in self.context_providers:
+            try:
+                extra = provider(task=task, agent=task.agent, context=base)
+            except Exception:  # noqa: BLE001 — providers must never break a run
+                logger.exception("context provider %r failed; skipping", provider)
+                continue
+            if extra:
+                chunks.append(str(extra))
+        return self._join(chunks) or None
 
     @staticmethod
     def _join(chunks: list[str]) -> str:
@@ -221,6 +263,11 @@ class Crew(BaseModel):
                 self.task_callback(output)
             except Exception:
                 logger.exception("task_callback failed for crew %r", self.name)
+        for sink in self.output_sinks:
+            try:
+                sink(task=task, output=output)
+            except Exception:  # noqa: BLE001 — sinks must never break a run
+                logger.exception("output sink %r failed; skipping", sink)
 
     def _run_sequential(self) -> list[TaskOutput]:
         completed: list[tuple[Task, TaskOutput]] = []
@@ -235,7 +282,10 @@ class Crew(BaseModel):
                 )
             if task.async_execution:
                 context = self._context_for(task, completed, futures)
-                futures[id(task)] = (task, task.execute_async(agent, context, task.tools))
+                futures[id(task)] = (
+                    task,
+                    task.execute_async(agent, context, task.tools),
+                )
                 continue
             # a sync task waits for every still-pending async task
             for task_key, (pending_task, future) in list(futures.items()):

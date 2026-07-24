@@ -1,6 +1,7 @@
 """
 Comprehensive unit tests for DatabricksVectorStorage.
 """
+
 import os
 import sys
 import pytest
@@ -177,9 +178,7 @@ class TestDatabricksVectorStorageSave:
 
         schema = {"id": "str", "content": "str", "embedding": "list"}
         with patch.object(DatabricksIndexSchemas, "get_schema", return_value=schema):
-            await storage.save(
-                {"content": "Hello", "embedding": [0.1] * 1024}
-            )
+            await storage.save({"content": "Hello", "embedding": [0.1] * 1024})
 
         repo.upsert.assert_called_once()
 
@@ -196,7 +195,9 @@ class TestDatabricksVectorStorageSave:
     async def test_save_raises_when_upsert_fails(self):
         storage, repo = _build_storage(memory_type="short_term")
         repo.get_index = AsyncMock(return_value=MagicMock(success=False))
-        repo.upsert = AsyncMock(return_value={"success": False, "message": "Index error"})
+        repo.upsert = AsyncMock(
+            return_value={"success": False, "message": "Index error"}
+        )
 
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
@@ -219,16 +220,16 @@ class TestDatabricksVectorStorageSave:
             await storage.save({"content": "test"})
 
         call_args = repo.upsert.call_args
-        records = call_args.args[2] if call_args.args else call_args[1].get("records", [])
+        records = (
+            call_args.args[2] if call_args.args else call_args[1].get("records", [])
+        )
         if records:
             assert "embedding" in records[0]
             assert len(records[0]["embedding"]) == 1024
 
     @pytest.mark.asyncio
     async def test_save_uses_job_id_as_session_id_for_short_term(self):
-        storage, repo = _build_storage(
-            memory_type="short_term", job_id="job_session_1"
-        )
+        storage, repo = _build_storage(memory_type="short_term", job_id="job_session_1")
         repo.get_index = AsyncMock(return_value=MagicMock(success=False))
         repo.upsert = AsyncMock(return_value={"success": True})
 
@@ -364,12 +365,17 @@ class TestDatabricksVectorStorageSearch:
 
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(
-            DatabricksIndexSchemas, "get_search_columns", return_value=["id", "content", "crew_id"]
-        ), patch.object(
-            DatabricksIndexSchemas,
-            "get_column_positions",
-            return_value={"id": 0, "content": 1, "crew_id": 2},
+        with (
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_search_columns",
+                return_value=["id", "content", "crew_id"],
+            ),
+            patch.object(
+                DatabricksIndexSchemas,
+                "get_column_positions",
+                return_value={"id": 0, "content": 1, "crew_id": 2},
+            ),
         ):
             results = await storage.search([0.1] * 1024, k=5)
 
@@ -384,7 +390,9 @@ class TestDatabricksVectorStorageSearch:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             results = await storage.search([0.1] * 1024)
 
         assert results == []
@@ -397,12 +405,18 @@ class TestDatabricksVectorStorageSearch:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             await storage.search([0.0] * 1024, k=3)
 
         call_args = repo.similarity_search.call_args
         # filters is the 5th positional arg (index 4) or keyword
-        filters = call_args[0][5] if len(call_args[0]) > 5 else call_args[1].get("filters", {})
+        filters = (
+            call_args[0][5]
+            if len(call_args[0]) > 5
+            else call_args[1].get("filters", {})
+        )
         assert filters.get("crew_id") == "crew_xyz"
 
     @pytest.mark.asyncio
@@ -411,7 +425,9 @@ class TestDatabricksVectorStorageSearch:
         repo.similarity_search = AsyncMock(side_effect=Exception("Network error"))
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             results = await storage.search([0.1] * 1024)
 
         assert results == []
@@ -424,7 +440,9 @@ class TestDatabricksVectorStorageSearch:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             results = await storage.search([0.1] * 1024)
 
         assert results == []
@@ -437,11 +455,17 @@ class TestDatabricksVectorStorageSearch:
         )
         from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
-        with patch.object(DatabricksIndexSchemas, "get_search_columns", return_value=[]):
+        with patch.object(
+            DatabricksIndexSchemas, "get_search_columns", return_value=[]
+        ):
             await storage.search([0.0] * 1024)
 
         call_args = repo.similarity_search.call_args
-        filters = call_args[0][5] if len(call_args[0]) > 5 else call_args[1].get("filters", {})
+        filters = (
+            call_args[0][5]
+            if len(call_args[0]) > 5
+            else call_args[1].get("filters", {})
+        )
         # Document memory uses group_id not crew_id
         assert filters.get("group_id") == "grp_doc"
 
@@ -571,7 +595,11 @@ class TestDatabricksVectorStorageGetStats:
             return_value={
                 "success": True,
                 "description": {
-                    "status": {"indexed_row_count": 42, "ready": True, "detailed_state": "ONLINE"}
+                    "status": {
+                        "indexed_row_count": 42,
+                        "ready": True,
+                        "detailed_state": "ONLINE",
+                    }
                 },
             }
         )
@@ -620,6 +648,8 @@ class TestDatabricksVectorStorageCountDocuments:
         await storage.count_documents()
 
         call_args = repo.count_documents.call_args
-        filters = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        filters = (
+            call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("filters")
+        )
         if filters:
             assert filters.get("crew_id") == "crew_filter"

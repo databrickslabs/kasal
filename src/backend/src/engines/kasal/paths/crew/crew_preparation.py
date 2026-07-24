@@ -5,6 +5,7 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 """
 
 from typing import Dict, Any, List, Optional
+import asyncio
 import logging
 import re
 import os
@@ -16,15 +17,15 @@ from src.engines.kasal.paths.crew.agent_adapter import create_agent
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.engines.kasal.memory.memory_backend_factory import MemoryBackendFactory
 from src.utils.databricks_url_utils import DatabricksURLUtils
+
 # Import new service classes
 from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
 from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
 from src.engines.kasal.config.manager_config_builder import ManagerConfigBuilder
 from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
 
-
-
 logger = LoggerManager.get_instance().crew
+
 
 def validate_crew_config(config: Dict[str, Any]) -> bool:
     """
@@ -37,13 +38,14 @@ def validate_crew_config(config: Dict[str, Any]) -> bool:
         True if configuration is valid
     """
     # Simple validation - check required sections
-    required_sections = ['agents', 'tasks']
+    required_sections = ["agents", "tasks"]
     for section in required_sections:
         if section not in config or not config[section]:
             logger.error(f"Missing or empty required section: {section}")
             return False
 
     return True
+
 
 def handle_crew_error(e: Exception, message: str) -> None:
     """
@@ -55,6 +57,7 @@ def handle_crew_error(e: Exception, message: str) -> None:
     """
     error_msg = f"{message}: {str(e)}"
     logger.error(error_msg, exc_info=True)
+
 
 async def process_crew_output(result: Any) -> Dict[str, Any]:
     """
@@ -69,7 +72,7 @@ async def process_crew_output(result: Any) -> Dict[str, Any]:
     try:
         if isinstance(result, dict):
             return result
-        elif hasattr(result, 'raw'):
+        elif hasattr(result, "raw"):
             # CrewAI result object with raw attribute
             return {"result": result.raw, "type": "crew_result"}
         else:
@@ -79,10 +82,17 @@ async def process_crew_output(result: Any) -> Dict[str, Any]:
         logger.error(f"Error processing crew output: {e}")
         return {"error": f"Failed to process output: {str(e)}"}
 
+
 class CrewPreparation:
     """Handles the preparation of CrewAI agents and tasks"""
 
-    def __init__(self, config: Dict[str, Any], tool_service=None, tool_factory=None, user_token: Optional[str] = None):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        tool_service=None,
+        tool_factory=None,
+        user_token: Optional[str] = None,
+    ):
         """
         Initialize the CrewPreparation class
 
@@ -108,8 +118,10 @@ class CrewPreparation:
 
         # Log the configuration to debug memory backend
         logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
-        if 'memory_backend_config' in config:
-            logger.info(f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}")
+        if "memory_backend_config" in config:
+            logger.info(
+                f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}"
+            )
 
     def _should_disable_memory_for_agent(self, agent_config: Dict[str, Any]) -> bool:
         """
@@ -122,8 +134,10 @@ class CrewPreparation:
             True if memory is explicitly set to False in the agent config
         """
         # Only check if memory is explicitly disabled in agent config
-        if 'memory' in agent_config and agent_config['memory'] is False:
-            logger.info(f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}")
+        if "memory" in agent_config and agent_config["memory"] is False:
+            logger.info(
+                f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}"
+            )
             return True
         return False
 
@@ -175,21 +189,29 @@ class CrewPreparation:
         Returns:
             Agent instance or None if not found
         """
-        logger.info(f"[_find_agent_by_reference] Looking for agent: '{agent_reference}'")
-        logger.info(f"[_find_agent_by_reference] Available agents: {list(self.agents.keys())}")
+        logger.info(
+            f"[_find_agent_by_reference] Looking for agent: '{agent_reference}'"
+        )
+        logger.info(
+            f"[_find_agent_by_reference] Available agents: {list(self.agents.keys())}"
+        )
 
-        if not agent_reference or agent_reference == 'unknown':
-            logger.info(f"[_find_agent_by_reference] Returning None for unknown/empty reference")
+        if not agent_reference or agent_reference == "unknown":
+            logger.info(
+                f"[_find_agent_by_reference] Returning None for unknown/empty reference"
+            )
             return None
 
         # Try direct lookup first
         agent = self.agents.get(agent_reference)
         if agent:
-            logger.info(f"[_find_agent_by_reference] Found by direct lookup: {agent_reference}")
+            logger.info(
+                f"[_find_agent_by_reference] Found by direct lookup: {agent_reference}"
+            )
             return agent
 
         # If reference starts with 'agent_agent-', extract the UUID part and try lookup
-        if agent_reference.startswith('agent_agent-'):
+        if agent_reference.startswith("agent_agent-"):
             # Extract UUID: 'agent_agent-47b50da8-bfa2-41c9-8d0f-19c063f5c9c0' -> '47b50da8-bfa2-41c9-8d0f-19c063f5c9c0'
             uuid_part = agent_reference[12:]  # Remove 'agent_agent-' prefix
 
@@ -197,19 +219,25 @@ class CrewPreparation:
             for agent_key, stored_agent in self.agents.items():
                 # Check if the stored agent key contains this UUID
                 if uuid_part in agent_key:
-                    logger.info(f"Found agent by UUID match: {agent_reference} -> {agent_key}")
+                    logger.info(
+                        f"Found agent by UUID match: {agent_reference} -> {agent_key}"
+                    )
                     return stored_agent
 
         # If still not found, try to match by agent role in the original config
         # This handles cases where the task references an agent ID but we stored by role
-        for agent_config in self.config.get('agents', []):
-            agent_id = agent_config.get('id', '')
+        for agent_config in self.config.get("agents", []):
+            agent_id = agent_config.get("id", "")
             if agent_id == agent_reference:
                 # Found the config, now find the corresponding stored agent
-                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', '')))
+                agent_name = agent_config.get(
+                    "name", agent_config.get("id", agent_config.get("role", ""))
+                )
                 stored_agent = self.agents.get(agent_name)
                 if stored_agent:
-                    logger.info(f"Found agent by config ID match: {agent_reference} -> {agent_name}")
+                    logger.info(
+                        f"Found agent by config ID match: {agent_reference} -> {agent_name}"
+                    )
                     return stored_agent
 
         logger.warning(f"Could not find agent for reference: {agent_reference}")
@@ -243,8 +271,8 @@ class CrewPreparation:
         Pure config normalization, no DB access — safe across the subprocess
         boundary. Ids are compared as strings (the config mixes ints and strings).
         """
-        agents = self.config.get('agents', [])
-        tasks = self.config.get('tasks', [])
+        agents = self.config.get("agents", [])
+        tasks = self.config.get("tasks", [])
         if not agents or not tasks:
             return
 
@@ -252,7 +280,7 @@ class CrewPreparation:
         # the tasks assigned to it.
         def _agent_refs(agent_config: Dict[str, Any]) -> set:
             refs = set()
-            for k in ('id', 'name', 'role'):
+            for k in ("id", "name", "role"):
                 v = agent_config.get(k)
                 if v:
                     refs.add(str(v))
@@ -262,11 +290,11 @@ class CrewPreparation:
         # Agent refs that have a task relying on tool inheritance (task tools empty).
         agent_refs_with_inheriting_task: set = set()
         for task_config in tasks:
-            agent_ref = task_config.get('agent')
+            agent_ref = task_config.get("agent")
             if not agent_ref:
                 continue
             t_tools = {
-                str(t) for t in (task_config.get('tools') or []) if t is not None
+                str(t) for t in (task_config.get("tools") or []) if t is not None
             }
             if not t_tools:
                 # This task carries no tools → at runtime it inherits the agent's
@@ -279,7 +307,7 @@ class CrewPreparation:
             return
 
         for agent_config in agents:
-            agent_tools = agent_config.get('tools') or []
+            agent_tools = agent_config.get("tools") or []
             if not agent_tools:
                 continue
             refs = _agent_refs(agent_config)
@@ -297,7 +325,7 @@ class CrewPreparation:
             removed = [t for t in agent_tools if str(t) in task_tool_ids]
             if removed:
                 agent_name = agent_config.get(
-                    'name', agent_config.get('role', agent_config.get('id', 'unknown'))
+                    "name", agent_config.get("role", agent_config.get("id", "unknown"))
                 )
                 logger.info(
                     f"[CrewPreparation] Agent '{agent_name}': removed tool(s) "
@@ -305,7 +333,7 @@ class CrewPreparation:
                     f"task level with the task's configuration (avoids an "
                     f"empty-config duplicate tool instance)."
                 )
-                agent_config['tools'] = kept
+                agent_config["tools"] = kept
 
     async def _create_agents(self) -> bool:
         """
@@ -317,30 +345,50 @@ class CrewPreparation:
         try:
             # Use MCP integration to collect agent MCP requirements
             from src.engines.kasal.tools.mcp_integration import MCPIntegration
-            agent_mcp_requirements = await MCPIntegration.collect_agent_mcp_requirements(self.config)
 
-            for i, agent_config in enumerate(self.config.get('agents', [])):
+            agent_mcp_requirements = (
+                await MCPIntegration.collect_agent_mcp_requirements(self.config)
+            )
+
+            for i, agent_config in enumerate(self.config.get("agents", [])):
                 # Use the agent's 'name' if present, then 'id', then 'role', or generate a name if none exist
-                agent_name = agent_config.get('name', agent_config.get('id', agent_config.get('role', f'agent_{i}')))
-                config_agent_id = agent_config.get('id', agent_name)
+                agent_name = agent_config.get(
+                    "name",
+                    agent_config.get("id", agent_config.get("role", f"agent_{i}")),
+                )
+                config_agent_id = agent_config.get("id", agent_name)
 
                 # CRITICAL FIX: Look up the actual Kasal agent UUID from database using AgentService
                 # The config agent_id is the CrewAI agent name, but we need the Kasal agent UUID for vector search
-                kasal_agent_id = await self._lookup_kasal_agent_uuid_via_service(agent_config, config_agent_id)
+                kasal_agent_id = await self._lookup_kasal_agent_uuid_via_service(
+                    agent_config, config_agent_id
+                )
                 agent_id = kasal_agent_id if kasal_agent_id else config_agent_id
 
                 # Debug logging to track agent ID resolution for knowledge source access control
-                logger.info(f"[CrewPreparation] Agent {i}: name='{agent_name}', config_id='{config_agent_id}'")
-                logger.info(f"[CrewPreparation] Agent {i}: kasal_agent_id='{kasal_agent_id}', final_agent_id='{agent_id}'")
-                logger.info(f"[CrewPreparation] Agent {i}: Will use agent_id '{agent_id}' for knowledge source access control")
+                logger.info(
+                    f"[CrewPreparation] Agent {i}: name='{agent_name}', config_id='{config_agent_id}'"
+                )
+                logger.info(
+                    f"[CrewPreparation] Agent {i}: kasal_agent_id='{kasal_agent_id}', final_agent_id='{agent_id}'"
+                )
+                logger.info(
+                    f"[CrewPreparation] Agent {i}: Will use agent_id '{agent_id}' for knowledge source access control"
+                )
 
                 # Log agent configuration to debug knowledge_sources
-                logger.info(f"[CrewPreparation] Processing agent {agent_name} with config keys: {list(agent_config.keys())}")
-                if 'knowledge_sources' in agent_config:
-                    ks = agent_config['knowledge_sources']
-                    logger.info(f"[CrewPreparation] Agent {agent_name} has {len(ks)} knowledge_sources: {ks}")
+                logger.info(
+                    f"[CrewPreparation] Processing agent {agent_name} with config keys: {list(agent_config.keys())}"
+                )
+                if "knowledge_sources" in agent_config:
+                    ks = agent_config["knowledge_sources"]
+                    logger.info(
+                        f"[CrewPreparation] Agent {agent_name} has {len(ks)} knowledge_sources: {ks}"
+                    )
                 else:
-                    logger.debug(f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources")
+                    logger.debug(
+                        f"[CrewPreparation] Agent {agent_name} has NO knowledge_sources"
+                    )
 
                 # Add MCP requirements from assigned tasks to agent config
                 # Try multiple keys: collect_agent_mcp_requirements() uses
@@ -353,26 +401,44 @@ class CrewPreparation:
                     or agent_mcp_requirements.get(agent_name, [])
                 )
                 if agent_mcp_servers:
-                    logger.info(f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}")
-                    if 'tool_configs' not in agent_config:
-                        agent_config['tool_configs'] = {}
-                    agent_config['tool_configs']['MCP_SERVERS'] = {'servers': agent_mcp_servers}
+                    logger.info(
+                        f"Agent {agent_name} will have MCP servers from tasks: {agent_mcp_servers}"
+                    )
+                    if "tool_configs" not in agent_config:
+                        agent_config["tool_configs"] = {}
+                    agent_config["tool_configs"]["MCP_SERVERS"] = {
+                        "servers": agent_mcp_servers
+                    }
 
                 # Propagate crew-level reasoning config to each agent
                 # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT a Crew-level parameter
-                crew_config = self.config.get('crew', {})
-                if crew_config.get('reasoning') and 'reasoning' not in agent_config:
-                    agent_config['reasoning'] = True
-                    logger.info(f"Agent {agent_name}: Enabling reasoning from crew-level config")
-                if crew_config.get('max_reasoning_attempts') and 'max_reasoning_attempts' not in agent_config:
-                    agent_config['max_reasoning_attempts'] = crew_config['max_reasoning_attempts']
-                    logger.info(f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config")
+                crew_config = self.config.get("crew", {})
+                if crew_config.get("reasoning") and "reasoning" not in agent_config:
+                    agent_config["reasoning"] = True
+                    logger.info(
+                        f"Agent {agent_name}: Enabling reasoning from crew-level config"
+                    )
+                if (
+                    crew_config.get("max_reasoning_attempts")
+                    and "max_reasoning_attempts" not in agent_config
+                ):
+                    agent_config["max_reasoning_attempts"] = crew_config[
+                        "max_reasoning_attempts"
+                    ]
+                    logger.info(
+                        f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config"
+                    )
                 # PlanningConfig overrides (effort + step/replan caps) set in the sidebar
                 # Reasoning section. The shared agent builder turns this into a bounded
                 # crewai PlanningConfig; without it the agent gets CrewAI's expansive defaults.
-                if crew_config.get('reasoning_config') and 'reasoning_config' not in agent_config:
-                    agent_config['reasoning_config'] = crew_config['reasoning_config']
-                    logger.info(f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}")
+                if (
+                    crew_config.get("reasoning_config")
+                    and "reasoning_config" not in agent_config
+                ):
+                    agent_config["reasoning_config"] = crew_config["reasoning_config"]
+                    logger.info(
+                        f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}"
+                    )
 
                 # SAFETY: CrewAI's reasoning refine loop is
                 #   while not ready and (max_attempts is None or attempt < max_attempts)
@@ -381,9 +447,13 @@ class CrewPreparation:
                 # structured `ready` field). With litellm response caching on, each refine
                 # call is an instant cache hit, so it spins at hundreds/sec and never
                 # finishes. Bound it whenever reasoning is enabled without an explicit cap.
-                if agent_config.get('reasoning') and not agent_config.get('max_reasoning_attempts'):
-                    agent_config['max_reasoning_attempts'] = 3
-                    logger.info(f"Agent {agent_name}: reasoning enabled without a cap — defaulting max_reasoning_attempts=3 to prevent an unbounded refine loop")
+                if agent_config.get("reasoning") and not agent_config.get(
+                    "max_reasoning_attempts"
+                ):
+                    agent_config["max_reasoning_attempts"] = 3
+                    logger.info(
+                        f"Agent {agent_name}: reasoning enabled without a cap — defaulting max_reasoning_attempts=3 to prevent an unbounded refine loop"
+                    )
 
                 agent = await create_agent(
                     agent_key=agent_name,
@@ -391,7 +461,7 @@ class CrewPreparation:
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
                     config=self.config,  # Pass the full config for execution_id and group_id
-                    agent_id=agent_id   # Pass Kasal agent UUID for knowledge source access control
+                    agent_id=agent_id,  # Pass Kasal agent UUID for knowledge source access control
                 )
                 if not agent:
                     logger.error(f"Failed to create agent: {agent_name}")
@@ -408,7 +478,6 @@ class CrewPreparation:
             handle_crew_error(e, "Error creating agents")
             return False
 
-
     async def _create_tasks(self) -> bool:
         """
         Create all tasks defined in the configuration
@@ -419,7 +488,7 @@ class CrewPreparation:
         try:
             from src.engines.kasal.paths.crew.task_adapter import create_task
 
-            tasks = self.config.get('tasks', [])
+            tasks = self.config.get("tasks", [])
             # Predefined UI Configurator surfaces are now composed POST-execution by
             # the shared A2UI composer (a2ui_runner.wrap_result_with_surface, wired
             # into the crew completion paths in execution_runner) — the same
@@ -433,7 +502,7 @@ class CrewPreparation:
             # First pass: create all tasks without setting context
             for i, task_config in enumerate(tasks):
                 # Get the agent for this task, default to first agent if not specified
-                agent_name = task_config.get('agent', 'unknown')
+                agent_name = task_config.get("agent", "unknown")
                 agent = self._find_agent_by_reference(agent_name)
 
                 # Handle missing agent
@@ -444,7 +513,9 @@ class CrewPreparation:
 
                     # Use the first available agent as fallback
                     fallback_agent_name, agent = next(iter(self.agents.items()))
-                    logger.warning(f"Invalid agent '{agent_name}' specified for task. Using '{fallback_agent_name}' instead.")
+                    logger.warning(
+                        f"Invalid agent '{agent_name}' specified for task. Using '{fallback_agent_name}' instead."
+                    )
 
                 # Define task_name first so it can be used in logging
                 # If this is the first task and it has the Databricks knowledge tool, add context
@@ -458,15 +529,20 @@ class CrewPreparation:
                         # service first. This is what makes weaker models (e.g. Haiku) get
                         # the "you MUST call the tool" nudge — Opus calls it unprompted, Haiku
                         # does not, so a missed nudge looks like a model bug.
-                        task_tools = task_config.get('tools', []) or task_config.get('_original_tools', [])
+                        task_tools = task_config.get("tools", []) or task_config.get(
+                            "_original_tools", []
+                        )
                         resolved_task_tool_names = []
                         if task_tools and self.tool_service:
                             try:
                                 from src.engines.kasal.kernel.tool_helpers import (
                                     resolve_tool_ids_to_names,
                                 )
-                                resolved_task_tool_names = await resolve_tool_ids_to_names(
-                                    task_tools, self.tool_service
+
+                                resolved_task_tool_names = (
+                                    await resolve_tool_ids_to_names(
+                                        task_tools, self.tool_service
+                                    )
                                 )
                             except Exception as _resolve_err:
                                 logger.warning(
@@ -474,9 +550,9 @@ class CrewPreparation:
                                     f"for nudge detection: {_resolve_err}"
                                 )
                         has_db_knowledge_tool = (
-                            'DatabricksKnowledgeSearchTool' in resolved_task_tool_names or
-                            'DatabricksKnowledgeSearchTool' in task_tools or
-                            '36' in [str(t) for t in task_tools]
+                            "DatabricksKnowledgeSearchTool" in resolved_task_tool_names
+                            or "DatabricksKnowledgeSearchTool" in task_tools
+                            or "36" in [str(t) for t in task_tools]
                         )
 
                         if has_db_knowledge_tool:
@@ -484,29 +560,38 @@ class CrewPreparation:
                             available_files = []
 
                             # Find the agent config that matches the current task's agent
-                            task_agent_ref = task_config.get('agent', '')
+                            task_agent_ref = task_config.get("agent", "")
                             agent_config_for_files = None
 
-                            for agent_cfg in self.config.get('agents', []):
-                                agent_id = agent_cfg.get('id', '')
-                                agent_role = agent_cfg.get('role', '')
+                            for agent_cfg in self.config.get("agents", []):
+                                agent_id = agent_cfg.get("id", "")
+                                agent_role = agent_cfg.get("role", "")
                                 # Match by ID or role
-                                if agent_id == task_agent_ref or agent_role == task_agent_ref:
+                                if (
+                                    agent_id == task_agent_ref
+                                    or agent_role == task_agent_ref
+                                ):
                                     agent_config_for_files = agent_cfg
                                     break
 
                             if not agent_config_for_files:
                                 # Fallback to first agent if no match found
-                                agent_config_for_files = self.config.get('agents', [{}])[0]
+                                agent_config_for_files = self.config.get(
+                                    "agents", [{}]
+                                )[0]
 
-                            knowledge_sources = agent_config_for_files.get('knowledge_sources', [])
+                            knowledge_sources = agent_config_for_files.get(
+                                "knowledge_sources", []
+                            )
 
                             for ks in knowledge_sources:
                                 if isinstance(ks, dict):
                                     # Extract filename from fileInfo or metadata
-                                    file_info = ks.get('fileInfo', {})
-                                    metadata = ks.get('metadata', {})
-                                    filename = file_info.get('filename') or metadata.get('filename')
+                                    file_info = ks.get("fileInfo", {})
+                                    metadata = ks.get("metadata", {})
+                                    filename = file_info.get(
+                                        "filename"
+                                    ) or metadata.get("filename")
 
                                     if filename:
                                         available_files.append(filename)
@@ -514,7 +599,9 @@ class CrewPreparation:
                             # Build file list string
                             files_info = ""
                             if available_files:
-                                files_list = "\n".join([f"  - {fname}" for fname in available_files])
+                                files_list = "\n".join(
+                                    [f"  - {fname}" for fname in available_files]
+                                )
                                 files_info = f"\n\n**Available Knowledge Files:**\n{files_list}\n"
 
                             # Prepend a STRONG instruction to REQUIRE tool use with file context.
@@ -532,40 +619,54 @@ class CrewPreparation:
                                 "passages. DO NOT answer from your own knowledge and DO NOT proceed without calling this tool first.\n\n"
                             )
                             # Only inject once, and keep original description intact after the nudge
-                            original_desc = task_config.get('description', '') or ''
+                            original_desc = task_config.get("description", "") or ""
                             if nudge.strip() not in original_desc:
-                                task_config['description'] = f"{nudge}{original_desc}"
-                                t_name_for_log = task_config.get('name', 'first_task')
-                                logger.info(f"[CrewPreparation] Injected STRONG knowledge-search requirement with {len(available_files)} files into first task '{t_name_for_log}' for agent '{agent_name}'")
+                                task_config["description"] = f"{nudge}{original_desc}"
+                                t_name_for_log = task_config.get("name", "first_task")
+                                logger.info(
+                                    f"[CrewPreparation] Injected STRONG knowledge-search requirement with {len(available_files)} files into first task '{t_name_for_log}' for agent '{agent_name}'"
+                                )
 
                             # Also ensure DatabricksKnowledgeSearchTool is in the task's tools
                             # list — but only if it isn't already present under a name OR a
                             # numeric id (e.g. 83). has_db_knowledge_tool already accounts for
                             # the resolved names, so appending here would only duplicate the tool.
                             if not has_db_knowledge_tool:
-                                task_tools = task_config.get('tools', [])
-                                task_tools.append('DatabricksKnowledgeSearchTool')
-                                task_config['tools'] = task_tools
-                                logger.info(f"[CrewPreparation] Added DatabricksKnowledgeSearchTool to task '{t_name_for_log}' tools list")
+                                task_tools = task_config.get("tools", [])
+                                task_tools.append("DatabricksKnowledgeSearchTool")
+                                task_config["tools"] = task_tools
+                                logger.info(
+                                    f"[CrewPreparation] Added DatabricksKnowledgeSearchTool to task '{t_name_for_log}' tools list"
+                                )
                 except Exception as _nudge_err:
-                    logger.warning(f"[CrewPreparation] Failed to inject knowledge-search nudge: {_nudge_err}")
+                    logger.warning(
+                        f"[CrewPreparation] Failed to inject knowledge-search nudge: {_nudge_err}"
+                    )
 
-                task_name = task_config.get('name', f"task_{len(self.tasks)}")
-                task_id = task_config.get('id', task_name)
+                task_name = task_config.get("name", f"task_{len(self.tasks)}")
+                task_id = task_config.get("id", task_name)
 
                 # Store any context IDs for second pass resolution (only if multiple tasks)
                 if len(tasks) > 1 and "context" in task_config:
                     context_value = task_config.pop("context")
                     # Only process non-empty context values
                     if context_value:  # Skip empty lists, empty strings, etc.
-                        logger.info(f"Saved context references for task {task_name}: {context_value}")
+                        logger.info(
+                            f"Saved context references for task {task_name}: {context_value}"
+                        )
                         # Store the references for resolution in second pass
                         if isinstance(context_value, list) and context_value:
-                            task_config['_context_refs'] = [str(item) for item in context_value]
+                            task_config["_context_refs"] = [
+                                str(item) for item in context_value
+                            ]
                         elif isinstance(context_value, str) and context_value.strip():
-                            task_config['_context_refs'] = [context_value]
-                        elif isinstance(context_value, dict) and "task_ids" in context_value and context_value["task_ids"]:
-                            task_config['_context_refs'] = context_value["task_ids"]
+                            task_config["_context_refs"] = [context_value]
+                        elif (
+                            isinstance(context_value, dict)
+                            and "task_ids" in context_value
+                            and context_value["task_ids"]
+                        ):
+                            task_config["_context_refs"] = context_value["task_ids"]
                 elif "context" in task_config:
                     # Remove context from single-task configurations to avoid issues
                     task_config.pop("context")
@@ -574,22 +675,32 @@ class CrewPreparation:
                 # Tasks with async_execution=True will run in parallel (if they have no context dependencies)
                 # CrewAI validation requires that a crew ends with at most one async task
                 # We handle this by auto-creating a completion task after the loop if needed
-                is_async = task_config.get('async_execution', False)
+                is_async = task_config.get("async_execution", False)
 
                 if is_async:
                     # Mark that this task wants async execution for later processing
-                    task_config['_wanted_async'] = True
-                    has_context = '_context_refs' in task_config or task_config.get('context')
+                    task_config["_wanted_async"] = True
+                    has_context = "_context_refs" in task_config or task_config.get(
+                        "context"
+                    )
                     if has_context:
-                        logger.info(f"Task '{task_name}' has async_execution=True with context - will wait for dependencies")
+                        logger.info(
+                            f"Task '{task_name}' has async_execution=True with context - will wait for dependencies"
+                        )
                     else:
-                        logger.info(f"Task '{task_name}' has async_execution=True - will run in parallel")
+                        logger.info(
+                            f"Task '{task_name}' has async_execution=True - will run in parallel"
+                        )
 
                 logger.info(f"Task '{task_name}' async_execution setting: {is_async}")
 
                 # Create the task
                 # Get execution_name from config (can be run_name or execution_id)
-                execution_name = self.config.get('run_name') or self.config.get('inputs', {}).get('run_name') or self.config.get('execution_id')
+                execution_name = (
+                    self.config.get("run_name")
+                    or self.config.get("inputs", {}).get("run_name")
+                    or self.config.get("execution_id")
+                )
 
                 task = await create_task(
                     task_key=task_name,
@@ -598,7 +709,7 @@ class CrewPreparation:
                     config=self.config,
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
-                    execution_name=execution_name
+                    execution_name=execution_name,
                 )
 
                 # Self-hosted vLLM: CrewAI engages NATIVE tool-calling only when the
@@ -613,10 +724,19 @@ class CrewPreparation:
                 # Databricks/other providers are unaffected. De-dup by tool name.
                 try:
                     from src.core.llm_manager import _VLLMFunctionCallingLLM
+
                     task_tools = getattr(task, "tools", None) or []
-                    if task_tools and isinstance(getattr(agent, "llm", None), _VLLMFunctionCallingLLM):
-                        existing = {getattr(t, "name", id(t)) for t in (agent.tools or [])}
-                        added = [t for t in task_tools if getattr(t, "name", id(t)) not in existing]
+                    if task_tools and isinstance(
+                        getattr(agent, "llm", None), _VLLMFunctionCallingLLM
+                    ):
+                        existing = {
+                            getattr(t, "name", id(t)) for t in (agent.tools or [])
+                        }
+                        added = [
+                            t
+                            for t in task_tools
+                            if getattr(t, "name", id(t)) not in existing
+                        ]
                         if added:
                             agent.tools = list(agent.tools or []) + added
                             if hasattr(agent, "create_agent_executor"):
@@ -640,16 +760,18 @@ class CrewPreparation:
 
             # Second pass: Resolve context references to actual Task objects
             for task_config in tasks:
-                task_id = task_config.get('id', task_config.get('name'))
+                task_id = task_config.get("id", task_config.get("name"))
                 task = task_dict.get(task_id)
 
                 if not task:
-                    logger.warning(f"Could not find task for ID {task_id} during context resolution")
+                    logger.warning(
+                        f"Could not find task for ID {task_id} during context resolution"
+                    )
                     continue
 
                 # If this task has context references, resolve them
-                if '_context_refs' in task_config:
-                    context_refs = task_config['_context_refs']
+                if "_context_refs" in task_config:
+                    context_refs = task_config["_context_refs"]
                     context_tasks = []
 
                     for ref in context_refs:
@@ -659,19 +781,29 @@ class CrewPreparation:
                             # Frontend sends refs with "task_" prefix (e.g. "task_<uuid>")
                             # but task_dict keys are raw IDs from task_config['id'].
                             # Strip the prefix and retry.
-                            stripped = ref.replace("task_", "", 1) if ref.startswith("task_") else None
+                            stripped = (
+                                ref.replace("task_", "", 1)
+                                if ref.startswith("task_")
+                                else None
+                            )
                             if stripped:
                                 resolved_task = task_dict.get(stripped)
                         if resolved_task:
                             context_tasks.append(resolved_task)
                         else:
-                            logger.warning(f"Could not resolve context reference '{ref}' for task {task_id}")
+                            logger.warning(
+                                f"Could not resolve context reference '{ref}' for task {task_id}"
+                            )
 
                     if context_tasks:
-                        logger.info(f"Setting context for task {task_id} to {len(context_tasks)} Task objects")
+                        logger.info(
+                            f"Setting context for task {task_id} to {len(context_tasks)} Task objects"
+                        )
                         task.context = context_tasks
                     else:
-                        logger.warning(f"No context tasks could be resolved for task {task_id}")
+                        logger.warning(
+                            f"No context tasks could be resolved for task {task_id}"
+                        )
 
             # Handle parallel execution for multiple async tasks
             # CrewAI validation: "A crew must end with at most one async task"
@@ -681,15 +813,21 @@ class CrewPreparation:
             # IMPORTANT: Tasks with async_execution=True must NOT have context set,
             # otherwise they will wait for that context and not run in parallel!
             if self.tasks:
-                async_tasks = [t for t in self.tasks if getattr(t, 'async_execution', False)]
+                async_tasks = [
+                    t for t in self.tasks if getattr(t, "async_execution", False)
+                ]
 
                 if len(async_tasks) > 1:
-                    logger.info(f"Found {len(async_tasks)} async tasks - configuring for parallel execution")
+                    logger.info(
+                        f"Found {len(async_tasks)} async tasks - configuring for parallel execution"
+                    )
 
                     # Remove any context from async tasks so they can run truly in parallel
                     for async_task in async_tasks:
-                        if getattr(async_task, 'context', None):
-                            logger.info(f"Removing context from async task to enable parallel execution")
+                        if getattr(async_task, "context", None):
+                            logger.info(
+                                f"Removing context from async task to enable parallel execution"
+                            )
                             async_task.context = None
 
                     # Add a minimal completion task that waits for all async tasks
@@ -705,7 +843,7 @@ class CrewPreparation:
                         expected_output="The outputs from all parallel tasks.",
                         agent=completion_agent,
                         context=async_tasks,  # Wait for ALL async tasks to complete
-                        async_execution=False  # Sync task to satisfy CrewAI validation
+                        async_execution=False,  # Sync task to satisfy CrewAI validation
                     )
 
                     # Add completion task to the crew's task list
@@ -713,14 +851,20 @@ class CrewPreparation:
 
                     # Log the parallel execution setup
                     parallel_descriptions = [
-                        getattr(t, 'description', 'unknown')[:40] + '...'
-                        if len(getattr(t, 'description', '')) > 40
-                        else getattr(t, 'description', 'unknown')
+                        (
+                            getattr(t, "description", "unknown")[:40] + "..."
+                            if len(getattr(t, "description", "")) > 40
+                            else getattr(t, "description", "unknown")
+                        )
                         for t in async_tasks
                     ]
 
-                    logger.info(f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}")
-                    logger.info(f"  Added completion task to collect results and satisfy CrewAI validation")
+                    logger.info(
+                        f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}"
+                    )
+                    logger.info(
+                        f"  Added completion task to collect results and satisfy CrewAI validation"
+                    )
 
             return True
         except Exception as e:
@@ -741,10 +885,7 @@ class CrewPreparation:
             memory_service = CrewMemoryService(self.config, self.user_token)
             embedder_builder = EmbedderConfigBuilder(self.config, self.user_token)
             manager_builder = ManagerConfigBuilder(
-                self.config,
-                self.tool_service,
-                self.tool_factory,
-                self.user_token
+                self.config, self.tool_service, self.tool_factory, self.user_token
             )
 
             # 1. Determine crew memory and process type
@@ -756,20 +897,24 @@ class CrewPreparation:
                 agents=list(self.agents.values()),
                 tasks=self.tasks,
                 process_type=process_type,
-                default_crew_memory=default_crew_memory
+                default_crew_memory=default_crew_memory,
             )
 
             # 3. Configure manager (hierarchical/sequential)
-            crew_kwargs = await manager_builder.configure_manager(crew_kwargs, process_type)
+            crew_kwargs = await manager_builder.configure_manager(
+                crew_kwargs, process_type
+            )
 
             # 4. Configure embedder
-            crew_kwargs, custom_embedder, embedder_config = await embedder_builder.configure_embedder(crew_kwargs)
+            crew_kwargs, custom_embedder, embedder_config = (
+                await embedder_builder.configure_embedder(crew_kwargs)
+            )
             self.custom_embedder = custom_embedder
             self.embedder_config = embedder_config
 
             # 5. Fetch and setup memory backend
             # CRITICAL: Use consistent defaults - memory is enabled by default
-            memory_enabled = crew_kwargs.get('memory', True)
+            memory_enabled = crew_kwargs.get("memory", True)
             should_disable_memory = not memory_enabled
 
             logger.info("=" * 80)
@@ -781,19 +926,27 @@ class CrewPreparation:
 
             memory_backend_config = None
             if memory_enabled and not should_disable_memory:
-                logger.info("Memory is enabled - fetching memory backend config from database...")
-                memory_backend_config = await memory_service.fetch_memory_backend_config()
+                logger.info(
+                    "Memory is enabled - fetching memory backend config from database..."
+                )
+                memory_backend_config = (
+                    await memory_service.fetch_memory_backend_config()
+                )
                 if memory_backend_config:
-                    logger.info(f"Successfully fetched memory backend config: {memory_backend_config.get('backend_type')}")
+                    logger.info(
+                        f"Successfully fetched memory backend config: {memory_backend_config.get('backend_type')}"
+                    )
                 else:
                     logger.warning("fetch_memory_backend_config returned None")
             else:
-                logger.info(f"Skipping memory backend fetch: memory_enabled={memory_enabled}, should_disable_memory={should_disable_memory}")
+                logger.info(
+                    f"Skipping memory backend fetch: memory_enabled={memory_enabled}, should_disable_memory={should_disable_memory}"
+                )
 
             # If no config found, create default
             if not memory_backend_config and memory_enabled:
                 memory_backend_config = {
-                    'backend_type': 'default',
+                    "backend_type": "default",
                 }
                 logger.info(
                     "Created default memory backend configuration "
@@ -805,23 +958,30 @@ class CrewPreparation:
             memory_service.setup_storage_directory(crew_id, memory_backend_config)
 
             # 7. Check if all memory types disabled
-            if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
-                crew_kwargs['memory'] = False
+            if config_builder.check_memory_disabled_by_backend_config(
+                memory_backend_config
+            ):
+                crew_kwargs["memory"] = False
                 should_disable_memory = True
-                logger.info("Found 'Disabled Configuration' - ignoring database config and using default memory")
+                logger.info(
+                    "Found 'Disabled Configuration' - ignoring database config and using default memory"
+                )
 
             # 8. Configure unified cognitive memory (CrewAI 1.10+)
-            memory_enabled = crew_kwargs.get('memory', True) and not should_disable_memory
+            memory_enabled = (
+                crew_kwargs.get("memory", True) and not should_disable_memory
+            )
             logger.info(
                 "Step 8 - Configure unified memory: memory_enabled=%s, memory_backend_config=%s",
                 memory_enabled,
                 memory_backend_config is not None,
             )
             if memory_enabled and memory_backend_config:
-                backend_type = memory_backend_config.get('backend_type')
+                backend_type = memory_backend_config.get("backend_type")
                 embedder_for_backend = (
-                    custom_embedder if backend_type in ('databricks', 'lakebase')
-                    else crew_kwargs.get('embedder')
+                    custom_embedder
+                    if backend_type in ("databricks", "lakebase")
+                    else crew_kwargs.get("embedder")
                 )
                 logger.info(
                     "Creating unified storage (backend=%s, custom_embedder=%s)",
@@ -836,10 +996,17 @@ class CrewPreparation:
                 )
                 logger.info(
                     "Unified storage: %s",
-                    type(unified_storage).__name__ if unified_storage else "crewai-default",
+                    (
+                        type(unified_storage).__name__
+                        if unified_storage
+                        else "crewai-default"
+                    ),
                 )
 
-                from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
+                from src.schemas.memory_backend import (
+                    MemoryBackendConfig as MemBackConfig,
+                )
+
                 memory_config = MemBackConfig(**memory_backend_config)
 
                 # Resolve the optional memory-analysis LLM override into a fully
@@ -872,22 +1039,35 @@ class CrewPreparation:
             logger.info("=" * 80)
             logger.info("MEMORY BACKEND SUMMARY (FINAL)")
             logger.info("=" * 80)
-            actual_backend = memory_backend_config.get('backend_type', 'unknown') if memory_backend_config else 'default (LanceDB)'
+            actual_backend = (
+                memory_backend_config.get("backend_type", "unknown")
+                if memory_backend_config
+                else "default (LanceDB)"
+            )
             logger.info("Backend Type: %s", actual_backend)
-            resolved_memory = crew_kwargs.get('memory')
+            resolved_memory = crew_kwargs.get("memory")
             logger.info(
                 "Unified Memory: %s",
-                type(resolved_memory).__name__ if resolved_memory not in (True, False, None) else resolved_memory,
+                (
+                    type(resolved_memory).__name__
+                    if resolved_memory not in (True, False, None)
+                    else resolved_memory
+                ),
             )
-            if memory_backend_config and memory_backend_config.get('backend_type') == 'databricks':
-                db_config = memory_backend_config.get('databricks_config')
+            if (
+                memory_backend_config
+                and memory_backend_config.get("backend_type") == "databricks"
+            ):
+                db_config = memory_backend_config.get("databricks_config")
                 if db_config:
                     memory_index = (
-                        getattr(db_config, 'memory_index', None)
+                        getattr(db_config, "memory_index", None)
                         if not isinstance(db_config, dict)
-                        else db_config.get('memory_index')
+                        else db_config.get("memory_index")
                     )
-                    logger.info("Databricks unified memory index: %s", memory_index or 'N/A')
+                    logger.info(
+                        "Databricks unified memory index: %s", memory_index or "N/A"
+                    )
             logger.info("=" * 80)
 
             # 13. Handle OpenAI API key
@@ -904,18 +1084,30 @@ class CrewPreparation:
                 logger.warning(f"Crew creation failed with error: {error_msg}")
 
                 # Try to extract the problematic field from the error message
-                if "unexpected keyword argument" in error_msg or "validation error" in error_msg.lower():
+                if (
+                    "unexpected keyword argument" in error_msg
+                    or "validation error" in error_msg.lower()
+                ):
                     # Common problematic fields that might not be supported in all CrewAI versions
-                    problematic_keys = ['tracing', 'embedder', 'reasoning_llm', 'planning_llm']
+                    problematic_keys = [
+                        "tracing",
+                        "embedder",
+                        "reasoning_llm",
+                        "planning_llm",
+                    ]
 
                     # Try removing each problematic key one at a time
                     for key in problematic_keys:
                         if key in crew_kwargs:
-                            logger.warning(f"Removing potentially unsupported Crew kwarg '{key}' and retrying")
+                            logger.warning(
+                                f"Removing potentially unsupported Crew kwarg '{key}' and retrying"
+                            )
                             crew_kwargs.pop(key, None)
                             try:
                                 self.crew = Crew(**crew_kwargs)
-                                logger.info(f"Successfully created crew after removing '{key}'")
+                                logger.info(
+                                    f"Successfully created crew after removing '{key}'"
+                                )
                                 break
                             except Exception:
                                 continue
@@ -924,17 +1116,19 @@ class CrewPreparation:
                         # If still failing, try with minimal kwargs
                         logger.warning("Trying crew creation with minimal kwargs")
                         minimal_kwargs = {
-                            'agents': crew_kwargs.get('agents', []),
-                            'tasks': crew_kwargs.get('tasks', []),
-                            'process': crew_kwargs.get('process'),
-                            'verbose': crew_kwargs.get('verbose', True),
-                            'memory': crew_kwargs.get('memory', False)
+                            "agents": crew_kwargs.get("agents", []),
+                            "tasks": crew_kwargs.get("tasks", []),
+                            "process": crew_kwargs.get("process"),
+                            "verbose": crew_kwargs.get("verbose", True),
+                            "memory": crew_kwargs.get("memory", False),
                         }
                         # For hierarchical process, manager_llm or manager_agent is required
-                        if 'manager_llm' in crew_kwargs:
-                            minimal_kwargs['manager_llm'] = crew_kwargs['manager_llm']
-                        elif 'manager_agent' in crew_kwargs:
-                            minimal_kwargs['manager_agent'] = crew_kwargs['manager_agent']
+                        if "manager_llm" in crew_kwargs:
+                            minimal_kwargs["manager_llm"] = crew_kwargs["manager_llm"]
+                        elif "manager_agent" in crew_kwargs:
+                            minimal_kwargs["manager_agent"] = crew_kwargs[
+                                "manager_agent"
+                            ]
                         self.crew = Crew(**minimal_kwargs)
                 else:
                     raise
@@ -952,6 +1146,7 @@ class CrewPreparation:
                 from src.engines.kasal.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
+
                 _run_security_checks(
                     self.crew,
                     context=f"crew with {len(self.crew.tasks)} task(s)",
@@ -965,7 +1160,10 @@ class CrewPreparation:
             # exec_id/group_id come from its config. set_crew_reference_on_memory
             # stays crew-only (no flow equivalent).
             memory_service.set_crew_reference_on_memory(self.crew)
-            from src.engines.kasal.kernel.trace_context import attach_execution_trace_context
+            from src.engines.kasal.kernel.trace_context import (
+                attach_execution_trace_context,
+            )
+
             attach_execution_trace_context(
                 self.crew, crew_kwargs, service=memory_service
             )
@@ -983,14 +1181,18 @@ class CrewPreparation:
             from src.services.api_keys_service import ApiKeysService
 
             # SECURITY: Get group_id from config for multi-tenant isolation
-            group_id = self.config.get('group_id')
-            openai_key = await ApiKeysService.get_provider_api_key("openai", group_id=group_id)
+            group_id = self.config.get("group_id")
+            openai_key = await ApiKeysService.get_provider_api_key(
+                "openai", group_id=group_id
+            )
             if openai_key:
                 os.environ["OPENAI_API_KEY"] = openai_key
                 logger.info("OpenAI API key is configured, keeping it for CrewAI")
             else:
                 os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
-                logger.info("No OpenAI API key configured, set dummy key for CrewAI validation")
+                logger.info(
+                    "No OpenAI API key configured, set dummy key for CrewAI validation"
+                )
         except Exception as e:
             logger.warning(f"Error handling OpenAI API key: {e}")
 
@@ -1006,9 +1208,42 @@ class CrewPreparation:
             return {"error": "Crew not prepared"}
 
         try:
-            # Execute the crew. Use the async kickoff: CrewAI 1.14.5 raises if a
+            # ── Memory wiring — the engine's context_providers/output_sinks
+            # seams. Recall: a context provider runs at each task's context
+            # assembly (query = description + runtime context tail). Persist:
+            # an output sink fires for every completed task, fire-and-forget.
+            from src.engines.kasal.memory.memory_hooks import (
+                make_memory_context_provider,
+                make_memory_output_sink,
+            )
+
+            crew_memory = getattr(self.crew, "memory", None)
+            memory_provider = make_memory_context_provider(crew_memory)
+            if memory_provider is not None:
+                self.crew.context_providers.append(memory_provider)
+            memory_sink = make_memory_output_sink(crew_memory)
+            if memory_sink is not None:
+                self.crew.output_sinks.append(memory_sink)
+            if memory_provider is not None or memory_sink is not None:
+                logger.info("Memory recall provider + persist sink attached to crew")
+
+            # Execute the crew. Use the async kickoff: the engine raises if a
             # synchronous ``kickoff()`` is invoked from within a running event loop.
-            result = await self.crew.kickoff_async()
+            try:
+                result = await self.crew.kickoff_async()
+            finally:
+                # Drain in-flight memory writes so the final task's save (and
+                # its "Memory Write" trace span) survives process teardown,
+                # then run the bounded LLM-free dedupe pass.
+                from src.engines.kasal.memory.memory_hooks import (
+                    flush_memory_writes,
+                )
+                from src.engines.kasal.memory.memory_maintenance import (
+                    run_memory_maintenance,
+                )
+
+                await asyncio.to_thread(flush_memory_writes, 15.0)
+                await asyncio.to_thread(run_memory_maintenance, crew_memory)
 
             # Process the output
             processed_output = await process_crew_output(result)
@@ -1023,7 +1258,9 @@ class CrewPreparation:
             handle_crew_error(e, "Error during crew execution")
             return {"error": str(e)}
 
-    async def _lookup_kasal_agent_uuid_via_service(self, agent_config: Dict[str, Any], config_agent_id: str) -> Optional[str]:
+    async def _lookup_kasal_agent_uuid_via_service(
+        self, agent_config: Dict[str, Any], config_agent_id: str
+    ) -> Optional[str]:
         """
         Look up the actual Kasal agent UUID from the database using AgentService.
 
@@ -1047,11 +1284,13 @@ class CrewPreparation:
                 from src.utils.user_context import GroupContext
                 from src.db.session import request_scoped_session
 
-                group_id = self.config.get('group_id', 'default')
+                group_id = self.config.get("group_id", "default")
                 async with request_scoped_session() as session:
                     agent_service = AgentService(session)
                     group_context = GroupContext(group_ids=[group_id])
-                    self._group_agents_cache = await agent_service.find_by_group(group_context)
+                    self._group_agents_cache = await agent_service.find_by_group(
+                        group_context
+                    )
                 logger.info(
                     f"[CrewPreparation] Cached {len(self._group_agents_cache)} group "
                     f"agents for UUID lookups (group '{group_id}')"
@@ -1060,23 +1299,25 @@ class CrewPreparation:
             agents = self._group_agents_cache
 
             # Try to match by various criteria
-            agent_role = agent_config.get('role', '')
-            agent_name = agent_config.get('name', '')
+            agent_role = agent_config.get("role", "")
+            agent_name = agent_config.get("name", "")
 
             for db_agent in agents:
                 # Try exact matches first
-                if (db_agent.role == agent_role or
-                    db_agent.name == agent_name or
-                    str(db_agent.id) == config_agent_id):
-                    logger.info(f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'")
+                if (
+                    db_agent.role == agent_role
+                    or db_agent.name == agent_name
+                    or str(db_agent.id) == config_agent_id
+                ):
+                    logger.info(
+                        f"[CrewPreparation] Found matching agent: UUID={db_agent.id}, role='{db_agent.role}', name='{db_agent.name}'"
+                    )
                     return str(db_agent.id)
 
             # No exact match: log a BOUNDED summary. Dumping the whole group
             # table (up to hundreds of rows) at INFO cost ~60KB of log + the
             # same again copied into execution_logs, per failed lookup.
-            sample = ", ".join(
-                f"{db_agent.role!r}" for db_agent in agents[:3]
-            )
+            sample = ", ".join(f"{db_agent.role!r}" for db_agent in agents[:3])
             logger.warning(
                 f"[CrewPreparation] No matching agent found for config_id='{config_agent_id}' "
                 f"(role='{agent_role}', name='{agent_name}') among {len(agents)} group agents; "
@@ -1094,11 +1335,14 @@ class CrewPreparation:
         Cleanup method to restore original environment settings.
         This should be called when done with the crew to restore the original storage directory.
         """
-        if hasattr(self, '_original_storage_dir'):
+        if hasattr(self, "_original_storage_dir"):
             import os
+
             if self._original_storage_dir is not None:
                 os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
-                logger.info(f"Restored original CREWAI_STORAGE_DIR: {self._original_storage_dir}")
+                logger.info(
+                    f"Restored original CREWAI_STORAGE_DIR: {self._original_storage_dir}"
+                )
             elif "CREWAI_STORAGE_DIR" in os.environ:
                 # If there was no original value, remove the environment variable
                 del os.environ["CREWAI_STORAGE_DIR"]

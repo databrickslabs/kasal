@@ -8,6 +8,7 @@ Updated for app-modes refactoring:
 - LakebaseMemoryConfig uses memory_table (not short_term/long_term/entity tables)
 - create_embedder_wrapper was removed (no longer in API)
 """
+
 import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -23,8 +24,8 @@ from src.schemas.memory_backend import (
     LakebaseMemoryConfig,
 )
 
-
 # ─── _validate_databricks_index extra state branches ──────────────────────────
+
 
 class TestValidateDatabricksIndexExtra:
 
@@ -147,7 +148,9 @@ class TestValidateDatabricksIndexExtra:
     async def test_describe_exception_raises_describe_failed(self):
         """Exception during describe raises with describe_failed error_type."""
         mock_repo = MagicMock()
-        mock_repo.describe_index = AsyncMock(side_effect=RuntimeError("Connection timeout"))
+        mock_repo.describe_index = AsyncMock(
+            side_effect=RuntimeError("Connection timeout")
+        )
 
         with patch.dict(
             "sys.modules",
@@ -181,6 +184,7 @@ class TestValidateDatabricksIndexExtra:
 
 
 # ─── create_memory_backends DATABRICKS ──────────────────────────────────────
+
 
 class TestDatabricksBackendCases:
 
@@ -334,6 +338,7 @@ class TestDatabricksBackendCases:
 
 # ─── create_memory_backends LAKEBASE extra cases ──────────────────────────────
 
+
 class TestLakebaseBackendCases:
 
     @pytest.mark.asyncio
@@ -438,6 +443,7 @@ class TestLakebaseBackendCases:
 
 # ─── DatabricksIndexValidationError edge cases ───────────────────────────────
 
+
 class TestDatabricksIndexValidationErrorEdgeCases:
 
     def test_missing_indexes_defaults_to_empty_list(self):
@@ -456,7 +462,7 @@ class TestDatabricksIndexValidationErrorEdgeCases:
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             raise DatabricksIndexValidationError(
                 "test error",
-                {"error_type": "missing_index", "missing_indexes": ["idx1"]}
+                {"error_type": "missing_index", "missing_indexes": ["idx1"]},
             )
         assert exc_info.value.error_type == "missing_index"
         assert "idx1" in exc_info.value.missing_indexes

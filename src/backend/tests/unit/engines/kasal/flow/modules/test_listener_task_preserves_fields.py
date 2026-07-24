@@ -23,13 +23,15 @@ def _flow_methods_source() -> str:
 
 
 def test_listener_runtime_task_carries_tools_and_structured_output():
-    src = _flow_methods_source()
+    # Quote-normalized: black rewrites '...' to "..." — the guard is about the
+    # fields being forwarded, not the quote style.
+    src = _flow_methods_source().replace("'", '"')
     # The runtime Task() reconstruction must forward these fields from the
     # original task; otherwise listener crews lose tools + structured output.
     for field in (
-        "tools=getattr(task, 'tools'",
-        "output_pydantic=getattr(task, 'output_pydantic'",
-        "output_json=getattr(task, 'output_json'",
-        "converter_cls=getattr(task, 'converter_cls'",
+        'tools=getattr(task, "tools"',
+        'output_pydantic=getattr(task, "output_pydantic"',
+        'output_json=getattr(task, "output_json"',
+        'converter_cls=getattr(task, "converter_cls"',
     ):
         assert field in src, f"listener Task rebuild dropped: {field}"

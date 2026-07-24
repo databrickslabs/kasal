@@ -3,6 +3,7 @@ Flow methods module for CrewAI flow execution.
 
 This module handles dynamic creation of flow methods (starting points, listeners, routers).
 """
+
 import logging
 import asyncio
 import uuid
@@ -45,37 +46,37 @@ def extract_final_answer(results) -> str:
         return ""
 
     # Get the first result
-    first_result = results[0] if hasattr(results, '__getitem__') else results
+    first_result = results[0] if hasattr(results, "__getitem__") else results
 
     # Handle list of dicts with 'content' key
     if isinstance(first_result, list):
         # Multiple content items - extract final answer from each and join
         contents = []
         for item in first_result:
-            if isinstance(item, dict) and 'content' in item:
-                content = item['content']
+            if isinstance(item, dict) and "content" in item:
+                content = item["content"]
                 # Extract only the Final Answer portion if present
-                if 'Final Answer:' in content:
+                if "Final Answer:" in content:
                     # Get everything after "Final Answer:"
-                    final_answer_part = content.split('Final Answer:')[-1].strip()
+                    final_answer_part = content.split("Final Answer:")[-1].strip()
                     contents.append(final_answer_part)
-                elif 'Final Answer' in content:
+                elif "Final Answer" in content:
                     # Handle case without colon
-                    final_answer_part = content.split('Final Answer')[-1].strip()
+                    final_answer_part = content.split("Final Answer")[-1].strip()
                     # Remove leading colon or newline if present
-                    final_answer_part = final_answer_part.lstrip(':').strip()
+                    final_answer_part = final_answer_part.lstrip(":").strip()
                     contents.append(final_answer_part)
                 else:
                     contents.append(content)
             elif isinstance(item, str):
                 contents.append(item)
-        return '\n\n'.join(contents)
+        return "\n\n".join(contents)
 
     # Handle dict with 'content' key
-    if isinstance(first_result, dict) and 'content' in first_result:
-        content = first_result['content']
+    if isinstance(first_result, dict) and "content" in first_result:
+        content = first_result["content"]
     # Handle objects with 'raw' attribute (TaskOutput, CrewOutput)
-    elif hasattr(first_result, 'raw') and first_result.raw:
+    elif hasattr(first_result, "raw") and first_result.raw:
         content = str(first_result.raw)
     # Handle string
     elif isinstance(first_result, str):
@@ -85,11 +86,11 @@ def extract_final_answer(results) -> str:
         content = str(first_result)
 
     # Extract only the Final Answer portion if present
-    if 'Final Answer:' in content:
-        return content.split('Final Answer:')[-1].strip()
-    elif 'Final Answer' in content:
-        final_answer_part = content.split('Final Answer')[-1].strip()
-        return final_answer_part.lstrip(':').strip()
+    if "Final Answer:" in content:
+        return content.split("Final Answer:")[-1].strip()
+    elif "Final Answer" in content:
+        final_answer_part = content.split("Final Answer")[-1].strip()
+        return final_answer_part.lstrip(":").strip()
 
     return content
 
@@ -111,11 +112,11 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
     try:
         # Get the model name from agent's llm attribute
         model_name = None
-        if hasattr(agent, 'llm') and agent.llm:
+        if hasattr(agent, "llm") and agent.llm:
             # The agent.llm could be a LiteLLM instance or string
             if isinstance(agent.llm, str):
                 model_name = agent.llm
-            elif hasattr(agent.llm, 'model'):
+            elif hasattr(agent.llm, "model"):
                 model_name = agent.llm.model
             else:
                 logger.warning(f"Agent LLM has unknown type: {type(agent.llm)}")
@@ -128,9 +129,9 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
         # Extract group_id from group_context
         group_id = None
         if group_context:
-            if hasattr(group_context, 'primary_group_id'):
+            if hasattr(group_context, "primary_group_id"):
                 group_id = group_context.primary_group_id
-            elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+            elif hasattr(group_context, "group_ids") and group_context.group_ids:
                 group_id = group_context.group_ids[0]
 
         if not group_id:
@@ -146,10 +147,22 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
             model_config = await model_config_service.find_by_key(model_name)
 
             if model_config:
-                context_window = model_config.context_window if hasattr(model_config, 'context_window') and model_config.context_window else default_context_window
-                max_output = model_config.max_output_tokens if hasattr(model_config, 'max_output_tokens') and model_config.max_output_tokens else default_max_output
+                context_window = (
+                    model_config.context_window
+                    if hasattr(model_config, "context_window")
+                    and model_config.context_window
+                    else default_context_window
+                )
+                max_output = (
+                    model_config.max_output_tokens
+                    if hasattr(model_config, "max_output_tokens")
+                    and model_config.max_output_tokens
+                    else default_max_output
+                )
 
-                logger.info(f"Model {model_name}: context_window={context_window}, max_output_tokens={max_output}")
+                logger.info(
+                    f"Model {model_name}: context_window={context_window}, max_output_tokens={max_output}"
+                )
                 return context_window, max_output
 
             logger.info(f"No model config found for {model_name}, using defaults")
@@ -207,9 +220,14 @@ async def configure_flow_crew_memory(
     # Build the embedder (callable for databricks/lakebase, provider dict otherwise).
     custom_embedder = None
     try:
-        embedder_build_config = {"agents": [{"embedder_config": None}], "group_id": group_id}
+        embedder_build_config = {
+            "agents": [{"embedder_config": None}],
+            "group_id": group_id,
+        }
         embedder_builder = EmbedderConfigBuilder(embedder_build_config, user_token)
-        crew_kwargs, custom_embedder, _ = await embedder_builder.configure_embedder(crew_kwargs)
+        crew_kwargs, custom_embedder, _ = await embedder_builder.configure_embedder(
+            crew_kwargs
+        )
     except Exception as e:
         logger.warning(f"[FLOW MEMORY] Embedder configuration failed: {e}")
 
@@ -308,10 +326,15 @@ def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> No
             }
             if not task_tool_names:
                 continue
-            kept = [t for t in agent_tools if getattr(t, "name", None) not in task_tool_names]
+            kept = [
+                t
+                for t in agent_tools
+                if getattr(t, "name", None) not in task_tool_names
+            ]
             if len(kept) != len(agent_tools):
                 removed = [
-                    getattr(t, "name", "?") for t in agent_tools
+                    getattr(t, "name", "?")
+                    for t in agent_tools
                     if getattr(t, "name", None) in task_tool_names
                 ]
                 agent.tools = kept
@@ -340,7 +363,7 @@ class FlowMethodFactory:
         create_execution_callbacks: Callable,
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
-        group_id: Optional[str] = None
+        group_id: Optional[str] = None,
     ) -> Callable:
         """
         Create a starting point method that executes multiple tasks as a crew.
@@ -359,29 +382,34 @@ class FlowMethodFactory:
         Returns:
             Async function decorated with @start()
         """
+
         @start()
         async def starting_point_crew_method(self):
             """Starting point method - executes crew with multiple sequential tasks."""
-            logger.info("="*80)
+            logger.info("=" * 80)
             logger.info(f"START CREW METHOD CALLED - Crew: {crew_name}")
             logger.info(f"Number of tasks: {len(task_list)}")
-            logger.info("="*80)
+            logger.info("=" * 80)
 
             # Collect all unique agents from tasks
             agents = []
             agent_roles_seen = set()
 
             for task in task_list:
-                if hasattr(task, 'agent') and task.agent:
-                    agent_role = task.agent.role if hasattr(task.agent, 'role') else 'Unknown'
+                if hasattr(task, "agent") and task.agent:
+                    agent_role = (
+                        task.agent.role if hasattr(task.agent, "role") else "Unknown"
+                    )
                     if agent_role not in agent_roles_seen:
                         agents.append(task.agent)
                         agent_roles_seen.add(agent_role)
                         logger.info(f"  Agent: {agent_role}")
 
                         # Log if agent has no tools
-                        if not hasattr(task.agent, 'tools') or not task.agent.tools:
-                            logger.info(f"  Agent {agent_role} has no tools assigned but will continue with execution")
+                        if not hasattr(task.agent, "tools") or not task.agent.tools:
+                            logger.info(
+                                f"  Agent {agent_role} has no tools assigned but will continue with execution"
+                            )
 
             # De-dupe agent∩task tools (flow path): a tool present on BOTH an
             # agent and a task it runs is built twice — the agent copy carries the
@@ -398,9 +426,19 @@ class FlowMethodFactory:
 
             # Log task dependencies
             for idx, task in enumerate(task_list):
-                task_desc = task.description[:50] + '...' if len(task.description) > 50 else task.description
-                if hasattr(task, 'context') and task.context and isinstance(task.context, list):
-                    logger.info(f"  Task {idx}: {task_desc} (depends on {len(task.context)} previous task(s))")
+                task_desc = (
+                    task.description[:50] + "..."
+                    if len(task.description) > 50
+                    else task.description
+                )
+                if (
+                    hasattr(task, "context")
+                    and task.context
+                    and isinstance(task.context, list)
+                ):
+                    logger.info(
+                        f"  Task {idx}: {task_desc} (depends on {len(task.context)} previous task(s))"
+                    )
                 else:
                     logger.info(f"  Task {idx}: {task_desc} (no dependencies)")
 
@@ -414,24 +452,36 @@ class FlowMethodFactory:
 
             # First, get crew-level memory setting if available
             crew_memory_from_config = None
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+            if (
+                crew_data
+                and hasattr(crew_data, "memory")
+                and crew_data.memory is not None
+            ):
                 crew_memory_from_config = crew_data.memory
-                logger.info(f"Crew memory setting from configuration: {crew_memory_from_config}")
+                logger.info(
+                    f"Crew memory setting from configuration: {crew_memory_from_config}"
+                )
 
             # Then check agent memory settings - this is ALWAYS checked, not just as fallback
             # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
             agents_with_memory_enabled = []
             agents_with_memory_disabled = []
-            logger.info(f"Checking memory settings for {len(agents)} agents in crew {crew_name}")
+            logger.info(
+                f"Checking memory settings for {len(agents)} agents in crew {crew_name}"
+            )
             for agent in agents:
-                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                agent_role = agent.role if hasattr(agent, "role") else "Unknown"
                 # Check our custom attribute that was set during agent configuration
-                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
-                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
-                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                has_kasal_attr = hasattr(agent, "_kasal_memory_disabled")
+                kasal_memory_disabled = getattr(agent, "_kasal_memory_disabled", False)
+                logger.info(
+                    f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}"
+                )
                 if has_kasal_attr and kasal_memory_disabled:
                     agents_with_memory_disabled.append(agent_role)
-                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
+                    logger.info(
+                        f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)"
+                    )
                 else:
                     agents_with_memory_enabled.append(agent_role)
                     logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
@@ -440,11 +490,15 @@ class FlowMethodFactory:
             # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
             # 2. If crew config explicitly sets memory=False, use that
             # 3. Otherwise use crew config or default to True
-            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+            all_agents_memory_disabled = (
+                agents_with_memory_disabled and not agents_with_memory_enabled
+            )
 
             if all_agents_memory_disabled:
                 crew_memory = False
-                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting crew memory to False")
+                logger.info(
+                    f"All agents have memory disabled ({agents_with_memory_disabled}) - setting crew memory to False"
+                )
             elif crew_memory_from_config is False:
                 crew_memory = False
                 logger.info(f"Crew memory explicitly disabled in configuration")
@@ -454,12 +508,14 @@ class FlowMethodFactory:
             else:
                 # Default: at least one agent has memory enabled
                 crew_memory = True
-                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting crew memory to True")
+                logger.info(
+                    f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting crew memory to True"
+                )
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
-            if crew_data and hasattr(crew_data, 'process') and crew_data.process:
-                if crew_data.process.lower() == 'hierarchical':
+            if crew_data and hasattr(crew_data, "process") and crew_data.process:
+                if crew_data.process.lower() == "hierarchical":
                     process_type = Process.hierarchical
                     logger.info(f"Using hierarchical process from crew configuration")
                 else:
@@ -469,52 +525,67 @@ class FlowMethodFactory:
 
             # Determine verbose setting from crew_data
             crew_verbose = True  # Default
-            if crew_data and hasattr(crew_data, 'verbose') and crew_data.verbose is not None:
+            if (
+                crew_data
+                and hasattr(crew_data, "verbose")
+                and crew_data.verbose is not None
+            ):
                 crew_verbose = crew_data.verbose
 
             crew_kwargs = {
-                'name': crew_name,
-                'agents': agents,
-                'tasks': task_list,  # Pass ALL tasks - CrewAI will respect task.context for sequential execution
-                'verbose': crew_verbose,
-                'process': process_type,
-                'memory': crew_memory,
+                "name": crew_name,
+                "agents": agents,
+                "tasks": task_list,  # Pass ALL tasks - CrewAI will respect task.context for sequential execution
+                "verbose": crew_verbose,
+                "process": process_type,
+                "memory": crew_memory,
             }
 
             # Add planning configuration if enabled
-            if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
-                crew_kwargs['planning'] = True
+            if crew_data and hasattr(crew_data, "planning") and crew_data.planning:
+                crew_kwargs["planning"] = True
                 # Set planning_llm to avoid CrewAI defaulting to OpenAI
-                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                planning_llm_model = getattr(crew_data, "planning_llm", None)
                 if planning_llm_model:
                     # Use the explicit planning_llm from crew configuration
                     try:
                         from src.core.llm_manager import LLMManager
+
                         planning_llm = await LLMManager.get_llm(planning_llm_model)
-                        crew_kwargs['planning_llm'] = planning_llm
-                        logger.info(f"Planning enabled - using crew planning_llm: {planning_llm_model}")
+                        crew_kwargs["planning_llm"] = planning_llm
+                        logger.info(
+                            f"Planning enabled - using crew planning_llm: {planning_llm_model}"
+                        )
                     except Exception as e:
-                        logger.warning(f"Could not create planning LLM for {planning_llm_model}: {e}")
-                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
+                        logger.warning(
+                            f"Could not create planning LLM for {planning_llm_model}: {e}"
+                        )
+                elif agents and hasattr(agents[0], "llm") and agents[0].llm:
                     # Fallback: use the first agent's LLM so we don't default to OpenAI
-                    crew_kwargs['planning_llm'] = agents[0].llm
-                    logger.info(f"Planning enabled - using first agent's LLM as planning_llm")
+                    crew_kwargs["planning_llm"] = agents[0].llm
+                    logger.info(
+                        f"Planning enabled - using first agent's LLM as planning_llm"
+                    )
                 else:
-                    logger.warning(f"Planning enabled but no planning_llm configured and no agent LLM available")
+                    logger.warning(
+                        f"Planning enabled but no planning_llm configured and no agent LLM available"
+                    )
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
             # We must propagate reasoning to each agent for it to actually work
-            if crew_data and hasattr(crew_data, 'reasoning') and crew_data.reasoning:
-                crew_kwargs['reasoning'] = True
+            if crew_data and hasattr(crew_data, "reasoning") and crew_data.reasoning:
+                crew_kwargs["reasoning"] = True
                 logger.info(f"Reasoning enabled for crew from configuration")
 
                 # Propagate reasoning to each agent (required for CrewAI reasoning to work)
                 for agent in agents:
-                    if not hasattr(agent, 'reasoning') or not agent.reasoning:
+                    if not hasattr(agent, "reasoning") or not agent.reasoning:
                         agent.reasoning = True
-                        agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                        logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
+                        agent_role = agent.role if hasattr(agent, "role") else "Unknown"
+                        logger.info(
+                            f"  → Propagated reasoning=True to agent '{agent_role}'"
+                        )
 
             # Configure the unified memory backend (Databricks/Lakebase) for the
             # flow crew — same wiring as the regular crew path. Without this the
@@ -526,10 +597,39 @@ class FlowMethodFactory:
                 )
 
             # Log crew configuration for debugging
-            logger.info(f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")
+            logger.info(
+                f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}"
+            )
 
             crew = Crew(**crew_kwargs)
-            logger.info(f"Crew instance '{crew_name}' created successfully with {len(task_list)} tasks, kwargs: {list(crew_kwargs.keys())}")
+            logger.info(
+                f"Crew instance '{crew_name}' created successfully with {len(task_list)} tasks, kwargs: {list(crew_kwargs.keys())}"
+            )
+
+            # ── Memory seams — same wiring as the crew path: runtime recall via
+            # context provider, per-task persistence via output sink. The flow
+            # subprocess flushes pending writes at flow end.
+            try:
+                from src.engines.kasal.memory.memory_hooks import (
+                    make_memory_context_provider,
+                    make_memory_output_sink,
+                )
+
+                _flow_crew_memory = getattr(crew, "memory", None)
+                _memory_provider = make_memory_context_provider(_flow_crew_memory)
+                if _memory_provider is not None:
+                    crew.context_providers.append(_memory_provider)
+                _memory_sink = make_memory_output_sink(_flow_crew_memory)
+                if _memory_sink is not None:
+                    crew.output_sinks.append(_memory_sink)
+                if _memory_provider is not None or _memory_sink is not None:
+                    logger.info(
+                        f"Memory recall provider + persist sink attached to flow crew '{crew_name}'"
+                    )
+            except Exception as mem_err:
+                logger.warning(
+                    f"Flow crew memory wiring skipped (non-fatal): {mem_err}"
+                )
 
             # SECURITY: Run all assembly-time security checks (spotlighting, trifecta,
             # mixed-task anti-pattern, destructive tools).  Flow crews are built here
@@ -539,14 +639,17 @@ class FlowMethodFactory:
                 from src.engines.kasal.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
+
                 _run_security_checks(crew, context=f"flow crew '{crew_name}'")
             except Exception as _sec_err:
-                logger.debug("[SECURITY] Flow crew security checks skipped: %s", _sec_err)
+                logger.debug(
+                    "[SECURITY] Flow crew security checks skipped: %s", _sec_err
+                )
 
             # Set up execution callbacks
             job_id = None
             if callbacks:
-                job_id = callbacks.get('job_id')
+                job_id = callbacks.get("job_id")
                 if job_id:
                     logger.info(f"Extracted job_id from callbacks: {job_id}")
 
@@ -554,24 +657,30 @@ class FlowMethodFactory:
             if job_id:
                 try:
                     step_callback, task_callback = create_execution_callbacks(
-                        job_id=job_id,
-                        config={},
-                        group_context=group_context,
-                        crew=crew
+                        job_id=job_id, config={}, group_context=group_context, crew=crew
                     )
                     crew.step_callback = step_callback
                     crew.task_callback = task_callback
-                    logger.info(f"✅ Set synchronous execution callbacks on crew for job {job_id}")
+                    logger.info(
+                        f"✅ Set synchronous execution callbacks on crew for job {job_id}"
+                    )
                 except Exception as callback_error:
-                    logger.warning(f"Failed to set execution callbacks: {callback_error}")
+                    logger.warning(
+                        f"Failed to set execution callbacks: {callback_error}"
+                    )
             else:
-                logger.warning("No job_id available, skipping execution callbacks setup")
+                logger.warning(
+                    "No job_id available, skipping execution callbacks setup"
+                )
 
             # Attach execution trace context to the crew's tools + memory (parity
             # with the crew path) so flow tool/memory traces carry job_id + group
             # attribution (e.g. custom llm_call trace events). Shared entry point
             # with the crew path; builds a minimal service from group_id+job_id.
-            from src.engines.kasal.kernel.trace_context import attach_execution_trace_context
+            from src.engines.kasal.kernel.trace_context import (
+                attach_execution_trace_context,
+            )
+
             attach_execution_trace_context(
                 crew, crew_kwargs, group_id=group_id, job_id=job_id
             )
@@ -579,47 +688,62 @@ class FlowMethodFactory:
             try:
                 # Enhanced logging for truncation diagnosis
                 import time
+
                 start_time = time.time()
 
                 # Log LLM configuration details for first agent
                 first_agent = agents[0] if agents else None
-                if first_agent and hasattr(first_agent, 'llm') and first_agent.llm:
+                if first_agent and hasattr(first_agent, "llm") and first_agent.llm:
                     llm = first_agent.llm
                     llm_info = {
-                        'model': getattr(llm, 'model', 'unknown'),
-                        'max_tokens': getattr(llm, 'max_tokens', 'not set'),
-                        'timeout': getattr(llm, 'timeout', 'not set'),
+                        "model": getattr(llm, "model", "unknown"),
+                        "max_tokens": getattr(llm, "max_tokens", "not set"),
+                        "timeout": getattr(llm, "timeout", "not set"),
                     }
                     logger.info(f"📊 LLM Configuration: {llm_info}")
 
                 logger.info(f"📝 Total tasks: {len(task_list)}")
-                logger.info(f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
+                logger.info(
+                    f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
+                )
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
+                result = await asyncio.wait_for(
+                    crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS
+                )
 
                 elapsed_time = time.time() - start_time
-                logger.info(f"⏱️ Crew '{crew_name}' execution took {elapsed_time:.2f} seconds")
+                logger.info(
+                    f"⏱️ Crew '{crew_name}' execution took {elapsed_time:.2f} seconds"
+                )
 
                 # Log result details for truncation diagnosis
                 if result:
-                    if hasattr(result, 'raw') and result.raw:
+                    if hasattr(result, "raw") and result.raw:
                         result_length = len(str(result.raw))
-                        logger.info(f"✅ kickoff_async completed - result.raw length: {result_length} chars")
+                        logger.info(
+                            f"✅ kickoff_async completed - result.raw length: {result_length} chars"
+                        )
                         raw_str = str(result.raw)
                         if result_length > 400:
-                            logger.info(f"📄 Result preview - First 200 chars: {raw_str[:200]}")
-                            logger.info(f"📄 Result preview - Last 200 chars: {raw_str[-200:]}")
+                            logger.info(
+                                f"📄 Result preview - First 200 chars: {raw_str[:200]}"
+                            )
+                            logger.info(
+                                f"📄 Result preview - Last 200 chars: {raw_str[-200:]}"
+                            )
                         else:
                             logger.info(f"📄 Full result: {raw_str}")
                     else:
-                        logger.info(f"✅ kickoff_async completed - result type: {type(result)}, str length: {len(str(result))}")
+                        logger.info(
+                            f"✅ kickoff_async completed - result type: {type(result)}, str length: {len(str(result))}"
+                        )
                 else:
                     logger.warning("⚠️ kickoff_async returned None or empty result")
 
                 # Return serializable value for @persist compatibility
                 # CrewOutput objects are not JSON-serializable, so extract raw content
                 serializable_result = None
-                if hasattr(result, 'raw') and result.raw:
+                if hasattr(result, "raw") and result.raw:
                     serializable_result = result.raw
                 elif result is not None:
                     serializable_result = str(result)
@@ -629,10 +753,12 @@ class FlowMethodFactory:
                 # Store result in state for checkpoint resume support
                 # This allows skipped crews to retrieve the output when resuming
                 if serializable_result is not None:
-                    if hasattr(self, 'state'):
+                    if hasattr(self, "state"):
                         self.state[method_name] = serializable_result
                         self.state[crew_name] = serializable_result
-                        logger.info(f"📦 Stored crew output in state['{method_name}'] and state['{crew_name}'] for checkpoint support")
+                        logger.info(
+                            f"📦 Stored crew output in state['{method_name}'] and state['{crew_name}'] for checkpoint support"
+                        )
 
                         # ── CI/CD artifact aggregation ─────────────────────────
                         # If this crew produced a cicd_download_url, append it to
@@ -643,42 +769,65 @@ class FlowMethodFactory:
                             _parsed_result = None
                             if isinstance(serializable_result, dict):
                                 _parsed_result = serializable_result
-                            elif isinstance(serializable_result, str) and serializable_result.strip().startswith('{'):
+                            elif isinstance(
+                                serializable_result, str
+                            ) and serializable_result.strip().startswith("{"):
                                 import json as _json
+
                                 _parsed_result = _json.loads(serializable_result)
 
                             if _parsed_result and isinstance(_parsed_result, dict):
-                                _url = _parsed_result.get('cicd_download_url')
+                                _url = _parsed_result.get("cicd_download_url")
                                 if _url:
                                     _artifact = {
-                                        'cicd_download_url': _url,
-                                        'cicd_type': _parsed_result.get('cicd_type', ''),
-                                        'cicd_name': _parsed_result.get('cicd_name', ''),
+                                        "cicd_download_url": _url,
+                                        "cicd_type": _parsed_result.get(
+                                            "cicd_type", ""
+                                        ),
+                                        "cicd_name": _parsed_result.get(
+                                            "cicd_name", ""
+                                        ),
                                     }
-                                    if 'cicd_serialized_space' in _parsed_result:
-                                        _artifact['cicd_serialized_space'] = _parsed_result['cicd_serialized_space']
+                                    if "cicd_serialized_space" in _parsed_result:
+                                        _artifact["cicd_serialized_space"] = (
+                                            _parsed_result["cicd_serialized_space"]
+                                        )
 
                                     # Initialise or extend the shared list
-                                    existing = self.state.get('_cicd_artifacts', [])
+                                    existing = self.state.get("_cicd_artifacts", [])
                                     if not isinstance(existing, list):
                                         existing = []
                                     # Deduplicate by URL
-                                    if not any(a.get('cicd_download_url') == _url for a in existing):
+                                    if not any(
+                                        a.get("cicd_download_url") == _url
+                                        for a in existing
+                                    ):
                                         existing.append(_artifact)
-                                    self.state['_cicd_artifacts'] = existing
-                                    logger.info(f"📥 [CI/CD] Captured artifact from '{crew_name}': {_artifact.get('cicd_type')} — {_url}")
+                                    self.state["_cicd_artifacts"] = existing
+                                    logger.info(
+                                        f"📥 [CI/CD] Captured artifact from '{crew_name}': {_artifact.get('cicd_type')} — {_url}"
+                                    )
                         except Exception as _ce:
-                            logger.debug(f"[CI/CD] Could not capture artifact from '{crew_name}': {_ce}")
+                            logger.debug(
+                                f"[CI/CD] Could not capture artifact from '{crew_name}': {_ce}"
+                            )
                         # ── end CI/CD aggregation ──────────────────────────────
 
                 return serializable_result
             except asyncio.TimeoutError:
-                elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
-                raise TimeoutError(f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minutes")
+                elapsed_time = time.time() - start_time if "start_time" in dir() else 0
+                logger.error(
+                    f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
+                )
+                raise TimeoutError(
+                    f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minutes"
+                )
             except Exception as e:
-                elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Error during crew '{crew_name}' kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
+                elapsed_time = time.time() - start_time if "start_time" in dir() else 0
+                logger.error(
+                    f"❌ Error during crew '{crew_name}' kickoff after {elapsed_time:.2f} seconds: {e}",
+                    exc_info=True,
+                )
                 raise
 
         # Set metadata on both wrapper AND wrapped function
@@ -705,7 +854,7 @@ class FlowMethodFactory:
         crew_name: Optional[str] = None,
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
-        group_id: Optional[str] = None
+        group_id: Optional[str] = None,
     ) -> Callable:
         """
         Create a listener method for the flow.
@@ -731,9 +880,15 @@ class FlowMethodFactory:
         @decorator
         async def listener_method(self, *results):
             """Listener method - executes when listening to a specific event."""
-            logger.info("="*80)
-            condition_desc = f"{condition_type} conditional " if condition_type in ["AND", "OR"] else ""
-            logger.info(f"LISTENER METHOD CALLED - Executing {condition_desc}listener with {len(listener_tasks)} tasks")
+            logger.info("=" * 80)
+            condition_desc = (
+                f"{condition_type} conditional "
+                if condition_type in ["AND", "OR"]
+                else ""
+            )
+            logger.info(
+                f"LISTENER METHOD CALLED - Executing {condition_desc}listener with {len(listener_tasks)} tasks"
+            )
 
             # Log and store previous outputs from preceding methods
             if results:
@@ -746,17 +901,18 @@ class FlowMethodFactory:
                     # this method runs, and a raw CrewOutput is not JSON-serializable
                     # (would raise "Object of type CrewOutput is not JSON serializable").
                     serialized_result = (
-                        result.raw if hasattr(result, 'raw') and result.raw
+                        result.raw
+                        if hasattr(result, "raw") and result.raw
                         else (str(result) if result is not None else result)
                     )
-                    self.state[f'previous_output_{i}'] = serialized_result
+                    self.state[f"previous_output_{i}"] = serialized_result
                     if i == 0:
                         # Also store first output as 'previous_output' for easy access
-                        self.state['previous_output'] = serialized_result
+                        self.state["previous_output"] = serialized_result
             else:
                 logger.info("📭 No previous outputs received")
 
-            logger.info("="*80)
+            logger.info("=" * 80)
 
             # Create runtime tasks with previous output injected into descriptions
             # This follows the official CrewAI Flow pattern of creating tasks at runtime
@@ -780,8 +936,12 @@ class FlowMethodFactory:
                         f"Call the tool without passing config_json — it already has the data."
                     )
                 else:
-                    previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
-                logger.info(f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)")
+                    previous_output_context = (
+                        f"\n\nContext from previous step:\n{previous_output_str}"
+                    )
+                logger.info(
+                    f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)"
+                )
 
             # Create new Task objects with modified descriptions.
             # CRITICAL: carry over tools/output_pydantic/output_json/converter_cls/
@@ -796,11 +956,15 @@ class FlowMethodFactory:
                 runtime_task = Task(
                     description=f"{task.description}{previous_output_context}",
                     agent=task.agent,
-                    expected_output=task.expected_output if hasattr(task, 'expected_output') else "Task completed successfully",
-                    tools=getattr(task, 'tools', None) or [],
-                    output_pydantic=getattr(task, 'output_pydantic', None),
-                    output_json=getattr(task, 'output_json', None),
-                    converter_cls=getattr(task, 'converter_cls', None),
+                    expected_output=(
+                        task.expected_output
+                        if hasattr(task, "expected_output")
+                        else "Task completed successfully"
+                    ),
+                    tools=getattr(task, "tools", None) or [],
+                    output_pydantic=getattr(task, "output_pydantic", None),
+                    output_json=getattr(task, "output_json", None),
+                    converter_cls=getattr(task, "converter_cls", None),
                 )
                 runtime_tasks.append(runtime_task)
                 logger.info(
@@ -815,14 +979,26 @@ class FlowMethodFactory:
 
             # Log if agents have no tools
             for agent in agents:
-                if not hasattr(agent, 'tools') or not agent.tools:
-                    logger.info(f"Agent {agent.role} has no tools assigned but will continue with execution")
+                if not hasattr(agent, "tools") or not agent.tools:
+                    logger.info(
+                        f"Agent {agent.role} has no tools assigned but will continue with execution"
+                    )
 
             logger.info("Creating Crew instance for listener method")
-            logger.info(f"Listener has {len(agents)} agents and {len(runtime_tasks)} tasks")
+            logger.info(
+                f"Listener has {len(agents)} agents and {len(runtime_tasks)} tasks"
+            )
 
             # Use provided crew name from flow config, fallback to first agent role
-            listener_crew_name = crew_name if crew_name else (agents[0].role if agents and hasattr(agents[0], 'role') and agents[0].role else "Listener Crew")
+            listener_crew_name = (
+                crew_name
+                if crew_name
+                else (
+                    agents[0].role
+                    if agents and hasattr(agents[0], "role") and agents[0].role
+                    else "Listener Crew"
+                )
+            )
             logger.info(f"Creating listener crew with name: {listener_crew_name}")
 
             # Determine crew memory setting - check both crew config AND agent settings
@@ -830,24 +1006,36 @@ class FlowMethodFactory:
 
             # First, get crew-level memory setting if available
             crew_memory_from_config = None
-            if crew_data and hasattr(crew_data, 'memory') and crew_data.memory is not None:
+            if (
+                crew_data
+                and hasattr(crew_data, "memory")
+                and crew_data.memory is not None
+            ):
                 crew_memory_from_config = crew_data.memory
-                logger.info(f"Listener crew memory setting from configuration: {crew_memory_from_config}")
+                logger.info(
+                    f"Listener crew memory setting from configuration: {crew_memory_from_config}"
+                )
 
             # Then check agent memory settings - this is ALWAYS checked, not just as fallback
             # We check our custom _kasal_memory_disabled attribute since CrewAI Agent doesn't store memory as an attribute
             agents_with_memory_enabled = []
             agents_with_memory_disabled = []
-            logger.info(f"Checking memory settings for {len(agents)} agents in listener crew {listener_crew_name}")
+            logger.info(
+                f"Checking memory settings for {len(agents)} agents in listener crew {listener_crew_name}"
+            )
             for agent in agents:
-                agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
+                agent_role = agent.role if hasattr(agent, "role") else "Unknown"
                 # Check our custom attribute that was set during agent configuration
-                has_kasal_attr = hasattr(agent, '_kasal_memory_disabled')
-                kasal_memory_disabled = getattr(agent, '_kasal_memory_disabled', False)
-                logger.info(f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}")
+                has_kasal_attr = hasattr(agent, "_kasal_memory_disabled")
+                kasal_memory_disabled = getattr(agent, "_kasal_memory_disabled", False)
+                logger.info(
+                    f"  Agent '{agent_role}': has_kasal_attr={has_kasal_attr}, _kasal_memory_disabled={kasal_memory_disabled}"
+                )
                 if has_kasal_attr and kasal_memory_disabled:
                     agents_with_memory_disabled.append(agent_role)
-                    logger.info(f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)")
+                    logger.info(
+                        f"  → Agent '{agent_role}' has memory DISABLED (via _kasal_memory_disabled)"
+                    )
                 else:
                     agents_with_memory_enabled.append(agent_role)
                     logger.info(f"  → Agent '{agent_role}' has memory ENABLED")
@@ -856,133 +1044,185 @@ class FlowMethodFactory:
             # 1. If ALL agents have memory disabled, crew memory should be False (regardless of crew config)
             # 2. If crew config explicitly sets memory=False, use that
             # 3. Otherwise use crew config or default to True
-            all_agents_memory_disabled = agents_with_memory_disabled and not agents_with_memory_enabled
+            all_agents_memory_disabled = (
+                agents_with_memory_disabled and not agents_with_memory_enabled
+            )
 
             if all_agents_memory_disabled:
                 crew_memory = False
-                logger.info(f"All agents have memory disabled ({agents_with_memory_disabled}) - setting listener crew memory to False")
+                logger.info(
+                    f"All agents have memory disabled ({agents_with_memory_disabled}) - setting listener crew memory to False"
+                )
             elif crew_memory_from_config is False:
                 crew_memory = False
-                logger.info(f"Listener crew memory explicitly disabled in configuration")
+                logger.info(
+                    f"Listener crew memory explicitly disabled in configuration"
+                )
             elif crew_memory_from_config is True:
                 crew_memory = True
-                logger.info(f"Using listener crew memory setting from configuration: True")
+                logger.info(
+                    f"Using listener crew memory setting from configuration: True"
+                )
             else:
                 # Default: at least one agent has memory enabled
                 crew_memory = True
-                logger.info(f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting listener crew memory to True")
+                logger.info(
+                    f"At least one agent has memory enabled ({agents_with_memory_enabled}) - setting listener crew memory to True"
+                )
 
             # Determine process type from crew_data
             process_type = Process.sequential  # Default
-            if crew_data and hasattr(crew_data, 'process') and crew_data.process:
-                if crew_data.process.lower() == 'hierarchical':
+            if crew_data and hasattr(crew_data, "process") and crew_data.process:
+                if crew_data.process.lower() == "hierarchical":
                     process_type = Process.hierarchical
-                    logger.info(f"Using hierarchical process for listener crew from configuration")
+                    logger.info(
+                        f"Using hierarchical process for listener crew from configuration"
+                    )
                 else:
-                    logger.info(f"Using sequential process for listener crew from configuration")
+                    logger.info(
+                        f"Using sequential process for listener crew from configuration"
+                    )
             else:
                 logger.info(f"Using default sequential process for listener crew")
 
             # Determine verbose setting from crew_data
             crew_verbose = True  # Default
-            if crew_data and hasattr(crew_data, 'verbose') and crew_data.verbose is not None:
+            if (
+                crew_data
+                and hasattr(crew_data, "verbose")
+                and crew_data.verbose is not None
+            ):
                 crew_verbose = crew_data.verbose
 
             # Create crew with configuration from crew_data
             crew_kwargs = {
-                'name': listener_crew_name,
-                'agents': agents,
-                'tasks': runtime_tasks,
-                'verbose': crew_verbose,
-                'process': process_type,
-                'memory': crew_memory,
+                "name": listener_crew_name,
+                "agents": agents,
+                "tasks": runtime_tasks,
+                "verbose": crew_verbose,
+                "process": process_type,
+                "memory": crew_memory,
             }
 
             # Add planning configuration if enabled
-            if crew_data and hasattr(crew_data, 'planning') and crew_data.planning:
-                crew_kwargs['planning'] = True
+            if crew_data and hasattr(crew_data, "planning") and crew_data.planning:
+                crew_kwargs["planning"] = True
                 # Set planning_llm to avoid CrewAI defaulting to OpenAI
-                planning_llm_model = getattr(crew_data, 'planning_llm', None)
+                planning_llm_model = getattr(crew_data, "planning_llm", None)
                 if planning_llm_model:
                     try:
                         from src.core.llm_manager import LLMManager
+
                         planning_llm = await LLMManager.get_llm(planning_llm_model)
-                        crew_kwargs['planning_llm'] = planning_llm
-                        logger.info(f"Planning enabled for listener crew - using crew planning_llm: {planning_llm_model}")
+                        crew_kwargs["planning_llm"] = planning_llm
+                        logger.info(
+                            f"Planning enabled for listener crew - using crew planning_llm: {planning_llm_model}"
+                        )
                     except Exception as e:
-                        logger.warning(f"Could not create planning LLM for listener crew {planning_llm_model}: {e}")
-                elif agents and hasattr(agents[0], 'llm') and agents[0].llm:
-                    crew_kwargs['planning_llm'] = agents[0].llm
-                    logger.info(f"Planning enabled for listener crew - using first agent's LLM as planning_llm")
+                        logger.warning(
+                            f"Could not create planning LLM for listener crew {planning_llm_model}: {e}"
+                        )
+                elif agents and hasattr(agents[0], "llm") and agents[0].llm:
+                    crew_kwargs["planning_llm"] = agents[0].llm
+                    logger.info(
+                        f"Planning enabled for listener crew - using first agent's LLM as planning_llm"
+                    )
                 else:
-                    logger.warning(f"Planning enabled for listener crew but no planning_llm configured and no agent LLM available")
+                    logger.warning(
+                        f"Planning enabled for listener crew but no planning_llm configured and no agent LLM available"
+                    )
 
             # Add reasoning configuration if enabled
             # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
             # We must propagate reasoning to each agent for it to actually work
-            if crew_data and hasattr(crew_data, 'reasoning') and crew_data.reasoning:
-                crew_kwargs['reasoning'] = True
+            if crew_data and hasattr(crew_data, "reasoning") and crew_data.reasoning:
+                crew_kwargs["reasoning"] = True
                 logger.info(f"Reasoning enabled for listener crew from configuration")
 
                 # Propagate reasoning to each agent (required for CrewAI reasoning to work)
                 for agent in agents:
-                    if not hasattr(agent, 'reasoning') or not agent.reasoning:
+                    if not hasattr(agent, "reasoning") or not agent.reasoning:
                         agent.reasoning = True
-                        agent_role = agent.role if hasattr(agent, 'role') else 'Unknown'
-                        logger.info(f"  → Propagated reasoning=True to agent '{agent_role}'")
+                        agent_role = agent.role if hasattr(agent, "role") else "Unknown"
+                        logger.info(
+                            f"  → Propagated reasoning=True to agent '{agent_role}'"
+                        )
 
             # Configure the unified memory backend (Databricks/Lakebase) for the
             # listener crew — same wiring as the regular crew path (avoids the
             # CrewAI default LanceDB + OpenAI embedder / CHROMA_OPENAI_API_KEY).
             if crew_memory:
                 crew_kwargs = await configure_flow_crew_memory(
-                    crew_kwargs, agents, runtime_tasks, listener_crew_name, group_id, user_token
+                    crew_kwargs,
+                    agents,
+                    runtime_tasks,
+                    listener_crew_name,
+                    group_id,
+                    user_token,
                 )
 
             # Log crew configuration for debugging
-            logger.info(f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}")
+            logger.info(
+                f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}"
+            )
 
             crew = Crew(**crew_kwargs)
-            logger.info(f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}")
+            logger.info(
+                f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}"
+            )
 
             # SECURITY: Same assembly-time checks as starting-point crews.
             try:
                 from src.engines.kasal.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
-                _run_security_checks(crew, context=f"flow listener crew '{listener_crew_name}'")
+
+                _run_security_checks(
+                    crew, context=f"flow listener crew '{listener_crew_name}'"
+                )
             except Exception as _sec_err:
-                logger.debug("[SECURITY] Flow listener crew security checks skipped: %s", _sec_err)
+                logger.debug(
+                    "[SECURITY] Flow listener crew security checks skipped: %s",
+                    _sec_err,
+                )
 
             # Set up execution callbacks
             job_id = None
             if callbacks:
-                job_id = callbacks.get('job_id')
+                job_id = callbacks.get("job_id")
                 if job_id:
-                    logger.info(f"Extracted job_id from callbacks for listener: {job_id}")
+                    logger.info(
+                        f"Extracted job_id from callbacks for listener: {job_id}"
+                    )
 
             # Create and set synchronous step and task callbacks
             if job_id:
                 try:
                     step_callback, task_callback = create_execution_callbacks(
-                        job_id=job_id,
-                        config={},
-                        group_context=group_context,
-                        crew=crew
+                        job_id=job_id, config={}, group_context=group_context, crew=crew
                     )
                     crew.step_callback = step_callback
                     crew.task_callback = task_callback
-                    logger.info(f"✅ Set synchronous execution callbacks on listener crew for job {job_id}")
+                    logger.info(
+                        f"✅ Set synchronous execution callbacks on listener crew for job {job_id}"
+                    )
                 except Exception as callback_error:
-                    logger.warning(f"Failed to set execution callbacks on listener: {callback_error}")
+                    logger.warning(
+                        f"Failed to set execution callbacks on listener: {callback_error}"
+                    )
             else:
-                logger.warning("No job_id available for listener, skipping execution callbacks setup")
+                logger.warning(
+                    "No job_id available for listener, skipping execution callbacks setup"
+                )
 
             # Attach execution trace context to the crew's tools + memory (parity
             # with the crew path) so flow tool/memory traces carry job_id + group
             # attribution (e.g. custom llm_call trace events). Shared entry point
             # with the crew path; builds a minimal service from group_id+job_id.
-            from src.engines.kasal.kernel.trace_context import attach_execution_trace_context
+            from src.engines.kasal.kernel.trace_context import (
+                attach_execution_trace_context,
+            )
+
             attach_execution_trace_context(
                 crew, crew_kwargs, group_id=group_id, job_id=job_id
             )
@@ -990,16 +1230,17 @@ class FlowMethodFactory:
             try:
                 # Enhanced logging for truncation diagnosis
                 import time
+
                 start_time = time.time()
 
                 # Log LLM configuration details for first agent
                 first_agent = agents[0] if agents else None
-                if first_agent and hasattr(first_agent, 'llm') and first_agent.llm:
+                if first_agent and hasattr(first_agent, "llm") and first_agent.llm:
                     llm = first_agent.llm
                     llm_info = {
-                        'model': getattr(llm, 'model', 'unknown'),
-                        'max_tokens': getattr(llm, 'max_tokens', 'not set'),
-                        'timeout': getattr(llm, 'timeout', 'not set'),
+                        "model": getattr(llm, "model", "unknown"),
+                        "max_tokens": getattr(llm, "max_tokens", "not set"),
+                        "timeout": getattr(llm, "timeout", "not set"),
                     }
                     logger.info(f"📊 Listener LLM Configuration: {llm_info}")
 
@@ -1016,26 +1257,40 @@ class FlowMethodFactory:
                     _inject_source = extract_final_answer(results)
                 # Also check flow state for a more recent output from the
                 # immediately preceding crew (stored at listener_N keys)
-                if hasattr(self, 'state') and isinstance(self.state, dict):
+                if hasattr(self, "state") and isinstance(self.state, dict):
                     # Find the highest listener_N key that has data
                     _latest_listener = None
                     for _sk, _sv in self.state.items():
-                        if _sk.startswith('listener_') and _sv:
-                            idx = _sk.replace('listener_', '')
+                        if _sk.startswith("listener_") and _sv:
+                            idx = _sk.replace("listener_", "")
                             if idx.isdigit():
-                                if _latest_listener is None or int(idx) > _latest_listener[0]:
+                                if (
+                                    _latest_listener is None
+                                    or int(idx) > _latest_listener[0]
+                                ):
                                     _latest_listener = (int(idx), str(_sv))
                     if _latest_listener and _latest_listener[1]:
                         _candidate = _latest_listener[1]
                         # Extract raw string from CrewOutput if needed
-                        if hasattr(_candidate, 'raw'):
+                        if hasattr(_candidate, "raw"):
                             _candidate = _candidate.raw
-                        _candidate = str(_candidate) if not isinstance(_candidate, str) else _candidate
+                        _candidate = (
+                            str(_candidate)
+                            if not isinstance(_candidate, str)
+                            else _candidate
+                        )
                         # Prefer the state output if it contains UCMV data (yaml key)
                         # or is from a more recent crew than what results provided
-                        _is_ucmv_output = '"yaml"' in _candidate[:500] or "'yaml'" in _candidate[:500]
-                        _is_different = _inject_source is None or _candidate != _inject_source
-                        if _is_different and (_is_ucmv_output or len(_candidate) > len(_inject_source or '')):
+                        _is_ucmv_output = (
+                            '"yaml"' in _candidate[:500] or "'yaml'" in _candidate[:500]
+                        )
+                        _is_different = (
+                            _inject_source is None or _candidate != _inject_source
+                        )
+                        if _is_different and (
+                            _is_ucmv_output
+                            or len(_candidate) > len(_inject_source or "")
+                        ):
                             logger.info(
                                 f"📥 Using flow state listener_{_latest_listener[0]} output "
                                 f"({len(_candidate):,} chars, has_yaml={_is_ucmv_output}) "
@@ -1054,14 +1309,15 @@ class FlowMethodFactory:
                         return None
                     s = raw.strip()
                     # Direct JSON
-                    if s.startswith('{'):
+                    if s.startswith("{"):
                         try:
                             return _json.loads(s)
                         except _json.JSONDecodeError:
                             pass
                     # Extract JSON from "Final Answer: {...}" or narrative wrapping
                     import re as _re
-                    match = _re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', s)
+
+                    match = _re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", s)
                     if match:
                         try:
                             return _json.loads(match.group(0))
@@ -1078,12 +1334,14 @@ class FlowMethodFactory:
                     parsed = _extract_json(_inject_source)
                     if parsed:
                         all_outputs.append(parsed)
-                        all_output_sources.append(f"immediate predecessor ({len(_inject_source):,} chars)")
+                        all_output_sources.append(
+                            f"immediate predecessor ({len(_inject_source):,} chars)"
+                        )
 
                 # Add all stored state outputs (from earlier crews in the chain)
-                if hasattr(self, 'state') and isinstance(self.state, dict):
+                if hasattr(self, "state") and isinstance(self.state, dict):
                     for _sk, _sv in sorted(self.state.items()):
-                        if not _sv or _sk.startswith('_'):
+                        if not _sv or _sk.startswith("_"):
                             continue
                         sv_str = str(_sv) if not isinstance(_sv, str) else _sv
                         parsed = _extract_json(sv_str)
@@ -1091,19 +1349,27 @@ class FlowMethodFactory:
                             all_outputs.append(parsed)
                             all_output_sources.append(f"state[{_sk}]")
 
-                logger.info(f"📦 Collected {len(all_outputs)} parseable JSON outputs from flow chain")
+                logger.info(
+                    f"📦 Collected {len(all_outputs)} parseable JSON outputs from flow chain"
+                )
 
                 try:
                     injected_count = 0
                     for agent in agents:
-                        for tool in (agent.tools or []):
-                            if not hasattr(tool, '_default_config') or not isinstance(tool._default_config, dict):
+                        for tool in agent.tools or []:
+                            if not hasattr(tool, "_default_config") or not isinstance(
+                                tool._default_config, dict
+                            ):
                                 continue
                             tool_name = type(tool).__name__
                             cfg = tool._default_config
 
                             for out_idx, prev_data in enumerate(all_outputs):
-                                source_label = all_output_sources[out_idx] if out_idx < len(all_output_sources) else "unknown"
+                                source_label = (
+                                    all_output_sources[out_idx]
+                                    if out_idx < len(all_output_sources)
+                                    else "unknown"
+                                )
 
                                 # ── Pipeline Config Generator output → UCMV inputs ──
                                 # config-gen emits a WRAPPER dict:
@@ -1115,22 +1381,51 @@ class FlowMethodFactory:
                                 # unwrap the wrapper and map each piece to the matching
                                 # UCMV field. Detect by the wrapper's own keys OR by a
                                 # bare (unwrapped) pipeline-config dict.
-                                inner_cfg = prev_data.get('proposed_config') if isinstance(prev_data.get('proposed_config'), dict) else None
+                                inner_cfg = (
+                                    prev_data.get("proposed_config")
+                                    if isinstance(
+                                        prev_data.get("proposed_config"), dict
+                                    )
+                                    else None
+                                )
                                 has_ucmv_handoff = any(
-                                    k in prev_data for k in ('proposed_config', 'measures_json', 'mquery_json')
+                                    k in prev_data
+                                    for k in (
+                                        "proposed_config",
+                                        "measures_json",
+                                        "mquery_json",
+                                    )
                                 )
                                 is_bare_pipeline_config = inner_cfg is None and any(
-                                    k in prev_data for k in ('join_key_map', 'enrichment_joins', 'filter_sets', 'measure_resolutions')
+                                    k in prev_data
+                                    for k in (
+                                        "join_key_map",
+                                        "enrichment_joins",
+                                        "filter_sets",
+                                        "measure_resolutions",
+                                    )
                                 )
                                 if has_ucmv_handoff or is_bare_pipeline_config:
                                     # config_json ← proposed_config (or the bare dict itself)
-                                    if 'config_json' in cfg:
-                                        existing = cfg.get('config_json') or ''
-                                        if not existing or existing in ('{}', 'null') or len(existing) <= 10:
-                                            config_payload = inner_cfg if inner_cfg is not None else prev_data
-                                            cfg['config_json'] = _json.dumps(config_payload)
+                                    if "config_json" in cfg:
+                                        existing = cfg.get("config_json") or ""
+                                        if (
+                                            not existing
+                                            or existing in ("{}", "null")
+                                            or len(existing) <= 10
+                                        ):
+                                            config_payload = (
+                                                inner_cfg
+                                                if inner_cfg is not None
+                                                else prev_data
+                                            )
+                                            cfg["config_json"] = _json.dumps(
+                                                config_payload
+                                            )
                                             injected_count += 1
-                                            logger.info(f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json")
+                                            logger.info(
+                                                f"📥 Injected pipeline config from {source_label} into {tool_name}.config_json"
+                                            )
                                     # measures_json / mquery_json / relationships_json ← handoff arrays.
                                     # NOTE: do NOT require the key to already exist in cfg —
                                     # the UCMV crew is seeded in JSON mode with these fields
@@ -1140,78 +1435,142 @@ class FlowMethodFactory:
                                     # them to _default_config is exactly what JSON mode expects.
                                     # Only fill when the current value is empty so a manually
                                     # provided value is never clobbered.
-                                    for _hk in ('measures_json', 'mquery_json', 'relationships_json'):
+                                    for _hk in (
+                                        "measures_json",
+                                        "mquery_json",
+                                        "relationships_json",
+                                    ):
                                         payload = prev_data.get(_hk)
                                         if not payload:
                                             continue
-                                        existing = cfg.get(_hk) or ''
-                                        if not existing or existing in ('[]', '{}', 'null') or len(str(existing)) <= 2:
-                                            cfg[_hk] = payload if isinstance(payload, str) else _json.dumps(payload)
+                                        existing = cfg.get(_hk) or ""
+                                        if (
+                                            not existing
+                                            or existing in ("[]", "{}", "null")
+                                            or len(str(existing)) <= 2
+                                        ):
+                                            cfg[_hk] = (
+                                                payload
+                                                if isinstance(payload, str)
+                                                else _json.dumps(payload)
+                                            )
                                             injected_count += 1
-                                            _n = len(payload) if isinstance(payload, list) else len(_json.dumps(payload))
-                                            logger.info(f"📥 Injected {_hk} ({_n} items) from {source_label} into {tool_name}")
+                                            _n = (
+                                                len(payload)
+                                                if isinstance(payload, list)
+                                                else len(_json.dumps(payload))
+                                            )
+                                            logger.info(
+                                                f"📥 Injected {_hk} ({_n} items) from {source_label} into {tool_name}"
+                                            )
                                     continue
 
                                 # UCMV output (has 'yaml' key) → ucmv_output
-                                if 'ucmv_output' in cfg and 'yaml' in prev_data:
+                                if "ucmv_output" in cfg and "yaml" in prev_data:
                                     has_manual_yaml = bool(
-                                        cfg.get('yaml_specs_json') and
-                                        cfg['yaml_specs_json'] not in ('{}', None, '')
+                                        cfg.get("yaml_specs_json")
+                                        and cfg["yaml_specs_json"]
+                                        not in ("{}", None, "")
                                     )
-                                    if not has_manual_yaml and (not cfg.get('ucmv_output') or cfg['ucmv_output'] in (None, 'null', '')):
-                                        cfg['ucmv_output'] = _json.dumps(prev_data)
+                                    if not has_manual_yaml and (
+                                        not cfg.get("ucmv_output")
+                                        or cfg["ucmv_output"] in (None, "null", "")
+                                    ):
+                                        cfg["ucmv_output"] = _json.dumps(prev_data)
                                         injected_count += 1
-                                        logger.info(f"📥 Injected UCMV output from {source_label} ({len(_json.dumps(prev_data)):,} chars) into {tool_name}.ucmv_output")
+                                        logger.info(
+                                            f"📥 Injected UCMV output from {source_label} ({len(_json.dumps(prev_data)):,} chars) into {tool_name}.ucmv_output"
+                                        )
                                     continue
 
                                 # Visual mappings (has 'visual_mappings' or 'visual_mappings_json') → visual_mappings_json
-                                if 'visual_mappings_json' in cfg and ('visual_mappings' in prev_data or 'visual_mappings_json' in prev_data):
-                                    if not cfg.get('visual_mappings_json') or cfg['visual_mappings_json'] in (None, 'null', ''):
-                                        raw_mappings = prev_data.get('visual_mappings_json') or _json.dumps(prev_data.get('visual_mappings', []))
-                                        cfg['visual_mappings_json'] = raw_mappings if isinstance(raw_mappings, str) else _json.dumps(raw_mappings)
+                                if "visual_mappings_json" in cfg and (
+                                    "visual_mappings" in prev_data
+                                    or "visual_mappings_json" in prev_data
+                                ):
+                                    if not cfg.get("visual_mappings_json") or cfg[
+                                        "visual_mappings_json"
+                                    ] in (None, "null", ""):
+                                        raw_mappings = prev_data.get(
+                                            "visual_mappings_json"
+                                        ) or _json.dumps(
+                                            prev_data.get("visual_mappings", [])
+                                        )
+                                        cfg["visual_mappings_json"] = (
+                                            raw_mappings
+                                            if isinstance(raw_mappings, str)
+                                            else _json.dumps(raw_mappings)
+                                        )
                                         injected_count += 1
-                                        logger.info(f"📥 Injected visual_mappings_json from {source_label} into {tool_name}")
+                                        logger.info(
+                                            f"📥 Injected visual_mappings_json from {source_label} into {tool_name}"
+                                        )
                                     continue
 
                                 # Generic: inject matching keys from immediate predecessor only
                                 if out_idx == 0:
                                     for key, value in prev_data.items():
-                                        if key in cfg and (not cfg.get(key) or cfg[key] in (None, 'null', '')):
-                                            cfg[key] = value if isinstance(value, str) else _json.dumps(value)
+                                        if key in cfg and (
+                                            not cfg.get(key)
+                                            or cfg[key] in (None, "null", "")
+                                        ):
+                                            cfg[key] = (
+                                                value
+                                                if isinstance(value, str)
+                                                else _json.dumps(value)
+                                            )
                                             injected_count += 1
 
                     if injected_count > 0:
-                        logger.info(f"📥 Total: injected {injected_count} key(s) from flow chain into tool _default_config(s)")
+                        logger.info(
+                            f"📥 Total: injected {injected_count} key(s) from flow chain into tool _default_config(s)"
+                        )
                 except Exception as inject_err:
-                    logger.debug(f"Flow chain injection error (non-fatal): {inject_err}")
+                    logger.debug(
+                        f"Flow chain injection error (non-fatal): {inject_err}"
+                    )
 
-                logger.info(f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout...")
+                logger.info(
+                    f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
+                )
 
-                result = await asyncio.wait_for(crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS)
+                result = await asyncio.wait_for(
+                    crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS
+                )
 
                 elapsed_time = time.time() - start_time
-                logger.info(f"⏱️ Listener crew execution took {elapsed_time:.2f} seconds")
+                logger.info(
+                    f"⏱️ Listener crew execution took {elapsed_time:.2f} seconds"
+                )
 
                 # Log result details for truncation diagnosis
                 if result:
-                    if hasattr(result, 'raw') and result.raw:
+                    if hasattr(result, "raw") and result.raw:
                         result_length = len(str(result.raw))
-                        logger.info(f"✅ Listener kickoff completed - result.raw length: {result_length} chars")
+                        logger.info(
+                            f"✅ Listener kickoff completed - result.raw length: {result_length} chars"
+                        )
                         raw_str = str(result.raw)
                         if result_length > 400:
-                            logger.info(f"📄 Listener result preview - First 200 chars: {raw_str[:200]}")
-                            logger.info(f"📄 Listener result preview - Last 200 chars: {raw_str[-200:]}")
+                            logger.info(
+                                f"📄 Listener result preview - First 200 chars: {raw_str[:200]}"
+                            )
+                            logger.info(
+                                f"📄 Listener result preview - Last 200 chars: {raw_str[-200:]}"
+                            )
                         else:
                             logger.info(f"📄 Listener full result: {raw_str}")
                     else:
-                        logger.info(f"✅ Listener kickoff completed - result type: {type(result)}, str length: {len(str(result))}")
+                        logger.info(
+                            f"✅ Listener kickoff completed - result type: {type(result)}, str length: {len(str(result))}"
+                        )
                 else:
                     logger.warning("⚠️ Listener kickoff returned None or empty result")
 
                 # Return serializable value for @persist compatibility
                 # CrewOutput objects are not JSON-serializable, so extract raw content
                 serializable_result = None
-                if hasattr(result, 'raw') and result.raw:
+                if hasattr(result, "raw") and result.raw:
                     serializable_result = result.raw
                 elif result is not None:
                     serializable_result = str(result)
@@ -1221,19 +1580,26 @@ class FlowMethodFactory:
                 # Store result in state for checkpoint resume support
                 # This allows skipped crews to retrieve the output when resuming
                 if serializable_result is not None:
-                    if hasattr(self, 'state'):
+                    if hasattr(self, "state"):
                         self.state[method_name] = serializable_result
                         self.state[crew_name] = serializable_result
-                        logger.info(f"📦 Stored listener output in state['{method_name}'] and state['{crew_name}'] for checkpoint support")
+                        logger.info(
+                            f"📦 Stored listener output in state['{method_name}'] and state['{crew_name}'] for checkpoint support"
+                        )
 
                 return serializable_result
             except asyncio.TimeoutError:
-                elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)")
+                elapsed_time = time.time() - start_time if "start_time" in dir() else 0
+                logger.error(
+                    f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
+                )
                 raise TimeoutError("Listener crew execution timed out")
             except Exception as e:
-                elapsed_time = time.time() - start_time if 'start_time' in dir() else 0
-                logger.error(f"❌ Error during listener crew kickoff after {elapsed_time:.2f} seconds: {e}", exc_info=True)
+                elapsed_time = time.time() - start_time if "start_time" in dir() else 0
+                logger.error(
+                    f"❌ Error during listener crew kickoff after {elapsed_time:.2f} seconds: {e}",
+                    exc_info=True,
+                )
                 raise
 
         # Set metadata on both wrapper AND wrapped function
@@ -1254,7 +1620,7 @@ class FlowMethodFactory:
         is_starting_point: bool = True,
         method_condition: Any = None,
         condition_type: str = "NONE",
-        checkpoint_output: Any = None
+        checkpoint_output: Any = None,
     ) -> Callable:
         """
         Create a stub method for a crew that should be skipped during checkpoint resume.
@@ -1276,10 +1642,14 @@ class FlowMethodFactory:
         Returns:
             A decorated async method that returns the checkpoint output
         """
-        logger.info(f"Creating SKIP method '{method_name}' for crew '{crew_name}' (sequence: {crew_sequence})")
+        logger.info(
+            f"Creating SKIP method '{method_name}' for crew '{crew_name}' (sequence: {crew_sequence})"
+        )
         if checkpoint_output is not None:
-            logger.info(f"  📦 Checkpoint output provided: {str(checkpoint_output)[:200]}...")
-        
+            logger.info(
+                f"  📦 Checkpoint output provided: {str(checkpoint_output)[:200]}..."
+            )
+
         def get_cached_output(flow_instance, method_nm, crew_nm, prev_output=None):
             """
             Retrieve cached output from persistence layer.
@@ -1294,37 +1664,53 @@ class FlowMethodFactory:
             cached_output = None
 
             # DIAGNOSTIC: Log what's available in the flow instance
-            logger.info(f"  🔍 DIAGNOSTIC - Looking for cached output for '{method_nm}' / '{crew_nm}'")
-            if hasattr(flow_instance, '_method_outputs'):
-                logger.info(f"  🔍 DIAGNOSTIC - _method_outputs exists: {bool(flow_instance._method_outputs)}")
+            logger.info(
+                f"  🔍 DIAGNOSTIC - Looking for cached output for '{method_nm}' / '{crew_nm}'"
+            )
+            if hasattr(flow_instance, "_method_outputs"):
+                logger.info(
+                    f"  🔍 DIAGNOSTIC - _method_outputs exists: {bool(flow_instance._method_outputs)}"
+                )
                 if flow_instance._method_outputs:
-                    logger.info(f"  🔍 DIAGNOSTIC - _method_outputs keys: {list(flow_instance._method_outputs.keys()) if isinstance(flow_instance._method_outputs, dict) else 'not a dict'}")
+                    logger.info(
+                        f"  🔍 DIAGNOSTIC - _method_outputs keys: {list(flow_instance._method_outputs.keys()) if isinstance(flow_instance._method_outputs, dict) else 'not a dict'}"
+                    )
             else:
                 logger.info(f"  🔍 DIAGNOSTIC - _method_outputs does not exist")
 
-            if hasattr(flow_instance, 'state'):
+            if hasattr(flow_instance, "state"):
                 state = flow_instance.state
                 logger.info(f"  🔍 DIAGNOSTIC - state exists, type: {type(state)}")
-                if hasattr(state, 'keys'):
+                if hasattr(state, "keys"):
                     logger.info(f"  🔍 DIAGNOSTIC - state keys: {list(state.keys())}")
-                elif hasattr(state, '__dict__'):
-                    logger.info(f"  🔍 DIAGNOSTIC - state attrs: {list(vars(state).keys())}")
+                elif hasattr(state, "__dict__"):
+                    logger.info(
+                        f"  🔍 DIAGNOSTIC - state attrs: {list(vars(state).keys())}"
+                    )
             else:
                 logger.info(f"  🔍 DIAGNOSTIC - state does not exist")
 
             # Try to get from _method_outputs (CrewAI @persist stores outputs here)
-            if hasattr(flow_instance, '_method_outputs') and flow_instance._method_outputs:
-                if isinstance(flow_instance._method_outputs, dict) and method_nm in flow_instance._method_outputs:
+            if (
+                hasattr(flow_instance, "_method_outputs")
+                and flow_instance._method_outputs
+            ):
+                if (
+                    isinstance(flow_instance._method_outputs, dict)
+                    and method_nm in flow_instance._method_outputs
+                ):
                     cached_output = flow_instance._method_outputs[method_nm]
-                    logger.info(f"  📦 Found cached output in _method_outputs['{method_nm}']")
+                    logger.info(
+                        f"  📦 Found cached output in _method_outputs['{method_nm}']"
+                    )
                     return cached_output
 
             # Try to get from state with various key patterns
-            if hasattr(flow_instance, 'state'):
+            if hasattr(flow_instance, "state"):
                 state = flow_instance.state
 
                 # Check for method_name as key
-                if hasattr(state, 'get'):
+                if hasattr(state, "get"):
                     # Dict-like state
                     if method_nm in state:
                         cached_output = state.get(method_nm)
@@ -1348,13 +1734,17 @@ class FlowMethodFactory:
                     output_key = f"{method_nm}_output"
                     if output_key in state:
                         cached_output = state.get(output_key)
-                        logger.info(f"  📦 Found cached output in state['{output_key}']")
+                        logger.info(
+                            f"  📦 Found cached output in state['{output_key}']"
+                        )
                         return cached_output
 
                     # Check previous_output key
-                    if 'previous_output' in state:
-                        cached_output = state.get('previous_output')
-                        logger.info(f"  📦 Found cached output in state['previous_output']")
+                    if "previous_output" in state:
+                        cached_output = state.get("previous_output")
+                        logger.info(
+                            f"  📦 Found cached output in state['previous_output']"
+                        )
                         return cached_output
                 else:
                     # Object-like state
@@ -1369,18 +1759,24 @@ class FlowMethodFactory:
 
             # Fall back to previous_output if provided (pass-through for listeners)
             if prev_output is not None:
-                logger.info(f"  📦 Using previous_output as fallback (pass-through mode)")
+                logger.info(
+                    f"  📦 Using previous_output as fallback (pass-through mode)"
+                )
                 return prev_output
 
-            logger.warning(f"  ⚠️ No cached output found for '{method_nm}' / '{crew_nm}'")
+            logger.warning(
+                f"  ⚠️ No cached output found for '{method_nm}' / '{crew_nm}'"
+            )
             return None
-        
+
         if is_starting_point:
             # Create a starting point stub method that returns checkpoint output
             @start()
             async def skipped_starting_method(self):
-                logger.info("="*80)
-                logger.info(f"⏭️  CHECKPOINT RESUME: Skipping crew '{crew_name}' (sequence: {crew_sequence})")
+                logger.info("=" * 80)
+                logger.info(
+                    f"⏭️  CHECKPOINT RESUME: Skipping crew '{crew_name}' (sequence: {crew_sequence})"
+                )
                 logger.info(f"Method: {method_name}")
                 logger.info(f"This crew was already completed in a previous execution")
 
@@ -1388,29 +1784,37 @@ class FlowMethodFactory:
                 result_output = checkpoint_output
 
                 if result_output is not None:
-                    logger.info(f"  ✅ Using checkpoint output from database: {str(result_output)[:200]}...")
+                    logger.info(
+                        f"  ✅ Using checkpoint output from database: {str(result_output)[:200]}..."
+                    )
                 else:
                     # Fallback: try to get from persistence layer (in case @persist loaded state)
                     result_output = get_cached_output(self, method_name, crew_name)
 
                     if result_output is not None:
-                        logger.info(f"  ✅ Using cached output from persistence: {str(result_output)[:200]}...")
+                        logger.info(
+                            f"  ✅ Using cached output from persistence: {str(result_output)[:200]}..."
+                        )
                     else:
-                        logger.warning(f"  ⚠️ No checkpoint output found, returning placeholder")
+                        logger.warning(
+                            f"  ⚠️ No checkpoint output found, returning placeholder"
+                        )
                         # Create a placeholder output to allow flow to continue
                         result_output = {
                             "status": "skipped",
                             "crew_name": crew_name,
-                            "message": f"Crew '{crew_name}' was skipped during checkpoint resume"
+                            "message": f"Crew '{crew_name}' was skipped during checkpoint resume",
                         }
 
                 # Store in state for downstream propagation
-                if hasattr(self, 'state'):
+                if hasattr(self, "state"):
                     self.state[method_name] = result_output
                     self.state[crew_name] = result_output
-                    logger.info(f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']")
+                    logger.info(
+                        f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
+                    )
 
-                logger.info("="*80)
+                logger.info("=" * 80)
                 return result_output
 
             # Set metadata on both wrapper AND wrapped function
@@ -1423,41 +1827,55 @@ class FlowMethodFactory:
             # Create a listener stub method that returns checkpoint output
             @listen(method_condition)
             async def skipped_listener_method(self, previous_output=None):
-                logger.info("="*80)
-                logger.info(f"⏭️  CHECKPOINT RESUME: Skipping listener crew '{crew_name}' (sequence: {crew_sequence})")
+                logger.info("=" * 80)
+                logger.info(
+                    f"⏭️  CHECKPOINT RESUME: Skipping listener crew '{crew_name}' (sequence: {crew_sequence})"
+                )
                 logger.info(f"Method: {method_name}")
                 logger.info(f"Listening to: {method_condition}")
-                logger.info(f"Previous output received: {str(previous_output)[:200] if previous_output else 'None'}...")
+                logger.info(
+                    f"Previous output received: {str(previous_output)[:200] if previous_output else 'None'}..."
+                )
                 logger.info(f"This crew was already completed in a previous execution")
 
                 # Primary source: checkpoint_output from database traces (passed from flow builder)
                 result_output = checkpoint_output
 
                 if result_output is not None:
-                    logger.info(f"  ✅ Using checkpoint output from database: {str(result_output)[:200]}...")
+                    logger.info(
+                        f"  ✅ Using checkpoint output from database: {str(result_output)[:200]}..."
+                    )
                 else:
                     # Fallback: try to get from persistence layer, with previous_output as last resort
-                    result_output = get_cached_output(self, method_name, crew_name, previous_output)
+                    result_output = get_cached_output(
+                        self, method_name, crew_name, previous_output
+                    )
 
                     if result_output is not None:
-                        logger.info(f"  ✅ Using cached/fallback output: {str(result_output)[:200]}...")
+                        logger.info(
+                            f"  ✅ Using cached/fallback output: {str(result_output)[:200]}..."
+                        )
                     else:
-                        logger.warning(f"  ⚠️ No checkpoint output found and no previous_output, returning placeholder")
+                        logger.warning(
+                            f"  ⚠️ No checkpoint output found and no previous_output, returning placeholder"
+                        )
                         # Create a placeholder output to allow flow to continue
                         result_output = {
                             "status": "skipped",
                             "crew_name": crew_name,
-                            "message": f"Crew '{crew_name}' was skipped during checkpoint resume"
+                            "message": f"Crew '{crew_name}' was skipped during checkpoint resume",
                         }
 
                 # Store in state to propagate to downstream crews
-                if hasattr(self, 'state'):
+                if hasattr(self, "state"):
                     self.state[method_name] = result_output
                     self.state[crew_name] = result_output
-                    self.state['previous_output'] = result_output
-                    logger.info(f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']")
+                    self.state["previous_output"] = result_output
+                    logger.info(
+                        f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
+                    )
 
-                logger.info("="*80)
+                logger.info("=" * 80)
                 return result_output
 
             # Set metadata on both wrapper AND wrapped function
@@ -1475,7 +1893,7 @@ class FlowMethodFactory:
         previous_method_name: str,
         crew_sequence: int,
         callbacks: Optional[Dict[str, Any]] = None,
-        group_context: Optional[Any] = None
+        group_context: Optional[Any] = None,
     ) -> Callable:
         """
         Create an HITL gate method that pauses flow for human approval.
@@ -1503,83 +1921,104 @@ class FlowMethodFactory:
         Returns:
             Async function decorated with @listen() that pauses for approval
         """
+
         @listen(previous_method_name)
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
-            from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
+            from src.engines.kasal.paths.flow.exceptions import (
+                FlowPausedForApprovalException,
+            )
             from src.db.session import request_scoped_session
             from src.services.hitl_service import HITLService
             from src.services.hitl_webhook_service import HITLWebhookService
             from src.repositories.hitl_repository import HITLApprovalRepository
             from src.models.hitl_approval import HITLApprovalStatus
 
-            logger.info("="*80)
+            logger.info("=" * 80)
             logger.info(f"🚦 HITL GATE REACHED: {gate_node_id}")
             logger.info(f"Method: {method_name}")
             logger.info(f"Listening to: {previous_method_name}")
             logger.info(f"Gate config: {gate_config}")
-            logger.info("="*80)
+            logger.info("=" * 80)
 
             # Extract execution context
-            job_id = callbacks.get('job_id') if callbacks else None
-            flow_id = callbacks.get('flow_id') if callbacks else None
+            job_id = callbacks.get("job_id") if callbacks else None
+            flow_id = callbacks.get("flow_id") if callbacks else None
 
             logger.info(f"📋 Extracted from callbacks:")
             logger.info(f"   job_id: {job_id}")
             logger.info(f"   flow_id: {flow_id}")
-            logger.info(f"   callbacks keys: {list(callbacks.keys()) if callbacks else 'None'}")
+            logger.info(
+                f"   callbacks keys: {list(callbacks.keys()) if callbacks else 'None'}"
+            )
 
             if not job_id:
-                logger.error("No job_id found in callbacks - cannot create HITL approval")
+                logger.error(
+                    "No job_id found in callbacks - cannot create HITL approval"
+                )
                 raise ValueError("HITL gate requires job_id in callbacks")
 
             # Get group_id from context
             group_id = None
             if group_context:
-                if hasattr(group_context, 'primary_group_id'):
+                if hasattr(group_context, "primary_group_id"):
                     group_id = group_context.primary_group_id
-                elif hasattr(group_context, 'group_ids') and group_context.group_ids:
+                elif hasattr(group_context, "group_ids") and group_context.group_ids:
                     group_id = group_context.group_ids[0]
 
             if not group_id:
-                logger.error("No group_id found in group_context - cannot create HITL approval")
+                logger.error(
+                    "No group_id found in group_context - cannot create HITL approval"
+                )
                 raise ValueError("HITL gate requires group_id in context")
 
             # Check if there's already an APPROVED approval for this gate
             # This happens when resuming after approval
             async with request_scoped_session() as session:
                 hitl_repo = HITLApprovalRepository(session)
-                existing_approvals = await hitl_repo.get_all_for_execution(job_id, group_id)
+                existing_approvals = await hitl_repo.get_all_for_execution(
+                    job_id, group_id
+                )
 
                 # Look for an approved approval for this specific gate
                 approved_for_gate = None
                 for approval in existing_approvals:
-                    if (approval.gate_node_id == gate_node_id and
-                        approval.status == HITLApprovalStatus.APPROVED):
+                    if (
+                        approval.gate_node_id == gate_node_id
+                        and approval.status == HITLApprovalStatus.APPROVED
+                    ):
                         approved_for_gate = approval
                         break
 
                 if approved_for_gate:
-                    logger.info("="*80)
+                    logger.info("=" * 80)
                     logger.info(f"✅ HITL GATE ALREADY APPROVED: {gate_node_id}")
                     logger.info(f"   Approval ID: {approved_for_gate.id}")
                     logger.info(f"   Approved by: {approved_for_gate.responded_by}")
                     logger.info(f"   Approved at: {approved_for_gate.responded_at}")
                     logger.info("   Passing through to next step...")
-                    logger.info("="*80)
+                    logger.info("=" * 80)
 
                     # Check if the user edited the config in the Config Editor.
                     # If so, pass the edited version to the next crew instead of
                     # the original crew output.
                     try:
-                        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+                        from src.repositories.execution_history_repository import (
+                            ExecutionHistoryRepository,
+                        )
+
                         exec_repo = ExecutionHistoryRepository(session)
                         execution = await exec_repo.get_execution_by_job_id(job_id)
                         if execution and execution.checkpoint_data:
-                            edited_config = execution.checkpoint_data.get("edited_config")
+                            edited_config = execution.checkpoint_data.get(
+                                "edited_config"
+                            )
                             if edited_config:
                                 import json
-                                logger.info(f"   📝 Found edited_config in checkpoint_data — using user edits")
+
+                                logger.info(
+                                    f"   📝 Found edited_config in checkpoint_data — using user edits"
+                                )
                                 return json.dumps(edited_config)
                     except Exception as e:
                         logger.warning(f"   Could not check for edited_config: {e}")
@@ -1593,16 +2032,16 @@ class FlowMethodFactory:
             if previous_output:
                 if isinstance(previous_output, str):
                     previous_crew_output = previous_output
-                elif hasattr(previous_output, 'raw'):
+                elif hasattr(previous_output, "raw"):
                     previous_crew_output = str(previous_output.raw)
                 else:
                     previous_crew_output = str(previous_output)
 
             # Get flow state snapshot
             flow_state_snapshot = {}
-            if hasattr(self, 'state'):
+            if hasattr(self, "state"):
                 try:
-                    if hasattr(self.state, 'model_dump'):
+                    if hasattr(self.state, "model_dump"):
                         flow_state_snapshot = self.state.model_dump()
                     elif isinstance(self.state, dict):
                         flow_state_snapshot = dict(self.state)
@@ -1613,30 +2052,34 @@ class FlowMethodFactory:
             flow_uuid = None
             logger.info(f"🔍 HITL gate checkpoint extraction:")
             logger.info(f"   hasattr(self, 'state'): {hasattr(self, 'state')}")
-            if hasattr(self, 'state'):
+            if hasattr(self, "state"):
                 state = self.state
                 logger.info(f"   self.state type: {type(state)}")
                 logger.info(f"   hasattr(self.state, 'id'): {hasattr(state, 'id')}")
-                if hasattr(state, 'id'):
-                    flow_uuid = getattr(state, 'id', None)
+                if hasattr(state, "id"):
+                    flow_uuid = getattr(state, "id", None)
                     logger.info(f"   ✅ Extracted flow_uuid from state.id: {flow_uuid}")
-                elif isinstance(state, dict) and 'id' in state:
+                elif isinstance(state, dict) and "id" in state:
                     # Try to get id from dict-like state
-                    flow_uuid = state['id']
-                    logger.info(f"   ✅ Extracted flow_uuid from dict state['id']: {flow_uuid}")
+                    flow_uuid = state["id"]
+                    logger.info(
+                        f"   ✅ Extracted flow_uuid from dict state['id']: {flow_uuid}"
+                    )
 
             # Fallback: Generate a UUID if none was found
             # This ensures checkpoint functionality works even if @persist state.id is not available
             if not flow_uuid:
                 flow_uuid = str(uuid.uuid4())
-                logger.warning(f"   ⚠️ No state.id found - generated fallback flow_uuid: {flow_uuid}")
+                logger.warning(
+                    f"   ⚠️ No state.id found - generated fallback flow_uuid: {flow_uuid}"
+                )
                 # Store in state for future reference if possible
-                if hasattr(self, 'state'):
+                if hasattr(self, "state"):
                     try:
-                        if hasattr(self.state, 'id'):
-                            setattr(self.state, 'id', flow_uuid)
+                        if hasattr(self.state, "id"):
+                            setattr(self.state, "id", flow_uuid)
                         elif isinstance(self.state, dict):
-                            self.state['id'] = flow_uuid
+                            self.state["id"] = flow_uuid
                         logger.info(f"   ✅ Stored generated flow_uuid in state")
                     except Exception as e:
                         logger.warning(f"   Could not store flow_uuid in state: {e}")
@@ -1655,7 +2098,7 @@ class FlowMethodFactory:
                     group_id=group_id,
                     previous_crew_name=previous_crew_name,
                     previous_crew_output=previous_crew_output,
-                    flow_state_snapshot=flow_state_snapshot
+                    flow_state_snapshot=flow_state_snapshot,
                 )
 
                 await session.commit()
@@ -1671,23 +2114,22 @@ class FlowMethodFactory:
                     approval_url = f"/flows/approvals/{approval.id}"
 
                     await webhook_service.send_gate_reached_notification(
-                        approval=approval,
-                        approval_url=approval_url
+                        approval=approval, approval_url=approval_url
                     )
                 except Exception as e:
                     logger.warning(f"Failed to send webhook notification: {e}")
 
             # Raise exception to pause flow
             logger.info("🛑 PAUSING FLOW FOR HUMAN APPROVAL")
-            logger.info("="*80)
+            logger.info("=" * 80)
 
             raise FlowPausedForApprovalException(
                 approval_id=approval.id,
                 gate_node_id=gate_node_id,
-                message=gate_config.get('message', 'Approval required to proceed'),
+                message=gate_config.get("message", "Approval required to proceed"),
                 execution_id=job_id,
                 crew_sequence=crew_sequence,
-                flow_uuid=flow_uuid
+                flow_uuid=flow_uuid,
             )
 
         # Set metadata on both wrapper AND wrapped function

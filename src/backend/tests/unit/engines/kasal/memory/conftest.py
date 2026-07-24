@@ -12,7 +12,6 @@ import sys
 import types
 from unittest.mock import MagicMock
 
-
 # ── chromadb stub ─────────────────────────────────────────────────────────────
 
 _chromadb_stub = MagicMock()
@@ -40,15 +39,20 @@ sys.modules.setdefault("asyncpg", MagicMock())
 
 try:
     from pydantic import BaseModel as _PydanticBaseModel
+
     class _PlaceholderBase(_PydanticBaseModel):
         """A Pydantic-compatible placeholder for crewai.rag type stubs."""
+
         model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
         def __class_getitem__(cls, item):
             return cls
+
 except Exception:
+
     class _PlaceholderBase:
         """Fallback placeholder when Pydantic is not available."""
+
         def __class_getitem__(cls, item):
             return cls
 
@@ -84,6 +88,7 @@ class _RagFinder:
     def find_spec(fullname, path, target=None):
         if fullname == "crewai.rag" or fullname.startswith("crewai.rag."):
             import importlib.util
+
             spec = importlib.util.spec_from_loader(fullname, _RagModuleLoader())
             return spec
         return None

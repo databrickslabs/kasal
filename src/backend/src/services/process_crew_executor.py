@@ -436,6 +436,7 @@ def run_crew_in_process(
                     UserContext.set_user_token(user_token)
                     # Also set for LiteLLM callback fallback (contextvars don't propagate to callback threads)
                     from src.core.llm_manager import set_subprocess_user_token
+
                     set_subprocess_user_token(user_token)
                     subprocess_logger.info(
                         f"[SUBPROCESS] ✓ UserContext initialized with group_id={group_id} and OBO token"
@@ -480,13 +481,20 @@ def run_crew_in_process(
             # (tools, memory, etc.) automatically use Lakebase.
             try:
                 from src.db.database_router import activate_lakebase_in_subprocess
+
                 lb_ok = await activate_lakebase_in_subprocess()
                 if lb_ok:
-                    subprocess_logger.info("[SUBPROCESS] Lakebase activated on async_session_factory")
+                    subprocess_logger.info(
+                        "[SUBPROCESS] Lakebase activated on async_session_factory"
+                    )
                 else:
-                    subprocess_logger.debug("[SUBPROCESS] Lakebase not enabled, using local DB")
+                    subprocess_logger.debug(
+                        "[SUBPROCESS] Lakebase not enabled, using local DB"
+                    )
             except Exception as lb_err:
-                subprocess_logger.warning(f"[SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}")
+                subprocess_logger.warning(
+                    f"[SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}"
+                )
 
             # Suppress any stdout/stderr from CrewAI
             import warnings
@@ -683,16 +691,22 @@ def run_crew_in_process(
                 try:
                     if isinstance(crew_config, dict) and inputs:
                         # Ensure inputs structure exists for ToolFactory placeholder resolution
-                        if 'inputs' not in crew_config:
-                            crew_config['inputs'] = {}
-                        if isinstance(crew_config['inputs'], dict):
+                        if "inputs" not in crew_config:
+                            crew_config["inputs"] = {}
+                        if isinstance(crew_config["inputs"], dict):
                             # Store inputs in nested structure that ToolFactory expects
-                            crew_config['inputs']['inputs'] = inputs
-                            async_logger.info(f"[SUBPROCESS] Injected execution inputs into crew_config for tool placeholder resolution: {list(inputs.keys())}")
+                            crew_config["inputs"]["inputs"] = inputs
+                            async_logger.info(
+                                f"[SUBPROCESS] Injected execution inputs into crew_config for tool placeholder resolution: {list(inputs.keys())}"
+                            )
                         else:
-                            async_logger.warning(f"[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs")
+                            async_logger.warning(
+                                f"[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs"
+                            )
                 except Exception as e:
-                    async_logger.warning(f"[SUBPROCESS] Could not inject execution inputs into crew_config: {e}")
+                    async_logger.warning(
+                        f"[SUBPROCESS] Could not inject execution inputs into crew_config: {e}"
+                    )
 
                 # Extract user_token from crew_config for OBO authentication
                 # The user_token is passed from the parent process via crew_config
@@ -728,9 +742,7 @@ def run_crew_in_process(
                         SimpleSpanProcessor,
                     )
 
-                    otel_provider = create_kasal_tracer_provider(
-                        job_id=execution_id
-                    )
+                    otel_provider = create_kasal_tracer_provider(job_id=execution_id)
 
                     # DB exporter + SSE processor. BatchSpanProcessor
                     # (PERF-014): spans are queued and exported in batches on
@@ -744,11 +756,10 @@ def run_crew_in_process(
                     from src.services.otel_tracing.sse_processor import (
                         KasalSSESpanProcessor,
                     )
+
                     otel_provider.add_span_processor(
                         BatchSpanProcessor(
-                            KasalDBSpanExporter(
-                                execution_id, group_context
-                            ),
+                            KasalDBSpanExporter(execution_id, group_context),
                             schedule_delay_millis=1000,
                         )
                     )
@@ -773,6 +784,7 @@ def run_crew_in_process(
                         from src.services.otel_tracing.mlflow_exporter import (
                             KasalMLflowSpanExporter,
                         )
+
                         otel_provider.add_span_processor(
                             SimpleSpanProcessor(
                                 KasalMLflowSpanExporter(
@@ -784,7 +796,9 @@ def run_crew_in_process(
                         async_logger.info(
                             f"[SUBPROCESS] MLflow span exporter added to OTel pipeline for {execution_id}"
                         )
-                    elif mlflow_result and getattr(mlflow_result, "uc_trace_storage", False):
+                    elif mlflow_result and getattr(
+                        mlflow_result, "uc_trace_storage", False
+                    ):
                         async_logger.info(
                             "[SUBPROCESS] UC trace storage active — native MLflow autolog writes "
                             "the UC trace; imperative KasalMLflowSpanExporter not added"
@@ -797,9 +811,8 @@ def run_crew_in_process(
                         from openinference.instrumentation.crewai import (
                             CrewAIInstrumentor,
                         )
-                        CrewAIInstrumentor().instrument(
-                            tracer_provider=otel_provider
-                        )
+
+                        CrewAIInstrumentor().instrument(tracer_provider=otel_provider)
                         async_logger.info(
                             f"[SUBPROCESS] OTel tracing enabled with CrewAI instrumentation for {execution_id}"
                         )
@@ -810,11 +823,13 @@ def run_crew_in_process(
 
                     # Diagnostic: confirm span processors are attached
                     try:
-                        proc_count = len(
-                            otel_provider._active_span_processor._span_processors
-                        ) if hasattr(otel_provider, '_active_span_processor') else 'unknown'
+                        proc_count = (
+                            len(otel_provider._active_span_processor._span_processors)
+                            if hasattr(otel_provider, "_active_span_processor")
+                            else "unknown"
+                        )
                     except Exception:
-                        proc_count = 'unknown'
+                        proc_count = "unknown"
                     async_logger.info(
                         f"[SUBPROCESS] OTel pipeline: provider has {proc_count} span processor(s) for {execution_id}"
                     )
@@ -1320,14 +1335,41 @@ def run_crew_in_process(
                     async_logger.info(f"Inputs provided: {list(inputs.keys())}")
                 else:
                     async_logger.info("No inputs provided")
-                async_logger.info(
-                    f"[SUBPROCESS] ABOUT TO CALL crew.kickoff()"
-                )
+                async_logger.info(f"[SUBPROCESS] ABOUT TO CALL crew.kickoff()")
 
                 from src.services.otel_tracing.mlflow_setup import (
                     execute_with_mlflow_trace_async,
                     post_execution_mlflow_cleanup,
                 )
+
+                # ── Memory wiring — the engine's context_providers/output_sinks
+                # seams. Recall: a context provider runs at each task's context
+                # assembly (query = description + runtime context tail), firing
+                # MemoryQuery* events → the OTel bridge above turns them into
+                # "Memory Read" trace rows under the task. Persist: an output
+                # sink fires from _finish_task for every completed task,
+                # fire-and-forget ("Memory Write" rows). Best-effort.
+                try:
+                    from src.engines.kasal.memory.memory_hooks import (
+                        make_memory_context_provider,
+                        make_memory_output_sink,
+                    )
+
+                    crew_memory = getattr(crew, "memory", None)
+                    memory_provider = make_memory_context_provider(crew_memory)
+                    if memory_provider is not None:
+                        crew.context_providers.append(memory_provider)
+                    memory_sink = make_memory_output_sink(crew_memory)
+                    if memory_sink is not None:
+                        crew.output_sinks.append(memory_sink)
+                    if memory_provider is not None or memory_sink is not None:
+                        async_logger.info(
+                            "Memory recall provider + persist sink attached to crew"
+                        )
+                except Exception as mem_err:
+                    async_logger.warning(
+                        f"Memory wiring skipped (non-fatal): {mem_err}"
+                    )
 
                 # CrewAI 1.14.5 refuses a synchronous ``crew.kickoff()`` when a
                 # running event loop is detected (the agent executor returns a
@@ -1338,15 +1380,50 @@ def run_crew_in_process(
                         return await crew.kickoff_async(inputs=inputs)
                     return await crew.kickoff_async()
 
-                result = await execute_with_mlflow_trace_async(
-                    kickoff_coro_fn=kickoff_fn,
-                    mlflow_result=mlflow_result,
-                    flow_config=crew_config,
-                    inputs=inputs,
-                    async_logger=async_logger,
-                    trace_label="crew_kickoff",
-                    execution_id=execution_id,
-                )
+                try:
+                    result = await execute_with_mlflow_trace_async(
+                        kickoff_coro_fn=kickoff_fn,
+                        mlflow_result=mlflow_result,
+                        flow_config=crew_config,
+                        inputs=inputs,
+                        async_logger=async_logger,
+                        trace_label="crew_kickoff",
+                        execution_id=execution_id,
+                    )
+                finally:
+                    # Drain in-flight memory writes BEFORE this subprocess winds
+                    # down: the last task's save is fire-and-forget and would
+                    # otherwise die with the interpreter — losing both the
+                    # stored memory and its "Memory Write" trace span.
+                    try:
+                        from src.engines.kasal.memory.memory_hooks import (
+                            flush_memory_writes,
+                        )
+
+                        still_pending = await asyncio.to_thread(
+                            flush_memory_writes, 15.0
+                        )
+                        if still_pending:
+                            async_logger.warning(
+                                f"{still_pending} memory write(s) did not finish "
+                                f"within the flush window"
+                            )
+                        # Sleep-time maintenance: bounded, LLM-free dedupe of
+                        # the group scope now that this run's writes landed.
+                        from src.engines.kasal.memory.memory_maintenance import (
+                            run_memory_maintenance,
+                        )
+
+                        stats = await asyncio.to_thread(
+                            run_memory_maintenance, getattr(crew, "memory", None)
+                        )
+                        if stats.get("deleted"):
+                            async_logger.info(
+                                f"Memory consolidation removed "
+                                f"{stats['deleted']} duplicate(s)"
+                            )
+                    except Exception as flush_err:
+                        async_logger.warning(f"Memory write flush skipped: {flush_err}")
                 async_logger.info(f"✅ Crew execution completed successfully")
 
                 await post_execution_mlflow_cleanup(
@@ -1388,6 +1465,7 @@ def run_crew_in_process(
                 # Shutdown OTel TracerProvider to flush remaining spans
                 try:
                     from src.services.otel_tracing import shutdown_provider
+
                     shutdown_provider()
                 except Exception as otel_shutdown_err:
                     async_logger.debug(
@@ -1397,11 +1475,10 @@ def run_crew_in_process(
                 # Stop MCP adapters to close streaming HTTP connections
                 try:
                     from src.engines.kasal.tools.mcp_handler import stop_all_adapters
+
                     await stop_all_adapters()
                 except Exception as mcp_err:
-                    async_logger.debug(
-                        f"[SUBPROCESS] MCP adapter cleanup: {mcp_err}"
-                    )
+                    async_logger.debug(f"[SUBPROCESS] MCP adapter cleanup: {mcp_err}")
 
                 return result
 
@@ -1417,7 +1494,9 @@ def run_crew_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from kasal_engine.events import crewai_event_bus as _cleanup_event_bus
+                    from kasal_engine.events import (
+                        crewai_event_bus as _cleanup_event_bus,
+                    )
 
                     _cleanup_event_bus.flush(timeout=15.0)
                 except Exception:
@@ -1504,6 +1583,7 @@ def run_crew_in_process(
         mcp_warnings = []
         try:
             from src.engines.kasal.tools.mcp_integration import MCPIntegration
+
             mcp_warnings = MCPIntegration.get_warnings()
             if mcp_warnings:
                 crew_logger = logging.getLogger("crew")
@@ -1539,6 +1619,7 @@ def run_crew_in_process(
         # thread pool drains and pending trace writes complete.
         try:
             from src.services.otel_tracing import shutdown_provider
+
             shutdown_provider()
         except Exception:
             pass
@@ -1883,15 +1964,21 @@ class ProcessCrewExecutor:
         old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
         old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
         try:
-            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            from src.db.database_router import (
+                is_lakebase_enabled,
+                get_lakebase_config_from_db,
+            )
             import asyncio
+
             loop = asyncio.get_running_loop()
             lakebase_enabled = await is_lakebase_enabled()
             if lakebase_enabled:
                 os.environ["LAKEBASE_ACTIVE"] = "true"
                 lakebase_config = await get_lakebase_config_from_db()
                 if lakebase_config:
-                    instance_name = lakebase_config.get("instance_name") or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                    instance_name = lakebase_config.get(
+                        "instance_name"
+                    ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
                     os.environ["LAKEBASE_INSTANCE_NAME"] = instance_name
                 logger.info(
                     f"[ProcessCrewExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
@@ -2416,7 +2503,6 @@ class ProcessCrewExecutor:
                             }
                         )
 
-
             if len(logs_to_write) <= 1:  # Only has JobConfiguration
                 logger.info(f"No logs found for execution {exec_id_short} in crew.log")
                 # Still write the JobConfiguration log
@@ -2428,7 +2514,9 @@ class ProcessCrewExecutor:
             # Route through get_smart_db_session so logs land in
             # Lakebase when enabled (same path as API endpoints).
             from src.db.database_router import get_smart_db_session
-            from src.repositories.execution_logs_repository import ExecutionLogsRepository
+            from src.repositories.execution_logs_repository import (
+                ExecutionLogsRepository,
+            )
 
             logger.info(
                 f"[ProcessCrewExecutor] Writing {len(logs_to_write)} logs via smart DB session"

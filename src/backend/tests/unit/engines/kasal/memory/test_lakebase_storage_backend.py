@@ -92,3 +92,60 @@ class TestSaveTimestampTz:
         # whose local timezone is not UTC.
         persisted = params["created_at"].astimezone(timezone.utc).replace(tzinfo=None)
         assert persisted == created
+
+
+class TestHybridSearchSql:
+    """asearch must blend semantic + keyword + recency + importance and keep
+    the pgvector index in play via the two-stage candidate re-rank."""
+
+    def _run_search(self, backend, **kwargs):
+        import asyncio
+
+        captured = {}
+        mock_session = AsyncMock()
+
+        async def _execute(sql, params):
+            captured["sql"] = str(sql)
+            captured["params"] = params
+            result = AsyncMock()
+            result.fetchall = lambda: []
+            return result
+
+        mock_session.execute = _execute
+        with patch(
+            "src.engines.kasal.memory.lakebase_storage_backend.get_lakebase_session",
+            return_value=_make_lakebase_ctx(mock_session),
+        ):
+            asyncio.run(backend.asearch(query_embedding=[0.1, 0.2, 0.3, 0.4], **kwargs))
+        return captured
+
+    def test_two_stage_query_with_all_scoring_terms(self, backend):
+        captured = self._run_search(backend, query_text="swiss market news")
+        sql = captured["sql"]
+
+        # Inner stage: index-friendly vector ordering with a candidate pool.
+        assert "ORDER BY embedding <=>" in sql
+        assert "LIMIT :candidate_limit" in sql
+        # Outer stage: blended score over the candidates.
+        assert ":w_semantic * c.semantic" in sql
+        assert "ts_rank_cd" in sql
+        assert "EXP(" in sql  # recency decay
+        assert "importance" in sql
+        assert captured["params"]["query_text"] == "swiss market news"
+        assert captured["params"]["candidate_limit"] == 50
+
+    def test_no_query_text_drops_keyword_term(self, backend):
+        captured = self._run_search(backend)
+        assert "ts_rank_cd" not in captured["sql"]
+        assert "query_text" not in captured["params"]
+
+    def test_weights_are_configurable(self):
+        custom = LakebaseStorageBackend(
+            table_name="crew_memory",
+            crew_id="c",
+            group_id="g",
+            semantic_weight=1.0,
+            keyword_weight=0.0,
+        )
+        assert custom.semantic_weight == 1.0
+        assert custom.keyword_weight == 0.0

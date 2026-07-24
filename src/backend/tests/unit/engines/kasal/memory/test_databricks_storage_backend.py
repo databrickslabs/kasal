@@ -122,7 +122,9 @@ class TestBridgeLoop:
 
     def test_lakebase_backend_shares_the_bridge_loop(self):
         import asyncio
-        from src.engines.kasal.memory.lakebase_storage_backend import LakebaseStorageBackend
+        from src.engines.kasal.memory.lakebase_storage_backend import (
+            LakebaseStorageBackend,
+        )
 
         backend = _make_backend()
 
@@ -154,6 +156,7 @@ class TestBridgeLoop:
         loop1 = m._get_bridge_loop()
         loop1.call_soon_threadsafe(loop1.stop)
         import time
+
         for _ in range(50):
             if not loop1.is_running():
                 break

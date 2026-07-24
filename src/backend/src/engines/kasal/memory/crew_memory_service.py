@@ -538,29 +538,31 @@ class CrewMemoryService:
             crew_kwargs["memory"] = False
             return crew_kwargs
 
-        # DEFAULT backend → let Memory use its own LanceDB backend, but pass
-        # the crew's embedder/LLM so we don't implicitly require OPENAI_API_KEY.
-        if storage is None:
-            memory_kwargs = self._build_memory_kwargs(
-                crew_kwargs=crew_kwargs,
-                custom_embedder=custom_embedder,
-                crew_id=crew_id,
-                memory_config=memory_config,
-                memory_llm_override=memory_llm_override,
-            )
-            try:
-                crew_kwargs["memory"] = Memory(**memory_kwargs)
-                logger.info(
-                    "Configured unified Memory with CrewAI default storage (crew=%s)",
-                    crew_id,
-                )
-            except Exception as exc:
-                logger.error("Failed to build unified Memory: %s", exc)
-                crew_kwargs["memory"] = False
-            self._attach_crew_memory_to_agents(crew_kwargs)
-            return crew_kwargs
+        from src.engines.kasal.memory.engine_storage_adapter import (
+            EngineStorageAdapter,
+        )
 
-        # Custom backend (Databricks / Lakebase) → wire storage into Memory.
+        # DEFAULT backend → local persistent SQLite storage (the crewAI LanceDB
+        # default died with the crewai library; without this, Memory silently
+        # falls back to the engine's in-process dict).
+        if storage is None:
+            storage = self._create_local_storage(
+                crew_kwargs, custom_embedder, memory_config
+            )
+            if storage is None:
+                logger.warning(
+                    "DEFAULT memory backend has no usable embedder — disabling memory"
+                )
+                crew_kwargs["memory"] = False
+                return crew_kwargs
+
+        # Wrap whichever backend we have (Databricks / Lakebase / local) in the
+        # engine-protocol adapter: it embeds recall queries, maps kwarg names,
+        # and unwraps (record, score) tuples — Memory itself passes raw strings.
+        adapted_storage = EngineStorageAdapter(
+            storage, embedder=custom_embedder or crew_kwargs.get("embedder")
+        )
+
         memory_kwargs = self._build_memory_kwargs(
             crew_kwargs=crew_kwargs,
             custom_embedder=custom_embedder,
@@ -568,7 +570,7 @@ class CrewMemoryService:
             memory_config=memory_config,
             memory_llm_override=memory_llm_override,
         )
-        memory_kwargs["storage"] = storage
+        memory_kwargs["storage"] = adapted_storage
         try:
             crew_kwargs["memory"] = Memory(**memory_kwargs)
             logger.info(
@@ -581,6 +583,62 @@ class CrewMemoryService:
             crew_kwargs["memory"] = False
         self._attach_crew_memory_to_agents(crew_kwargs)
         return crew_kwargs
+
+    def _create_local_storage(
+        self,
+        crew_kwargs: Dict[str, Any],
+        custom_embedder: Any,
+        memory_config: Optional["MemoryBackendConfig"] = None,
+    ) -> Optional[Any]:
+        """Build the local SQLite memory backend for the DEFAULT configuration.
+
+        Embedder preference: the resolved custom embedder (callable), else a
+        litellm-backed callable derived from the crew's provider-dict embedder,
+        else OpenAI small embeddings when only OPENAI_API_KEY is present
+        (parity with the old crewAI default). Returns ``None`` when no
+        embedding route exists. Cognitive-config weights (when configured)
+        override the hybrid-scoring defaults.
+        """
+        try:
+            from kasal_engine.utils import db_storage_path
+
+            from src.engines.kasal.memory.engine_storage_adapter import (
+                build_litellm_embedder,
+            )
+            from src.engines.kasal.memory.local_storage_backend import (
+                LocalMemoryStorage,
+            )
+
+            embedder: Any = None
+            if callable(custom_embedder) or hasattr(custom_embedder, "embed_documents"):
+                embedder = custom_embedder
+            if embedder is None:
+                embedder = build_litellm_embedder(crew_kwargs.get("embedder"))
+            if embedder is None and os.environ.get("OPENAI_API_KEY"):
+                embedder = build_litellm_embedder(
+                    {
+                        "provider": "openai",
+                        "config": {"model": "text-embedding-3-small"},
+                    }
+                )
+            if embedder is None:
+                return None
+
+            db_path = Path(db_storage_path()) / "memory.db"
+            logger.info("Local memory storage at %s", db_path)
+            from src.engines.kasal.memory.memory_backend_factory import (
+                MemoryBackendFactory,
+            )
+
+            scoring_kwargs = (
+                MemoryBackendFactory._cognitive_scoring_kwargs(memory_config)
+                if memory_config is not None
+                else {}
+            )
+            return LocalMemoryStorage(db_path, embedder=embedder, **scoring_kwargs)
+        except Exception as exc:  # noqa: BLE001 — memory must never break a run
+            logger.warning("Local memory storage unavailable: %s", exc)
+            return None
 
     def _attach_crew_memory_to_agents(self, crew_kwargs: Dict[str, Any]) -> None:
         """Point each agent's ``memory`` at the crew's unified Memory instance.
@@ -721,7 +779,9 @@ class CrewMemoryService:
                 group_id,
             )
             return llm
-        except Exception as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
             logger.warning(
                 "Could not build memory LLM override '%s' (%s); "
                 "falling back to the crew's LLM instance",
@@ -883,9 +943,8 @@ class CrewMemoryService:
             if not memory_obj:
                 return
 
-            storage = (
-                getattr(memory_obj, "_storage", None)
-                or getattr(memory_obj, "storage", None)
+            storage = getattr(memory_obj, "_storage", None) or getattr(
+                memory_obj, "storage", None
             )
             if storage is None:
                 return

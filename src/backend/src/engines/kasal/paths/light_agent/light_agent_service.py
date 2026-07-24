@@ -784,9 +784,25 @@ class LightAgentService:
 
                 logger.info(f"[light_agent] Kicking off single agent for execution {execution_id}")
                 try:
+                    # ── Memory recall — the engine Agent does not consult memory
+                    # itself, so recall here and prepend a capped context block.
+                    # One embedding + one search (no LLM calls); best-effort.
+                    memory_block = ""
+                    if _agent_memory is not None:
+                        from src.engines.kasal.memory.memory_hooks import (
+                            build_memory_preamble,
+                        )
+                        memory_block = await asyncio.to_thread(
+                            build_memory_preamble, _agent_memory, prompt
+                        )
+                        if memory_block:
+                            _log("Memory recall: context block injected")
+                    preamble_parts = [
+                        part for part in (memory_block, conversation_preamble) if part
+                    ]
                     kickoff_prompt = (
-                        f"{conversation_preamble}\n\nCurrent message:\n{prompt}"
-                        if conversation_preamble else prompt
+                        "\n\n".join(preamble_parts) + f"\n\nCurrent message:\n{prompt}"
+                        if preamble_parts else prompt
                     )
                     kicked = await self._kickoff_with_mlflow_trace(
                         agent, kickoff_prompt, config, execution_id,
@@ -812,6 +828,21 @@ class LightAgentService:
                 answer = getattr(kicked, "raw", None)
                 if answer is None:
                     answer = str(kicked) if kicked is not None else ""
+
+                # ── Memory persist — fire-and-forget (never blocks the answer).
+                # The engine Agent does not auto-save; store the compact turn.
+                if _agent_memory is not None and (answer or "").strip():
+                    from src.engines.kasal.memory.memory_hooks import (
+                        format_turn_for_memory,
+                        remember_async,
+                    )
+                    remember_async(
+                        _agent_memory,
+                        format_turn_for_memory(prompt, answer),
+                        source="chat",
+                        agent_role=role,
+                        metadata={"execution_id": execution_id},
+                    )
 
             _log(f"Chat agent '{role}' completed ({len(answer or '')} chars)")
 
@@ -1274,9 +1305,9 @@ class LightAgentService:
         execution_id: str,
         log,
     ) -> None:
-        """Attach a unified cognitive ``Memory`` to the single agent so
-        ``Agent.kickoff_async`` auto-recalls relevant context and persists the
-        turn — chat-mode parity with crews.
+        """Attach a unified cognitive ``Memory`` to the single agent. The
+        engine Agent does not consult memory itself — recall/persist are done
+        by the memory_hooks around kickoff — chat-mode parity with crews.
 
         Composes the EXISTING public ``CrewMemoryService`` building blocks (same
         backend selection, embedder, group/session scoping and crew-id rules the
