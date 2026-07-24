@@ -269,7 +269,8 @@ class TestConfigureTask:
 
         MockGF.create_guardrail.assert_called_once()
         assert "guardrail" in captured_kwargs
-        assert captured_kwargs.get("retry_on_fail") is True
+        # retry_on_fail is not an engine Task field — engine retries via max_retries.
+        assert "retry_on_fail" not in captured_kwargs
 
     @pytest.mark.asyncio
     async def test_configure_task_guardrail_self_reflection_stamps_run_model(self):
@@ -381,7 +382,8 @@ class TestConfigureTask:
 
         # LLM guardrail should be applied (as a Task kwarg, with retry enabled)
         assert "guardrail" in captured_kwargs
-        assert captured_kwargs.get("retry_on_fail") is True
+        # retry_on_fail is not an engine Task field — engine retries via max_retries.
+        assert "retry_on_fail" not in captured_kwargs
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_object_config(self):

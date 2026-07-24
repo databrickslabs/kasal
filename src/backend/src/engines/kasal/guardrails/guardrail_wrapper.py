@@ -1,10 +1,11 @@
 """
-Callable wrapper class for guardrails that supports inspect.getsource().
+Callable wrapper class for factory-built guardrails.
 
-CrewAI's LLMGuardrailStartedEvent.__init__ calls getsource() on the guardrail function.
-This fails for closures/lambdas with "OSError: could not get source code".
-By using a class defined in a source file, getsource() can inspect the __call__ method.
+Gives the guardrail callable a stable class identity (instead of a closure),
+which the engine uses for a readable guardrail label in events/trace rows
+(Task._guardrail_label reads the wrapper's inner guardrail type).
 """
+
 import datetime
 import os
 import traceback
@@ -17,10 +18,9 @@ class GuardrailWrapper:
     """
     A callable wrapper for BaseGuardrail instances.
 
-    This class exists because CrewAI's guardrail events call inspect.getsource()
-    on the guardrail function, which fails for closures/lambdas. By defining
-    the __call__ method in a source file, getsource() can inspect it properly,
-    enabling guardrail events to be emitted.
+    Wraps a BaseGuardrail so the engine sees a stable class (not a closure):
+    Task._guardrail_label resolves the inner guardrail's type name for the
+    LLMGuardrail*Event trace rows, and logging stays per-task.
 
     Attributes:
         guardrail: The BaseGuardrail instance to wrap
@@ -50,7 +50,7 @@ class GuardrailWrapper:
         """
         Validate task output with the wrapped guardrail.
 
-        This method is called by CrewAI's guardrail mechanism. It must return
+        This method is called by the engine's guardrail mechanism. It must return
         a tuple of (bool, str) where:
         - (True, output) indicates validation passed
         - (False, feedback) indicates validation failed with feedback message
@@ -64,7 +64,9 @@ class GuardrailWrapper:
         # Write to debug log
         with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
             f.write(f"\n\n{'='*50}\n")
-            f.write(f"VALIDATION CALLBACK CALLED at {datetime.datetime.now().isoformat()}\n")
+            f.write(
+                f"VALIDATION CALLBACK CALLED at {datetime.datetime.now().isoformat()}\n"
+            )
             f.write(f"Task: {self.task_key}\n")
             f.write(f"Output type: {type(output)}\n")
             f.write(f"Output: {str(output)[:1000]}\n")
@@ -81,7 +83,9 @@ class GuardrailWrapper:
             result = self.guardrail.validate(output)
 
             if result.get("valid", False):
-                self.logger.info(f"Task {self.task_key} output passed guardrail validation")
+                self.logger.info(
+                    f"Task {self.task_key} output passed guardrail validation"
+                )
                 self.logger.info(f"Validation result: {result}")
                 # Write to debug log
                 with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
@@ -90,9 +94,13 @@ class GuardrailWrapper:
                 # Return a tuple indicating success (True, output)
                 return (True, output)
             else:
-                # If validation fails, return a tuple for CrewAI guardrail mechanism
-                feedback = result.get("feedback", "Output does not meet requirements. Please try again.")
-                self.logger.warning(f"Task {self.task_key} output failed guardrail validation")
+                # If validation fails, return a tuple for the engine's guardrail loop
+                feedback = result.get(
+                    "feedback", "Output does not meet requirements. Please try again."
+                )
+                self.logger.warning(
+                    f"Task {self.task_key} output failed guardrail validation"
+                )
                 self.logger.warning(f"Validation feedback: {feedback}")
                 self.logger.info(f"Full validation result: {result}")
                 # Write to debug log

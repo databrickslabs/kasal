@@ -975,7 +975,8 @@ class TestTaskConfigGuardrails:
             mock_configure_llm.assert_called_once()
             mock_llm_guardrail_class.assert_called_once()
             assert captured.get("guardrail") == mock_llm_guardrail
-            assert captured.get("retry_on_fail") is True
+            # retry_on_fail is not an engine Task field — engine retries via max_retries.
+            assert "retry_on_fail" not in captured
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_takes_priority(self, mock_task_data_with_both_guardrails, mock_agent):

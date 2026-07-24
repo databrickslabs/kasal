@@ -33,7 +33,8 @@ class TestBaseAssembly:
         assert args["expected_output"] == "E"
         assert args["tools"] == []
         assert args["async_execution"] is False
-        assert args["retry_on_fail"] is False
+        # retry_on_fail is not an engine Task field — never passed through.
+        assert "retry_on_fail" not in args
         assert args["max_retries"] == 3
         assert args["markdown"] is False
 
@@ -82,7 +83,7 @@ class TestCodeGuardrail:
                 [],
             )
         assert "guardrail" in args
-        assert args["retry_on_fail"] is True
+        assert "retry_on_fail" not in args  # engine retries via max_retries
 
     @pytest.mark.asyncio
     async def test_self_reflection_stamps_run_model(self):
@@ -165,7 +166,7 @@ class TestLlmGuardrail:
                 config={"group_id": "g1"},
             )
         assert "guardrail" in args
-        assert args["retry_on_fail"] is True
+        assert "retry_on_fail" not in args  # engine retries via max_retries
 
     @pytest.mark.asyncio
     async def test_missing_group_id_raises(self):

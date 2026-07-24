@@ -20,7 +20,14 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, Field
 
 from ..events.bus import crewai_event_bus
-from ..events.types import TaskCompletedEvent, TaskFailedEvent, TaskStartedEvent
+from ..events.types import (
+    LLMGuardrailCompletedEvent,
+    LLMGuardrailFailedEvent,
+    LLMGuardrailStartedEvent,
+    TaskCompletedEvent,
+    TaskFailedEvent,
+    TaskStartedEvent,
+)
 from ..tools.base import BaseTool
 from .agent import BaseAgent
 from .executor import interpolate_text, json_schema_instruction, structured_from_raw
@@ -98,9 +105,7 @@ class Task(BaseModel):
             "you MUST return the actual complete content as the final answer, not a summary."
         )
         if self.markdown:
-            parts.append(
-                "Your final answer MUST be formatted in Markdown syntax."
-            )
+            parts.append("Your final answer MUST be formatted in Markdown syntax.")
         return "\n\n".join(parts)
 
     def interpolate_inputs(self, inputs: dict[str, Any]) -> None:
@@ -134,11 +139,13 @@ class Task(BaseModel):
         context: str | None,
         tools: Sequence[Any] | None,
     ) -> TaskOutput:
-        structured_model = self.response_model or self.output_pydantic or self.output_json
+        structured_model = (
+            self.response_model or self.output_pydantic or self.output_json
+        )
         if structured_model is not None:
             original_expected = self.expected_output
-            self.expected_output = (
-                original_expected + json_schema_instruction(structured_model)
+            self.expected_output = original_expected + json_schema_instruction(
+                structured_model
             )
             try:
                 raw = executing_agent.execute_task(
@@ -213,9 +220,7 @@ class Task(BaseModel):
                 (a for a in agents if a.role == self.agent.role), self.agent
             )
         if isinstance(self.context, list):
-            cloned.context = [
-                task_mapping.get(t.key, t) for t in self.context
-            ]
+            cloned.context = [task_mapping.get(t.key, t) for t in self.context]
         return cloned
 
     def _summary(self) -> str:
@@ -234,7 +239,12 @@ class Task(BaseModel):
             )
             return raw, None, None, OutputFormat.RAW
         if self.output_json and not (self.output_pydantic or self.response_model):
-            return instance.model_dump_json(), None, instance.model_dump(), OutputFormat.JSON
+            return (
+                instance.model_dump_json(),
+                None,
+                instance.model_dump(),
+                OutputFormat.JSON,
+            )
         return raw, instance, instance.model_dump(), OutputFormat.PYDANTIC
 
     def _normalized_guardrails(self, agent: Any) -> list[Callable[..., Any]]:
@@ -260,6 +270,19 @@ class Task(BaseModel):
                 raise TypeError(f"Unsupported guardrail: {entry!r}")
         return normalized
 
+    @staticmethod
+    def _guardrail_label(guardrail: Any) -> str:
+        """Human-readable guardrail name for events/trace rows."""
+        description = getattr(guardrail, "description", None)
+        if description:
+            return str(description)[:200]
+        owner = getattr(guardrail, "__self__", None)  # bound wrapper methods
+        if owner is not None:
+            inner = getattr(owner, "guardrail", None)
+            return type(inner).__name__ if inner is not None else type(owner).__name__
+        name = getattr(guardrail, "__qualname__", None)
+        return str(name) if name else type(guardrail).__name__
+
     def _apply_guardrails(
         self,
         output: TaskOutput,
@@ -276,8 +299,32 @@ class Task(BaseModel):
             retries = self.max_retries
 
         for guardrail in guardrails:
+            label = self._guardrail_label(guardrail)
             for attempt in range(retries + 1):
+                crewai_event_bus.emit(
+                    self,
+                    LLMGuardrailStartedEvent(
+                        guardrail=label,
+                        retry_count=attempt,
+                        task=self,
+                        task_id=str(self.id),
+                        task_name=self.name,
+                    ),
+                )
                 ok, result = guardrail(output)
+                crewai_event_bus.emit(
+                    self,
+                    LLMGuardrailCompletedEvent(
+                        guardrail=label,
+                        success=bool(ok),
+                        result=str(result)[:500] if result is not None else None,
+                        error=None if ok else str(result)[:500],
+                        retry_count=attempt,
+                        task=self,
+                        task_id=str(self.id),
+                        task_name=self.name,
+                    ),
+                )
                 if ok:
                     if isinstance(result, TaskOutput):
                         output = result
@@ -285,6 +332,17 @@ class Task(BaseModel):
                         output = output.model_copy(update={"raw": result})
                     break
                 if attempt == retries:
+                    crewai_event_bus.emit(
+                        self,
+                        LLMGuardrailFailedEvent(
+                            guardrail=label,
+                            error=str(result)[:500],
+                            retry_count=attempt,
+                            task=self,
+                            task_id=str(self.id),
+                            task_name=self.name,
+                        ),
+                    )
                     raise ValueError(
                         f"Task guardrail failed after {retries} retries: {result}"
                     )
@@ -292,8 +350,7 @@ class Task(BaseModel):
                     f"{context}\n\nYour previous answer was rejected by a reviewer "
                     f"with this feedback:\n{result}\nPrevious answer:\n{output.raw}"
                     if context
-                    else
-                    f"Your previous answer was rejected by a reviewer with this "
+                    else f"Your previous answer was rejected by a reviewer with this "
                     f"feedback:\n{result}\nPrevious answer:\n{output.raw}"
                 )
                 raw = agent.execute_task(self, feedback, list(tools) if tools else None)

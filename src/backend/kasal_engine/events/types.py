@@ -106,6 +106,7 @@ class LLMEventBase(BaseEvent):
 
 class LLMCallType(str, Enum):
     """Engine replacement for crewai.events.types.llm_events.LLMCallType"""
+
     LLM_CALL = "llm_call"
     TOOL_CALL = "tool_call"
 
@@ -199,6 +200,40 @@ class LiteAgentExecutionStartedEvent(BaseEvent):
     tools: Sequence[Any] | None
     messages: str | list[dict[str, str]]
     type: Literal["lite_agent_execution_started"] = "lite_agent_execution_started"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class LLMGuardrailStartedEvent(BaseEvent):
+    """Emitted before a guardrail validates a task's output (one per attempt)."""
+
+    guardrail: str
+    retry_count: int = 0
+    type: Literal["llm_guardrail_started"] = "llm_guardrail_started"
+    task: Any | None = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class LLMGuardrailCompletedEvent(BaseEvent):
+    """Emitted after a guardrail validation attempt, pass or fail."""
+
+    guardrail: str
+    success: bool
+    result: str | None = None
+    error: str | None = None
+    retry_count: int = 0
+    type: Literal["llm_guardrail_completed"] = "llm_guardrail_completed"
+    task: Any | None = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class LLMGuardrailFailedEvent(BaseEvent):
+    """Emitted when a guardrail rejects the output after exhausting retries."""
+
+    guardrail: str
+    error: str
+    retry_count: int = 0
+    type: Literal["llm_guardrail_failed"] = "llm_guardrail_failed"
+    task: Any | None = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
