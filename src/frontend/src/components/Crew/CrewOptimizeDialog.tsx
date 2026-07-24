@@ -25,6 +25,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GavelIcon from '@mui/icons-material/Gavel';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
 import {
   CrewEval,
@@ -719,15 +721,69 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 </Box>
                 {expandedEval === ev.trace_id && (
                   <Box sx={{ mt: 1.5 }}>
-                    <TextField
-                      fullWidth
-                      multiline
-                      maxRows={10}
-                      size="small"
-                      label="Answer"
-                      value={ev.deliverable}
-                      InputProps={{ readOnly: true, sx: { fontSize: 13 } }}
-                    />
+                    <Typography
+                      variant="overline"
+                      sx={{ color: 'text.secondary', letterSpacing: 0.6 }}
+                    >
+                      Answer
+                    </Typography>
+                    {/* Rendered markdown, not raw text — crew deliverables are
+                        mostly GFM tables, unreadable as pipe soup. */}
+                    <Box
+                      sx={{
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        p: 1.5,
+                        maxHeight: 340,
+                        overflow: 'auto',
+                        fontSize: 13,
+                        lineHeight: 1.55,
+                        '& p': { m: 0, mb: 1 },
+                        '& h1, & h2, & h3, & h4': { m: 0, mb: 1, fontSize: 14, fontWeight: 600 },
+                        '& table': {
+                          borderCollapse: 'collapse',
+                          width: 'max-content',
+                          maxWidth: '100%',
+                          mb: 1,
+                        },
+                        '& th, & td': {
+                          border: 1,
+                          borderColor: 'divider',
+                          px: 1,
+                          py: 0.5,
+                          textAlign: 'left',
+                          verticalAlign: 'top',
+                        },
+                        '& th': { bgcolor: 'action.hover', fontWeight: 600 },
+                        '& code': {
+                          bgcolor: 'action.hover',
+                          px: 0.5,
+                          borderRadius: 0.5,
+                          fontSize: 12,
+                        },
+                        '& pre': { overflow: 'auto', m: 0, mb: 1 },
+                        '& ul, & ol': { m: 0, mb: 1, pl: 2.5 },
+                        '& a': { wordBreak: 'break-all' },
+                      }}
+                    >
+                      {ev.deliverable ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            a: ({ node: _node, ...props }) => (
+                              <a {...props} target="_blank" rel="noreferrer" />
+                            ),
+                          }}
+                        >
+                          {ev.deliverable}
+                        </ReactMarkdown>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          (empty deliverable)
+                        </Typography>
+                      )}
+                    </Box>
                     <Box
                       sx={{
                         display: 'flex',
