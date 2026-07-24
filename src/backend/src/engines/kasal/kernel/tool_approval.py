@@ -98,6 +98,22 @@ async def _create_approval(
         return str(approval.id) if approval is not None else None
 
 
+async def _restore_running(execution_id: str) -> None:
+    """Flip WAITING_FOR_APPROVAL back to RUNNING once a gate is decided.
+
+    Safe unconditionally: the run cannot reach a terminal state while its
+    worker thread is blocked on the gate.
+    """
+    from src.models.execution_status import ExecutionStatus
+    from src.services.execution_status_service import ExecutionStatusService
+
+    await ExecutionStatusService.update_status(
+        job_id=execution_id,
+        status=ExecutionStatus.RUNNING.value,
+        message="Approval decided — run continuing",
+    )
+
+
 async def _approval_status(approval_id: str) -> Optional[str]:
     from src.db.session import request_scoped_session
     from src.repositories.hitl_repository import HITLApprovalRepository
@@ -219,6 +235,10 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
         def _record(decision: str) -> None:
             if scope != "call":
                 _run_decisions[(execution_id, tool_name)] = decision
+            try:
+                run_async_with_context(_restore_running(execution_id), timeout=15)
+            except Exception as restore_err:  # noqa: BLE001
+                logger.debug(f"[tool_approval] status restore skipped: {restore_err}")
 
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:

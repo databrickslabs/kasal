@@ -380,7 +380,7 @@ describe('HITLApprovalDialog', () => {
 
       await waitFor(() => {
         // The component sets error when no pending_approval, so it shows error alert
-        expect(screen.getByText('No pending approval found for this execution')).toBeInTheDocument();
+        expect(screen.getByText('Nothing is waiting for approval — the decision was already made and the run has continued.')).toBeInTheDocument();
       });
     });
 
@@ -1075,7 +1075,7 @@ describe('HITLApprovalDialog', () => {
         </TestWrapper>
       );
       await waitFor(() => {
-        expect(screen.getByText(/No pending approval found/i)).toBeInTheDocument();
+        expect(screen.getByText(/Nothing is waiting for approval/i)).toBeInTheDocument();
       });
     });
 

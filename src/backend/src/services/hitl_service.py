@@ -210,10 +210,10 @@ class HITLService:
                 approval_comment=comment
             )
 
-            # Tool-call gates don't suspend the orchestration — the blocked
-            # worker thread polls the row and resumes itself, so there is no
-            # flow to relaunch.
-            if (approval.gate_config or {}).get("kind") == "tool_call":
+            # Tool-call and task-review gates don't suspend the orchestration —
+            # the blocked worker thread polls the row and resumes itself, so
+            # there is no flow to relaunch.
+            if (approval.gate_config or {}).get("kind") in ("tool_call", "task_review"):
                 execution_resumed = False
             else:
                 # Resume flow execution with user's token for OBO auth
@@ -295,12 +295,18 @@ class HITLService:
             )
 
             # Handle rejection action
-            if (approval.gate_config or {}).get("kind") == "tool_call":
+            gate_kind = (approval.gate_config or {}).get("kind")
+            if gate_kind == "tool_call":
                 # Tool-call gate: the run is NOT suspended — the blocked tool
                 # call sees the rejected row, returns a denial to the agent,
                 # and the run continues. Never fail the execution here.
                 execution_resumed = False
                 message = "Tool call denied - the agent continues without it"
+            elif gate_kind == "task_review":
+                # Task-review gate: the blocked task sees the rejection and
+                # re-runs itself with the reviewer's feedback.
+                execution_resumed = False
+                message = "Output rejected - the task retries with your feedback"
             elif action == HITLRejectionActionEnum.RETRY:
                 # Retry: Re-run the previous crew
                 execution_resumed = await self._retry_previous_crew(approval)

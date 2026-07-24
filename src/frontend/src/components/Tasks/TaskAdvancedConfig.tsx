@@ -260,6 +260,15 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
         }
         label="Async Execution"
       />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={Boolean(advancedConfig.human_input)}
+            onChange={(e) => onConfigChange('human_input', e.target.checked)}
+          />
+        }
+        label="Human approval (HITL) — pause after this task until you approve its output; rejecting re-runs the task with your feedback"
+      />
       <TextField
         type="number"
         label="Priority"

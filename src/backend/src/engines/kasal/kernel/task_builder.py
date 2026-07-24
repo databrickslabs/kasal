@@ -94,6 +94,13 @@ async def build_task_args(
     if task_config.get("output_pydantic"):
         await _apply_output_pydantic(task_args, task_config, agent, task_key)
 
+    # Task-boundary human approval (HITL): the crew must not advance past this
+    # task until a human approves its output. Attached as the LAST guardrail so
+    # the human reviews the final validated output; rejection feedback re-runs
+    # the task through the engine's guardrail retry loop.
+    if task_config.get("human_input"):
+        _apply_human_review(task_args, task_config, config, task_key)
+
     # Other optional Task fields.
     for field in (
         "async_execution",
@@ -109,6 +116,37 @@ async def build_task_args(
             task_args[field] = task_config[field]
 
     return task_args
+
+
+def _apply_human_review(task_args, task_config, config, task_key):
+    """Attach a HumanReviewGuardrail when the task enables human_input."""
+    import os
+
+    from src.engines.kasal.guardrails.core.human_review_guardrail import (
+        HumanReviewGuardrail,
+    )
+
+    run_config = config or {}
+    execution_id = run_config.get("execution_id") or os.environ.get(
+        "KASAL_EXECUTION_ID", ""
+    )
+    if not execution_id:
+        guardrail_logger.warning(
+            f"Task {task_key}: human_input enabled but no execution_id in "
+            "config/env — review gate NOT attached"
+        )
+        return
+    group_id = run_config.get("group_id") or "default"
+    review = HumanReviewGuardrail(
+        task_name=str(task_config.get("name") or task_key),
+        execution_id=str(execution_id),
+        group_id=str(group_id),
+    )
+    # The engine prefers `guardrails` (plural) over `guardrail`; fold any
+    # content guardrail in FIRST so the human reviews validated output.
+    existing = task_args.pop("guardrail", None)
+    task_args["guardrails"] = ([existing] if existing else []) + [review]
+    guardrail_logger.info(f"Task {task_key}: human review gate attached")
 
 
 def _apply_code_guardrail(task_args, task_config, agent, config, task_key):

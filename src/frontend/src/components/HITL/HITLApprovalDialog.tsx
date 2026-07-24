@@ -132,7 +132,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         }
       } else {
         setApproval(null);
-        setError('No pending approval found for this execution');
+        setError(
+          'Nothing is waiting for approval — the decision was already made and the run has continued.'
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch approval');

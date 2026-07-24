@@ -13,9 +13,12 @@ import { useSessionStore } from '../../store/sessionStore';
 export interface ToolApprovalData {
   approval_id: string | number;
   job_id?: string;
+  kind?: string; // "tool_call" (default) | "task_review"
   tool_name?: string;
+  task_name?: string;
   agent_role?: string;
   tool_args?: Record<string, string>;
+  output_preview?: string;
   message?: string;
   decided?: 'approved' | 'denied';
 }
@@ -58,9 +61,13 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
   };
 
   // Render as ONE activity-style text line (like the run-activity rows) —
-  // no card chrome, no colored buttons; args truncate so nothing wraps.
+  // no card chrome, no colored buttons; the detail part truncates so nothing
+  // wraps. Two variants: tool_call ("wants to run X {args}") and task_review
+  // ("finished task X — review the output").
+  const isTaskReview = data.kind === 'task_review';
   const args = data.tool_args ?? {};
   const argsJson = Object.keys(args).length > 0 ? JSON.stringify(args) : '';
+  const detail = isTaskReview ? (data.output_preview ?? '') : argsJson;
 
   const linkClass =
     'underline underline-offset-2 disabled:opacity-50 hover:opacity-80 font-medium shrink-0';
@@ -70,21 +77,29 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
       className="my-1.5 px-1 flex items-center gap-1.5 text-[13px] leading-[1.7] whitespace-nowrap overflow-hidden"
       style={{ color: 'var(--text-muted)' }}
     >
-      <span className="shrink-0">✋ {data.agent_role || 'The agent'} wants to run</span>
-      <span className="font-medium shrink-0" style={{ color: 'var(--text-primary)' }}>
-        {data.tool_name || 'a tool'}
+      <span className="shrink-0">
+        ✋ {isTaskReview
+          ? 'Review the output of'
+          : `${data.agent_role || 'The agent'} wants to run`}
       </span>
-      {argsJson && (
+      <span className="font-medium shrink-0" style={{ color: 'var(--text-primary)' }}>
+        {(isTaskReview ? data.task_name : data.tool_name) || (isTaskReview ? 'the task' : 'a tool')}
+      </span>
+      {detail && (
         <span
           className="truncate min-w-0 font-mono text-[12px]"
           style={{ color: 'var(--text-muted)', background: 'transparent' }}
         >
-          {argsJson}
+          {detail}
         </span>
       )}
       {decided ? (
         <span className="shrink-0">
-          {decided === 'approved' ? '— approved' : '— denied'}
+          {decided === 'approved'
+            ? '— approved'
+            : isTaskReview
+              ? '— changes requested, the task retries'
+              : '— denied'}
         </span>
       ) : (
         <>
@@ -106,7 +121,7 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
             className={linkClass}
             style={{ color: 'var(--text-primary)' }}
           >
-            Deny
+            {isTaskReview ? 'Request changes' : 'Deny'}
           </button>
           {busy && <span className="shrink-0">…</span>}
         </>
