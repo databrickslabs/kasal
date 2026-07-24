@@ -98,6 +98,14 @@ def _parse_crew_doc(doc: str) -> Optional[Dict[str, str]]:
     Returns {key: text} or None when the document lost its structure —
     callers score such candidates 0 WITHOUT executing the crew.
     """
+    doc = (doc or "").strip()
+    # Fence rescue: reflection models sometimes wrap the document in markdown
+    # code fences that survive gepa's extraction. The content inside is a
+    # perfectly good document — losing the candidate over the wrapper wastes
+    # the proposal.
+    if doc.startswith("```"):
+        doc = re.sub(r"^```\S*\n?", "", doc)
+        doc = re.sub(r"\n?```\s*$", "", doc)
     fields: Dict[str, str] = {}
     entity_prefix: Optional[str] = None
     current_key: Optional[str] = None
@@ -1924,8 +1932,59 @@ class PromptOptimizationService:
                         # every iteration a free cache-hit rejection, budget
                         # drained, zero exploration (observed live in
                         # proposals.json). Explicit sampling temperature is
-                        # the only diversity source this setup has.
-                        "reflection_lm_kwargs": {"temperature": 1.0},
+                        # the only diversity source this setup has — and
+                        # no-cache is MANDATORY: llm_manager enables a
+                        # process-global litellm disk cache at import, and
+                        # gepa's LM rides the same litellm, so identical
+                        # reflection prompts were served the SAME cached
+                        # response forever (observed live: duration=0.00s,
+                        # byte-identical proposals at temperature 1.0).
+                        # 0.8, not 1.0: at 1.0 the reflection model emitted a
+                        # bare "```" and stopped in 2 of 3 samples; at 0.8
+                        # with the no-fence contract below, 4 of 4 samples
+                        # parsed, were distinct, and carried the requirements
+                        # (validated offline against the live endpoint).
+                        "reflection_lm_kwargs": {
+                            "temperature": 0.8,
+                            "cache": {"no-cache": True},
+                        },
+                        # gepa's default template says "write a new
+                        # instruction ... within ``` blocks" — an open
+                        # invitation to restructure: the reflection model
+                        # returned {"instruction": "..."} JSON blobs that
+                        # lost the [AGENT]/[TASK] document structure and
+                        # free-rejected every proposal (observed live, 11/11
+                        # malformed). Pin the output contract to the crew-doc
+                        # format instead.
+                        "reflection_prompt_template": (
+                            "I provided an assistant with the following "
+                            "DOCUMENT of prompt fields that configures an AI "
+                            "crew (agents and tasks):\n"
+                            "```\n<curr_param>\n```\n\n"
+                            "The following are examples of task inputs, the "
+                            "crew's final answer, and feedback (score and "
+                            "judge rationale) on how the answer could be "
+                            "better:\n"
+                            "```\n<side_info>\n```\n\n"
+                            "Your task is to write an IMPROVED VERSION of the "
+                            "document above so that a future answer satisfies "
+                            "the feedback and every hard requirement stated "
+                            "in the task input.\n\n"
+                            "STRICT FORMAT RULES:\n"
+                            "- Keep EXACTLY the same structure: the same "
+                            "[AGENT <id>] and [TASK <id>] section headers "
+                            "with the same ids, and the same field labels "
+                            "(ROLE:, GOAL:, BACKSTORY:, DESCRIPTION:, "
+                            "EXPECTED_OUTPUT:).\n"
+                            "- Each field label starts its line, followed by "
+                            "the improved text for that field on the same "
+                            "line.\n"
+                            "- Do NOT output JSON, commentary, or anything "
+                            "except the document.\n"
+                            "- Output ONLY the improved document, nothing "
+                            "before or after it. Start your reply directly "
+                            "with the first [AGENT line."
+                        ),
                     },
                 ),
                 scorers=[output_format, output_correct],

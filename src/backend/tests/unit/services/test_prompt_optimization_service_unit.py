@@ -300,6 +300,27 @@ class TestRequirementsDistillation:
         assert _distill_requirements(["", "   ", None]) == []
 
 
+class TestCrewDocFenceRescue:
+    DOC = (
+        "[AGENT a1]\nROLE: r\nGOAL: g\nBACKSTORY: b\n\n"
+        "[TASK t1]\nDESCRIPTION: d\nEXPECTED_OUTPUT: e"
+    )
+
+    def test_fenced_doc_parses(self):
+        fenced = f"```\n{self.DOC}\n```"
+        fields = svc_module._parse_crew_doc(fenced)
+        assert fields is not None
+        assert fields["agent.a1.role"] == "r"
+        assert fields["task.t1.expected_output"] == "e"
+
+    def test_language_tagged_fence_parses(self):
+        fenced = f"```text\n{self.DOC}\n```"
+        assert svc_module._parse_crew_doc(fenced) is not None
+
+    def test_json_blob_still_rejected(self):
+        assert svc_module._parse_crew_doc('{"instruction": "be better"}') is None
+
+
 class TestParseRequirementLines:
     def test_parses_numbered_lines(self):
         text = (
