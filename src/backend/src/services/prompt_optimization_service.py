@@ -213,6 +213,24 @@ def _distill_requirements(raw_notes: List[str], limit: int = 8) -> List[str]:
     return requirements[:limit]
 
 
+def _pin_local_experiment() -> None:
+    """Pin the MLflow experiment for judge/scorer operations.
+
+    Scorers are PER-EXPERIMENT. The optimization runs pin the launch
+    experiment ('kasal' by default), but a fresh worker's active experiment
+    is Default/0 — a judge registered or listed there silently diverges from
+    everything else (risk observed live while chasing a judge that never
+    appeared). Every judge CRUD body must call this after set_tracking_uri.
+    """
+    import mlflow
+
+    exp_name = os.environ.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
+    try:
+        mlflow.set_experiment(exp_name)
+    except Exception as exp_err:
+        logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
+
+
 def _parse_requirement_lines(text: str) -> List[str]:
     """Parse 'R1. ...' numbered requirement lines from a distillation reply."""
     return [
@@ -1618,9 +1636,7 @@ class PromptOptimizationService:
                 if run_entry.get("cancel_requested"):
                     raise RuntimeError("Cancelled by user")
                 candidate = client.load_prompt(prompt_uri)
-                doc_key = hashlib.sha256(
-                    candidate.template.encode("utf-8")
-                ).hexdigest()
+                doc_key = hashlib.sha256(candidate.template.encode("utf-8")).hexdigest()
                 with execute_lock:
                     return _predict_locked(doc_key, candidate, run_entry, inputs)
 
@@ -2154,6 +2170,7 @@ class PromptOptimizationService:
             prev = mlflow.get_tracking_uri()
             mlflow.set_tracking_uri(local_uri)
             try:
+                _pin_local_experiment()
                 from mlflow.genai.scorers import list_scorers
 
                 out = []
@@ -2171,8 +2188,11 @@ class PromptOptimizationService:
                             "full_name": full_name,
                             "crew_id": crew_id,
                             "model": getattr(s, "model", None),
+                            # Full text (bounded): the edit dialog round-trips
+                            # this — a truncated copy would corrupt the judge
+                            # on save.
                             "instructions": (getattr(s, "instructions", "") or "")[
-                                :500
+                                :4000
                             ],
                         }
                     )
@@ -2205,9 +2225,6 @@ class PromptOptimizationService:
         safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name.strip())
         if not safe_name:
             raise ValueError("Judge name is required")
-        if crew_id:
-            # Crew-assigned judge: scope via the registry name.
-            safe_name = f"{self._crew_judge_prefix(crew_id)}{safe_name}"
         text = instructions.strip()
         if not text:
             raise ValueError("Judge instructions are required")
@@ -2216,6 +2233,9 @@ class PromptOptimizationService:
         model_uri, _env = await self._resolve_reflection_model(
             model or DEFAULT_TARGET_MODEL, group_context
         )
+        scoped_name = (
+            f"{self._crew_judge_prefix(crew_id)}{safe_name}" if crew_id else None
+        )
 
         def _create() -> Dict[str, Any]:
             import mlflow
@@ -2223,18 +2243,29 @@ class PromptOptimizationService:
             prev = mlflow.get_tracking_uri()
             mlflow.set_tracking_uri(local_uri)
             try:
+                _pin_local_experiment()
                 from mlflow.genai.judges import make_judge
 
-                judge = make_judge(
-                    name=safe_name,
-                    instructions=text,
-                    model=model_uri,
-                    # Numeric verdicts — categorical words ('Satisfactory') are
-                    # lossier to fold into an aggregate score.
-                    feedback_value_type=float,
-                )
-                judge.register()
-                return {"name": safe_name, "model": model_uri}
+                # ALWAYS register the shared library original; when created
+                # from a crew's dialog, ALSO register the crew-scoped copy
+                # (auto-assign). Registering only the scoped copy made the
+                # judge invisible in every other crew's Assign menu — there
+                # was no library original to assign (observed live).
+                for reg_name in filter(None, [safe_name, scoped_name]):
+                    judge = make_judge(
+                        name=reg_name,
+                        instructions=text,
+                        model=model_uri,
+                        # Numeric verdicts — categorical words ('Satisfactory')
+                        # are lossier to fold into an aggregate score.
+                        feedback_value_type=float,
+                    )
+                    judge.register()
+                return {
+                    "name": safe_name,
+                    "full_name": scoped_name or safe_name,
+                    "model": model_uri,
+                }
             finally:
                 mlflow.set_tracking_uri(prev)
 
@@ -2255,6 +2286,7 @@ class PromptOptimizationService:
             prev = mlflow.get_tracking_uri()
             mlflow.set_tracking_uri(local_uri)
             try:
+                _pin_local_experiment()
                 from mlflow.genai.judges import make_judge
                 from mlflow.genai.scorers import get_scorer
 
@@ -2273,6 +2305,63 @@ class PromptOptimizationService:
 
         return await asyncio.to_thread(_assign)
 
+    async def update_judge(
+        self,
+        name: str,
+        instructions: Optional[str] = None,
+        model: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ) -> Dict[str, Any]:
+        """Update a judge's instructions and/or model.
+
+        `name` is the FULL registry name (library judge, or a crew-scoped
+        'crew_<id>__name' copy — editing an assigned copy changes what that
+        crew's runs use). MLflow scorers are versioned: registering under the
+        same name creates a new version and get_scorer/list_scorers return the
+        latest (verified live against the local registry). Omitted fields keep
+        their current values. Editing a library judge does NOT touch copies
+        already assigned to crews — those are snapshots taken at assign time.
+        """
+        local_uri = self._local_mlflow_uri()
+        if not local_uri:
+            raise ValueError("Judge update requires the local MLflow server.")
+        new_text = (instructions or "").strip()
+        if not new_text and not model:
+            raise ValueError("Nothing to update: provide instructions and/or a model")
+        model_uri: Optional[str] = None
+        if model:
+            model_uri, _env = await self._resolve_reflection_model(model, group_context)
+
+        def _update() -> Dict[str, Any]:
+            import mlflow
+
+            prev = mlflow.get_tracking_uri()
+            mlflow.set_tracking_uri(local_uri)
+            try:
+                _pin_local_experiment()
+                from mlflow.genai.judges import make_judge
+                from mlflow.genai.scorers import get_scorer
+
+                current = get_scorer(name=name)
+                text = new_text or (getattr(current, "instructions", "") or "").strip()
+                if not text:
+                    raise ValueError("Judge instructions are required")
+                if "{{ outputs }}" not in text and "{{outputs}}" not in text:
+                    text += "\n\nThe answer to evaluate:\n{{ outputs }}"
+                final_model = model_uri or getattr(current, "model", None)
+                judge = make_judge(
+                    name=name,
+                    instructions=text,
+                    model=final_model,
+                    feedback_value_type=float,
+                )
+                judge.register()
+                return {"name": name, "model": final_model}
+            finally:
+                mlflow.set_tracking_uri(prev)
+
+        return await asyncio.to_thread(_update)
+
     async def delete_judge(self, name: str) -> bool:
         """Delete a registered judge by name."""
         local_uri = self._local_mlflow_uri()
@@ -2285,6 +2374,7 @@ class PromptOptimizationService:
             prev = mlflow.get_tracking_uri()
             mlflow.set_tracking_uri(local_uri)
             try:
+                _pin_local_experiment()
                 from mlflow.genai.scorers import delete_scorer
 
                 delete_scorer(name=name, version="all")
