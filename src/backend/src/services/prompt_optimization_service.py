@@ -1917,6 +1917,15 @@ class PromptOptimizationService:
                         # the metric call entirely on repeats, preserving the
                         # metric budget for NEW candidates.
                         "cache_evaluation": True,
+                        # The reflection prompt is IDENTICAL every iteration
+                        # (same parent, same single example, cached rationale),
+                        # so a deterministic reflection endpoint re-proposed
+                        # the byte-identical candidate 11 times in one run —
+                        # every iteration a free cache-hit rejection, budget
+                        # drained, zero exploration (observed live in
+                        # proposals.json). Explicit sampling temperature is
+                        # the only diversity source this setup has.
+                        "reflection_lm_kwargs": {"temperature": 1.0},
                     },
                 ),
                 scorers=[output_format, output_correct],
