@@ -169,6 +169,28 @@ async def assign_judge(
         raise BadRequestError(str(e))
 
 
+@router.put("/judges/{name}")
+async def update_judge(
+    name: str, body: dict, group_context: GroupContextDep, session: SessionDep
+):
+    """Update a judge's instructions and/or model: {instructions?, model?}.
+
+    `name` is the full registry name; editing a crew-scoped copy changes what
+    that crew's runs use, editing a library judge leaves assigned copies as-is.
+    """
+    _publish_user_context(group_context)
+    service = PromptOptimizationService(session)
+    try:
+        return await service.update_judge(
+            name=name,
+            instructions=body.get("instructions"),
+            model=body.get("model"),
+            group_context=group_context,
+        )
+    except ValueError as e:
+        raise BadRequestError(str(e))
+
+
 @router.delete("/judges/{name}")
 async def delete_judge(name: str, group_context: GroupContextDep, session: SessionDep):
     """Delete a registered LLM judge by name."""

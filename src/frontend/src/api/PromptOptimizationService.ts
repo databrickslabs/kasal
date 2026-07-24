@@ -177,6 +177,24 @@ export class PromptOptimizationService {
     return response.data;
   }
 
+  /** Update a judge's instructions and/or model (full registry name).
+   *  Editing a crew-scoped copy changes what that crew's runs use; editing a
+   *  library judge leaves already-assigned copies untouched. */
+  static async updateJudge(
+    name: string,
+    changes: { instructions?: string; model?: string },
+  ): Promise<LLMJudge> {
+    const response = await apiClient.put<LLMJudge>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}`,
+      {
+        instructions: changes.instructions || undefined,
+        model: changes.model || undefined,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
   static async deleteJudge(name: string): Promise<boolean> {
     const response = await apiClient.delete<{ ok: boolean }>(
       `/prompt-optimization/judges/${encodeURIComponent(name)}`,

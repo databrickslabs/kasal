@@ -8,9 +8,11 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
+  DialogActions,
   FormControl,
   IconButton,
   InputLabel,
+  ListItemText,
   Menu,
   MenuItem,
   Paper,
@@ -21,6 +23,8 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -123,6 +127,12 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [judgeCriteria, setJudgeCriteria] = useState('');
   const [judgeModel, setJudgeModel] = useState('');
   const [savingJudge, setSavingJudge] = useState(false);
+  const [editJudge, setEditJudge] = useState<LLMJudge | null>(null);
+  const [editInstructions, setEditInstructions] = useState('');
+  const [editModel, setEditModel] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleteJudgeTarget, setDeleteJudgeTarget] = useState<LLMJudge | null>(null);
+  const [deletingJudge, setDeletingJudge] = useState(false);
 
   const refreshRuns = useCallback(async () => {
     if (!crewId) return;
@@ -309,6 +319,56 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
     }
   };
 
+  const openEditJudge = (judge: LLMJudge) => {
+    setEditJudge(judge);
+    setEditInstructions(judge.instructions || '');
+    // Empty = keep the judge's current model; the stored value is an MLflow
+    // model URI, not a Kasal model key, so there is no reliable reverse map.
+    setEditModel('');
+  };
+
+  const handleUpdateJudge = async () => {
+    if (!editJudge) return;
+    setSavingEdit(true);
+    try {
+      await PromptOptimizationService.updateJudge(
+        editJudge.full_name || editJudge.name,
+        { instructions: editInstructions, model: editModel || undefined },
+      );
+      toast.success(
+        editJudge.crew_id
+          ? `Judge "${editJudge.name}" updated — the next run uses the new version`
+          : `Library judge "${editJudge.name}" updated`,
+      );
+      setEditJudge(null);
+      await refreshJudges();
+    } catch (e: unknown) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to update judge';
+      setError(detail);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteLibraryJudge = async () => {
+    if (!deleteJudgeTarget) return;
+    setDeletingJudge(true);
+    try {
+      await PromptOptimizationService.deleteJudge(
+        deleteJudgeTarget.full_name || deleteJudgeTarget.name,
+      );
+      toast.success(`Judge "${deleteJudgeTarget.name}" deleted`);
+      setDeleteJudgeTarget(null);
+      await refreshJudges();
+    } catch {
+      setError('Failed to delete judge');
+    } finally {
+      setDeletingJudge(false);
+    }
+  };
+
   const crewPrefix = crewId ? crewId.replace(/-/g, '').slice(0, 12) : '';
   const assignedJudges = judges.filter((j) => j.crew_id === crewPrefix);
   const libraryJudges = judges.filter(
@@ -430,8 +490,10 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 size="small"
                 color="primary"
                 variant="outlined"
+                clickable
                 label={j.name}
-                title={j.instructions || ''}
+                title={`${j.instructions || ''}\n\nClick to edit this judge.`}
+                onClick={() => openEditJudge(j)}
                 onDelete={() => handleUnassignJudge(j.full_name || j.name)}
               />
             ))}
@@ -458,24 +520,53 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                         void handleAssignJudge(j.name);
                       }}
                     >
-                      <Box>
-                        <Typography variant="body2">{j.name}</Typography>
-                        {j.instructions && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{
-                              display: 'block',
-                              maxWidth: 320,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {j.instructions}
-                          </Typography>
-                        )}
-                      </Box>
+                      <ListItemText
+                        primary={<Typography variant="body2">{j.name}</Typography>}
+                        secondary={
+                          j.instructions ? (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{
+                                display: 'block',
+                                maxWidth: 320,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {j.instructions}
+                            </Typography>
+                          ) : undefined
+                        }
+                      />
+                      <Tooltip title="Edit judge">
+                        <IconButton
+                          size="small"
+                          edge="end"
+                          sx={{ ml: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAssignAnchor(null);
+                            openEditJudge(j);
+                          }}
+                        >
+                          <EditIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete from library">
+                        <IconButton
+                          size="small"
+                          edge="end"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAssignAnchor(null);
+                            setDeleteJudgeTarget(j);
+                          }}
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
                     </MenuItem>
                   ))}
                 </Menu>
@@ -871,6 +962,87 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
           </>
         )}
       </DialogContent>
+
+      {/* Edit judge — instructions and/or model; saving registers a new
+          version under the same registry name (latest version wins). */}
+      <Dialog
+        open={Boolean(editJudge)}
+        onClose={() => setEditJudge(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <GavelIcon fontSize="small" color="primary" />
+          Edit judge — {editJudge?.name}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            {editJudge?.crew_id
+              ? 'This judge is assigned to this crew — changes apply to the next optimization run.'
+              : 'This is a shared library judge — copies already assigned to crews keep their current version until re-assigned.'}
+          </Typography>
+          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Judge model</InputLabel>
+            <Select
+              value={editModel}
+              label="Judge model"
+              onChange={(e) => setEditModel(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Keep current{editJudge?.model ? ` (${editJudge.model})` : ''}</em>
+              </MenuItem>
+              {models.map((key) => (
+                <MenuItem key={key} value={key}>
+                  {key}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            multiline
+            minRows={4}
+            maxRows={14}
+            size="small"
+            label="Evaluation criteria (plain language)"
+            value={editInstructions}
+            onChange={(e) => setEditInstructions(e.target.value)}
+            helperText="Reference the answer as {{ outputs }} — added automatically when missing."
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditJudge(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={savingEdit || (!editInstructions.trim() && !editModel)}
+            onClick={() => void handleUpdateJudge()}
+          >
+            {savingEdit ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete library judge — confirm first; crew-assigned copies survive. */}
+      <Dialog open={Boolean(deleteJudgeTarget)} onClose={() => setDeleteJudgeTarget(null)}>
+        <DialogTitle>Delete judge “{deleteJudgeTarget?.name}”?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            The judge is removed from the shared library. Crews that already have
+            it assigned keep their own copy until it is unassigned there.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteJudgeTarget(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={deletingJudge}
+            onClick={() => void handleDeleteLibraryJudge()}
+          >
+            {deletingJudge ? 'Deleting…' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 };
