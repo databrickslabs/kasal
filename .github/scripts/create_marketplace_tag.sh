@@ -239,14 +239,49 @@ if [ -f "src/backend/run_tests.py" ]; then
     echo "  ✓ Removed run_tests.py"
 fi
 
-# Remove uv lockfiles from the marketplace payload. The Databricks Apps
-# builder runs `uv sync --locked` whenever uv.lock is present, and its uv
-# is older than ours: our uv writes lockfile revision 3, which the builder
-# rejects with "The lockfile at uv.lock needs to be updated" and the app
-# never starts. Known-good installs (marketplace-v1.3.0 and earlier)
-# shipped NO lockfiles and resolved fresh from pyproject.toml.
-rm -f src/uv.lock src/backend/uv.lock
-echo "  ✓ Removed uv lockfiles (Apps builder uv can't parse lock revision 3)"
+# Dependency install for the marketplace payload: ship a fully-pinned
+# src/requirements.txt (pip) and NO uv manifests. Why:
+#   - The Apps builder runs `uv sync` whenever pyproject.toml/uv.lock are present
+#     at the app root (src/). Its uv is OLDER than ours: our uv.lock is revision
+#     3, which the builder rejects ("lockfile needs to be updated") and the app
+#     never starts.
+#   - But shipping pyproject.toml WITHOUT uv.lock is worse: `uv sync` finds the
+#     manifest, has no lockfile to install from, installs NOTHING, and the app
+#     crashes at startup with `ModuleNotFoundError: No module named 'sqlalchemy'`.
+#   - So we do what the known-good marketplace-v1.3.0 did: pip install from a
+#     requirements.txt. We GENERATE it from the source tree's uv.lock via
+#     `uv export`, so the pins exactly match the locked versions (no pip
+#     backtracking, current crewai/mlflow/etc.) instead of a hand-maintained,
+#     drift-prone list.
+echo ""
+echo "📦 Generating pinned requirements.txt from uv.lock (pip install path)..."
+if command -v uv >/dev/null 2>&1 && [ -f "src/uv.lock" ]; then
+    # Export from the ORIGINAL source lock (in GIT_ROOT/src), where the lock is
+    # still present, into the marketplace payload's src/requirements.txt.
+    # --no-emit-project: don't list the app itself as a dependency.
+    # --no-dev: runtime deps only. --no-hashes: the Apps builder pip has no
+    # network-pinned hash support and hashes just bloat the file.
+    if uv export --frozen --no-hashes --no-emit-project --no-dev \
+        --project "$GIT_ROOT/src" \
+        -o "$TEMP_DIR/src/requirements.txt" 2>/tmp/uv-export-err.log; then
+        REQ_LINES=$(grep -cvE '^\s*(#|$)' "$TEMP_DIR/src/requirements.txt" || echo "?")
+        echo "  ✓ Wrote src/requirements.txt ($REQ_LINES pinned packages)"
+    else
+        echo "  ❌ uv export failed:"
+        sed 's/^/     /' /tmp/uv-export-err.log
+        echo "  Aborting: cannot produce a dependency manifest for the tag."
+        exit 1
+    fi
+else
+    echo "  ❌ uv not on PATH or src/uv.lock missing — cannot generate requirements.txt"
+    echo "     (install uv, or add a src/requirements.txt to the source tree)"
+    exit 1
+fi
+
+# Remove the uv manifests from the payload so the Apps builder uses the pip
+# path (requirements.txt) above, NOT uv sync.
+rm -f src/uv.lock src/backend/uv.lock src/pyproject.toml
+echo "  ✓ Removed uv manifests (src/uv.lock, src/backend/uv.lock, src/pyproject.toml) — using pip + requirements.txt"
 
 # Count files after cleanup
 FILES_AFTER=$(find . -type f | wc -l)
