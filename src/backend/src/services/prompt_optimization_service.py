@@ -456,37 +456,148 @@ Given the user message and the predicted intent, answer with EXACTLY one word:
 CORRECT or WRONG."""
 
 
-def _preflight_reflection(reflection_uri: str, reflection_env: Dict[str, str]) -> None:
-    """One-token ping of GEPA's reflection model BEFORE any budget is spent.
+# ---------------------------------------------------------------------------
+# ALL LLM calls in this service go through LLMManager (judge, distillation,
+# preflight, AND GEPA's reflection model via the bridge below). LLMManager
+# owns provider routing, group-scoped API keys, and per-provider request
+# quirks (e.g. Kimi rejecting any explicit temperature) — re-implementing
+# those here produced a string of provider-specific failures (retired
+# DeepSeek names, Kimi temperature 400s, per-tenant keys written into the
+# shared process env). None of that belongs outside the manager.
+# ---------------------------------------------------------------------------
+
+# Per-worker-thread override consumed by the patched gepa.optimize below.
+_GEPA_REFLECTION_STATE = threading.local()
+
+
+def _install_gepa_reflection_bridge() -> None:
+    """Route GEPA's reflection LM through LLMManager (idempotent).
+
+    MLflow's GepaPromptOptimizer pins `reflection_lm` to a litellm model
+    STRING in the kwargs it builds last, so a callable cannot be injected via
+    gepa_kwargs. gepa itself accepts any callable conforming to its
+    LanguageModel protocol; this one-time patch swaps in the callable armed on
+    the current worker thread (each optimization run owns one thread, so
+    concurrent runs cannot cross wires).
+    """
+    import gepa
+
+    if getattr(gepa.optimize, "_kasal_reflection_bridge", False):
+        return
+    original = gepa.optimize
+
+    def bridged(*args, **kwargs):
+        override = getattr(_GEPA_REFLECTION_STATE, "reflection_fn", None)
+        if override is not None:
+            kwargs["reflection_lm"] = override
+        return original(*args, **kwargs)
+
+    bridged._kasal_reflection_bridge = True
+    gepa.optimize = bridged
+
+
+def _make_reflection_fn(
+    loop: asyncio.AbstractEventLoop,
+    model: str,
+    group_context: Optional[GroupContext],
+    user_token: Optional[str],
+):
+    """Build GEPA's reflection callable, backed by LLMManager.
+
+    `model` is a plain Kasal model key — LLMManager resolves provider,
+    endpoint, group-scoped API key, and request quirks (it drops temperature
+    for Kimi, which 400s on any explicit value)."""
+
+    def reflection_fn(prompt: Any) -> str:
+        if isinstance(prompt, list):
+            messages = list(prompt)
+        else:
+            messages = [{"role": "user", "content": str(prompt)}]
+        # Cache-buster: the reflection prompt is byte-identical every
+        # iteration in the 1-example regime, and the process-global litellm
+        # cache would replay one cached proposal forever (observed live:
+        # duration=0.00s, identical candidates). A unique system line keeps
+        # each request distinct without touching the task content.
+        messages = [
+            {
+                "role": "system",
+                "content": f"reflection request {uuid.uuid4().hex}",
+            }
+        ] + messages
+        return _sync_llm_completion(
+            loop,
+            messages=messages,
+            model=model,
+            # Forced-thinking models (Kimi K2.x) spend heavily on reasoning
+            # before the visible document; starving them returns empty text.
+            max_tokens=6000,
+            group_context=group_context,
+            user_token=user_token,
+            # Proposal diversity. LLMManager drops the param for providers
+            # that reject it — no per-provider branching here.
+            temperature=0.8,
+        )
+
+    return reflection_fn
+
+
+def _stored_judge_model_to_key(stored: Any) -> Optional[str]:
+    """Kasal model key from a judge's stored model field.
+
+    New judges store the Kasal key wrapped as 'openai:/<key>' purely to
+    satisfy make_judge's URI shape (the judge is INVOKED via LLMManager, the
+    URI is inert). Legacy judges stored real provider URIs — the remainder
+    after '<scheme>:/' is the best available key for those too.
+    """
+    if not stored:
+        return None
+    text = str(stored)
+    if ":/" in text:
+        return text.split(":/", 1)[1] or None
+    return text
+
+
+def _parse_grade_from_text(text: str) -> Optional[float]:
+    """0-1 grade from a judge reply: LAST number wins (thinking models emit
+    incidental numbers first); values in (10, 100] are read as percentages —
+    clamping alone turned a hallucinated '40' into a perfect 10/10."""
+    matches = re.findall(r"\d+(?:\.\d+)?", text or "")
+    if not matches:
+        return None
+    number = float(matches[-1])
+    if 10.0 < number <= 100.0:
+        number /= 10.0
+    return max(0.0, min(10.0, number)) / 10.0
+
+
+def _preflight_reflection(
+    loop: asyncio.AbstractEventLoop,
+    model: str,
+    group_context: Optional[GroupContext],
+    user_token: Optional[str],
+) -> None:
+    """Tiny ping of GEPA's reflection model BEFORE any budget is spent.
 
     A dead reflection model doesn't fail a run — GEPA just proposes zero
     candidates and 'completes' at the baseline after burning the whole
     execution budget (observed live with a retired provider model name).
+    Runs through LLMManager like every other call.
     """
-    import litellm
-
-    saved = {k: os.environ.get(k) for k in reflection_env}
     try:
-        for k, v in reflection_env.items():
-            os.environ[k] = v
-        litellm_model = reflection_uri.replace(":/", "/", 1)
-        litellm.completion(
-            model=litellm_model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
+        _sync_llm_completion(
+            loop,
+            messages=[{"role": "user", "content": "ping — reply with OK"}],
+            model=model,
+            max_tokens=5,
+            group_context=group_context,
+            user_token=user_token,
         )
     except Exception as e:
         raise ValueError(
-            f"Reflection model '{reflection_uri}' failed a test call — the "
+            f"Reflection model '{model}' failed a test call — the "
             f"optimization cannot generate candidates with it. Pick a different "
             f"reflection model. Provider error: {str(e)[:300]}"
         )
-    finally:
-        for k, old in saved.items():
-            if old is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = old
 
 
 def _sync_llm_completion(
@@ -496,6 +607,7 @@ def _sync_llm_completion(
     max_tokens: int,
     group_context: Optional[GroupContext] = None,
     user_token: Optional[str] = None,
+    temperature: float = 0.0,
 ) -> str:
     """Run LLMManager.completion from a worker thread by submitting it to the
     MAIN event loop. Never run it on a fresh loop (asyncio.run) — the app's
@@ -518,7 +630,10 @@ def _sync_llm_completion(
         return await LLMManager.completion(
             messages=messages,
             model=model,
-            temperature=0.0,
+            # 0.0 for deterministic judging/distillation; reflection passes
+            # 0.8 for proposal diversity. LLMManager owns per-provider quirks
+            # (it drops the param entirely for models that reject it).
+            temperature=temperature,
             max_tokens=max_tokens,
             extra_headers=get_user_agent_header(KasalProduct.PROMPT_IMPROVEMENT),
         )
@@ -649,11 +764,10 @@ class PromptOptimizationService:
 
         target_model = request.model or DEFAULT_TARGET_MODEL
         judge_model = request.judge_model or target_model
-        reflection_uri, reflection_env, reflection_provider = (
-            await self._resolve_reflection_model(
-                request.reflection_model or target_model, group_context
-            )
-        )
+        # Reflection is a Kasal model key like every other model here —
+        # invocation goes through LLMManager (keys, endpoints, provider quirks
+        # all owned there), so no URI/env resolution happens in this service.
+        reflection_model = request.reflection_model or target_model
         registry_uri, prompt_name = await self._resolve_registry(
             request.template_name, group_context
         )
@@ -687,8 +801,7 @@ class PromptOptimizationService:
                 input_key=task_cfg["input_key"],
                 target_model=target_model,
                 judge_model=judge_model,
-                reflection_uri=reflection_uri,
-                reflection_env=reflection_env,
+                reflection_model=reflection_model,
                 max_metric_calls=request.max_metric_calls,
                 registry_uri=registry_uri,
                 prompt_name=prompt_name,
@@ -744,105 +857,6 @@ class PromptOptimizationService:
                     break
             page += 1
         return examples
-
-    # Providers whose GEPA reflection calls authenticate via a single API-key
-    # env var (litellm convention), with the key held in Kasal's key store.
-    _REFLECTION_KEY_ENV = {
-        "openai": "OPENAI_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "mistral": "MISTRAL_API_KEY",
-    }
-
-    async def _resolve_reflection_model(
-        self, model_key: str, group_context: Optional[GroupContext] = None
-    ) -> tuple:
-        """Map a Kasal model key to an MLflow/GEPA reflection-model URI.
-
-        GEPA invokes its reflection model itself (outside LLMManager), so the
-        key must become a provider URI plus any env vars the provider needs —
-        including the provider API key from Kasal's group-scoped key store.
-
-        Returns (uri, env, provider) — the provider string lets callers apply
-        provider-specific request quirks (e.g. Kimi rejects any temperature).
-        """
-        config = await self.model_repository.find_by_key(model_key)
-        provider = (getattr(config, "provider", None) or "").lower() if config else ""
-        # The provider API expects the config's `name` (llm_manager does this
-        # translation too) — sending the Kasal KEY 400s when they differ
-        # (observed live: key deepseek-v3.1-non-thinking vs API name).
-        api_model = (
-            (getattr(config, "name", None) or model_key) if config else model_key
-        )
-        if provider == "databricks":
-            return f"databricks:/{api_model}", {}, provider
-        if provider == "vllm":
-            # OpenAI-compatible endpoint — same env resolution as llm_manager.
-            return (
-                f"openai:/{api_model}",
-                {
-                    "OPENAI_API_BASE": os.getenv(
-                        "VLLM_BASE_URL", "http://localhost:8081/v1"
-                    ),
-                    "OPENAI_API_KEY": os.getenv("VLLM_API_KEY", "vllm"),
-                },
-                provider,
-            )
-        if provider == "kimi":
-            # Kimi (Moonshot AI) — OpenAI-compatible endpoint with the key from
-            # Kasal's key store, mirroring llm_manager's kimi routing.
-            from src.services.api_keys_service import ApiKeysService
-
-            group_id = group_context.primary_group_id if group_context else None
-            api_key = await ApiKeysService.get_provider_api_key(
-                "kimi", group_id=group_id
-            )
-            if not api_key:
-                raise ValueError(
-                    "Reflection model needs a Kimi API key — add KIMI_API_KEY "
-                    "under Configuration -> API Keys."
-                )
-            return (
-                f"openai:/{api_model}",
-                {
-                    "OPENAI_API_BASE": os.getenv(
-                        "KIMI_ENDPOINT", "https://api.moonshot.ai/v1"
-                    ),
-                    "OPENAI_API_KEY": api_key,
-                },
-                provider,
-            )
-        if provider in self._REFLECTION_KEY_ENV:
-            env: Dict[str, str] = {}
-            env_name = self._REFLECTION_KEY_ENV[provider]
-            try:
-                from src.services.api_keys_service import ApiKeysService
-
-                group_id = group_context.primary_group_id if group_context else None
-                api_key = await ApiKeysService.get_provider_api_key(
-                    provider, group_id=group_id
-                )
-                if api_key:
-                    env[env_name] = api_key
-            except Exception as key_err:
-                logger.warning(
-                    f"Could not fetch {provider} API key for reflection model: {key_err}"
-                )
-            # Fall back to a pre-set env var when the store has no key.
-            if env_name not in env and not os.getenv(env_name):
-                raise ValueError(
-                    f"Reflection model '{model_key}' needs a {provider} API key "
-                    f"(configure it under API Keys) or pass 'reflection_model' "
-                    f"with a different provider."
-                )
-            return f"{provider}:/{api_model}", env, provider
-        raise ValueError(
-            f"Reflection model '{model_key}' has unsupported provider '{provider or 'unknown'}' "
-            f"(supported: databricks, vllm, kimi, {', '.join(sorted(self._REFLECTION_KEY_ENV))}). "
-            f"Pass 'reflection_model' explicitly."
-        )
 
     async def _resolve_registry(
         self, template_name: str, group_context: Optional[GroupContext]
@@ -936,8 +950,7 @@ class PromptOptimizationService:
         input_key: str,
         target_model: str,
         judge_model: str,
-        reflection_uri: str,
-        reflection_env: Dict[str, str],
+        reflection_model: str,
         max_metric_calls: int,
         registry_uri: str,
         prompt_name: str,
@@ -1121,7 +1134,6 @@ class PromptOptimizationService:
             {"inputs": {input_key: ex}, "expectations": {}} for ex in examples
         ]
 
-        saved_env = {k: os.environ.get(k) for k in reflection_env}
         # Mark every autolog flavor disabled for the span: optimize_prompts'
         # evaluation wrapper otherwise registers import hooks that lazily
         # import each installed flavor module (openai, crewai, ...) inside a
@@ -1146,23 +1158,24 @@ class PromptOptimizationService:
         _prev_parser_level = _parser_logger.level
         _parser_logger.setLevel(logging.CRITICAL)
 
+        reflection_fn = _make_reflection_fn(
+            loop, reflection_model, group_context, user_token
+        )
+        _install_gepa_reflection_bridge()
+
         # Tracking is already redirected in local mode (see above); this
         # try/finally owns restoring it once the optimization ends.
         try:
-            for k, v in reflection_env.items():
-                os.environ[k] = v
+            _GEPA_REFLECTION_STATE.reflection_fn = reflection_fn
             result = optimize_prompts(
                 predict_fn=predict_fn,
                 train_data=train_data,
                 prompt_uris=[prompt_uri],
                 optimizer=GepaPromptOptimizer(
-                    reflection_model=reflection_uri,
+                    # Inert placeholder — the bridge swaps in the LLMManager
+                    # -backed callable; this string is parsed but never called.
+                    reflection_model="openai:/kasal-llm-manager",
                     max_metric_calls=max_metric_calls,
-                    # llm_manager enables a process-global litellm cache;
-                    # without a per-request bypass, identical reflection
-                    # prompts are served the same cached proposal forever
-                    # (observed live in crew mode).
-                    gepa_kwargs={"reflection_lm_kwargs": {"cache": {"no-cache": True}}},
                 ),
                 scorers=[output_format, output_correct],
                 aggregation=aggregation,
@@ -1171,6 +1184,7 @@ class PromptOptimizationService:
                 enable_tracking=local_mode,
             )
         finally:
+            _GEPA_REFLECTION_STATE.reflection_fn = None
             _parser_logger.setLevel(_prev_parser_level)
             _restore_span_env()
             for _flavor, old_flag in saved_autolog_flags.items():
@@ -1178,11 +1192,6 @@ class PromptOptimizationService:
                     AUTOLOGGING_INTEGRATIONS.get(_flavor, {}).pop("disable", None)
                 else:
                     AUTOLOGGING_INTEGRATIONS[_flavor]["disable"] = old_flag
-            for k, old in saved_env.items():
-                if old is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = old
 
         optimized = result.optimized_prompts[0]
         return {
@@ -1299,11 +1308,8 @@ class PromptOptimizationService:
 
         target_model = request.model or DEFAULT_TARGET_MODEL
         judge_model = request.judge_model or target_model
-        reflection_uri, reflection_env, reflection_provider = (
-            await self._resolve_reflection_model(
-                request.reflection_model or target_model, group_context
-            )
-        )
+        # A Kasal model key; invoked through LLMManager (no URI/env plumbing).
+        reflection_model = request.reflection_model or target_model
         registry_uri, _ = await self._resolve_registry("crew", group_context)
         safe_group = "".join(
             c if c.isalnum() or c in "-_" else "_"
@@ -1352,9 +1358,7 @@ class PromptOptimizationService:
                 tasks_yaml=tasks_yaml,
                 target_model=target_model,
                 judge_model=judge_model,
-                reflection_uri=reflection_uri,
-                reflection_env=reflection_env,
-                reflection_provider=reflection_provider,
+                reflection_model=reflection_model,
                 max_metric_calls=request.max_metric_calls,
                 execution_timeout=request.execution_timeout_seconds,
                 registry_uri=registry_uri,
@@ -1377,15 +1381,13 @@ class PromptOptimizationService:
         tasks_yaml: Dict[str, Any],
         target_model: str,
         judge_model: str,
-        reflection_uri: str,
-        reflection_env: Dict[str, str],
+        reflection_model: str,
         max_metric_calls: int,
         execution_timeout: int,
         registry_uri: str,
         prompt_name: str,
         crew_id: str = "",
         cancel_run_id: str = "",
-        reflection_provider: str = "",
         group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
@@ -1421,14 +1423,10 @@ class PromptOptimizationService:
             cfg = AUTOLOGGING_INTEGRATIONS.setdefault(_flavor, {})
             saved_autolog_flags[_flavor] = cfg.get("disable")
             cfg["disable"] = True
-        saved_env = {k: os.environ.get(k) for k in reflection_env}
 
         try:
-            for k, v in reflection_env.items():
-                os.environ[k] = v
-
             # Fail fast on a dead reflection model — before ANY crew execution.
-            _preflight_reflection(reflection_uri, reflection_env)
+            _preflight_reflection(loop, reflection_model, group_context, user_token)
 
             prompt_version = client.register_prompt(
                 name=prompt_name,
@@ -1880,31 +1878,60 @@ class PromptOptimizationService:
                 # running as separate MLflow scorers — trace-based scorers were
                 # each re-triggering their own crew execution (observed live as
                 # bursts of one execution per judge), multiplying the budget.
+                # Registered judges are RENDERED AND INVOKED HERE through
+                # LLMManager — never via mlflow's own model client. The judge
+                # entity contributes only its instructions and model key;
+                # provider routing, keys and request quirks stay centralized
+                # in the manager (invoking judges through mlflow's client is
+                # what produced the retired-DeepSeek and Kimi failures).
                 for judge in registered_scorers:
+                    judge_name = getattr(judge, "name", "judge")
                     try:
-                        feedback = judge(
-                            inputs={"request": inputs.get("request", objective)},
-                            outputs=text,
+                        instructions = getattr(judge, "instructions", "") or ""
+                        rendered = (
+                            instructions.replace("{{ outputs }}", text)
+                            .replace("{{outputs}}", text)
+                            .replace(
+                                "{{ inputs }}", str(inputs.get("request", objective))
+                            )
+                            .replace(
+                                "{{inputs}}", str(inputs.get("request", objective))
+                            )
                         )
-                        grade = _judge_value_to_grade(getattr(feedback, "value", None))
+                        judge_reply = _sync_llm_completion(
+                            loop,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        f"{rendered}\n\nEnd your reply with the "
+                                        "numeric grade 0-10 alone on the LAST line."
+                                    ),
+                                }
+                            ],
+                            model=_stored_judge_model_to_key(
+                                getattr(judge, "model", None)
+                            )
+                            or judge_model,
+                            max_tokens=1500,
+                            group_context=group_context,
+                            user_token=user_token,
+                        )
+                        grade = _parse_grade_from_text(judge_reply)
                         if grade is None:
                             logger.warning(
-                                f"Registered judge '{getattr(judge, 'name', '?')}' "
-                                f"returned unusable value "
-                                f"{getattr(feedback, 'value', None)!r}; skipping"
+                                f"Registered judge '{judge_name}' reply not "
+                                f"numeric; skipping: {judge_reply!r:.200}"
                             )
                         else:
                             grades.append(grade)
-                            judge_rationale = getattr(feedback, "rationale", None)
-                            if judge_rationale:
+                            if judge_reply and judge_reply.strip():
                                 rationale_parts.append(
-                                    f"[{getattr(judge, 'name', 'judge')}] "
-                                    f"{judge_rationale}"
+                                    f"[{judge_name}] {judge_reply.strip()}"
                                 )
                     except Exception as judge_err:
                         logger.warning(
-                            f"Registered judge '{getattr(judge, 'name', '?')}' "
-                            f"failed: {judge_err}"
+                            f"Registered judge '{judge_name}' failed: {judge_err}"
                         )
                 grade_value = sum(grades) / len(grades) if grades else 0.0
                 rationale = "\n".join(rationale_parts)[:4000]
@@ -1928,6 +1955,11 @@ class PromptOptimizationService:
                 correct = _num(scores.get("output_correct"))
                 return 0.3 * fmt + 0.7 * correct
 
+            reflection_fn = _make_reflection_fn(
+                loop, reflection_model, group_context, user_token
+            )
+            _install_gepa_reflection_bridge()
+            _GEPA_REFLECTION_STATE.reflection_fn = reflection_fn
             result = optimize_prompts(
                 predict_fn=predict_fn,
                 train_data=[
@@ -1938,7 +1970,9 @@ class PromptOptimizationService:
                 ],
                 prompt_uris=[prompt_uri],
                 optimizer=GepaPromptOptimizer(
-                    reflection_model=reflection_uri,
+                    # Inert placeholder — the bridge swaps in the LLMManager
+                    # -backed callable; this string is parsed, never called.
+                    reflection_model="openai:/kasal-llm-manager",
                     # METRIC calls are decoupled from crew EXECUTIONS: with
                     # the caches (ours + gepa's) most metric calls are free
                     # re-scores, so the user's number stays a hard cap on real
@@ -1963,42 +1997,6 @@ class PromptOptimizationService:
                         # the metric call entirely on repeats, preserving the
                         # metric budget for NEW candidates.
                         "cache_evaluation": True,
-                        # The reflection prompt is IDENTICAL every iteration
-                        # (same parent, same single example, cached rationale),
-                        # so a deterministic reflection endpoint re-proposed
-                        # the byte-identical candidate 11 times in one run —
-                        # every iteration a free cache-hit rejection, budget
-                        # drained, zero exploration (observed live in
-                        # proposals.json). Explicit sampling temperature is
-                        # the only diversity source this setup has — and
-                        # no-cache is MANDATORY: llm_manager enables a
-                        # process-global litellm disk cache at import, and
-                        # gepa's LM rides the same litellm, so identical
-                        # reflection prompts were served the SAME cached
-                        # response forever (observed live: duration=0.00s,
-                        # byte-identical proposals at temperature 1.0).
-                        # 0.8, not 1.0: at 1.0 the reflection model emitted a
-                        # bare "```" and stopped in 2 of 3 samples; at 0.8
-                        # with the no-fence contract below, 4 of 4 samples
-                        # parsed, were distinct, and carried the requirements
-                        # (validated offline against the live endpoint).
-                        # PROVIDER QUIRK — Kimi K-series accepts ONLY its
-                        # default temperature: sending 0.8 made Moonshot 400
-                        # every reflection call ("invalid temperature: only 1
-                        # is allowed"), gepa skipped 10 proposals in a row and
-                        # the run 'completed' after the baseline's single
-                        # execution (observed live; verified by direct repro —
-                        # the same call without temperature returns a clean,
-                        # parseable crew doc). Kimi's forced default sampling
-                        # is itself diverse, so dropping the knob is safe.
-                        "reflection_lm_kwargs": (
-                            {"cache": {"no-cache": True}}
-                            if reflection_provider == "kimi"
-                            else {
-                                "temperature": 0.8,
-                                "cache": {"no-cache": True},
-                            }
-                        ),
                         # gepa's default template says "write a new
                         # instruction ... within ``` blocks" — an open
                         # invitation to restructure: the reflection model
@@ -2043,6 +2041,7 @@ class PromptOptimizationService:
                 enable_tracking=local_mode,
             )
         finally:
+            _GEPA_REFLECTION_STATE.reflection_fn = None
             if local_mode:
                 mlflow.set_tracking_uri(prev_tracking)
             for k, old in saved_exp_env.items():
@@ -2053,11 +2052,6 @@ class PromptOptimizationService:
                     AUTOLOGGING_INTEGRATIONS.get(_flavor, {}).pop("disable", None)
                 else:
                     AUTOLOGGING_INTEGRATIONS[_flavor]["disable"] = old_flag
-            for k, old in saved_env.items():
-                if old is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = old
 
         optimized = result.optimized_prompts[0]
         optimized_fields = _parse_crew_doc(optimized.template) or {}
@@ -2265,9 +2259,10 @@ class PromptOptimizationService:
             raise ValueError("Judge instructions are required")
         if "{{ outputs }}" not in text and "{{outputs}}" not in text:
             text += "\n\nThe answer to evaluate:\n{{ outputs }}"
-        model_uri, _env, _provider = await self._resolve_reflection_model(
-            model or DEFAULT_TARGET_MODEL, group_context
-        )
+        # The judge is INVOKED through LLMManager with the plain Kasal model
+        # key; the 'openai:/' wrapper exists only to satisfy make_judge's URI
+        # shape and is stripped back on invocation. No provider resolution.
+        model_uri = f"openai:/{model or DEFAULT_TARGET_MODEL}"
         scoped_name = (
             f"{self._crew_judge_prefix(crew_id)}{safe_name}" if crew_id else None
         )
@@ -2363,11 +2358,9 @@ class PromptOptimizationService:
         new_text = (instructions or "").strip()
         if not new_text and not model:
             raise ValueError("Nothing to update: provide instructions and/or a model")
-        model_uri: Optional[str] = None
-        if model:
-            model_uri, _env, _provider = await self._resolve_reflection_model(
-                model, group_context
-            )
+        # Plain Kasal model key, wrapped only for make_judge's URI shape —
+        # invocation goes through LLMManager (see _stored_judge_model_to_key).
+        model_uri: Optional[str] = f"openai:/{model}" if model else None
 
         def _update() -> Dict[str, Any]:
             import mlflow

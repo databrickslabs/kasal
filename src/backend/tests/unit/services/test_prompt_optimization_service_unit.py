@@ -214,58 +214,106 @@ class TestMineExamples:
         assert await svc._mine_examples("detect-intent", None, 30, 10) == []
 
 
-class TestReflectionModelResolution:
-    @pytest.mark.asyncio
-    async def test_databricks_provider(self):
-        svc = PromptOptimizationService(MagicMock())
-        svc.model_repository.find_by_key = AsyncMock(
-            return_value=SimpleNamespace(provider="databricks")
-        )
-        uri, env, provider = await svc._resolve_reflection_model("some-endpoint")
-        assert uri == "databricks:/some-endpoint"
-        assert env == {}
-        assert provider == "databricks"
+class TestLLMManagerRouting:
+    """All LLM calls route through LLMManager — this covers the pure helpers
+    that replaced the old URI/env resolver."""
 
-    @pytest.mark.asyncio
-    async def test_vllm_provider_sets_openai_env(self):
-        svc = PromptOptimizationService(MagicMock())
-        svc.model_repository.find_by_key = AsyncMock(
-            return_value=SimpleNamespace(provider="vllm")
+    def test_stored_judge_model_to_key_strips_uri_schemes(self):
+        to_key = svc_module._stored_judge_model_to_key
+        assert to_key("openai:/qwen-30b") == "qwen-30b"
+        assert to_key("databricks:/databricks-llama-4-maverick") == (
+            "databricks-llama-4-maverick"
         )
-        uri, env, provider = await svc._resolve_reflection_model(
-            "Qwen3-Coder-30B-A3B-Instruct"
-        )
-        assert uri == "openai:/Qwen3-Coder-30B-A3B-Instruct"
-        assert provider == "vllm"
-        assert "OPENAI_API_BASE" in env and "OPENAI_API_KEY" in env
+        assert to_key("deepseek:/deepseek-v4-pro") == "deepseek-v4-pro"
+        assert to_key("bare-kasal-key") == "bare-kasal-key"
+        assert to_key(None) is None
+        assert to_key("") is None
 
-    @pytest.mark.asyncio
-    async def test_kimi_provider_resolves_with_key_and_provider_tag(self):
-        # The provider tag drives request quirks downstream — Kimi rejects any
-        # explicit temperature, so the caller must know it is talking to Kimi.
-        svc = PromptOptimizationService(MagicMock())
-        svc.model_repository.find_by_key = AsyncMock(
-            return_value=SimpleNamespace(
-                provider="kimi", name="kimi-k2.7-code-highspeed"
-            )
-        )
-        with patch(
-            "src.services.api_keys_service.ApiKeysService.get_provider_api_key",
-            AsyncMock(return_value="sk-test"),
+    def test_parse_grade_from_text(self):
+        parse = svc_module._parse_grade_from_text
+        assert parse("Solid answer.\n7") == pytest.approx(0.7)
+        assert parse("thinking 3 things...\nfinal grade: 9") == pytest.approx(0.9)
+        # (10, 100] read as a percentage — clamping alone made "40" a perfect 10
+        assert parse("40") == pytest.approx(0.4)
+        assert parse("no digits here") is None
+        assert parse("") is None
+
+    def test_reflection_bridge_overrides_reflection_lm(self, monkeypatch):
+        import sys
+        import types
+
+        calls = {}
+        fake_gepa = types.ModuleType("gepa")
+
+        def original_optimize(**kwargs):
+            calls.update(kwargs)
+            return "result"
+
+        fake_gepa.optimize = original_optimize
+        monkeypatch.setitem(sys.modules, "gepa", fake_gepa)
+
+        svc_module._install_gepa_reflection_bridge()
+        assert getattr(fake_gepa.optimize, "_kasal_reflection_bridge", False)
+        # Idempotent — a second install must not double-wrap.
+        wrapped = fake_gepa.optimize
+        svc_module._install_gepa_reflection_bridge()
+        assert fake_gepa.optimize is wrapped
+
+        marker = object()
+        svc_module._GEPA_REFLECTION_STATE.reflection_fn = marker
+        try:
+            fake_gepa.optimize(reflection_lm="openai/placeholder")
+            assert calls["reflection_lm"] is marker
+        finally:
+            svc_module._GEPA_REFLECTION_STATE.reflection_fn = None
+
+        # With no override armed, the caller's reflection_lm passes through.
+        calls.clear()
+        fake_gepa.optimize(reflection_lm="openai/placeholder")
+        assert calls["reflection_lm"] == "openai/placeholder"
+
+    def test_preflight_wraps_provider_errors(self):
+        with patch.object(
+            svc_module,
+            "_sync_llm_completion",
+            MagicMock(side_effect=RuntimeError("connection refused")),
         ):
-            uri, env, provider = await svc._resolve_reflection_model(
-                "kimi-k2.7-code-highspeed", _group()
-            )
-        assert uri == "openai:/kimi-k2.7-code-highspeed"
-        assert env["OPENAI_API_KEY"] == "sk-test"
-        assert provider == "kimi"
+            with pytest.raises(ValueError, match="failed a test call"):
+                svc_module._preflight_reflection(MagicMock(), "dead-model", None, None)
 
-    @pytest.mark.asyncio
-    async def test_unknown_provider_raises(self):
-        svc = PromptOptimizationService(MagicMock())
-        svc.model_repository.find_by_key = AsyncMock(return_value=None)
-        with pytest.raises(ValueError, match="unsupported provider"):
-            await svc._resolve_reflection_model("mystery-model")
+    def test_reflection_fn_shapes_messages_and_params(self):
+        captured = {}
+
+        def fake_completion(loop, messages, model, max_tokens, **kwargs):
+            captured.update(
+                {
+                    "messages": messages,
+                    "model": model,
+                    "max_tokens": max_tokens,
+                    **kwargs,
+                }
+            )
+            return "IMPROVED DOC"
+
+        with patch.object(svc_module, "_sync_llm_completion", fake_completion):
+            fn = svc_module._make_reflection_fn(MagicMock(), "qwen-30b", None, None)
+            assert fn("improve this") == "IMPROVED DOC"
+        assert captured["model"] == "qwen-30b"
+        assert captured["temperature"] == 0.8
+        assert captured["max_tokens"] == 6000
+        # cache-buster system line + the actual prompt
+        assert captured["messages"][0]["role"] == "system"
+        assert "reflection request" in captured["messages"][0]["content"]
+        assert captured["messages"][1] == {
+            "role": "user",
+            "content": "improve this",
+        }
+        # A second call must produce a DIFFERENT cache-buster.
+        first_buster = captured["messages"][0]["content"]
+        with patch.object(svc_module, "_sync_llm_completion", fake_completion):
+            fn = svc_module._make_reflection_fn(MagicMock(), "qwen-30b", None, None)
+            fn("improve this")
+        assert captured["messages"][0]["content"] != first_buster
 
 
 class TestGenericScoringHelpers:
@@ -678,9 +726,7 @@ def fake_mlflow(monkeypatch):
 
 
 def _judge_service():
-    svc = PromptOptimizationService(MagicMock())
-    svc._resolve_reflection_model = AsyncMock(return_value=("openai:/qwen", {}, "vllm"))
-    return svc
+    return PromptOptimizationService(MagicMock())
 
 
 class TestJudgeLifecycle:
@@ -733,20 +779,18 @@ class TestJudgeLifecycle:
         assert name == "acc"
         assert "New criteria." in instructions
         assert "{{ outputs }}" in instructions
-        assert model == "openai:/qwen"  # unchanged from creation
-        assert result["model"] == "openai:/qwen"
+        # unchanged from creation (the wrapped default Kasal key)
+        assert model == f"openai:/{svc_module.DEFAULT_TARGET_MODEL}"
+        assert result["model"] == f"openai:/{svc_module.DEFAULT_TARGET_MODEL}"
 
     @pytest.mark.asyncio
     async def test_update_model_keeps_instructions(self, fake_mlflow):
         svc = _judge_service()
         await svc.create_judge("acc", "Keep these criteria for {{ outputs }}.")
-        svc._resolve_reflection_model = AsyncMock(
-            return_value=("deepseek:/v4", {}, "deepseek")
-        )
         fake_mlflow.registered.clear()
         await svc.update_judge("acc", model="deepseek-v4-pro", group_context=_group())
         name, instructions, model = fake_mlflow.registered[0]
-        assert model == "deepseek:/v4"
+        assert model == "openai:/deepseek-v4-pro"
         assert "Keep these criteria" in instructions
 
     @pytest.mark.asyncio
