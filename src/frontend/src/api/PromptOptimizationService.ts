@@ -32,6 +32,10 @@ export interface PromptOptimizationRun {
   optimized_fields?: Record<string, string> | null;
   executions_used?: number | null;
   execution_cap?: number | null;
+  /** Crew runs: human grades/expectations harvested into this run's judge + reflection. */
+  human_feedback_count?: number | null;
+  /** Crew runs: distinct candidate prompt sets actually executed. */
+  candidates_tried?: number | null;
 }
 
 export interface LLMJudge {
@@ -168,6 +172,24 @@ export class PromptOptimizationService {
     const response = await apiClient.post<LLMJudge>(
       `/prompt-optimization/judges/${encodeURIComponent(name)}/assign`,
       { crew_id: crewId },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** Update a judge's instructions and/or model (full registry name).
+   *  Editing a crew-scoped copy changes what that crew's runs use; editing a
+   *  library judge leaves already-assigned copies untouched. */
+  static async updateJudge(
+    name: string,
+    changes: { instructions?: string; model?: string },
+  ): Promise<LLMJudge> {
+    const response = await apiClient.put<LLMJudge>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}`,
+      {
+        instructions: changes.instructions || undefined,
+        model: changes.model || undefined,
+      },
       { headers: { 'Content-Type': 'application/json' } },
     );
     return response.data;

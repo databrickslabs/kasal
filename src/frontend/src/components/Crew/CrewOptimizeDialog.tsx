@@ -8,9 +8,11 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
+  DialogActions,
   FormControl,
   IconButton,
   InputLabel,
+  ListItemText,
   Menu,
   MenuItem,
   Paper,
@@ -21,10 +23,14 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GavelIcon from '@mui/icons-material/Gavel';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
 import {
   CrewEval,
@@ -121,6 +127,12 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [judgeCriteria, setJudgeCriteria] = useState('');
   const [judgeModel, setJudgeModel] = useState('');
   const [savingJudge, setSavingJudge] = useState(false);
+  const [editJudge, setEditJudge] = useState<LLMJudge | null>(null);
+  const [editInstructions, setEditInstructions] = useState('');
+  const [editModel, setEditModel] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleteJudgeTarget, setDeleteJudgeTarget] = useState<LLMJudge | null>(null);
+  const [deletingJudge, setDeletingJudge] = useState(false);
 
   const refreshRuns = useCallback(async () => {
     if (!crewId) return;
@@ -307,6 +319,56 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
     }
   };
 
+  const openEditJudge = (judge: LLMJudge) => {
+    setEditJudge(judge);
+    setEditInstructions(judge.instructions || '');
+    // Empty = keep the judge's current model; the stored value is an MLflow
+    // model URI, not a Kasal model key, so there is no reliable reverse map.
+    setEditModel('');
+  };
+
+  const handleUpdateJudge = async () => {
+    if (!editJudge) return;
+    setSavingEdit(true);
+    try {
+      await PromptOptimizationService.updateJudge(
+        editJudge.full_name || editJudge.name,
+        { instructions: editInstructions, model: editModel || undefined },
+      );
+      toast.success(
+        editJudge.crew_id
+          ? `Judge "${editJudge.name}" updated — the next run uses the new version`
+          : `Library judge "${editJudge.name}" updated`,
+      );
+      setEditJudge(null);
+      await refreshJudges();
+    } catch (e: unknown) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to update judge';
+      setError(detail);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteLibraryJudge = async () => {
+    if (!deleteJudgeTarget) return;
+    setDeletingJudge(true);
+    try {
+      await PromptOptimizationService.deleteJudge(
+        deleteJudgeTarget.full_name || deleteJudgeTarget.name,
+      );
+      toast.success(`Judge "${deleteJudgeTarget.name}" deleted`);
+      setDeleteJudgeTarget(null);
+      await refreshJudges();
+    } catch {
+      setError('Failed to delete judge');
+    } finally {
+      setDeletingJudge(false);
+    }
+  };
+
   const crewPrefix = crewId ? crewId.replace(/-/g, '').slice(0, 12) : '';
   const assignedJudges = judges.filter((j) => j.crew_id === crewPrefix);
   const libraryJudges = judges.filter(
@@ -369,7 +431,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 ))}
               </Select>
             </FormControl>
-            <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. Includes 1 validation + 1 baseline execution, so allow at least 6 for a real search. Executions have real side effects (tools, emails, database writes).">
+            <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. The baseline costs 1 execution; each further execution evaluates one NEW candidate prompt set (re-evaluations are cached and free). Executions have real side effects (tools, emails, database writes).">
               <TextField
                 size="small"
                 type="number"
@@ -428,8 +490,10 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 size="small"
                 color="primary"
                 variant="outlined"
+                clickable
                 label={j.name}
-                title={j.instructions || ''}
+                title={`${j.instructions || ''}\n\nClick to edit this judge.`}
+                onClick={() => openEditJudge(j)}
                 onDelete={() => handleUnassignJudge(j.full_name || j.name)}
               />
             ))}
@@ -456,24 +520,53 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                         void handleAssignJudge(j.name);
                       }}
                     >
-                      <Box>
-                        <Typography variant="body2">{j.name}</Typography>
-                        {j.instructions && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{
-                              display: 'block',
-                              maxWidth: 320,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {j.instructions}
-                          </Typography>
-                        )}
-                      </Box>
+                      <ListItemText
+                        primary={<Typography variant="body2">{j.name}</Typography>}
+                        secondary={
+                          j.instructions ? (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{
+                                display: 'block',
+                                maxWidth: 320,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {j.instructions}
+                            </Typography>
+                          ) : undefined
+                        }
+                      />
+                      <Tooltip title="Edit judge">
+                        <IconButton
+                          size="small"
+                          edge="end"
+                          sx={{ ml: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAssignAnchor(null);
+                            openEditJudge(j);
+                          }}
+                        >
+                          <EditIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete from library">
+                        <IconButton
+                          size="small"
+                          edge="end"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAssignAnchor(null);
+                            setDeleteJudgeTarget(j);
+                          }}
+                        >
+                          <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
                     </MenuItem>
                   ))}
                 </Menu>
@@ -556,6 +649,26 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                       variant="outlined"
                       label={`${run.executions_used}/${run.execution_cap} executions`}
                     />
+                  )}
+                {typeof run.candidates_tried === 'number' && run.candidates_tried > 1 && (
+                  <Tooltip title="Distinct prompt variants executed (baseline + GEPA candidates). Re-evaluations of an already-executed variant are cached and free.">
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`${run.candidates_tried} variants tried`}
+                    />
+                  </Tooltip>
+                )}
+                {typeof run.human_feedback_count === 'number' &&
+                  run.human_feedback_count > 0 && (
+                    <Tooltip title="Your grades, comments and expectations on past evaluation answers — folded into this run's judge rubric AND into what the GEPA reflection model sees.">
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color="secondary"
+                        label={`guided by ${run.human_feedback_count} human notes`}
+                      />
+                    </Tooltip>
                   )}
                 {typeof run.initial_score === 'number' &&
                   typeof run.final_score === 'number' && (
@@ -699,15 +812,69 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 </Box>
                 {expandedEval === ev.trace_id && (
                   <Box sx={{ mt: 1.5 }}>
-                    <TextField
-                      fullWidth
-                      multiline
-                      maxRows={10}
-                      size="small"
-                      label="Answer"
-                      value={ev.deliverable}
-                      InputProps={{ readOnly: true, sx: { fontSize: 13 } }}
-                    />
+                    <Typography
+                      variant="overline"
+                      sx={{ color: 'text.secondary', letterSpacing: 0.6 }}
+                    >
+                      Answer
+                    </Typography>
+                    {/* Rendered markdown, not raw text — crew deliverables are
+                        mostly GFM tables, unreadable as pipe soup. */}
+                    <Box
+                      sx={{
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        p: 1.5,
+                        maxHeight: 340,
+                        overflow: 'auto',
+                        fontSize: 13,
+                        lineHeight: 1.55,
+                        '& p': { m: 0, mb: 1 },
+                        '& h1, & h2, & h3, & h4': { m: 0, mb: 1, fontSize: 14, fontWeight: 600 },
+                        '& table': {
+                          borderCollapse: 'collapse',
+                          width: 'max-content',
+                          maxWidth: '100%',
+                          mb: 1,
+                        },
+                        '& th, & td': {
+                          border: 1,
+                          borderColor: 'divider',
+                          px: 1,
+                          py: 0.5,
+                          textAlign: 'left',
+                          verticalAlign: 'top',
+                        },
+                        '& th': { bgcolor: 'action.hover', fontWeight: 600 },
+                        '& code': {
+                          bgcolor: 'action.hover',
+                          px: 0.5,
+                          borderRadius: 0.5,
+                          fontSize: 12,
+                        },
+                        '& pre': { overflow: 'auto', m: 0, mb: 1 },
+                        '& ul, & ol': { m: 0, mb: 1, pl: 2.5 },
+                        '& a': { wordBreak: 'break-all' },
+                      }}
+                    >
+                      {ev.deliverable ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            a: ({ node: _node, ...props }) => (
+                              <a {...props} target="_blank" rel="noreferrer" />
+                            ),
+                          }}
+                        >
+                          {ev.deliverable}
+                        </ReactMarkdown>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          (empty deliverable)
+                        </Typography>
+                      )}
+                    </Box>
                     <Box
                       sx={{
                         display: 'flex',
@@ -795,6 +962,87 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
           </>
         )}
       </DialogContent>
+
+      {/* Edit judge — instructions and/or model; saving registers a new
+          version under the same registry name (latest version wins). */}
+      <Dialog
+        open={Boolean(editJudge)}
+        onClose={() => setEditJudge(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <GavelIcon fontSize="small" color="primary" />
+          Edit judge — {editJudge?.name}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            {editJudge?.crew_id
+              ? 'This judge is assigned to this crew — changes apply to the next optimization run.'
+              : 'This is a shared library judge — copies already assigned to crews keep their current version until re-assigned.'}
+          </Typography>
+          <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Judge model</InputLabel>
+            <Select
+              value={editModel}
+              label="Judge model"
+              onChange={(e) => setEditModel(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>Keep current{editJudge?.model ? ` (${editJudge.model})` : ''}</em>
+              </MenuItem>
+              {models.map((key) => (
+                <MenuItem key={key} value={key}>
+                  {key}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            multiline
+            minRows={4}
+            maxRows={14}
+            size="small"
+            label="Evaluation criteria (plain language)"
+            value={editInstructions}
+            onChange={(e) => setEditInstructions(e.target.value)}
+            helperText="Reference the answer as {{ outputs }} — added automatically when missing."
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditJudge(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={savingEdit || (!editInstructions.trim() && !editModel)}
+            onClick={() => void handleUpdateJudge()}
+          >
+            {savingEdit ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete library judge — confirm first; crew-assigned copies survive. */}
+      <Dialog open={Boolean(deleteJudgeTarget)} onClose={() => setDeleteJudgeTarget(null)}>
+        <DialogTitle>Delete judge “{deleteJudgeTarget?.name}”?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            The judge is removed from the shared library. Crews that already have
+            it assigned keep their own copy until it is unassigned there.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteJudgeTarget(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={deletingJudge}
+            onClick={() => void handleDeleteLibraryJudge()}
+          >
+            {deletingJudge ? 'Deleting…' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 };
