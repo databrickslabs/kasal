@@ -9,6 +9,7 @@ ImportError is raised on first use if it is missing.
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -17,7 +18,11 @@ from pydantic import BaseModel, PrivateAttr
 from ..events.bus import crewai_event_bus
 from ..events.types import LLMCallType, LLMStreamChunkEvent
 from .base import BaseLLM
-from .exceptions import LLMContextLengthExceededError, is_context_length_exceeded
+from .exceptions import (
+    ExecutionBudgetExceededError,
+    LLMContextLengthExceededError,
+    is_context_length_exceeded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +119,11 @@ class OpenAICompletion(BaseLLM):
         try:
             if self.api == "responses":
                 text, usage, call_type = self._call_responses_api(
-                    conversation, tools, available_functions
+                    conversation, tools, available_functions, from_agent=from_agent
                 )
             else:
                 text, usage, call_type = self._call_completions_api(
-                    conversation, tools, available_functions
+                    conversation, tools, available_functions, from_agent=from_agent
                 )
         except LLMContextLengthExceededError:
             raise
@@ -177,15 +182,43 @@ class OpenAICompletion(BaseLLM):
         params.update(self.additional_params)
         return params
 
+    def _execution_budget(self, from_agent: Any) -> tuple[int, float | None]:
+        """Resolve (max tool rounds, wall-clock deadline) for one call().
+
+        Agent.max_iter and Agent.max_execution_time were accepted-but-inert
+        fields (crewAI never enforced them either); here they become real.
+        Direct LLM calls with no agent keep the engine default round cap.
+        """
+        rounds = _MAX_TOOL_ROUNDS
+        deadline: float | None = None
+        if from_agent is not None:
+            max_iter = getattr(from_agent, "max_iter", None)
+            if isinstance(max_iter, int) and max_iter > 0:
+                rounds = max_iter
+            max_seconds = getattr(from_agent, "max_execution_time", None)
+            if isinstance(max_seconds, (int, float)) and max_seconds > 0:
+                deadline = time.monotonic() + float(max_seconds)
+        return rounds, deadline
+
+    def _check_deadline(self, deadline: float | None, rounds_done: int) -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ExecutionBudgetExceededError(
+                f"max_execution_time exceeded after {rounds_done} tool round(s) "
+                f"for model {self.model}."
+            )
+
     def _call_completions_api(
         self,
         conversation: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
+        from_agent: Any = None,
     ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
-        for _round in range(_MAX_TOOL_ROUNDS):
+        rounds, deadline = self._execution_budget(from_agent)
+        for _round in range(rounds):
+            self._check_deadline(deadline, _round)
             params = self._prepare_completion_params(conversation, tools)
             if self.stream:
                 content, usage, function_calls = self._stream_chat_completion(params)
@@ -227,8 +260,8 @@ class OpenAICompletion(BaseLLM):
                     )
                 continue
             return content or "", usage, call_type
-        raise RuntimeError(
-            f"Tool-calling did not converge within {_MAX_TOOL_ROUNDS} rounds "
+        raise ExecutionBudgetExceededError(
+            f"Tool-calling did not converge within {rounds} rounds "
             f"for model {self.model}."
         )
 
@@ -376,10 +409,13 @@ class OpenAICompletion(BaseLLM):
         conversation: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
+        from_agent: Any = None,
     ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
-        for _round in range(_MAX_TOOL_ROUNDS):
+        rounds, deadline = self._execution_budget(from_agent)
+        for _round in range(rounds):
+            self._check_deadline(deadline, _round)
             response = self.client.responses.create(
                 **self._prepare_responses_params(conversation, tools)
             )
@@ -401,8 +437,8 @@ class OpenAICompletion(BaseLLM):
                     )
                 continue
             return text, usage, call_type
-        raise RuntimeError(
-            f"Tool-calling did not converge within {_MAX_TOOL_ROUNDS} rounds "
+        raise ExecutionBudgetExceededError(
+            f"Tool-calling did not converge within {rounds} rounds "
             f"for model {self.model}."
         )
 

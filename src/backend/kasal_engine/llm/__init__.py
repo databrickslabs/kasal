@@ -15,6 +15,7 @@ from .constants import (
 )
 from .exceptions import (
     CONTEXT_LIMIT_ERRORS,
+    ExecutionBudgetExceededError,
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "CONTEXT_LIMIT_ERRORS",
     "CONTEXT_WINDOW_USAGE_RATIO",
     "DEFAULT_CONTEXT_WINDOW_SIZE",
+    "ExecutionBudgetExceededError",
     "InternalInstructor",
     "LLM",
     "LLMContextLengthExceededError",

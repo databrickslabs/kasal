@@ -36,3 +36,13 @@ class LLMContextLengthExceededError(Exception):
 def is_context_length_exceeded(error: Exception) -> bool:
     message = str(error)
     return any(phrase.lower() in message.lower() for phrase in CONTEXT_LIMIT_ERRORS)
+
+
+class ExecutionBudgetExceededError(RuntimeError):
+    """An agent execution budget was breached (tool rounds or wall clock).
+
+    Subclasses RuntimeError so callers that caught the engine's previous
+    round-cap RuntimeError keep working. When this propagates out of
+    LLM.call(), the standard failure path emits LLMCallFailedEvent, so the
+    breach is visible in traces/logs like any other terminal LLM failure.
+    """
