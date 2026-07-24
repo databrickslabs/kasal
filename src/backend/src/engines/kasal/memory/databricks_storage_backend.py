@@ -85,6 +85,7 @@ class DatabricksStorageBackend:
         embedder: Any = None,
         embedding_dimension: int = 1024,
         embedding_model: str = _DEFAULT_EMBEDDING_MODEL,
+        relevance_threshold: float = 0.35,
     ) -> None:
         self.index_name = index_name
         self.endpoint_name = endpoint_name
@@ -96,6 +97,10 @@ class DatabricksStorageBackend:
         self.embedder = embedder
         self.embedding_dimension = embedding_dimension
         self.embedding_model = embedding_model
+        # Similarity floor: unrelated memories never enter the context, no
+        # matter how few relevant candidates exist (top-k without a threshold
+        # returns SOMETHING even for a completely unrelated query).
+        self.relevance_threshold = relevance_threshold
 
         self._repo = DatabricksVectorIndexRepository(workspace_url, group_id=group_id)
 
@@ -307,7 +312,7 @@ class DatabricksStorageBackend:
         )
         filtered: list[tuple[MemoryRecord, float]] = []
         for record, score in rows:
-            if score < min_score:
+            if score < max(min_score, self.relevance_threshold):
                 continue
             if scope_prefix and not record.scope.startswith(scope_prefix):
                 continue

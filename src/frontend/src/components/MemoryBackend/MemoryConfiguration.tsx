@@ -449,7 +449,7 @@ export const MemoryConfiguration: React.FC = () => {
     }
   };
 
-  // Persist the LOCAL (DEFAULT / LanceDB) memory backend as an ACTIVE config so
+  // Persist the LOCAL (DEFAULT / SQLite) memory backend as an ACTIVE config so
   // crew execution loads its cognitive tuning (memory LLM, recall thresholds)
   // via get_active_config. Local has no connection step, so this creates the
   // active config AND saves the tuning in one call — there's no pre-existing
@@ -1891,7 +1891,7 @@ export const MemoryConfiguration: React.FC = () => {
             </Button>
           }
         >
-          Kasal unified cognitive memory is stored locally in LanceDB under
+          Kasal unified cognitive memory is stored locally in SQLite under
           <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
           relative to the backend working directory — one store per teamspace, no
           external infrastructure required. Click &ldquo;Browse Memory&rdquo; to

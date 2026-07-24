@@ -7,7 +7,7 @@
  */
 
 export enum MemoryBackendType {
-  DEFAULT = 'default', // CrewAI unified Memory (LanceDB)
+  DEFAULT = 'default', // Kasal unified Memory (local SQLite)
   DATABRICKS = 'databricks', // Databricks Vector Search
   LAKEBASE = 'lakebase', // Lakebase pgvector
 }
@@ -19,6 +19,8 @@ export interface CognitiveMemoryConfig {
   recency_weight?: number;
   importance_weight?: number;
   recency_half_life_days?: number;
+  /** Minimum semantic similarity for a memory to be recalled at all (default 0.35). */
+  relevance_threshold?: number;
 
   // Consolidation.
   consolidation_threshold?: number;
@@ -118,6 +120,7 @@ export const COGNITIVE_MEMORY_DEFAULTS: Required<
     | 'recency_weight'
     | 'importance_weight'
     | 'recency_half_life_days'
+    | 'relevance_threshold'
     | 'consolidation_threshold'
     | 'consolidation_limit'
     | 'default_importance'
@@ -132,6 +135,7 @@ export const COGNITIVE_MEMORY_DEFAULTS: Required<
   recency_weight: 0.3,
   importance_weight: 0.2,
   recency_half_life_days: 30,
+  relevance_threshold: 0.35,
   consolidation_threshold: 0.85,
   consolidation_limit: 5,
   default_importance: 0.5,
@@ -171,7 +175,7 @@ export const isValidMemoryBackendConfig = (config: unknown): config is MemoryBac
 
 /**
  * Knowledge sources (RAG) require a Lakebase pgvector memory backend, where
- * knowledge-file embeddings are stored. The default (ChromaDB/LanceDB) backend
+ * knowledge-file embeddings are stored. The default (local SQLite) backend
  * cannot store/retrieve document embeddings.
  */
 export const isKnowledgeCapableMemoryConfig = (config: unknown): boolean => {
@@ -183,7 +187,7 @@ export const isKnowledgeCapableMemoryConfig = (config: unknown): boolean => {
 // Helper to get display name for backend type
 export const getBackendDisplayName = (type: MemoryBackendType): string => {
   const displayNames: Record<MemoryBackendType, string> = {
-    [MemoryBackendType.DEFAULT]: 'Local (Kasal unified Memory / LanceDB)',
+    [MemoryBackendType.DEFAULT]: 'Local (Kasal unified Memory / SQLite)',
     [MemoryBackendType.DATABRICKS]: 'Databricks Vector Search',
     [MemoryBackendType.LAKEBASE]: 'Lakebase (pgvector)',
   };
@@ -194,7 +198,7 @@ export const getBackendDisplayName = (type: MemoryBackendType): string => {
 export const getBackendDescription = (type: MemoryBackendType): string => {
   const descriptions: Record<MemoryBackendType, string> = {
     [MemoryBackendType.DEFAULT]:
-      'Kasal unified cognitive memory stored on the local LanceDB instance. No external infrastructure required.',
+      'Kasal unified cognitive memory stored in a local SQLite database. No external infrastructure required.',
     [MemoryBackendType.DATABRICKS]:
       'Kasal unified cognitive memory backed by Databricks Vector Search for scalable, enterprise-grade storage with Unity Catalog governance.',
     [MemoryBackendType.LAKEBASE]:

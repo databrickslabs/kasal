@@ -149,3 +149,19 @@ class TestHybridSearchSql:
         )
         assert custom.semantic_weight == 1.0
         assert custom.keyword_weight == 0.0
+
+
+class TestRelevanceGateSql:
+    def test_semantic_gate_in_outer_query(self, backend):
+        captured = TestHybridSearchSql()._run_search(backend)
+        assert "WHERE c.semantic >= :relevance_threshold" in captured["sql"]
+        assert captured["params"]["relevance_threshold"] == 0.35
+
+    def test_gate_is_configurable(self):
+        custom = LakebaseStorageBackend(
+            table_name="crew_memory",
+            crew_id="c",
+            group_id="g",
+            relevance_threshold=0.6,
+        )
+        assert custom.relevance_threshold == 0.6

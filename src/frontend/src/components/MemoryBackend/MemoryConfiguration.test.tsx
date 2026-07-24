@@ -370,11 +370,11 @@ describe('MemoryConfiguration', () => {
     expect(screen.queryByText('Databricks Vector Search')).not.toBeInTheDocument();
   });
 
-  it('shows info alert about local LanceDB storage when mode is disabled', async () => {
+  it('shows info alert about local SQLite storage when mode is disabled', async () => {
     await act(async () => renderComponent());
     await waitForLoaded();
     expect(
-      screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/),
+      screen.getByText(/Kasal unified cognitive memory is stored locally in SQLite/),
     ).toBeInTheDocument();
   });
 
@@ -452,7 +452,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
+      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in SQLite/)).toBeInTheDocument();
     });
 
     it('handles 404 error with fallback to all configs that have data', async () => {
@@ -542,7 +542,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in LanceDB/)).toBeInTheDocument();
+      expect(screen.getByText(/Kasal unified cognitive memory is stored locally in SQLite/)).toBeInTheDocument();
     });
 
     it('detectWorkspaceUrl handles error gracefully', async () => {

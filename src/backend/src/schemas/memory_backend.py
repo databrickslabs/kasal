@@ -58,6 +58,16 @@ class CognitiveMemoryConfig(BaseModel):
         ge=1,
         description="Days for recency score to halve (default 30).",
     )
+    relevance_threshold: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum semantic similarity for a memory to be recalled at all "
+            "(default 0.35). Applied before recency/importance blending, so "
+            "unrelated memories are never pulled into the context."
+        ),
+    )
 
     # Consolidation.
     consolidation_threshold: Optional[float] = Field(

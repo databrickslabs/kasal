@@ -67,6 +67,17 @@ const COGNITIVE_SLIDERS: SliderSpec[] = [
     help: 'How strongly recall favors LLM-inferred importance (default 0.2).',
   },
   {
+    key: 'relevance_threshold',
+    label: 'Relevance threshold',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help:
+      'Minimum semantic similarity for a memory to be recalled at all (default 0.35). ' +
+      'Raise it to keep unrelated memories out of the context; applied before the ' +
+      'recency/importance blend.',
+  },
+  {
     key: 'consolidation_threshold',
     label: 'Consolidation threshold',
     min: 0,

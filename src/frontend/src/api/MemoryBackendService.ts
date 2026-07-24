@@ -137,7 +137,7 @@ export class MemoryBackendService {
   }
 
   /**
-   * Persist the local (DEFAULT / LanceDB) memory backend as an ACTIVE config so
+   * Persist the local (DEFAULT / SQLite) memory backend as an ACTIVE config so
    * crew execution loads its cognitive tuning via ``get_active_config``. Saving
    * to localStorage alone never reaches the backend runtime, so the memory LLM /
    * recall thresholds were silently ignored for local memory. Mirrors the

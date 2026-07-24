@@ -3,8 +3,8 @@
 Under the legacy per-memory-type architecture this module returned a dict with
 three wrappers (``short_term``/``long_term``/``entity``). CrewAI 1.10+ uses a
 single ``Memory`` class backed by one ``StorageBackend``, so this factory now
-returns a single instance (or ``None`` to signal that the CrewAI default
-LanceDB backend should be used).
+returns a single instance (or ``None`` to signal that the local SQLite
+backend should be built by CrewMemoryService).
 """
 
 from __future__ import annotations
@@ -70,8 +70,9 @@ class MemoryBackendFactory:
                 conversation across runs. Falls back to ``job_id``.
 
         Returns:
-            A ``StorageBackend`` instance, or ``None`` when the unified
-            ``Memory`` should fall back to its built-in LanceDB backend.
+            A ``StorageBackend`` instance, or ``None`` when the DEFAULT
+            configuration applies (CrewMemoryService builds the local SQLite
+            backend).
 
         Raises:
             DatabricksIndexValidationError: When the Databricks target index
@@ -98,7 +99,7 @@ class MemoryBackendFactory:
             )
         if config.backend_type == MemoryBackendType.DEFAULT:
             logger.info(
-                "Using CrewAI default unified memory (LanceDB) for crew %s",
+                "Using DEFAULT memory configuration (local SQLite) for crew %s",
                 crew_id,
             )
             return None
@@ -149,6 +150,12 @@ class MemoryBackendFactory:
             crew_id,
             group_id,
         )
+        scoring = MemoryBackendFactory._cognitive_scoring_kwargs(config)
+        databricks_kwargs = (
+            {"relevance_threshold": scoring["relevance_threshold"]}
+            if "relevance_threshold" in scoring
+            else {}
+        )
         return DatabricksStorageBackend(
             index_name=index_name,
             endpoint_name=databricks_cfg.endpoint_name,
@@ -159,6 +166,7 @@ class MemoryBackendFactory:
             session_id=job_id,
             embedder=embedder,
             embedding_dimension=databricks_cfg.embedding_dimension or 1024,
+            **databricks_kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -227,6 +235,7 @@ class MemoryBackendFactory:
             "recency_weight",
             "importance_weight",
             "recency_half_life_days",
+            "relevance_threshold",
         ):
             value = getattr(cognitive, field, None)
             if value is not None:

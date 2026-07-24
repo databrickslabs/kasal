@@ -987,7 +987,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   // Render
   // ------------------------------------------------------------------
 
-  const backendChipLabel = backend === 'default' ? 'Local (LanceDB)' : backend || '…';
+  const backendChipLabel = backend === 'default' ? 'Local (SQLite)' : backend || '…';
   const backendChipColor: 'primary' | 'success' | 'default' =
     backend === 'databricks' ? 'primary' : backend === 'lakebase' ? 'success' : 'default';
 
@@ -1423,7 +1423,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
             <Alert severity="warning" sx={{ mt: 2 }}>
               {records.length} record{records.length === 1 ? '' : 's'} currently visible
               {backend === 'default'
-                ? ' (stored locally across per-crew LanceDB directories)'
+                ? ' (stored locally in per-group SQLite databases)'
                 : ''}
               .
             </Alert>

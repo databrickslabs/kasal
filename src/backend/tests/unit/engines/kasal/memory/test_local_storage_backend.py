@@ -30,15 +30,16 @@ def _save(store, content, scope="/g1", **kwargs):
 
 
 class TestSaveAndSearch:
-    def test_cosine_ordering(self, tmp_path):
+    def test_cosine_ordering_with_relevance_gate(self, tmp_path):
         store = _store(tmp_path)
         _save(store, "the cat sat on the mat")
         _save(store, "the dog chased the ball")
 
         results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
 
-        assert results[0][0].content == "the cat sat on the mat"
-        assert results[0][1] > results[1][1]
+        # The matching record ranks; the orthogonal one is gated out entirely
+        # (semantic 0 < relevance threshold), not merely ranked lower.
+        assert [r.content for r, _ in results] == ["the cat sat on the mat"]
 
     def test_min_score_filters(self, tmp_path):
         store = _store(tmp_path)
@@ -159,3 +160,43 @@ class TestHybridScoring:
         results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
 
         assert results[0][0].content == "cat facts from today"
+
+
+class TestRelevanceGate:
+    """Unrelated memories must never enter the context — the Swiss-news-in-a-
+    database-job regression. Top-k without a threshold returns SOMETHING even
+    for a completely unrelated query; the semantic gate stops that."""
+
+    def test_unrelated_records_are_not_recalled(self, tmp_path):
+        store = _store(tmp_path)
+        _save(store, "dog news roundup for zurich")  # y-axis vector
+        _save(store, "dog political headlines")  # y-axis vector
+
+        # x-axis query — orthogonal to everything stored (semantic = 0).
+        results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
+
+        assert results == []
+
+    def test_related_records_still_pass(self, tmp_path):
+        store = _store(tmp_path)
+        _save(store, "cat facts")  # x-axis vector
+        results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
+        assert [r.content for r, _ in results] == ["cat facts"]
+
+    def test_threshold_override(self, tmp_path):
+        store = LocalMemoryStorage(
+            tmp_path / "m.db", embedder=_stub_embedder, relevance_threshold=0.0
+        )
+        record = MemoryRecord(content="anything", scope="/g1")
+        record.embedding = [0.2, 0.98, 0.0]  # weak x-similarity (~0.2)
+        store.save([record])
+
+        # Gate disabled → the weak match comes back; default 0.35 would drop it.
+        results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
+        assert len(results) == 1
+
+    def test_no_embedder_records_are_not_gated(self, tmp_path):
+        store = _store(tmp_path, embedder=None)
+        _save(store, "vectorless note", importance=0.9)
+        results = store.search(query_embedding=[1.0, 0.0, 0.0], scope_prefix="/g1")
+        assert len(results) == 1  # can't judge relevance without a vector

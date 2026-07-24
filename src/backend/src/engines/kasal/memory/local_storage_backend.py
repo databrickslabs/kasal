@@ -75,6 +75,7 @@ class LocalMemoryStorage:
         recency_weight: float | None = None,
         importance_weight: float | None = None,
         recency_half_life_days: float | None = None,
+        relevance_threshold: float | None = None,
     ):
         self.db_path = Path(db_path)
         self.embedder = embedder
@@ -87,6 +88,8 @@ class LocalMemoryStorage:
             self.IMPORTANCE_WEIGHT = float(importance_weight)
         if recency_half_life_days is not None:
             self.RECENCY_HALF_LIFE_DAYS = float(recency_half_life_days)
+        if relevance_threshold is not None:
+            self.RELEVANCE_THRESHOLD = float(relevance_threshold)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
@@ -150,6 +153,9 @@ class LocalMemoryStorage:
     RECENCY_WEIGHT = 0.15
     IMPORTANCE_WEIGHT = 0.10
     RECENCY_HALF_LIFE_DAYS = 30.0
+    # Semantic gate applied BEFORE blending — unrelated memories never enter
+    # the context, no matter how fresh or important.
+    RELEVANCE_THRESHOLD = 0.35
 
     def search(
         self,
@@ -190,6 +196,8 @@ class LocalMemoryStorage:
                 semantic = (
                     float(np.dot(query_vec, vector) / denom) if denom > 0 else 0.0
                 )
+                if semantic < self.RELEVANCE_THRESHOLD:
+                    continue  # unrelated — never rescued by recency/importance
             else:
                 semantic = 0.0
             keyword = 0.0

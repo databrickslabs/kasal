@@ -269,7 +269,7 @@ describe('isValidMemoryBackendConfig', () => {
 describe('getBackendDisplayName', () => {
   it('returns correct display name for DEFAULT type', () => {
     expect(getBackendDisplayName(MemoryBackendType.DEFAULT)).toBe(
-      'Local (Kasal unified Memory / LanceDB)'
+      'Local (Kasal unified Memory / SQLite)'
     );
   });
 
@@ -310,9 +310,9 @@ describe('getBackendDescription', () => {
     expect(description.length).toBeGreaterThan(0);
   });
 
-  it('DEFAULT description mentions LanceDB', () => {
+  it('DEFAULT description mentions SQLite', () => {
     const description = getBackendDescription(MemoryBackendType.DEFAULT);
-    expect(description).toContain('LanceDB');
+    expect(description).toContain('SQLite');
   });
 
   it('DATABRICKS description mentions Vector Search', () => {

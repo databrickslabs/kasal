@@ -78,6 +78,7 @@ class LakebaseStorageBackend:
         recency_weight: float = 0.15,
         importance_weight: float = 0.10,
         recency_half_life_days: float = 30.0,
+        relevance_threshold: float = 0.35,
     ) -> None:
         # SECURITY: validate before it reaches any interpolated raw SQL.
         self.table_name = _validate_table_name(table_name)
@@ -94,6 +95,10 @@ class LakebaseStorageBackend:
         self.recency_weight = recency_weight
         self.importance_weight = importance_weight
         self.recency_half_life_days = recency_half_life_days
+        # Semantic gate applied BEFORE blending: recency/importance rank among
+        # RELEVANT candidates — they must never rescue unrelated memories into
+        # the context (e.g. Swiss-news records recalled for a database job).
+        self.relevance_threshold = relevance_threshold
         # Default READ scope: True = workspace-wide (group_id), False = this
         # chat session only (session_id). Toggled per execution from the chat
         # "Workspace memory" switch. crew_id is NOT a scoping key — it only tags
@@ -405,6 +410,7 @@ class LakebaseStorageBackend:
         # Re-rank pool: enough candidates that keyword/recency can promote a
         # non-top-cosine hit, small enough that the outer pass is negligible.
         params["candidate_limit"] = max(limit * 5, 25)
+        params["relevance_threshold"] = float(self.relevance_threshold)
         params["half_life_days"] = float(self.recency_half_life_days)
         params["w_semantic"] = float(self.semantic_weight)
         params["w_recency"] = float(self.recency_weight)
@@ -446,6 +452,7 @@ class LakebaseStorageBackend:
                     ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
                     LIMIT :candidate_limit
                 ) AS c
+                WHERE c.semantic >= :relevance_threshold
                 ORDER BY score DESC
                 LIMIT :limit
                 """)
