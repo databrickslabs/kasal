@@ -191,22 +191,33 @@ async def relay_execution_events(queue: Any, execution_id: str) -> None:
         kind = frame.get("kind")
         if kind == _EOF_KIND:
             break
-        if kind != "chunk":
-            continue  # forward compatibility: ignore unknown frame kinds
         try:
-            await sse_manager.broadcast_to_job(
-                execution_id,
-                SSEEvent(
-                    data={
-                        "job_id": execution_id,
-                        "chunk": frame.get("chunk", ""),
-                        "seq": frame.get("seq"),
-                    },
-                    event="llm_chunk",
-                    id=f"{execution_id}_chunk_{datetime.now().timestamp()}",
-                ),
-                skip_replay=True,
-            )
+            if kind == "chunk":
+                await sse_manager.broadcast_to_job(
+                    execution_id,
+                    SSEEvent(
+                        data={
+                            "job_id": execution_id,
+                            "chunk": frame.get("chunk", ""),
+                            "seq": frame.get("seq"),
+                        },
+                        event="llm_chunk",
+                        id=f"{execution_id}_chunk_{datetime.now().timestamp()}",
+                    ),
+                    skip_replay=True,
+                )
+            elif kind == "hitl_request":
+                # A tool-approval gate in the subprocess needs the human NOW.
+                # Kept in the replay buffer (default) so a reconnecting client
+                # still learns about a pending gate.
+                payload = {k: v for k, v in frame.items() if k != "kind"}
+                payload.setdefault("job_id", execution_id)
+                await sse_manager.broadcast_to_job(
+                    execution_id,
+                    SSEEvent(data=payload, event="hitl_request"),
+                )
+            else:
+                continue  # forward compatibility: ignore unknown frame kinds
         except Exception as sse_err:
-            logger.warning(f"[EventPipe] chunk broadcast failed for {execution_id}: {sse_err}")
+            logger.warning(f"[EventPipe] {kind} broadcast failed for {execution_id}: {sse_err}")
     logger.info(f"[EventPipe] relay finished for {execution_id}")

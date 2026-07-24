@@ -770,6 +770,32 @@ class ToolFactory:
         Returns:
             Tool instance if successfully created, None otherwise
         """
+        # _create_tool_impl pops any approval policy out of the merged config
+        # (it must not reach `tool_class(**tool_config)`) and stashes it here;
+        # stamp it on the instance(s) so the engine's tool-approval hook can
+        # read a single attribute regardless of which branch built the tool.
+        self._pending_approval_policy = None
+        result = self._create_tool_impl(
+            tool_identifier, result_as_answer, tool_config_override
+        )
+        policy = getattr(self, '_pending_approval_policy', None)
+        if result is not None and policy is not None:
+            for instance in (result if isinstance(result, list) else [result]):
+                try:
+                    object.__setattr__(instance, '_approval_policy', dict(policy))
+                except Exception as stamp_err:
+                    logger.warning(
+                        f"[ToolFactory] could not stamp approval policy on "
+                        f"{type(instance).__name__}: {stamp_err}"
+                    )
+        return result
+
+    def _create_tool_impl(
+        self,
+        tool_identifier: Union[str, int],
+        result_as_answer: bool = False,
+        tool_config_override: Optional[Dict[str, Any]] = None
+    ) -> Optional[Union[BaseTool, list]]:
         # Get tool info from our cached tools obtained from the service
         tool_info = self.get_tool_info(tool_identifier)
         if not tool_info:
@@ -805,6 +831,20 @@ class ToolFactory:
             # Merge with override config if provided
             # The override takes precedence over base_config
             tool_config = {**base_config, **(tool_config_override or {})}
+
+            # Approval policy is NOT a constructor kwarg — pop it before the
+            # per-tool `tool_class(**tool_config)` branches (some splat into
+            # non-pydantic clients) and stamp it on the instance afterwards
+            # (see _stamp_approval_policy at the end of this method). Accepted
+            # shapes: requires_approval: true, or approval: {timeout_seconds,
+            # timeout_action}.
+            approval_policy = None
+            if tool_config.pop('requires_approval', False):
+                approval_policy = {}
+            approval_cfg = tool_config.pop('approval', None)
+            if isinstance(approval_cfg, dict):
+                approval_policy = {**(approval_policy or {}), **approval_cfg}
+            self._pending_approval_policy = approval_policy
 
             # Inject execution inputs if available in the main config (for dynamic parameter resolution)
             # Handle both direct inputs and nested inputs structure

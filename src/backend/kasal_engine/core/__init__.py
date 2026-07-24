@@ -9,6 +9,11 @@ from .agent import (
 from .crew import (
     Crew,
 )
+from .executor import (
+    ToolExecutionBlockedError,
+    register_tool_hooks,
+    unregister_tool_hooks,
+)
 from .guardrail import (
     LLMGuardrail,
 )
@@ -39,5 +44,8 @@ __all__ = [
     "Process",
     "Task",
     "TaskOutput",
+    "ToolExecutionBlockedError",
     "UsageMetrics",
+    "register_tool_hooks",
+    "unregister_tool_hooks",
 ]

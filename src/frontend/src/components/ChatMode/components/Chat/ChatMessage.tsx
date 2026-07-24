@@ -17,6 +17,7 @@ import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
 import AgentCard from '../Cards/AgentCard';
 import TaskCard from '../Cards/TaskCard';
+import ToolApprovalCard, { ToolApprovalData } from '../Cards/ToolApprovalCard';
 import CrewListCard from '../Cards/CrewListCard';
 import FlowListCard from '../Cards/FlowListCard';
 import CrewDetailCard from '../Cards/CrewDetailCard';
@@ -79,6 +80,13 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
     if (!message.resultType || !message.resultData) return null;
 
     switch (message.resultType) {
+      case 'hitl_approval':
+        return (
+          <ToolApprovalCard
+            data={message.resultData as ToolApprovalData}
+            messageId={message.id}
+          />
+        );
       case 'agent':
         return <AgentCard agent={message.resultData as GeneratedAgent} />;
       case 'task':

@@ -1097,6 +1097,22 @@ def run_crew_in_process(
                             f"[SUBPROCESS] Event pipe registration failed (non-fatal): {pipe_err}"
                         )
 
+                    # Tool-approval gates: approval-flagged tools pause and wait
+                    # for the human (approval row + hitl_request over the pipe).
+                    try:
+                        from src.engines.kasal.kernel.tool_approval import (
+                            install_tool_approval_hook,
+                        )
+
+                        install_tool_approval_hook(execution_id, group_context)
+                        async_logger.info(
+                            f"[SUBPROCESS] Tool approval hook installed for {execution_id}"
+                        )
+                    except Exception as approval_err:
+                        async_logger.warning(
+                            f"[SUBPROCESS] Tool approval hook not installed (non-fatal): {approval_err}"
+                        )
+
                     # Debug: Print that we're about to configure logging
                     import sys  # Import sys for stderr debugging
 

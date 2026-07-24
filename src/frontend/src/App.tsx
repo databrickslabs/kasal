@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import ThemeProvider from './config/theme/ThemeProvider';
 import ShortcutsCircle from './components/ShortcutsCircle';
 import SSEConnectionManager from './components/Common/SSEConnectionManager';
+import ToolApprovalListener from './components/HITL/ToolApprovalListener';
 import { LanguageService } from './api/LanguageService';
 import DatabaseManagementService from './api/DatabaseManagementService';
 import { usePermissionLoader } from './hooks/usePermissions';
@@ -94,6 +95,7 @@ function App() {
       />
       <ShortcutsCircle />
       <SSEConnectionManager />
+      <ToolApprovalListener />
       <Box
         component="main"
         sx={{

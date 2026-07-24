@@ -55,6 +55,54 @@ def tool_schema(tool: BaseTool) -> dict[str, Any]:
     }
 
 
+class ToolExecutionBlockedError(Exception):
+    """A pre-execution tool hook blocked this tool call.
+
+    The message is surfaced to the LLM as the tool result (via the normal
+    error path), so the agent can explain the denial instead of crashing.
+    """
+
+
+# Tool lifecycle hooks — the enforcement seam beneath guardrails. Every tool
+# call in every path flows through wrap_tool, so a hook registered here can
+# audit, rewrite arguments, cache, or BLOCK any call (raise
+# ToolExecutionBlockedError, or block synchronously while awaiting a human
+# decision — tool calls already run on LLM worker threads in all paths).
+# Global by design (one execution per subprocess; in-process hooks scope
+# themselves by the agent/tool identity they captured, exactly like bus
+# handlers do). Hook failures are isolated: a broken *observer* never breaks
+# the call, but ToolExecutionBlockedError always propagates.
+_TOOL_PRE_HOOKS: list[Callable[..., Any]] = []
+_TOOL_POST_HOOKS: list[Callable[..., Any]] = []
+
+
+def register_tool_hooks(
+    pre: Callable[..., Any] | None = None,
+    post: Callable[..., Any] | None = None,
+) -> None:
+    """Register tool hooks.
+
+    pre(tool, kwargs, agent, task) -> dict | None — return a dict to REPLACE
+    the tool kwargs; raise ToolExecutionBlockedError to block the call.
+    post(tool, kwargs, result, agent, task) -> Any | None — return non-None
+    to replace the tool result.
+    """
+    if pre is not None and pre not in _TOOL_PRE_HOOKS:
+        _TOOL_PRE_HOOKS.append(pre)
+    if post is not None and post not in _TOOL_POST_HOOKS:
+        _TOOL_POST_HOOKS.append(post)
+
+
+def unregister_tool_hooks(
+    pre: Callable[..., Any] | None = None,
+    post: Callable[..., Any] | None = None,
+) -> None:
+    if pre is not None and pre in _TOOL_PRE_HOOKS:
+        _TOOL_PRE_HOOKS.remove(pre)
+    if post is not None and post in _TOOL_POST_HOOKS:
+        _TOOL_POST_HOOKS.remove(post)
+
+
 def wrap_tool(tool: BaseTool, agent: Any = None, task: Any = None) -> Callable[..., Any]:
     """Wrap tool.run with engine tool-usage events (native context applies)."""
 
@@ -71,7 +119,26 @@ def wrap_tool(tool: BaseTool, agent: Any = None, task: Any = None) -> Callable[.
         started_at = datetime.now(timezone.utc)
         crewai_event_bus.emit(tool, ToolUsageStartedEvent(**common))
         try:
+            for pre_hook in list(_TOOL_PRE_HOOKS):
+                try:
+                    replacement = pre_hook(tool, kwargs, agent, task)
+                except ToolExecutionBlockedError:
+                    raise
+                except Exception:
+                    logger.exception("tool pre-hook %r failed (ignored)", pre_hook)
+                else:
+                    if isinstance(replacement, dict):
+                        kwargs = replacement
+                        common["tool_args"] = kwargs
             output = tool.run(**kwargs)
+            for post_hook in list(_TOOL_POST_HOOKS):
+                try:
+                    replaced = post_hook(tool, kwargs, output, agent, task)
+                except Exception:
+                    logger.exception("tool post-hook %r failed (ignored)", post_hook)
+                else:
+                    if replaced is not None:
+                        output = replaced
         except Exception as e:
             crewai_event_bus.emit(tool, ToolUsageErrorEvent(error=str(e), **common))
             raise

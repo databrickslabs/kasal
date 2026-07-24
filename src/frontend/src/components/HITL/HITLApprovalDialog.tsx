@@ -401,6 +401,42 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
           {(approval.gate_config as { message?: string })?.message || 'Approval Required'}
         </Typography>
 
+        {/* Tool-call gate: the agent is paused mid-run waiting for this call */}
+        {(approval.gate_config as { kind?: string })?.kind === 'tool_call' && (
+          <Box mb={2}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Agent{' '}
+              <strong>
+                {(approval.gate_config as { agent_role?: string })?.agent_role || 'unknown'}
+              </strong>{' '}
+              wants to run{' '}
+              <strong>
+                {(approval.gate_config as { tool_name?: string })?.tool_name || 'a tool'}
+              </strong>
+              . The run is paused until you decide (deny lets the agent continue
+              without the tool).
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                mt: 1,
+                p: 1.5,
+                bgcolor: 'action.hover',
+                borderRadius: 1,
+                fontSize: '0.8rem',
+                overflowX: 'auto',
+                maxHeight: 200,
+              }}
+            >
+              {JSON.stringify(
+                (approval.gate_config as { tool_args?: Record<string, string> })?.tool_args ?? {},
+                null,
+                2,
+              )}
+            </Box>
+          </Box>
+        )}
+
         {/* Previous Crew Info */}
         {approval.previous_crew_name && (
           <Typography variant="body2" color="text.secondary" gutterBottom>

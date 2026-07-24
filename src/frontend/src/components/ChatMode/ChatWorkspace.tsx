@@ -1118,6 +1118,33 @@ const ChatWorkspace: React.FC = () => {
     };
   }, [processTrace, completeExecutionOnce, failExecutionOnce]);
 
+  // --- Inline tool-approval cards ---
+  // Chat never shows modal dialogs: an hitl_request for a job owned by a chat
+  // session renders as an approval card in that session's conversation (the
+  // global ToolApprovalListener skips chat-owned jobs). Deduped by approval id
+  // so an SSE replay on reconnect doesn't post the card twice.
+  const seenApprovalsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const onHitlRequest = (e: Event) => {
+      const detail = (e as CustomEvent).detail as Record<string, unknown> | undefined;
+      const jobId = detail?.job_id as string | undefined;
+      const approvalId = detail?.approval_id;
+      if (!jobId || approvalId === undefined || approvalId === null) return;
+      const owner = useExecutionStore.getState().jobOwnerOf(jobId);
+      if (!owner) return;
+      const key = String(approvalId);
+      if (seenApprovalsRef.current.has(key)) return;
+      seenApprovalsRef.current.add(key);
+      useSessionStore.getState().addMessageToTargetSession(owner, 'assistant', '', {
+        id: `hitl-${key}`,
+        resultType: 'hitl_approval',
+        resultData: detail,
+      });
+    };
+    window.addEventListener('hitlRequest', onHitlRequest);
+    return () => window.removeEventListener('hitlRequest', onHitlRequest);
+  }, []);
+
   // --- Generation Stream ---
   // Generation steps fold into the SAME collapsible run-activity element as
   // tool calls (no crew card in the conversation): each step posts a trace

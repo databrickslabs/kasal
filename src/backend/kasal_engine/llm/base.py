@@ -146,7 +146,17 @@ class BaseLLM(BaseModel):
             except json.JSONDecodeError:
                 logger.warning("unparseable tool arguments for %r: %.200s", name, arguments)
                 return None
-        result = function(**arguments)
+        try:
+            result = function(**arguments)
+        except Exception as e:
+            # A blocked call (denied approval / policy hook) is an answer, not
+            # a crash: hand the denial to the LLM as the tool result so the
+            # agent can adapt or explain. Other tool errors keep propagating.
+            from ..core.executor import ToolExecutionBlockedError
+
+            if isinstance(e, ToolExecutionBlockedError):
+                return f"Tool call blocked: {e}"
+            raise
         return result if isinstance(result, str) else str(result)
 
     def _track_token_usage_internal(self, usage: dict[str, Any] | None) -> None:

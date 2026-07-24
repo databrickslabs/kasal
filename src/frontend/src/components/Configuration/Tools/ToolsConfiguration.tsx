@@ -10,6 +10,7 @@ import {
   IconButton,
   Stack,
   Tooltip,
+  Checkbox,
   CircularProgress,
   Switch,
   FormControlLabel,
@@ -413,6 +414,43 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
               <Alert severity="error">{configError}</Alert>
             </Box>
           )}
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={
+              <Checkbox
+                checked={(() => {
+                  try {
+                    return Boolean(
+                      configText.trim() &&
+                        (JSON.parse(configText) as Record<string, unknown>)
+                          .requires_approval,
+                    );
+                  } catch {
+                    return false;
+                  }
+                })()}
+                onChange={(e) => {
+                  try {
+                    const parsed = configText.trim()
+                      ? (JSON.parse(configText) as Record<string, unknown>)
+                      : {};
+                    if (e.target.checked) {
+                      parsed.requires_approval = true;
+                    } else {
+                      delete parsed.requires_approval;
+                    }
+                    setConfigText(JSON.stringify(parsed, null, 2));
+                    setConfigError(null);
+                  } catch {
+                    setConfigError(
+                      'Fix the JSON below before toggling approval',
+                    );
+                  }
+                }}
+              />
+            }
+            label="Requires human approval — every use of this tool pauses until someone approves it (chat shows an inline card; runs show the approval dialog)"
+          />
           <TextField
             label="Teamspace Configuration (JSON)"
             value={configText}

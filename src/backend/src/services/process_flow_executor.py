@@ -485,6 +485,21 @@ def run_flow_in_process(
                             f"[FLOW_SUBPROCESS] Event pipe registration failed (non-fatal): {pipe_err}"
                         )
 
+                    # Tool-approval gates (same machinery as the crew path).
+                    try:
+                        from src.engines.kasal.kernel.tool_approval import (
+                            install_tool_approval_hook,
+                        )
+
+                        install_tool_approval_hook(execution_id, group_context)
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] Tool approval hook installed for {execution_id}"
+                        )
+                    except Exception as approval_err:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] Tool approval hook not installed (non-fatal): {approval_err}"
+                        )
+
                     # Route OTel tracing loggers to flow.log for visibility
                     for otel_logger_name in [
                         "src.services.otel_tracing",

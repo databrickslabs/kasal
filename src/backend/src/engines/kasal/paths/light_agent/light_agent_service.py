@@ -855,6 +855,20 @@ class LightAgentService:
                 crewai_event_bus.register_handler(LiteAgentExecutionCompletedEvent, _on_agent_completed)
                 crewai_event_bus.register_handler(LiteAgentExecutionErrorEvent, _on_agent_error)
 
+                # Tool-approval gates: tools stamped with an approval policy
+                # (requires_approval in tool config) pause before executing and
+                # wait for the human via SSE hitl_request + the approvals API.
+                _uninstall_approval_hook = None
+                try:
+                    from src.engines.kasal.kernel.tool_approval import (
+                        install_tool_approval_hook,
+                    )
+                    _uninstall_approval_hook = install_tool_approval_hook(
+                        execution_id, group_context
+                    )
+                except Exception as approval_err:  # noqa: BLE001
+                    logger.warning(f"[light_agent] approval hook not installed: {approval_err}")
+
                 logger.info(f"[light_agent] Kicking off single agent for execution {execution_id}")
                 try:
                     # ── Memory recall — the engine Agent does not consult memory
@@ -882,6 +896,11 @@ class LightAgentService:
                         trace_context, group_context, group_id,
                     )
                 finally:
+                    if _uninstall_approval_hook is not None:
+                        try:
+                            _uninstall_approval_hook()
+                        except Exception:  # noqa: BLE001
+                            pass
                     # Always unregister so handlers never leak on the global bus.
                     try:
                         crewai_event_bus.off(LLMStreamChunkEvent, _on_llm_chunk)
