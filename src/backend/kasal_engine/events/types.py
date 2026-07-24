@@ -134,6 +134,20 @@ class LLMCallFailedEvent(LLMEventBase):
     type: Literal["llm_call_failed"] = "llm_call_failed"
 
 
+class LLMStreamChunkEvent(LLMEventBase):
+    """A text delta received while an LLM call streams (LLM.stream=True).
+
+    Emitted between LLMCallStartedEvent and LLMCallCompletedEvent, once per
+    provider delta. `chunk` is the incremental text only; the completed event
+    still carries the full response. Not traced (kasal's otel bridge skips it);
+    consumers are live-UI forwarders.
+    """
+
+    type: Literal["llm_stream_chunk"] = "llm_stream_chunk"
+    chunk: str
+    chunk_index: int | None = None
+
+
 class LLMCallStartedEvent(LLMEventBase):
     """Engine replacement for crewai.events.types.llm_events.LLMCallStartedEvent"""
 

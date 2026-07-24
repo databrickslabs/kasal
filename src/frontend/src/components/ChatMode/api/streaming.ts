@@ -61,6 +61,7 @@ export function streamExecution(
     const eventTypes = [
       'execution_update',
       'trace',
+      'llm_chunk',
       'hitl_request',
       'connected',
     ];

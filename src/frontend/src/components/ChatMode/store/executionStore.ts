@@ -164,6 +164,14 @@ interface ExecutionActions {
   // Execution lifecycle
   startExecution: (jobId: string, sessionId?: string, opts?: { preservePreview?: boolean }) => void;
   updateExecutionStatus: (status: ExecutionStatus) => void;
+  /**
+   * Append a token-stream chunk (SSE `llm_chunk`) to this job's live bubble,
+   * creating the bubble on the first chunk. Display-only nicety: chunks are
+   * dropped unless the user is viewing the job's owner session (appendToMessage
+   * writes to the on-screen message list); the terminal message from
+   * completeExecution is authoritative either way.
+   */
+  appendStreamChunk: (jobId: string, chunk: string) => void;
   // jobId routes the completion to the session that OWNS that job, so a run
   // finishing in a backgrounded session (parallel sessions) lands in the right
   // place instead of the single global slot. Omitting it keeps the legacy
@@ -216,6 +224,10 @@ const sessionSnapshots = new Map<string, SessionExecSnapshot>();
 // in that session's snapshot) instead of being dropped or misrouted. Lives
 // outside Zustand (pure routing data, no re-render needed), like sessionSnapshots.
 const jobOwners = new Map<string, string>();
+
+// jobId -> message id of the live token-streaming bubble (SSE `llm_chunk`).
+// Same lifecycle discipline as jobOwners: entries die when the job finalizes.
+const streamBubbles = new Map<string, string>();
 
 // Load a session's preview into the live slot when there's no in-memory
 // snapshot. Single source of truth: derive each run's deliverable from its
@@ -512,6 +524,25 @@ export const useExecutionStore = create<ExecutionStore>()(
     }));
   },
 
+  appendStreamChunk: (jobId, chunk) => {
+    if (!jobId || !chunk) return;
+    const ownerSession = jobOwners.get(jobId);
+    if (!ownerSession) return; // untracked or already finalized
+    const sessionStore = useSessionStore.getState();
+    // appendToMessage mutates the CURRENT session's message list, so only
+    // stream while the owner session is on screen. Switching away just pauses
+    // the live text; completeExecution still routes the final answer by owner.
+    if (sessionStore.currentSessionId !== ownerSession) return;
+    const existing = streamBubbles.get(jobId);
+    if (existing) {
+      sessionStore.appendToMessage(existing, chunk);
+      return;
+    }
+    const bubbleId = `stream-${jobId}`;
+    streamBubbles.set(jobId, bubbleId);
+    sessionStore.addMessage('assistant', chunk, { id: bubbleId, isStreaming: true });
+  },
+
   completeExecution: (resultText: string, jobId?: string, surface?: Surface) => {
     const state = get();
     // Route to the job's OWNER (parallel sessions), falling back to the single
@@ -523,6 +554,11 @@ export const useExecutionStore = create<ExecutionStore>()(
       if (!jobOwners.has(jobId)) return;
       jobOwners.delete(jobId);
     }
+    // Live token bubble for this job (if any). The terminal result is
+    // authoritative (it may be post-processed text or an A2UI surface), so the
+    // bubble is finalized in place below rather than left as a duplicate.
+    const streamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
+    if (jobId) streamBubbles.delete(jobId);
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -582,6 +618,12 @@ export const useExecutionStore = create<ExecutionStore>()(
         if (ownerSession) {
           saveSessionPreview(ownerSession, preview);
         }
+        // No chat message on this path — just stop the bubble's typing state.
+        if (streamBubbleId && ownerSession) {
+          sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
+            isStreaming: false,
+          });
+        }
       } else {
         // Route text message to the correct session. A composed surface IS the
         // canonical rendering of the answer (a Genie table, a dashboard, a deck…),
@@ -594,7 +636,14 @@ export const useExecutionStore = create<ExecutionStore>()(
         // their text. Formerly gated on `surface && preview`, which missed plain
         // markdown answers (parsePreviewContent is A2UI-only → null → text kept).
         const body = surface ? '' : resultText;
-        if (ownerSession) {
+        if (streamBubbleId && ownerSession) {
+          // Finalize the live bubble in place — no flicker, no duplicate.
+          sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
+            content: body,
+            isStreaming: false,
+            ...(runExtra ?? {}),
+          });
+        } else if (ownerSession) {
           sessionStore.addMessageToTargetSession(
             ownerSession,
             'assistant',
@@ -606,7 +655,14 @@ export const useExecutionStore = create<ExecutionStore>()(
         }
       }
     } else {
-      if (ownerSession) {
+      if (streamBubbleId && ownerSession) {
+        // Streamed text exists but the terminal result is empty — keep the
+        // streamed answer instead of posting a generic completion notice.
+        sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
+          isStreaming: false,
+          ...(runExtra ?? {}),
+        });
+      } else if (ownerSession) {
         sessionStore.addMessageToTargetSession(
           ownerSession,
           'assistant',
@@ -672,9 +728,17 @@ export const useExecutionStore = create<ExecutionStore>()(
       if (!jobOwners.has(jobId)) return; // already finalized — no-op
       jobOwners.delete(jobId);
     }
+    const failStreamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
+    if (jobId) streamBubbles.delete(jobId);
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
+    // Stop the live bubble's typing state; the error posts as its own message.
+    if (failStreamBubbleId && ownerSession) {
+      sessionStore.updateMessageInTargetSession(ownerSession, failStreamBubbleId, {
+        isStreaming: false,
+      });
+    }
 
     // Run is over — drop the persisted reconnect marker.
     if (ownerSession) clearActiveExecution(ownerSession);
@@ -733,6 +797,7 @@ export const useExecutionStore = create<ExecutionStore>()(
     // Untracked or already finalized — nothing to do (keeps double calls, e.g.
     // the reconnect backstop AND a late poller 'jobNotFound', a clean no-op).
     if (!jobId || !jobOwners.has(jobId)) return;
+    streamBubbles.delete(jobId);
     const ownerSession = jobOwners.get(jobId)!;
     jobOwners.delete(jobId);
 
@@ -862,6 +927,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   jobOwnerOf: (jobId: string) => jobOwners.get(jobId) ?? null,
   clearJobOwner: (jobId: string) => {
     jobOwners.delete(jobId);
+    streamBubbles.delete(jobId);
   },
 
   stashSessionPreview: (sessionId: string, preview: PreviewContent) => {

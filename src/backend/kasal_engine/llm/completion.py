@@ -14,7 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, PrivateAttr
 
-from ..events.types import LLMCallType
+from ..events.bus import crewai_event_bus
+from ..events.types import LLMCallType, LLMStreamChunkEvent
 from .base import BaseLLM
 from .exceptions import LLMContextLengthExceededError, is_context_length_exceeded
 
@@ -185,19 +186,21 @@ class OpenAICompletion(BaseLLM):
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
         for _round in range(_MAX_TOOL_ROUNDS):
-            response = self.client.chat.completions.create(
-                **self._prepare_completion_params(conversation, tools)
-            )
-            usage = self._extract_chat_token_usage(response)
-            self._track_token_usage_internal(usage)
-            function_calls = self._extract_function_calls_from_response(response)
-            message = response.choices[0].message
+            params = self._prepare_completion_params(conversation, tools)
+            if self.stream:
+                content, usage, function_calls = self._stream_chat_completion(params)
+            else:
+                response = self.client.chat.completions.create(**params)
+                usage = self._extract_chat_token_usage(response)
+                self._track_token_usage_internal(usage)
+                function_calls = self._extract_function_calls_from_response(response)
+                content = response.choices[0].message.content
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
                 conversation.append(
                     {
                         "role": "assistant",
-                        "content": message.content,
+                        "content": content,
                         "tool_calls": [
                             {
                                 "id": fc["id"],
@@ -223,11 +226,74 @@ class OpenAICompletion(BaseLLM):
                         }
                     )
                 continue
-            return message.content or "", usage, call_type
+            return content or "", usage, call_type
         raise RuntimeError(
             f"Tool-calling did not converge within {_MAX_TOOL_ROUNDS} rounds "
             f"for model {self.model}."
         )
+
+    def _stream_chat_completion(
+        self, params: dict[str, Any]
+    ) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+        """One streamed chat completion: emits LLMStreamChunkEvent per text
+        delta, accumulates tool-call deltas, returns (text, usage, calls)."""
+        params = {**params, "stream": True, "stream_options": {"include_usage": True}}
+        try:
+            response_stream = self.client.chat.completions.create(**params)
+        except Exception as e:
+            # Some OpenAI-compatible servers reject stream_options; retry
+            # without it (usage is then unavailable for this call).
+            if "stream_options" not in str(e):
+                raise
+            params.pop("stream_options", None)
+            response_stream = self.client.chat.completions.create(**params)
+
+        chunks: list[str] = []
+        calls_by_index: dict[int, dict[str, Any]] = {}
+        usage: dict[str, Any] | None = None
+        chunk_index = 0
+        for part in response_stream:
+            if getattr(part, "usage", None) is not None:
+                usage = self._extract_chat_token_usage(part)
+            choices = getattr(part, "choices", None)
+            if not choices:
+                continue
+            delta = choices[0].delta
+            text = getattr(delta, "content", None)
+            if text:
+                chunks.append(text)
+                crewai_event_bus.emit(
+                    self,
+                    LLMStreamChunkEvent(
+                        model=self.model, chunk=text, chunk_index=chunk_index
+                    ),
+                )
+                chunk_index += 1
+            for tc in getattr(delta, "tool_calls", None) or []:
+                slot = calls_by_index.setdefault(
+                    tc.index, {"id": None, "name": "", "arguments": ""}
+                )
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                function = getattr(tc, "function", None)
+                if function is not None:
+                    if getattr(function, "name", None):
+                        slot["name"] = function.name
+                    if getattr(function, "arguments", None):
+                        slot["arguments"] += function.arguments
+
+        if usage:
+            self._track_token_usage_internal(usage)
+        function_calls = [
+            {
+                "id": slot["id"] or f"call_{index}",
+                "name": slot["name"],
+                "arguments": slot["arguments"],
+            }
+            for index, slot in sorted(calls_by_index.items())
+            if slot["name"]
+        ]
+        return "".join(chunks), usage, function_calls
 
     def _extract_chat_token_usage(self, response: Any) -> dict[str, Any] | None:
         usage = getattr(response, "usage", None)

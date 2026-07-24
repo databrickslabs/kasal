@@ -416,6 +416,21 @@ class LightAgentService:
                 # per agent, so each in-process light run has its own instance.
                 _agent_llm = getattr(agent, "llm", None)
 
+                # Token streaming (chat live-typing): opt the per-run LLM into
+                # streamed completions so the engine emits LLMStreamChunkEvent
+                # per text delta. Chat Completions only — the Responses-API
+                # branch (codex models) does not read the flag, so setting it
+                # there is a harmless no-op. Kill-switch: CHAT_TOKEN_STREAMING=false.
+                if (
+                    _agent_llm is not None
+                    and os.getenv("CHAT_TOKEN_STREAMING", "true").strip().lower()
+                    not in ("0", "false", "no")
+                ):
+                    try:
+                        _agent_llm.stream = True
+                    except Exception as stream_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] token streaming not enabled: {stream_err}")
+
                 # Register tool-activity handlers scoped to THIS agent's id. A
                 # ``tool_usage`` trace marks the call; a ``<tool>_run`` trace carries
                 # the result (the chat pane renders both and restores ``_run`` from
@@ -430,6 +445,7 @@ class LightAgentService:
                 # answer is pure prose (the tool handlers above never fire then).
                 from kasal_engine.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
                 from kasal_engine.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
+                from kasal_engine.events import LLMStreamChunkEvent
                 # Memory recall/persist events — emitted by the unified Memory with
                 # source=<the Memory> (no agent_id), so they're matched by identity
                 # (source is _agent_memory). These give the chat trace the same
@@ -769,6 +785,63 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] agent-error trace skipped: {h_err}")
 
+                # ── Token chunks → SSE (chat live-typing) ───────────────────
+                # Chunk events fire on the LLM worker thread (kickoff runs under
+                # asyncio.to_thread), so they are buffered here and flushed onto
+                # the main loop in ~50ms frames: one SSE event per frame instead
+                # of one per token, which keeps the per-client queue (maxsize
+                # 100) and the wire chatty-but-sane. skip_replay: chunks are
+                # ephemeral — replaying them after a reconnect is useless and
+                # would evict trace/status history from the replay buffer.
+                # Scoped to THIS run via ``source is _agent_llm`` (fresh LLM
+                # instance per build — same guarantee the LLM handlers rely on).
+                import threading as _threading
+
+                _chunk_buf: list = []
+                _chunk_state = {"scheduled": False, "seq": 0}
+                _chunk_lock = _threading.Lock()
+
+                async def _flush_chunks() -> None:
+                    await asyncio.sleep(0.05)
+                    with _chunk_lock:
+                        _chunk_state["scheduled"] = False
+                        text = "".join(_chunk_buf)
+                        _chunk_buf.clear()
+                        seq = _chunk_state["seq"]
+                        _chunk_state["seq"] += 1
+                    if not text:
+                        return
+                    try:
+                        from src.core.sse_manager import SSEEvent, sse_manager
+                        await sse_manager.broadcast_to_job(
+                            execution_id,
+                            SSEEvent(
+                                data={"job_id": execution_id, "chunk": text, "seq": seq},
+                                event="llm_chunk",
+                            ),
+                            skip_replay=True,
+                        )
+                    except Exception as sse_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] llm_chunk broadcast skipped: {sse_err}")
+
+                def _on_llm_chunk(source, event) -> None:
+                    try:
+                        if _agent_llm is None or source is not _agent_llm:
+                            return
+                        text = getattr(event, "chunk", "") or ""
+                        if not text or _main_loop is None:
+                            return
+                        with _chunk_lock:
+                            _chunk_buf.append(text)
+                            if _chunk_state["scheduled"]:
+                                return
+                            _chunk_state["scheduled"] = True
+                        fut = asyncio.run_coroutine_threadsafe(_flush_chunks(), _main_loop)
+                        fut.add_done_callback(lambda f: f.exception())  # drain, never raise
+                    except Exception as h_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] llm-chunk forward skipped: {h_err}")
+
+                crewai_event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
                 crewai_event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
                 crewai_event_bus.register_handler(ToolUsageFinishedEvent, _on_tool_finished)
                 crewai_event_bus.register_handler(ToolUsageErrorEvent, _on_tool_error)
@@ -811,6 +884,7 @@ class LightAgentService:
                 finally:
                     # Always unregister so handlers never leak on the global bus.
                     try:
+                        crewai_event_bus.off(LLMStreamChunkEvent, _on_llm_chunk)
                         crewai_event_bus.off(ToolUsageStartedEvent, _on_tool_started)
                         crewai_event_bus.off(ToolUsageFinishedEvent, _on_tool_finished)
                         crewai_event_bus.off(ToolUsageErrorEvent, _on_tool_error)

@@ -153,7 +153,8 @@ class SSEConnectionManager:
     async def broadcast_to_job(
         self,
         job_id: str,
-        event: SSEEvent
+        event: SSEEvent,
+        skip_replay: bool = False,
     ) -> int:
         """
         Broadcast an event to all clients subscribed to a job.
@@ -174,11 +175,15 @@ class SSEConnectionManager:
             eid = self._event_id
         event.id = str(eid)
 
-        # Buffer for replay when proxy drops the connection
-        if job_id not in self._replay_buffer:
-            self._replay_buffer[job_id] = deque(maxlen=self._replay_max_per_job)
-        self._replay_buffer[job_id].append((eid, event))
-        self._global_replay.append((eid, event))
+        # Buffer for replay when proxy drops the connection. High-frequency
+        # ephemeral events (LLM token chunks) skip the buffer: replaying them
+        # is pointless after the fact, and hundreds of chunks would evict the
+        # trace/status history that reconnect replay depends on.
+        if not skip_replay:
+            if job_id not in self._replay_buffer:
+                self._replay_buffer[job_id] = deque(maxlen=self._replay_max_per_job)
+            self._replay_buffer[job_id].append((eid, event))
+            self._global_replay.append((eid, event))
 
         # Broadcast to job-specific subscribers
         if job_id in self.job_queues:

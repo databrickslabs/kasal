@@ -1033,6 +1033,12 @@ const ChatWorkspace: React.FC = () => {
   // --- Execution Stream ---
   const executionStream = useExecutionStream({
     onTrace: processTrace,
+    onChunk: (chunk, data) => {
+      // Route by the job id stamped on the event (parallel-session safe),
+      // falling back to the stream this workspace opened.
+      const jobId = (data.job_id as string) || sseJobIdRef.current;
+      if (jobId) useExecutionStore.getState().appendStreamChunk(jobId, chunk);
+    },
     onStatusChange: (status) => {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);
     },

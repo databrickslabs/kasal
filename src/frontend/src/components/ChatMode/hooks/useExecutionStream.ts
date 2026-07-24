@@ -7,6 +7,8 @@ interface UseExecutionStreamOptions {
   onStatusChange: (status: string, data: Record<string, unknown>) => void;
   onComplete: (result: Record<string, unknown>) => void;
   onError: (error: string) => void;
+  /** Coalesced LLM token chunk (`llm_chunk` SSE event) for live typing. */
+  onChunk?: (chunk: string, data: Record<string, unknown>) => void;
 }
 
 export function useExecutionStream(options: UseExecutionStreamOptions) {
@@ -54,6 +56,13 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
                   (event.data.error as string) || `Execution ${status}`
                 );
                 stopStream();
+              }
+              break;
+            }
+            case 'llm_chunk': {
+              const chunk = (event.data.chunk as string) || '';
+              if (chunk && opts.onChunk) {
+                opts.onChunk(chunk, event.data);
               }
               break;
             }
