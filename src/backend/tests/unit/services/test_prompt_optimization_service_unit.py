@@ -17,6 +17,9 @@ from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services import prompt_optimization_service as svc_module
 from src.services.prompt_optimization_service import (
     PromptOptimizationService,
+    _checklist_grade,
+    _distill_requirements,
+    _parse_requirement_lines,
     _extract_user_from_log,
     _intent_format_score,
     _json_keys_score,
@@ -270,6 +273,77 @@ class TestGenericScoringHelpers:
         assert _job_name_score("Run") == pytest.approx(0.5)
         assert _job_name_score('{"name": "Swiss News"}') == 0.0
         assert _job_name_score("") == 0.0
+
+
+class TestRequirementsDistillation:
+    def test_dedupes_repeated_complaints(self):
+        notes = [
+            "it is giving french side we need german side of switzerland",
+            "It is giving FRENCH side, we need german side of switzerland!",
+            "you provided me a link of rent and not buy.",
+            "I am expecting apartments for sale and not rent",
+            "",
+            "it is giving french side we need german side of switzerland",
+        ]
+        reqs = _distill_requirements(notes)
+        assert len(reqs) == 3
+        assert reqs[0].startswith("it is giving french side")
+
+    def test_respects_limit_and_order(self):
+        notes = [f"requirement {i}" for i in range(12)]
+        reqs = _distill_requirements(notes, limit=8)
+        assert len(reqs) == 8
+        assert reqs[0] == "requirement 0"
+
+    def test_empty_input(self):
+        assert _distill_requirements([]) == []
+        assert _distill_requirements(["", "   ", None]) == []
+
+
+class TestParseRequirementLines:
+    def test_parses_numbered_lines(self):
+        text = (
+            "R1. Only German-speaking Switzerland.\n\n"
+            "R2: Apartments for sale, not rent.\n"
+            "Some trailing chatter."
+        )
+        assert _parse_requirement_lines(text) == [
+            "Only German-speaking Switzerland.",
+            "Apartments for sale, not rent.",
+        ]
+
+    def test_empty_or_chatter_returns_nothing(self):
+        assert _parse_requirement_lines("") == []
+        assert _parse_requirement_lines("I could not produce a list.") == []
+
+
+class TestChecklistGrade:
+    def test_grade_computed_from_marks_not_model_arithmetic(self):
+        # The model claims "40" — the grade must come from the marks.
+        verdict = "R1: FAIL — quotes Geneva\nR2: PASS\nR3: PASS\n\n40"
+        grade = _checklist_grade(verdict, 3)
+        # 0.8 * (2/3) + 0.2 * 0.5 (no Q mark -> default 5/10)
+        assert grade == pytest.approx(0.8 * (2 / 3) + 0.1)
+
+    def test_quality_mark_blends_in(self):
+        verdict = "R1: PASS\nR2: PASS\nQ: 8"
+        assert _checklist_grade(verdict, 2) == pytest.approx(0.8 + 0.2 * 0.8)
+
+    def test_all_fail_scores_low_but_not_none(self):
+        verdict = "R1: FAIL — x\nR2: FAIL — y\nQ: 0"
+        assert _checklist_grade(verdict, 2) == pytest.approx(0.0)
+
+    def test_no_marks_returns_none_for_fallback(self):
+        assert _checklist_grade("I think this is a 7.", 3) is None
+        assert _checklist_grade("", 3) is None
+
+    def test_duplicate_marks_first_wins(self):
+        verdict = "R1: PASS\nR1: FAIL — restated\nQ: 5"
+        assert _checklist_grade(verdict, 1) == pytest.approx(0.8 + 0.1)
+
+    def test_case_insensitive_marks(self):
+        verdict = "r1: pass\nr2: fail — z"
+        assert _checklist_grade(verdict, 2) == pytest.approx(0.8 * 0.5 + 0.1)
 
 
 class TestRegistryResolution:
