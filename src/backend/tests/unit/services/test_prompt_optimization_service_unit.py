@@ -193,7 +193,9 @@ class TestMineExamples:
                 prompt="/load crew Some Crew", status="success", created_at=now
             ),  # slash command
             SimpleNamespace(
-                prompt="Crew generation failed: no credentials", status="success", created_at=now
+                prompt="Crew generation failed: no credentials",
+                status="success",
+                created_at=now,
             ),  # system error string
             SimpleNamespace(prompt="run crew", status="success", created_at=now),
         ]
@@ -219,9 +221,10 @@ class TestReflectionModelResolution:
         svc.model_repository.find_by_key = AsyncMock(
             return_value=SimpleNamespace(provider="databricks")
         )
-        uri, env = await svc._resolve_reflection_model("some-endpoint")
+        uri, env, provider = await svc._resolve_reflection_model("some-endpoint")
         assert uri == "databricks:/some-endpoint"
         assert env == {}
+        assert provider == "databricks"
 
     @pytest.mark.asyncio
     async def test_vllm_provider_sets_openai_env(self):
@@ -229,9 +232,33 @@ class TestReflectionModelResolution:
         svc.model_repository.find_by_key = AsyncMock(
             return_value=SimpleNamespace(provider="vllm")
         )
-        uri, env = await svc._resolve_reflection_model("Qwen3-Coder-30B-A3B-Instruct")
+        uri, env, provider = await svc._resolve_reflection_model(
+            "Qwen3-Coder-30B-A3B-Instruct"
+        )
         assert uri == "openai:/Qwen3-Coder-30B-A3B-Instruct"
+        assert provider == "vllm"
         assert "OPENAI_API_BASE" in env and "OPENAI_API_KEY" in env
+
+    @pytest.mark.asyncio
+    async def test_kimi_provider_resolves_with_key_and_provider_tag(self):
+        # The provider tag drives request quirks downstream — Kimi rejects any
+        # explicit temperature, so the caller must know it is talking to Kimi.
+        svc = PromptOptimizationService(MagicMock())
+        svc.model_repository.find_by_key = AsyncMock(
+            return_value=SimpleNamespace(
+                provider="kimi", name="kimi-k2.7-code-highspeed"
+            )
+        )
+        with patch(
+            "src.services.api_keys_service.ApiKeysService.get_provider_api_key",
+            AsyncMock(return_value="sk-test"),
+        ):
+            uri, env, provider = await svc._resolve_reflection_model(
+                "kimi-k2.7-code-highspeed", _group()
+            )
+        assert uri == "openai:/kimi-k2.7-code-highspeed"
+        assert env["OPENAI_API_KEY"] == "sk-test"
+        assert provider == "kimi"
 
     @pytest.mark.asyncio
     async def test_unknown_provider_raises(self):
@@ -605,9 +632,7 @@ class _FakeMlflowRegistry:
                 self.model = model
 
             def register(self):
-                registry.registered.append(
-                    (self.name, self.instructions, self.model)
-                )
+                registry.registered.append((self.name, self.instructions, self.model))
                 registry.scorers[self.name] = self
 
         mlflow = types.ModuleType("mlflow")
@@ -617,8 +642,10 @@ class _FakeMlflowRegistry:
 
         genai = types.ModuleType("mlflow.genai")
         judges = types.ModuleType("mlflow.genai.judges")
-        judges.make_judge = lambda name, instructions, model, feedback_value_type: _Judge(
-            name, instructions, model
+        judges.make_judge = (
+            lambda name, instructions, model, feedback_value_type: _Judge(
+                name, instructions, model
+            )
         )
         scorers = types.ModuleType("mlflow.genai.scorers")
         scorers.get_scorer = lambda name: registry.scorers[name]
@@ -652,7 +679,7 @@ def fake_mlflow(monkeypatch):
 
 def _judge_service():
     svc = PromptOptimizationService(MagicMock())
-    svc._resolve_reflection_model = AsyncMock(return_value=("openai:/qwen", {}))
+    svc._resolve_reflection_model = AsyncMock(return_value=("openai:/qwen", {}, "vllm"))
     return svc
 
 
@@ -714,7 +741,7 @@ class TestJudgeLifecycle:
         svc = _judge_service()
         await svc.create_judge("acc", "Keep these criteria for {{ outputs }}.")
         svc._resolve_reflection_model = AsyncMock(
-            return_value=("deepseek:/v4", {})
+            return_value=("deepseek:/v4", {}, "deepseek")
         )
         fake_mlflow.registered.clear()
         await svc.update_judge("acc", model="deepseek-v4-pro", group_context=_group())

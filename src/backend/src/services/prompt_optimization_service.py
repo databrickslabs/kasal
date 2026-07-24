@@ -649,8 +649,10 @@ class PromptOptimizationService:
 
         target_model = request.model or DEFAULT_TARGET_MODEL
         judge_model = request.judge_model or target_model
-        reflection_uri, reflection_env = await self._resolve_reflection_model(
-            request.reflection_model or target_model, group_context
+        reflection_uri, reflection_env, reflection_provider = (
+            await self._resolve_reflection_model(
+                request.reflection_model or target_model, group_context
+            )
         )
         registry_uri, prompt_name = await self._resolve_registry(
             request.template_name, group_context
@@ -762,6 +764,9 @@ class PromptOptimizationService:
         GEPA invokes its reflection model itself (outside LLMManager), so the
         key must become a provider URI plus any env vars the provider needs —
         including the provider API key from Kasal's group-scoped key store.
+
+        Returns (uri, env, provider) — the provider string lets callers apply
+        provider-specific request quirks (e.g. Kimi rejects any temperature).
         """
         config = await self.model_repository.find_by_key(model_key)
         provider = (getattr(config, "provider", None) or "").lower() if config else ""
@@ -772,15 +777,19 @@ class PromptOptimizationService:
             (getattr(config, "name", None) or model_key) if config else model_key
         )
         if provider == "databricks":
-            return f"databricks:/{api_model}", {}
+            return f"databricks:/{api_model}", {}, provider
         if provider == "vllm":
             # OpenAI-compatible endpoint — same env resolution as llm_manager.
-            return f"openai:/{api_model}", {
-                "OPENAI_API_BASE": os.getenv(
-                    "VLLM_BASE_URL", "http://localhost:8081/v1"
-                ),
-                "OPENAI_API_KEY": os.getenv("VLLM_API_KEY", "vllm"),
-            }
+            return (
+                f"openai:/{api_model}",
+                {
+                    "OPENAI_API_BASE": os.getenv(
+                        "VLLM_BASE_URL", "http://localhost:8081/v1"
+                    ),
+                    "OPENAI_API_KEY": os.getenv("VLLM_API_KEY", "vllm"),
+                },
+                provider,
+            )
         if provider == "kimi":
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint with the key from
             # Kasal's key store, mirroring llm_manager's kimi routing.
@@ -795,12 +804,16 @@ class PromptOptimizationService:
                     "Reflection model needs a Kimi API key — add KIMI_API_KEY "
                     "under Configuration -> API Keys."
                 )
-            return f"openai:/{api_model}", {
-                "OPENAI_API_BASE": os.getenv(
-                    "KIMI_ENDPOINT", "https://api.moonshot.ai/v1"
-                ),
-                "OPENAI_API_KEY": api_key,
-            }
+            return (
+                f"openai:/{api_model}",
+                {
+                    "OPENAI_API_BASE": os.getenv(
+                        "KIMI_ENDPOINT", "https://api.moonshot.ai/v1"
+                    ),
+                    "OPENAI_API_KEY": api_key,
+                },
+                provider,
+            )
         if provider in self._REFLECTION_KEY_ENV:
             env: Dict[str, str] = {}
             env_name = self._REFLECTION_KEY_ENV[provider]
@@ -824,7 +837,7 @@ class PromptOptimizationService:
                     f"(configure it under API Keys) or pass 'reflection_model' "
                     f"with a different provider."
                 )
-            return f"{provider}:/{api_model}", env
+            return f"{provider}:/{api_model}", env, provider
         raise ValueError(
             f"Reflection model '{model_key}' has unsupported provider '{provider or 'unknown'}' "
             f"(supported: databricks, vllm, kimi, {', '.join(sorted(self._REFLECTION_KEY_ENV))}). "
@@ -1145,6 +1158,11 @@ class PromptOptimizationService:
                 optimizer=GepaPromptOptimizer(
                     reflection_model=reflection_uri,
                     max_metric_calls=max_metric_calls,
+                    # llm_manager enables a process-global litellm cache;
+                    # without a per-request bypass, identical reflection
+                    # prompts are served the same cached proposal forever
+                    # (observed live in crew mode).
+                    gepa_kwargs={"reflection_lm_kwargs": {"cache": {"no-cache": True}}},
                 ),
                 scorers=[output_format, output_correct],
                 aggregation=aggregation,
@@ -1281,8 +1299,10 @@ class PromptOptimizationService:
 
         target_model = request.model or DEFAULT_TARGET_MODEL
         judge_model = request.judge_model or target_model
-        reflection_uri, reflection_env = await self._resolve_reflection_model(
-            request.reflection_model or target_model, group_context
+        reflection_uri, reflection_env, reflection_provider = (
+            await self._resolve_reflection_model(
+                request.reflection_model or target_model, group_context
+            )
         )
         registry_uri, _ = await self._resolve_registry("crew", group_context)
         safe_group = "".join(
@@ -1334,6 +1354,7 @@ class PromptOptimizationService:
                 judge_model=judge_model,
                 reflection_uri=reflection_uri,
                 reflection_env=reflection_env,
+                reflection_provider=reflection_provider,
                 max_metric_calls=request.max_metric_calls,
                 execution_timeout=request.execution_timeout_seconds,
                 registry_uri=registry_uri,
@@ -1364,6 +1385,7 @@ class PromptOptimizationService:
         prompt_name: str,
         crew_id: str = "",
         cancel_run_id: str = "",
+        reflection_provider: str = "",
         group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
@@ -1960,10 +1982,23 @@ class PromptOptimizationService:
                         # with the no-fence contract below, 4 of 4 samples
                         # parsed, were distinct, and carried the requirements
                         # (validated offline against the live endpoint).
-                        "reflection_lm_kwargs": {
-                            "temperature": 0.8,
-                            "cache": {"no-cache": True},
-                        },
+                        # PROVIDER QUIRK — Kimi K-series accepts ONLY its
+                        # default temperature: sending 0.8 made Moonshot 400
+                        # every reflection call ("invalid temperature: only 1
+                        # is allowed"), gepa skipped 10 proposals in a row and
+                        # the run 'completed' after the baseline's single
+                        # execution (observed live; verified by direct repro —
+                        # the same call without temperature returns a clean,
+                        # parseable crew doc). Kimi's forced default sampling
+                        # is itself diverse, so dropping the knob is safe.
+                        "reflection_lm_kwargs": (
+                            {"cache": {"no-cache": True}}
+                            if reflection_provider == "kimi"
+                            else {
+                                "temperature": 0.8,
+                                "cache": {"no-cache": True},
+                            }
+                        ),
                         # gepa's default template says "write a new
                         # instruction ... within ``` blocks" — an open
                         # invitation to restructure: the reflection model
@@ -2230,7 +2265,7 @@ class PromptOptimizationService:
             raise ValueError("Judge instructions are required")
         if "{{ outputs }}" not in text and "{{outputs}}" not in text:
             text += "\n\nThe answer to evaluate:\n{{ outputs }}"
-        model_uri, _env = await self._resolve_reflection_model(
+        model_uri, _env, _provider = await self._resolve_reflection_model(
             model or DEFAULT_TARGET_MODEL, group_context
         )
         scoped_name = (
@@ -2330,7 +2365,9 @@ class PromptOptimizationService:
             raise ValueError("Nothing to update: provide instructions and/or a model")
         model_uri: Optional[str] = None
         if model:
-            model_uri, _env = await self._resolve_reflection_model(model, group_context)
+            model_uri, _env, _provider = await self._resolve_reflection_model(
+                model, group_context
+            )
 
         def _update() -> Dict[str, Any]:
             import mlflow
