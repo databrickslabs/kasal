@@ -208,13 +208,15 @@ async def relay_execution_events(queue: Any, execution_id: str) -> None:
                 )
             elif kind == "hitl_request":
                 # A tool-approval gate in the subprocess needs the human NOW.
-                # Kept in the replay buffer (default) so a reconnecting client
-                # still learns about a pending gate.
+                # skip_replay: replaying old gate events after a reconnect pops
+                # stale/expired dialogs; clients that missed the live event
+                # discover pending gates via the approvals API instead.
                 payload = {k: v for k, v in frame.items() if k != "kind"}
                 payload.setdefault("job_id", execution_id)
                 await sse_manager.broadcast_to_job(
                     execution_id,
                     SSEEvent(data=payload, event="hitl_request"),
+                    skip_replay=True,
                 )
             else:
                 continue  # forward compatibility: ignore unknown frame kinds

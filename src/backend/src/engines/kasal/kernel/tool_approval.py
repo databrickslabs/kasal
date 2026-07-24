@@ -34,6 +34,35 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL_SECONDS = 1.0
 _DEFAULT_TIMEOUT_SECONDS = 300  # tool gates want minutes, not the flow-gate hour
 _DEFAULT_TIMEOUT_ACTION = "reject"  # or "approve" per-policy
+_DEFAULT_SCOPE = "run"  # a decision sticks for the rest of the run; "call" re-asks
+
+# (execution_id, tool_name) -> "approved" | "rejected". One human decision per
+# tool per run: an agent looping on the same tool must not re-prompt the user
+# every call. In-memory is enough within a process (one execution per
+# subprocess; light path keys by execution id); the DB lookup below covers
+# resumed runs in a fresh process.
+_run_decisions: Dict[tuple, str] = {}
+
+
+async def _prior_decision(execution_id: str, tool_name: str, group_id: str) -> Optional[str]:
+    """Latest approved/rejected tool_call decision for this tool in this run."""
+    from src.db.session import request_scoped_session
+    from src.repositories.hitl_repository import HITLApprovalRepository
+
+    async with request_scoped_session() as session:
+        approvals = await HITLApprovalRepository(session).get_all_for_execution(
+            execution_id, group_id
+        )
+    decision = None
+    for approval in approvals or []:
+        config = approval.gate_config or {}
+        if config.get("kind") != "tool_call" or config.get("tool_name") != tool_name:
+            continue
+        status = approval.status
+        status = status.value if hasattr(status, "value") else str(status)
+        if status in ("approved", "rejected"):
+            decision = status  # list is time-ordered; keep the latest
+    return decision
 
 
 def _safe_args(kwargs: Dict[str, Any], max_len: int = 500) -> Dict[str, str]:
@@ -84,9 +113,13 @@ async def _approval_status(approval_id: str) -> Optional[str]:
 async def _notify_sse(execution_id: str, payload: Dict[str, Any]) -> None:
     from src.core.sse_manager import SSEEvent, sse_manager
 
+    # skip_replay: a replayed hitl_request after a reconnect would pop stale
+    # (often already-expired) gates. The DB row + GET /hitl/pending are the
+    # durable source of truth for clients that missed the live event.
     await sse_manager.broadcast_to_job(
         execution_id,
         SSEEvent(data=payload, event="hitl_request"),
+        skip_replay=True,
     )
 
 
@@ -124,6 +157,29 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             return
 
         tool_name = getattr(tool, "name", type(tool).__name__)
+        scope = str(policy.get("scope", _DEFAULT_SCOPE)).lower()
+
+        # One decision per tool per run (default): an already-approved tool
+        # proceeds silently; an already-denied one is auto-denied with the
+        # same message the agent saw the first time. scope="call" re-asks.
+        if scope != "call":
+            decision = _run_decisions.get((execution_id, tool_name))
+            if decision is None:
+                try:
+                    decision = run_async_with_context(
+                        _prior_decision(execution_id, tool_name, group_id), timeout=15
+                    )
+                except Exception as prior_err:  # noqa: BLE001
+                    logger.debug(f"[tool_approval] prior-decision lookup skipped: {prior_err}")
+                if decision:
+                    _run_decisions[(execution_id, tool_name)] = decision
+            if decision == "approved":
+                return
+            if decision == "rejected":
+                raise ToolExecutionBlockedError(
+                    f"'{tool_name}' was denied by the human reviewer for this run."
+                )
+
         timeout_seconds = int(policy.get("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS))
         timeout_action = str(policy.get("timeout_action", _DEFAULT_TIMEOUT_ACTION)).lower()
         gate_config = {
@@ -160,6 +216,10 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             **gate_config,
         })
 
+        def _record(decision: str) -> None:
+            if scope != "call":
+                _run_decisions[(execution_id, tool_name)] = decision
+
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             try:
@@ -169,8 +229,10 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
                 status = None
             if status == "approved":
                 logger.info(f"[tool_approval] {approval_id} approved — running '{tool_name}'")
+                _record("approved")
                 return
             if status in ("rejected", "timeout"):
+                _record("rejected")
                 raise ToolExecutionBlockedError(
                     f"'{tool_name}' was {status} by the human reviewer."
                 )
@@ -180,7 +242,9 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             logger.warning(
                 f"[tool_approval] {approval_id} timed out — policy allows proceed"
             )
+            _record("approved")
             return
+        _record("rejected")
         raise ToolExecutionBlockedError(
             f"'{tool_name}' approval timed out after {timeout_seconds}s — not executed."
         )
@@ -195,5 +259,9 @@ def install_tool_approval_hook(execution_id: str, group_context: Optional[GroupC
 
     def uninstall() -> None:
         unregister_tool_hooks(pre=hook)
+        # Drop this run's cached decisions (matters for the long-lived
+        # in-process light path; subprocesses die with the process anyway).
+        for key in [k for k in _run_decisions if k[0] == execution_id]:
+            _run_decisions.pop(key, None)
 
     return uninstall

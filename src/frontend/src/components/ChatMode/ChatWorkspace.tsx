@@ -1030,9 +1030,26 @@ const ChatWorkspace: React.FC = () => {
     finishOnce(jobId, () => useExecutionStore.getState().failExecution(error, jobId));
   }, [finishOnce]);
 
+  // Keep an undecided approval line BELOW the latest activity row: when a new
+  // trace lands for a job with a pending approval message, bump it to the end.
+  const bumpPendingApproval = useCallback((jobId?: string) => {
+    if (!jobId) return;
+    const sessionStore = useSessionStore.getState();
+    const pending = sessionStore.messages.find(
+      (m) =>
+        m.resultType === 'hitl_approval' &&
+        !(m.resultData as { decided?: string } | undefined)?.decided &&
+        (m.resultData as { job_id?: string } | undefined)?.job_id === jobId,
+    );
+    if (pending) sessionStore.moveMessageToEnd(pending.id);
+  }, []);
+
   // --- Execution Stream ---
   const executionStream = useExecutionStream({
-    onTrace: processTrace,
+    onTrace: (msg, data) => {
+      processTrace(msg, data);
+      bumpPendingApproval((data?.job_id as string) || sseJobIdRef.current || undefined);
+    },
     onChunk: (chunk, data) => {
       // Route by the job id stamped on the event (parallel-session safe),
       // falling back to the stream this workspace opened.
@@ -1072,6 +1089,7 @@ const ChatWorkspace: React.FC = () => {
         (trace.trace as string) ||
         JSON.stringify(trace);
       processTrace(msg, trace as Record<string, unknown>);
+      bumpPendingApproval(jobId as string);
     };
     // Route by the job's OWNER, not the single live slot: a backgrounded
     // session's run must still finalize (and land in ITS session) even though
@@ -1116,7 +1134,7 @@ const ChatWorkspace: React.FC = () => {
       window.removeEventListener('jobStopped', onJobStopped as EventListener);
       window.removeEventListener('jobNotFound', onJobNotFound as EventListener);
     };
-  }, [processTrace, completeExecutionOnce, failExecutionOnce]);
+  }, [processTrace, completeExecutionOnce, failExecutionOnce, bumpPendingApproval]);
 
   // --- Inline tool-approval cards ---
   // Chat never shows modal dialogs: an hitl_request for a job owned by a chat

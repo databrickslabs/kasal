@@ -120,6 +120,9 @@ interface SessionActions {
     updates: Partial<ChatMessage>,
   ) => void;
   appendToMessage: (id: string, additionalContent: string) => void;
+  /** Move a message to the end of the current session's list (display order
+   *  only — e.g. keep an undecided approval line below the latest activity). */
+  moveMessageToEnd: (id: string) => void;
   clearMessages: () => void;
 }
 
@@ -382,6 +385,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
       }
       return { messages: updated };
+    });
+  },
+
+  moveMessageToEnd: (id) => {
+    set((state) => {
+      const index = state.messages.findIndex((m) => m.id === id);
+      if (index < 0 || index === state.messages.length - 1) return {};
+      const messages = [...state.messages];
+      const [message] = messages.splice(index, 1);
+      messages.push(message);
+      return { messages };
     });
   },
 

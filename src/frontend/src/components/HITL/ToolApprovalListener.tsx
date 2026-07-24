@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import HITLApprovalDialog from './HITLApprovalDialog';
+import { HITLService } from '../../api/HITLService';
 import { useExecutionStore } from '../ChatMode/store/executionStore';
 
 /**
@@ -20,10 +21,23 @@ const ToolApprovalListener: React.FC = () => {
     const onHitlRequest = (e: Event) => {
       const detail = (e as CustomEvent).detail as { job_id?: string } | undefined;
       if (!detail?.job_id) return;
-      // Chat-owned runs render an INLINE approval card in the conversation
-      // instead — the chat shell never shows modal dialogs.
+      // Chat never shows modal dialogs: skip when the job is chat-owned OR
+      // the chat shell is on screen at all (covers replayed events for jobs
+      // the store no longer tracks).
       if (useExecutionStore.getState().jobOwnerOf(detail.job_id)) return;
-      setExecutionId(detail.job_id);
+      if (document.getElementById('kasal-chat-root')) return;
+      const jobId = detail.job_id;
+      // Only open for a LIVE pending approval — an SSE reconnect replays old
+      // hitl_request events, and popping an expired gate helps no one.
+      void HITLService.getExecutionHITLStatus(jobId)
+        .then((status) => {
+          if (status.has_pending_approval && !status.pending_approval?.is_expired) {
+            setExecutionId(jobId);
+          }
+        })
+        .catch(() => {
+          /* stale/foreign job — never open on failure */
+        });
     };
     window.addEventListener('hitlRequest', onHitlRequest);
     return () => window.removeEventListener('hitlRequest', onHitlRequest);

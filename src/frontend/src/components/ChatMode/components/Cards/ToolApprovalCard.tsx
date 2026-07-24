@@ -57,65 +57,61 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
     }
   };
 
+  // Render as ONE activity-style text line (like the run-activity rows) —
+  // no card chrome, no colored buttons; args truncate so nothing wraps.
   const args = data.tool_args ?? {};
-  const hasArgs = Object.keys(args).length > 0;
+  const argsJson = Object.keys(args).length > 0 ? JSON.stringify(args) : '';
+
+  const linkClass =
+    'underline underline-offset-2 disabled:opacity-50 hover:opacity-80 font-medium shrink-0';
 
   return (
     <div
-      className="my-2 rounded-lg border px-4 py-3 text-[14px] leading-[1.6]"
-      style={{
-        borderColor: 'var(--border, rgba(128,128,128,0.35))',
-        color: 'var(--text-primary)',
-        background: 'var(--surface-raised, rgba(128,128,128,0.06))',
-      }}
+      className="my-1.5 px-1 flex items-center gap-1.5 text-[13px] leading-[1.7] whitespace-nowrap overflow-hidden"
+      style={{ color: 'var(--text-muted)' }}
     >
-      <div className="font-semibold mb-1">
-        ✋ Approval needed{data.agent_role ? ` — ${data.agent_role}` : ''}
-      </div>
-      <div className="mb-2">
-        The agent wants to run <span className="font-semibold">{data.tool_name || 'a tool'}</span>.
-        {decided ? '' : ' The run is paused until you decide.'}
-      </div>
-      {hasArgs && (
-        <pre
-          className="mb-2 max-h-40 overflow-auto rounded p-2 text-[12px]"
-          style={{ background: 'var(--surface, rgba(128,128,128,0.1))' }}
+      <span className="shrink-0">✋ {data.agent_role || 'The agent'} wants to run</span>
+      <span className="font-medium shrink-0" style={{ color: 'var(--text-primary)' }}>
+        {data.tool_name || 'a tool'}
+      </span>
+      {argsJson && (
+        <span
+          className="truncate min-w-0 font-mono text-[12px]"
+          style={{ color: 'var(--text-muted)', background: 'transparent' }}
         >
-          {JSON.stringify(args, null, 2)}
-        </pre>
+          {argsJson}
+        </span>
       )}
       {decided ? (
-        <div className="font-medium" style={{ color: decided === 'approved' ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
-          {decided === 'approved' ? '✓ Approved — the tool ran.' : '✗ Denied — the agent continued without it.'}
-        </div>
+        <span className="shrink-0">
+          {decided === 'approved' ? '— approved' : '— denied'}
+        </span>
       ) : (
-        <div className="flex items-center gap-2">
+        <>
+          <span className="shrink-0">—</span>
           <button
             type="button"
             disabled={busy}
             onClick={() => void decide('approved')}
-            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
-            style={{ background: 'var(--accent)' }}
+            className={linkClass}
+            style={{ color: 'var(--text-primary)' }}
           >
             Approve
           </button>
+          <span className="shrink-0">·</span>
           <button
             type="button"
             disabled={busy}
             onClick={() => void decide('denied')}
-            className="rounded-md border px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
-            style={{ borderColor: 'var(--border, rgba(128,128,128,0.35))', color: 'var(--text-primary)' }}
+            className={linkClass}
+            style={{ color: 'var(--text-primary)' }}
           >
             Deny
           </button>
-          {busy && <span className="text-[12px] opacity-70">Submitting…</span>}
-        </div>
+          {busy && <span className="shrink-0">…</span>}
+        </>
       )}
-      {error && (
-        <div className="mt-1 text-[12px]" style={{ color: 'var(--danger, #ef4444)' }}>
-          {error}
-        </div>
-      )}
+      {error && <span className="truncate min-w-0"> — {error}</span>}
     </div>
   );
 };
