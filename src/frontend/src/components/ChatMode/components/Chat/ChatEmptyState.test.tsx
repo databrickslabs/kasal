@@ -5,6 +5,7 @@ import ChatEmptyState from './ChatEmptyState';
 import { useExecutionStore } from '../../store/executionStore';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useFlowConfigStore } from '../../../../store/flowConfig';
+import { useAppStore } from '../../store/appStore';
 
 const setAppMode = vi.fn();
 
@@ -13,7 +14,24 @@ beforeEach(() => {
   useUILayoutStore.setState({ setAppMode });
   useFlowConfigStore.setState({ kasalFlowEnabled: true });
   useExecutionStore.setState({ chatModeType: 'chat' });
+  useAppStore.setState({ models: [], selectedModel: '' });
 });
+
+const asModel = (key: string, supports_reasoning_effort: boolean) =>
+  ({
+    id: 1,
+    key,
+    name: key,
+    provider: 'openai',
+    temperature: 1,
+    context_window: 128000,
+    max_output_tokens: 32000,
+    extended_thinking: false,
+    enabled: true,
+    supports_reasoning_effort,
+    created_at: '',
+    updated_at: '',
+  }) as never;
 
 describe('ChatEmptyState', () => {
   it('renders the three answer-mode chips', () => {
@@ -76,5 +94,58 @@ describe('ChatEmptyState', () => {
       'noopener,noreferrer',
     );
     openSpy.mockRestore();
+  });
+});
+
+// A model with no reasoning budget makes Deep Research identical to Research —
+// same crew, same tools, both efforts dropped by the engine. Offering it would
+// promise a difference that cannot happen.
+describe('ChatEmptyState answer modes vs model capability', () => {
+  const pickDeepCard = () =>
+    screen.getByText('Deep Research').closest('button') as HTMLButtonElement;
+
+  it('disables Deep Research for a model with no reasoning budget', () => {
+    useAppStore.setState({
+      models: [asModel('Qwen3-Coder-30B-A3B-Instruct', false)],
+      selectedModel: 'Qwen3-Coder-30B-A3B-Instruct',
+    });
+    render(<ChatEmptyState onPrefill={vi.fn()} />);
+
+    expect(pickDeepCard()).toBeDisabled();
+    expect(pickDeepCard().title).toContain('Qwen3-Coder-30B-A3B-Instruct');
+    expect(screen.getByText('Needs a model with a reasoning budget')).toBeInTheDocument();
+  });
+
+  it('keeps Research enabled there — a crew is a real difference on any model', () => {
+    useAppStore.setState({
+      models: [asModel('Qwen3-Coder-30B-A3B-Instruct', false)],
+      selectedModel: 'Qwen3-Coder-30B-A3B-Instruct',
+    });
+    const onPrefill = vi.fn();
+    render(<ChatEmptyState onPrefill={onPrefill} />);
+
+    const research = screen.getByText('Research').closest('button') as HTMLButtonElement;
+    expect(research).not.toBeDisabled();
+    fireEvent.click(research);
+    expect(onPrefill).toHaveBeenCalled();
+    // ...but it no longer claims reasoning it cannot do.
+    expect(screen.getByText('Full multi-agent crew')).toBeInTheDocument();
+  });
+
+  it('offers both, with the reasoning wording, for a reasoning-capable model', () => {
+    useAppStore.setState({
+      models: [asModel('gpt-5.6-terra', true)],
+      selectedModel: 'gpt-5.6-terra',
+    });
+    render(<ChatEmptyState onPrefill={vi.fn()} />);
+
+    expect(pickDeepCard()).not.toBeDisabled();
+    expect(screen.getByText('Deep tools with maximum reasoning')).toBeInTheDocument();
+    expect(screen.getByText('Full crew with reasoning')).toBeInTheDocument();
+  });
+
+  it('does not disable anything while the model list is still loading', () => {
+    render(<ChatEmptyState onPrefill={vi.fn()} />);
+    expect(pickDeepCard()).not.toBeDisabled();
   });
 });

@@ -229,6 +229,14 @@ export interface ModelConfigResponse {
   max_output_tokens: number | null;
   extended_thinking: boolean;
   enabled: boolean;
+  /**
+   * Whether this model accepts a native reasoning-effort budget. Derived
+   * server-side from the same allow-list the engine uses, so the UI cannot
+   * offer an answer mode whose reasoning the engine will silently drop.
+   * Optional because a cached/older response may not carry it — treat
+   * `undefined` as "unknown", not as "unsupported".
+   */
+  supports_reasoning_effort?: boolean;
   created_at: string;
   updated_at: string;
 }

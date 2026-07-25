@@ -1,7 +1,15 @@
 import React from 'react';
 import { useExecutionStore } from '../../store/executionStore';
+import { useAppStore } from '../../store/appStore';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useFlowConfigStore } from '../../../../store/flowConfig';
+import {
+  answerModeDisabledReason,
+  answerModeHint,
+  isAnswerModeDisabled,
+  modelDisplayName,
+  modelLacksReasoning,
+} from '../../utils/answerModes';
 
 /**
  * First-run launchpad shown BELOW the composer when a chat has no messages (the
@@ -36,8 +44,6 @@ type ModeId = 'chat' | 'research' | 'deep';
 interface ModeChip {
   id: ModeId;
   label: string;
-  /** Short subtitle — kept concise so it fits a 3-across row without truncating. */
-  hint: string;
   /** Editable starter prompt dropped into the composer when the chip is clicked. */
   prompt: string;
   icon: React.ReactNode;
@@ -48,7 +54,6 @@ const MODE_CHIPS: ModeChip[] = [
   {
     id: 'chat',
     label: 'Chat',
-    hint: 'Fast single-agent answer',
     prompt: 'Give me a quick summary of [topic].',
     icon: (
       <svg className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -59,7 +64,6 @@ const MODE_CHIPS: ModeChip[] = [
   {
     id: 'research',
     label: 'Research',
-    hint: 'Crew with reasoning',
     prompt: 'Research [topic] and write a concise brief with sources.',
     icon: (
       <svg className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -70,7 +74,6 @@ const MODE_CHIPS: ModeChip[] = [
   {
     id: 'deep',
     label: 'Deep Research',
-    hint: 'Deep tools + maximum reasoning',
     prompt:
       'Do a deep-dive analysis of [topic], comparing multiple sources and reasoning through the trade-offs.',
     icon: (
@@ -86,6 +89,13 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
   const kasalFlowEnabled = useFlowConfigStore((s) => s.kasalFlowEnabled);
+  // Read the model straight from the store, as this component already does for
+  // every other piece of state, so the chips and the composer's mode pill agree
+  // about what the selected model can actually do.
+  const models = useAppStore((s) => s.models);
+  const selectedModel = useAppStore((s) => s.selectedModel);
+  const lacksReasoning = modelLacksReasoning(models, selectedModel);
+  const reasoningModelName = modelDisplayName(models, selectedModel);
 
   // Picking a chip selects that answer mode (so the composer's mode pill matches)
   // and seeds an editable starter prompt.
@@ -110,14 +120,19 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
           composer's current selection. */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
         {MODE_CHIPS.map((chip) => {
-          const active = chip.id === chatModeType;
+          const chipDisabled = isAnswerModeDisabled(chip.id, lacksReasoning);
+          const active = chip.id === chatModeType && !chipDisabled;
           return (
             <button
               key={chip.id}
               type="button"
-              onClick={() => pickMode(chip)}
+              disabled={chipDisabled}
+              onClick={() => !chipDisabled && pickMode(chip)}
               aria-pressed={active}
-              className="kasal-suggest group flex items-center gap-3 text-left rounded-xl transition-colors"
+              title={chipDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
+              className={`kasal-suggest group flex items-center gap-3 text-left rounded-xl transition-colors${
+                chipDisabled ? ' opacity-50 cursor-not-allowed' : ''
+              }`}
               style={{
                 padding: '12px 14px',
                 backgroundColor: active ? 'var(--bg-active-chip)' : 'var(--bg-secondary)',
@@ -135,7 +150,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
                   {chip.label}
                 </span>
                 <span className="block text-xs truncate" style={{ color: 'var(--text-muted)' }}>
-                  {chip.hint}
+                  {answerModeHint(chip.id, lacksReasoning)}
                 </span>
               </span>
             </button>

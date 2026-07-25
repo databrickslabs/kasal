@@ -1,5 +1,13 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
+import {
+  answerModeDisabledReason,
+  answerModeHint,
+  isAnswerModeDisabled,
+  // aliased: this file already has a local `modelDisplayName` for the model pill
+  modelDisplayName as resolveModelDisplayName,
+  modelLacksReasoning,
+} from '../../utils/answerModes';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
 import McpPicker from './McpPicker';
@@ -56,14 +64,17 @@ const SLASH_COMMANDS = [
 ];
 
 // Answer modes shown in the composer's mode pill. 'chat' runs a single light
-// agent (fast); 'research'/'deep' build a crew with progressively deeper
-// model reasoning.
+// agent (fast); 'research'/'deep' build a crew, with progressively deeper model
+// reasoning ON MODELS THAT HAVE A REASONING BUDGET.
 // `label` is the full name (dropdown rows + aria); `short` is the compact label
 // shown on the collapsed trigger pill so the composer's control row stays tidy.
+// Hints are resolved per model at render (see utils/answerModes): on a model
+// with no budget, Research is still a real crew but Deep Research would be
+// identical to it, so its promise — and the mode itself — is withdrawn.
 const MODES = [
-  { id: 'chat', label: 'Chat', short: 'Chat', hint: 'Quick answer from a single agent' },
-  { id: 'research', label: 'Research', short: 'Research', hint: 'Full crew with reasoning' },
-  { id: 'deep', label: 'Deep Research', short: 'Deep', hint: 'Deep tools with maximum reasoning' },
+  { id: 'chat', label: 'Chat', short: 'Chat' },
+  { id: 'research', label: 'Research', short: 'Research' },
+  { id: 'deep', label: 'Deep Research', short: 'Deep' },
 ] as const;
 
 // Memory modes shown in the composer's memory pill — same labelled-dropdown
@@ -252,6 +263,20 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const chatModeType = useExecutionStore((s) => s.chatModeType);
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const activeMode = MODES.find((m) => m.id === chatModeType) ?? MODES[0];
+  // Whether the SELECTED model can spend a reasoning budget. Drives the mode
+  // hints and disables Deep Research, which on such a model is byte-for-byte
+  // identical to Research (the engine drops the effort).
+  const lacksReasoning = modelLacksReasoning(models, selectedModel);
+  const reasoningModelName = resolveModelDisplayName(models, selectedModel);
+  // The mode persists in the store, so a Deep selection made under a
+  // reasoning-capable model would otherwise stick after switching to one
+  // without a budget — silently running as Research while the pill still reads
+  // "Deep". Fall back explicitly instead.
+  useEffect(() => {
+    if (chatModeType === 'deep' && lacksReasoning) {
+      setChatModeType('research');
+    }
+  }, [chatModeType, lacksReasoning, setChatModeType]);
   // Memory mode is a single binary toggle: workspace (semantic memory on) vs
   // session (semantic memory off — recall comes only from this chat's history).
   const memoryModeId: MemoryModeId = memoryEnabled ? 'workspace' : 'session';
@@ -800,7 +825,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   setShowCommands(false);
                 }}
                 aria-label={`Answer mode: ${activeMode.label}`}
-                title={activeMode.hint}
+                title={answerModeHint(activeMode.id, lacksReasoning)}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
                 style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
               >
@@ -829,28 +854,47 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     </span>
                   </div>
                   <div className="px-1.5 pb-1.5">
-                    {MODES.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => {
-                          setChatModeType(m.id);
-                          setShowModePicker(false);
-                          inputRef.current?.focus();
-                        }}
-                        aria-label={`Answer mode: ${m.label}`}
-                        className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${m.id === chatModeType ? 'bg-[var(--bg-active-chip)]' : 'hover:bg-[var(--bg-rail-hover)]'}`}
-                      >
-                        <div>
-                          <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
-                          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.hint}</div>
-                        </div>
-                        {m.id === chatModeType && (
-                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </button>
-                    ))}
+                    {MODES.map((m) => {
+                      const modeDisabled = isAnswerModeDisabled(m.id, lacksReasoning);
+                      return (
+                        <button
+                          key={m.id}
+                          disabled={modeDisabled}
+                          onClick={() => {
+                            if (modeDisabled) return;
+                            setChatModeType(m.id);
+                            setShowModePicker(false);
+                            inputRef.current?.focus();
+                          }}
+                          aria-label={`Answer mode: ${m.label}`}
+                          title={modeDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
+                          className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${
+                            modeDisabled
+                              ? 'opacity-50 cursor-not-allowed'
+                              : m.id === chatModeType
+                                ? 'bg-[var(--bg-active-chip)]'
+                                : 'hover:bg-[var(--bg-rail-hover)]'
+                          }`}
+                        >
+                          <div>
+                            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
+                            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                              {answerModeHint(m.id, lacksReasoning)}
+                            </div>
+                          </div>
+                          {m.id === chatModeType && !modeDisabled && (
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {lacksReasoning && (
+                      <div className="!px-2.5 !py-2 text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                        {answerModeDisabledReason(reasoningModelName)}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
