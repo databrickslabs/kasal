@@ -1565,9 +1565,20 @@ class LightAgentService:
                 )
                 log(f"Memory enabled ({backend_type}, {scope} scope) — recall + persist")
             else:
-                log("Memory unavailable for this run (no backend/embedder)")
+                # Report the reason the memory layer RECORDED, not a guess.
+                # "no backend/embedder" named two possible causes and identified
+                # neither, and this module's logger.warning reaches no log file
+                # from the in-process chat path — so a run that silently lost
+                # memory left nothing to diagnose with. The execution log does
+                # reach the Logs tab, so the real reason goes there.
+                reason = (
+                    getattr(memory_service, "last_memory_error", None)
+                    or "storage or embedder unavailable (no reason recorded)"
+                )
+                log(f"Memory unavailable for this run — {reason}")
         except Exception as mem_err:  # noqa: BLE001
             logger.warning(f"[light_agent] memory setup skipped: {mem_err}")
+            log(f"Memory unavailable for this run — setup raised: {mem_err}")
 
 
 async def run_light_agent(

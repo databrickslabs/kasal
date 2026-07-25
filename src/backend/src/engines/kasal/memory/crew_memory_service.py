@@ -41,6 +41,8 @@ class CrewMemoryService:
         self.config = config
         self.user_token = user_token
         self._original_storage_dir = None
+        # Why memory ended up disabled, for the caller to surface. None = fine.
+        self.last_memory_error: Optional[str] = None
 
     async def fetch_memory_backend_config(self) -> Optional[Dict[str, Any]]:
         """
@@ -539,10 +541,12 @@ class CrewMemoryService:
             and not crew_kwargs.get("embedder")
             and not os.environ.get("OPENAI_API_KEY")
         ):
-            logger.warning(
-                "DEFAULT memory backend selected but no embedder / OpenAI key "
-                "available. Disabling memory to prevent fallback errors."
+            reason = (
+                "DEFAULT backend and no embedder at all: no Databricks embedder, "
+                "no configured provider, and OPENAI_API_KEY unset"
             )
+            logger.warning("Disabling memory — %s", reason)
+            self.last_memory_error = reason
             crew_kwargs["memory"] = False
             return crew_kwargs
 
@@ -566,9 +570,13 @@ class CrewMemoryService:
                 crew_kwargs, custom_embedder, memory_config
             )
             if storage is None:
-                logger.warning(
-                    "DEFAULT memory backend has no usable embedder — disabling memory"
+                # last_memory_error was set by _create_local_storage with the
+                # ACTUAL failure; keep it rather than overwrite with a guess.
+                self.last_memory_error = (
+                    self.last_memory_error
+                    or "local SQLite storage could not be created"
                 )
+                logger.warning("Disabling memory — %s", self.last_memory_error)
                 crew_kwargs["memory"] = False
                 return crew_kwargs
 
@@ -638,6 +646,11 @@ class CrewMemoryService:
                     }
                 )
             if embedder is None:
+                self.last_memory_error = (
+                    "no embedding route: no Databricks embedder, "
+                    f"configured={crew_kwargs.get('embedder')!r}, "
+                    f"OPENAI_API_KEY={'set' if os.environ.get('OPENAI_API_KEY') else 'unset'}"
+                )
                 return None
 
             db_path = Path(db_storage_path()) / "memory.db"
@@ -653,6 +666,7 @@ class CrewMemoryService:
             )
             return LocalMemoryStorage(db_path, embedder=embedder, **scoring_kwargs)
         except Exception as exc:  # noqa: BLE001 — memory must never break a run
+            self.last_memory_error = f"{type(exc).__name__}: {exc}"
             logger.warning("Local memory storage unavailable: %s", exc)
             return None
 
