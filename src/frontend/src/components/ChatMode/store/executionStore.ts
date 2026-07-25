@@ -279,9 +279,24 @@ function discardStreamPacing(jobId: string, flush: boolean): void {
  * first frame paints still has to land its text somewhere, and looking up a
  * bubble that had not been created yet silently dropped the whole answer.
  */
-function ensureStreamBubble(jobId: string): string {
+/**
+ * Paint `text` into this job's bubble, opening one if needed.
+ *
+ * The bubble is CREATED WITH its first text, never empty-then-updated. addMessage
+ * persists fire-and-forget and awaits ensureSession() first, while
+ * appendToMessage's update fires immediately — so an empty insert can land AFTER
+ * the update that carried the content and overwrite the row with ''. Leaving the
+ * session and returning then showed the headers but no streamed text, and took
+ * the A2UI surface with it (completeExecution writes the surface INTO this same
+ * bubble). Creating with content means the insert always carries the answer.
+ */
+function paintStreamText(jobId: string, text: string): void {
+  const sessionStore = useSessionStore.getState();
   const existing = streamBubbles.get(jobId);
-  if (existing) return existing;
+  if (existing) {
+    sessionStore.appendToMessage(existing, text);
+    return;
+  }
   // The id carries a sequence: a crew closes the bubble at each task boundary
   // (closeStreamBubble) so the NEXT task's tokens open a fresh one below its own
   // header, instead of every task pouring into a single bubble with all the
@@ -290,8 +305,7 @@ function ensureStreamBubble(jobId: string): string {
   streamBubbleSeq.set(jobId, seq);
   const bubbleId = `stream-${jobId}-${seq}`;
   streamBubbles.set(jobId, bubbleId);
-  useSessionStore.getState().addMessage('assistant', '', { id: bubbleId, isStreaming: true });
-  return bubbleId;
+  sessionStore.addMessage('assistant', text, { id: bubbleId, isStreaming: true });
 }
 
 /** Drain a job's buffer into its bubble immediately (no pacing). */
@@ -303,9 +317,7 @@ function flushStreamBuffer(jobId: string): void {
   }
   const pending = streamBuffers.get(jobId);
   streamBuffers.delete(jobId);
-  if (pending) {
-    useSessionStore.getState().appendToMessage(ensureStreamBubble(jobId), pending);
-  }
+  if (pending) paintStreamText(jobId, pending);
 }
 
 /**
@@ -321,7 +333,6 @@ function enqueueStreamText(jobId: string, chunk: string): void {
     streamTimers.delete(jobId);
     const pending = streamBuffers.get(jobId) ?? '';
     if (!pending) return;
-    const bubbleId = ensureStreamBubble(jobId);
     // Break on whitespace when one is near the budget so words are not sliced
     // mid-token — a word appearing letter by letter reads as a glitch.
     let take = Math.min(STREAM_CHARS_PER_TICK, pending.length);
@@ -329,7 +340,7 @@ function enqueueStreamText(jobId: string, chunk: string): void {
       const nextBreak = pending.slice(take, take + 20).search(/\s/);
       if (nextBreak >= 0) take += nextBreak + 1;
     }
-    useSessionStore.getState().appendToMessage(bubbleId, pending.slice(0, take));
+    paintStreamText(jobId, pending.slice(0, take));
     const rest = pending.slice(take);
     if (rest) {
       streamBuffers.set(jobId, rest);

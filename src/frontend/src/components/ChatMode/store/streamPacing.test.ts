@@ -156,6 +156,29 @@ describe('stream pacing', () => {
     expect(bubbles[1].content).toContain('second task output');
   });
 
+  // Persistence regression: addMessage writes to IndexedDB fire-and-forget and
+  // awaits ensureSession() first, while appendToMessage's update fires
+  // immediately. An empty insert can therefore land AFTER the update that
+  // carried the text and overwrite the row with ''. Leaving the session and
+  // returning then showed the task headers but no streamed answer — and took the
+  // A2UI surface with it, because completeExecution writes the surface into this
+  // same bubble.
+  it('never creates an empty bubble — the row must be inserted WITH content', () => {
+    const { jobId } = startOwnedJob('job-6');
+    const addMessage = (
+      useSessionStore as unknown as { getState: () => { addMessage: { mock: { calls: unknown[][] } } } }
+    ).getState().addMessage;
+
+    useExecutionStore.getState().appendStreamChunk(jobId, 'the answer text');
+    drainFrames();
+
+    const bubbleInserts = addMessage.mock.calls.filter(
+      (call) => String((call[2] as { id?: string } | undefined)?.id ?? '').startsWith('stream-'),
+    );
+    expect(bubbleInserts.length).toBeGreaterThan(0);
+    bubbleInserts.forEach((call) => expect(call[1]).not.toBe(''));
+  });
+
   it('is a no-op for an untracked job', () => {
     expect(() =>
       useExecutionStore.getState().appendStreamChunk('never-started', 'text'),
