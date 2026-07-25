@@ -85,7 +85,7 @@ class CrewGenerationService:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
-    async def _prepare_prompt_template(self, tools: List[Dict[str, Any]], group_context: Optional[GroupContext]) -> str:
+    async def _prepare_prompt_template(self, tools: List[Dict[str, Any]], group_context: Optional[GroupContext], prompt: Optional[str] = None) -> str:
         """
         Prepare the prompt template (with group/user appended overrides) and tool descriptions.
 
@@ -137,8 +137,25 @@ class CrewGenerationService:
             tools_context += f"\n{GENIE_ROUTING_DIRECTIVE}"
             logger.info("[GenieRouting] generate_crew: applied Genie routing directive (GenieTool available)")
 
+        # Few-shot examples from crews this workspace already built and a human
+        # marked good. Empty (so the prompt is byte-for-byte unchanged) until
+        # someone curates — see WorkflowRecipeService.exemplars_for_prompt for
+        # why only blessed recipes qualify. Never allowed to fail generation.
+        exemplars = ""
+        if prompt and group_context:
+            try:
+                from src.services.workflow_recipe_service import WorkflowRecipeService
+
+                exemplars = await WorkflowRecipeService(self.session).exemplars_for_prompt(
+                    prompt, group_context.group_ids or []
+                )
+                if exemplars:
+                    logger.info("CREATE CREW: injected curated workflow-recipe exemplars")
+            except Exception as exemplar_err:  # noqa: BLE001
+                logger.warning(f"CREATE CREW: exemplar injection skipped: {exemplar_err}")
+
         # Add tools context to the system message
-        return system_message + tools_context
+        return system_message + tools_context + exemplars
 
     def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None, disable_memory: bool = False) -> Dict[str, Any]:
         """
@@ -461,7 +478,9 @@ class CrewGenerationService:
             model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
 
             # Get and prepare the prompt template with tool descriptions (incl. group/user overrides)
-            system_message = await self._prepare_prompt_template(tools_with_details, group_context)
+            system_message = await self._prepare_prompt_template(
+                tools_with_details, group_context, prompt=getattr(request, "prompt", None)
+            )
             logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
 
             # Documentation context disabled: skip vector search/embedding for crew generation

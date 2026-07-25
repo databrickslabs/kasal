@@ -452,3 +452,115 @@ class TestCuration:
 
         with pytest.raises(ValueError):
             await WorkflowRecipeService(session=None).curate(1, "excellent", ["g1"])
+
+
+class TestExemplars:
+    """Generation only ever learns from recipes a HUMAN marked good.
+
+    Mining can say a crew finished; it cannot say it was correct. Feeding
+    merely-completed runs back into generation would teach whatever shape
+    happened to survive and — since generated crews get mined in turn —
+    reinforce it each round until the library only agrees with itself.
+    """
+
+    @staticmethod
+    def _row(rid, curation, intent="Load US and EU\nsearch yahoo finance"):
+        return SimpleNamespace(
+            id=rid,
+            intent_text=intent,
+            curation=curation,
+            agents_yaml={"a": {"role": "Data Engineer"}},
+            tasks_yaml={"t": {"description": "Load the companies. Then verify."}},
+            tool_names=["postgres_execute_sql"],
+            mcp_servers=["postgres"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_uncurated_recipes_are_never_used_as_exemplars(self, monkeypatch):
+        """The safety property: a merely-completed run must not shape generation."""
+        from src.services import workflow_recipe_service as module
+
+        async def fake_find(self, prompt, group_ids, limit=8):
+            return [(TestExemplars._row(1, None), 0.90)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
+            "load companies", ["g1"]
+        )
+        assert text == ""
+
+    @pytest.mark.asyncio
+    async def test_blessed_recipes_are_used(self, monkeypatch):
+        from src.services import workflow_recipe_service as module
+
+        async def fake_find(self, prompt, group_ids, limit=8):
+            return [(TestExemplars._row(1, "good"), 0.90)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
+            "load companies", ["g1"]
+        )
+        assert "PREVIOUSLY SUCCESSFUL CREWS" in text
+        assert "Data Engineer" in text
+        assert "postgres_execute_sql" in text
+        assert "not as a template to copy" in text
+
+    @pytest.mark.asyncio
+    async def test_blessed_but_irrelevant_is_not_used(self, monkeypatch):
+        """Curation never rescues a recipe that failed the relevance floor."""
+        from src.services import workflow_recipe_service as module
+
+        async def fake_find(self, prompt, group_ids, limit=8):
+            return [(TestExemplars._row(1, "good"), 0.40)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
+            "snake game", ["g1"]
+        )
+        assert text == ""
+
+    @pytest.mark.asyncio
+    async def test_retrieval_failure_never_breaks_generation(self, monkeypatch):
+        from src.services import workflow_recipe_service as module
+
+        async def boom(self, prompt, group_ids, limit=8):
+            raise RuntimeError("embedder exploded")
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", boom
+        )
+        text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
+            "anything", ["g1"]
+        )
+        assert text == ""
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_disables_injection(self, monkeypatch):
+        from src.services import workflow_recipe_service as module
+
+        async def fake_find(self, prompt, group_ids, limit=8):
+            return [(TestExemplars._row(1, "good"), 0.90)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        monkeypatch.setattr(module, "EXEMPLARS_ENABLED", False)
+        text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
+            "load companies", ["g1"]
+        )
+        assert text == ""
+
+    @pytest.mark.asyncio
+    async def test_no_group_yields_no_exemplars(self):
+        from src.services.workflow_recipe_service import WorkflowRecipeService
+
+        assert (
+            await WorkflowRecipeService(session=None).exemplars_for_prompt("x", [])
+            == ""
+        )

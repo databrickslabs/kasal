@@ -54,6 +54,39 @@ _BATCH = int(os.getenv("WORKFLOW_RECIPE_MINE_BATCH", "100"))
 # assuming this default transfers. Hence the env override.
 MIN_SIMILARITY = float(os.getenv("WORKFLOW_RECIPE_MIN_SIMILARITY", "0.75"))
 
+# Kill-switch for feeding past crews into generation as few-shot examples. The
+# real gate is curation (only human-blessed recipes are ever used, so this is
+# inert until a workspace curates), but a single env var to turn the whole
+# behaviour off is worth having when diagnosing a generation regression.
+EXEMPLARS_ENABLED = os.getenv(
+    "WORKFLOW_RECIPE_EXEMPLARS", "true"
+).strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
+
+def _roles(agents_yaml: Optional[Dict[str, Any]]) -> List[str]:
+    """Agent roles, for a compact exemplar line."""
+    return [
+        str(a.get("role") or name)
+        for name, a in (agents_yaml or {}).items()
+        if isinstance(a, dict)
+    ]
+
+
+def _task_names(tasks_yaml: Optional[Dict[str, Any]]) -> List[str]:
+    """Short task labels — the first clause of each description, not the whole
+    prose, so a two-exemplar block stays a handful of lines rather than pages."""
+    names = []
+    for name, task in (tasks_yaml or {}).items():
+        if not isinstance(task, dict):
+            continue
+        text = str(task.get("name") or task.get("description") or name)
+        names.append(text.split(".")[0][:70])
+    return names
+
 
 def _normalize_intent(text: str) -> str:
     """Collapse whitespace/case so trivially different phrasings hash alike."""
@@ -306,6 +339,70 @@ class WorkflowRecipeService:
             self.to_summary(recipe, similarity=round(score, 4))
             for recipe, score in relevant
         ]
+
+    # --------------------------------------------------------------- exemplars
+
+    async def exemplars_for_prompt(
+        self,
+        prompt: str,
+        group_ids: List[str],
+        limit: int = 2,
+    ) -> str:
+        """Few-shot examples for crew generation, or "" when there are none.
+
+        Sourced ONLY from recipes a human marked 'good'. That restriction is the
+        entire safety story: mining can say a crew FINISHED but never that it was
+        correct, so learning from merely-completed runs would teach the generator
+        whatever shape happened to survive — and, because generated crews get
+        mined in turn, reinforce it each round until the library agrees only with
+        itself. A blessed recipe is the one claim in the system backed by a
+        person looking at the result.
+
+        Consequence worth stating plainly: with nothing curated this returns ""
+        and generation is byte-for-byte unchanged. The feature switches itself on
+        as the workspace curates, rather than shipping enabled and hoping.
+        """
+        if not EXEMPLARS_ENABLED or not prompt or not group_ids:
+            return ""
+        try:
+            hits = await self.find_similar_for_prompt(prompt, group_ids, limit=8)
+        except Exception as retrieval_err:  # noqa: BLE001
+            # Generation must never fail because reuse lookup did.
+            logger.warning(
+                f"[WorkflowRecipes] Exemplar lookup skipped: {retrieval_err}"
+            )
+            return ""
+
+        blessed = [
+            (r, s)
+            for r, s in hits
+            if getattr(r, "curation", None) == "good" and s >= MIN_SIMILARITY
+        ][:limit]
+        if not blessed:
+            return ""
+
+        blocks = []
+        for recipe, score in blessed:
+            blocks.append(
+                f"--- Previously built for: {recipe.intent_text.splitlines()[0]}\n"
+                f"Agents ({len(recipe.agents_yaml or {})}): "
+                f"{', '.join(_roles(recipe.agents_yaml))}\n"
+                f"Tasks ({len(recipe.tasks_yaml or {})}): "
+                f"{', '.join(_task_names(recipe.tasks_yaml))}\n"
+                f"Tools actually used: {', '.join(recipe.tool_names or []) or 'none'}\n"
+                f"MCP servers: {', '.join(recipe.mcp_servers or []) or 'none'}"
+            )
+            logger.info(
+                f"[WorkflowRecipes] Exemplar recipe={recipe.id} similarity={score:.3f}"
+            )
+
+        return (
+            "\n\nPREVIOUSLY SUCCESSFUL CREWS IN THIS WORKSPACE\n"
+            "These were built for similar requests and a human marked them good. "
+            "Treat them as evidence of what works here — the shape of the team, "
+            "which tools mattered — not as a template to copy. The current "
+            "request takes precedence wherever they differ.\n\n" + "\n\n".join(blocks)
+        )
 
     # ---------------------------------------------------------------- curation
 
