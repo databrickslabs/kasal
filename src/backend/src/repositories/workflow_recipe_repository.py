@@ -6,7 +6,7 @@ tool bindings, so leaking one across workspaces would leak how another tenant
 builds their crews.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,3 +69,98 @@ class WorkflowRecipeRepository:
         stmt = select(WorkflowRecipe.id).where(WorkflowRecipe.group_id.in_(group_ids))
         result = await self.session.execute(stmt)
         return len(list(result.scalars().all()))
+
+    async def list_missing_embeddings(self, limit: int = 100) -> List[WorkflowRecipe]:
+        """Recipes with no vector yet. Not group-scoped: this is the writer's
+        backfill queue, not a tenant-visible read."""
+        stmt = (
+            select(WorkflowRecipe)
+            .where(WorkflowRecipe.embedding.is_(None))
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    # ---------------------------------------------------------------- retrieval
+
+    async def _is_sqlite(self) -> bool:
+        return "sqlite" in str(self.session.bind.dialect.name).lower()
+
+    async def find_similar(
+        self,
+        query_embedding: List[float],
+        group_ids: List[str],
+        limit: int = 3,
+    ) -> List[Tuple[WorkflowRecipe, float]]:
+        """Recipes ranked by cosine similarity to ``query_embedding``.
+
+        Returns (recipe, similarity) pairs so the caller can apply a threshold —
+        a ranked list alone would always yield a "best" match even when nothing
+        is actually close, which is how a cache serves the wrong plan.
+
+        Hidden recipes are excluded here rather than at the caller so no reuse
+        path can forget to.
+        """
+        if not group_ids or not query_embedding:
+            return []
+        if await self._is_sqlite():
+            return await self._find_similar_sqlite(query_embedding, group_ids, limit)
+        return await self._find_similar_postgres(query_embedding, group_ids, limit)
+
+    def _base_query(self, group_ids: List[str]):
+        return select(WorkflowRecipe).where(
+            WorkflowRecipe.group_id.in_(group_ids),
+            WorkflowRecipe.embedding.is_not(None),
+            (WorkflowRecipe.curation.is_(None)) | (WorkflowRecipe.curation != "hidden"),
+        )
+
+    async def _find_similar_sqlite(
+        self, query_embedding: List[float], group_ids: List[str], limit: int
+    ) -> List[Tuple[WorkflowRecipe, float]]:
+        """Rank in Python: SQLite stores the vector as JSON TEXT, so there is no
+        distance operator. Recipe counts are small (one row per distinct intent
+        per workspace), so this is milliseconds.
+        """
+        import json as _json
+        import math
+
+        result = await self.session.execute(self._base_query(group_ids))
+        rows = list(result.scalars().all())
+
+        q = [float(x) for x in query_embedding]
+        q_norm = math.sqrt(sum(x * x for x in q)) or 1.0
+
+        scored: List[Tuple[WorkflowRecipe, float]] = []
+        for row in rows:
+            emb = row.embedding
+            if isinstance(emb, (str, bytes)):
+                try:
+                    emb = _json.loads(emb)
+                except (TypeError, ValueError):
+                    continue
+            if not emb or len(emb) != len(q):
+                # A dimension mismatch means the row was embedded with a
+                # different model; comparing them would produce a meaningless
+                # score, so skip rather than silently mis-rank.
+                continue
+            dot = sum(a * b for a, b in zip(q, (float(x) for x in emb)))
+            norm = math.sqrt(sum(float(x) * float(x) for x in emb)) or 1.0
+            scored.append((row, dot / (q_norm * norm)))
+
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return scored[:limit]
+
+    async def _find_similar_postgres(
+        self, query_embedding: List[float], group_ids: List[str], limit: int
+    ) -> List[Tuple[WorkflowRecipe, float]]:
+        """pgvector: rank with the cosine-distance operator and convert to
+        similarity so both backends return the same scale."""
+        distance = WorkflowRecipe.embedding.cosine_distance(query_embedding)
+        stmt = (
+            self._base_query(group_ids)
+            .add_columns(distance.label("distance"))
+            .order_by(distance)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [(row[0], 1.0 - float(row[1])) for row in result.all()]

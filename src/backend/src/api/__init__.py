@@ -8,6 +8,7 @@ from src.api.agents_router import router as agents_router
 from src.api.api_keys_router import router as api_keys_router
 
 from src.api.chat_history_router import router as chat_history_router
+from src.api.workflow_recipe_router import router as workflow_recipe_router
 from src.api.connections_router import router as connections_router
 from src.api.crew_generation_router import router as crew_generation_router
 from src.api.crews_export_router import router as crews_export_router
@@ -106,6 +107,7 @@ api_router.include_router(engine_config_router)
 api_router.include_router(users_router)
 api_router.include_router(group_router)
 api_router.include_router(chat_history_router)
+api_router.include_router(workflow_recipe_router)
 api_router.include_router(memory_backend_router)
 api_router.include_router(documentation_embeddings_router)
 api_router.include_router(database_management_router)
@@ -155,6 +157,7 @@ __all__ = [
     "runs_router",
     "group_router",
     "chat_history_router",
+    "workflow_recipe_router",
     "memory_backend_router",
     "documentation_embeddings_router",
     "database_management_router",

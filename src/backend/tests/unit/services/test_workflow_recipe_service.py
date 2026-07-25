@@ -216,3 +216,103 @@ class TestConvergence:
         assert repeated.source_job_id in repeated.mined_job_ids
 
         await engine.dispose()
+
+
+class TestRetrievalThreshold:
+    """Retrieval must be able to say "nothing like this".
+
+    A ranked list always has a best row, so a caller that forgets to check the
+    score would cheerfully propose an unrelated crew. The threshold lives in the
+    service, below every reuse path, so it cannot be skipped.
+
+    Calibration (dev corpus, 51 recipes, local nomic-embed-text): genuine
+    matches scored 0.818/0.826/0.831, an unrelated prompt topped out at 0.456.
+    """
+
+    @pytest.mark.asyncio
+    async def test_only_matches_above_the_floor_are_suggested(self, monkeypatch):
+        from src.services import workflow_recipe_service as module
+
+        good = SimpleNamespace(
+            id=1,
+            intent_text="Load US and EU",
+            run_count=5,
+            agents_yaml={"a": {}},
+            tasks_yaml={"t": {}},
+            tool_names=["postgres_execute_sql"],
+            mcp_servers=["postgres"],
+            source_job_id="job-1",
+        )
+        noise = SimpleNamespace(
+            id=2,
+            intent_text="Swiss News",
+            run_count=1,
+            agents_yaml={},
+            tasks_yaml={},
+            tool_names=[],
+            mcp_servers=[],
+            source_job_id="job-2",
+        )
+
+        async def fake_find(self, prompt, group_ids, limit=3):
+            return [(good, 0.818), (noise, 0.456)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+
+        service = module.WorkflowRecipeService(session=None)
+        out = await service.suggest_for_prompt("load companies", ["g1"])
+
+        assert [r["recipe_id"] for r in out] == [1], "the 0.456 row must not be offered"
+        assert out[0]["similarity"] == 0.818
+        assert out[0]["mcp_servers"] == ["postgres"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_close_yields_no_suggestion(self, monkeypatch):
+        from src.services import workflow_recipe_service as module
+
+        row = SimpleNamespace(
+            id=9,
+            intent_text="Anything",
+            run_count=1,
+            agents_yaml={},
+            tasks_yaml={},
+            tool_names=[],
+            mcp_servers=[],
+            source_job_id="j",
+        )
+
+        async def fake_find(self, prompt, group_ids, limit=3):
+            return [(row, 0.456)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        service = module.WorkflowRecipeService(session=None)
+        assert await service.suggest_for_prompt("snake game", ["g1"]) == []
+
+    @pytest.mark.asyncio
+    async def test_no_group_never_retrieves(self):
+        """Group scoping is a data-leak boundary: a recipe carries another
+        tenant's crew structure and tool bindings."""
+        from src.services.workflow_recipe_service import WorkflowRecipeService
+
+        service = WorkflowRecipeService(session=None)
+        assert await service.find_similar_for_prompt("anything", []) == []
+        assert await service.suggest_for_prompt("anything", []) == []
+
+    @pytest.mark.asyncio
+    async def test_missing_embedder_degrades_to_no_suggestions(self, monkeypatch):
+        """An embedder outage must not raise into crew generation — it just
+        means nothing is retrievable right now."""
+        from src.services import workflow_recipe_service as module
+
+        async def no_embedder(text, group_id=None):
+            return None
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "embed", staticmethod(no_embedder)
+        )
+        service = module.WorkflowRecipeService(session=None)
+        assert await service.find_similar_for_prompt("anything", ["g1"]) == []

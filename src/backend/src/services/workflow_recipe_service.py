@@ -40,6 +40,20 @@ _MINEABLE_STATUS = "COMPLETED"
 
 _BATCH = int(os.getenv("WORKFLOW_RECIPE_MINE_BATCH", "100"))
 
+# Minimum cosine similarity for a recipe to be offered for reuse.
+#
+# Measured on the dev corpus (51 recipes, local nomic-embed-text): genuinely
+# matching prompts scored 0.818 / 0.826 / 0.831, while an unrelated prompt
+# ("build me a snake game in python") topped out at 0.456. 0.75 sits in that gap
+# with margin on the noise side, because the costs are asymmetric — missing a
+# reusable crew just means generating it as before, whereas offering the wrong
+# crew wastes the user's attention and erodes trust in every later suggestion.
+#
+# The absolute scale is MODEL-DEPENDENT: swapping the embedder (dev Ollama vs
+# production databricks-gte-large-en) shifts these numbers, so re-measure before
+# assuming this default transfers. Hence the env override.
+MIN_SIMILARITY = float(os.getenv("WORKFLOW_RECIPE_MIN_SIMILARITY", "0.75"))
+
 
 def _normalize_intent(text: str) -> str:
     """Collapse whitespace/case so trivially different phrasings hash alike."""
@@ -196,6 +210,126 @@ class WorkflowRecipeService:
             text,
         )
 
+    # -------------------------------------------------------------- embedding
+
+    @staticmethod
+    async def embed(text: str, group_id: Optional[str] = None) -> Optional[List[float]]:
+        """Embed one string with the SAME resolver knowledge ingest/search use.
+
+        Write and read must embed with the same model or the vectors never
+        match, so both sides go through ``resolve_knowledge_embedder_config``
+        (Databricks in production, local Ollama in dev).
+
+        Returns None rather than raising when no embedder is reachable: a recipe
+        without a vector is simply not retrievable yet, which must never be
+        allowed to fail a mining sweep or a crew generation.
+        """
+        try:
+            from src.core.llm_manager import LLMManager
+            from src.services.knowledge_embedder import (
+                resolve_knowledge_embedder_config,
+            )
+
+            config = await resolve_knowledge_embedder_config(group_id=group_id)
+            return await LLMManager.get_embedding(text, embedder_config=config)
+        except Exception as embed_err:  # noqa: BLE001
+            logger.warning(f"[WorkflowRecipes] Embedding unavailable: {embed_err}")
+            return None
+
+    async def backfill_embeddings(self, limit: int = 100) -> int:
+        """Embed recipes that have no vector yet.
+
+        Separate from mining so an embedder outage degrades to "not retrievable
+        yet" instead of losing the recipe: the structure is captured on the
+        sweep, and the vector is filled in whenever the embedder returns.
+        """
+        embedded = 0
+        for recipe in await self.repository.list_missing_embeddings(limit=limit):
+            vector = await self.embed(recipe.intent_text, recipe.group_id)
+            if vector is None:
+                break  # embedder is down; try again next sweep
+            recipe.embedding = vector
+            embedded += 1
+        if embedded:
+            await self.session.commit()
+        return embedded
+
+    # ---------------------------------------------------------------- retrieval
+
+    async def find_similar_for_prompt(
+        self,
+        prompt: str,
+        group_ids: List[str],
+        limit: int = 3,
+    ) -> List[Tuple[Any, float]]:
+        """Recipes most similar to a user's generation prompt, best first.
+
+        NOTE the asymmetry this matches across: a recipe's ``intent_text`` is
+        built from the GENERATED run name and task descriptions, while the query
+        is the user's own phrasing. They describe the same job in different
+        registers, so scores run lower than a like-for-like comparison would —
+        the threshold is calibrated for that, not for prose-vs-prose.
+        """
+        if not prompt or not group_ids:
+            return []
+        vector = await self.embed(prompt, group_ids[0] if group_ids else None)
+        if vector is None:
+            return []
+        return await self.repository.find_similar(vector, group_ids, limit=limit)
+
+    async def suggest_for_prompt(
+        self,
+        prompt: str,
+        group_ids: List[str],
+        limit: int = 3,
+        min_similarity: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Reuse candidates for a prompt, already thresholded.
+
+        Returns [] when nothing clears the bar — deliberately, rather than
+        "closest anyway". A ranked list always has a best row, so a caller that
+        forgets to check the score would happily propose an unrelated crew.
+        """
+        threshold = MIN_SIMILARITY if min_similarity is None else min_similarity
+        hits = await self.find_similar_for_prompt(prompt, group_ids, limit=limit)
+        return [
+            {
+                "recipe_id": recipe.id,
+                "similarity": round(score, 4),
+                "intent_text": recipe.intent_text,
+                "run_count": recipe.run_count,
+                "agent_count": len(recipe.agents_yaml or {}),
+                "task_count": len(recipe.tasks_yaml or {}),
+                "tool_names": recipe.tool_names or [],
+                "mcp_servers": recipe.mcp_servers or [],
+                "source_job_id": recipe.source_job_id,
+            }
+            for recipe, score in hits
+            if score >= threshold
+        ]
+
+    async def list_for_group(self, group_ids: List[str], limit: int = 50) -> List[Any]:
+        """The workspace's recipe library, as summaries."""
+        from src.schemas.workflow_recipe import RecipeSummary
+
+        recipes = await self.repository.list_by_group(group_ids, limit=limit)
+        return [
+            RecipeSummary(
+                recipe_id=r.id,
+                intent_text=r.intent_text,
+                run_count=r.run_count,
+                agent_count=len(r.agents_yaml or {}),
+                task_count=len(r.tasks_yaml or {}),
+                tool_names=r.tool_names or [],
+                mcp_servers=r.mcp_servers or [],
+                source_job_id=r.source_job_id,
+                curation=r.curation,
+                times_reused=r.times_reused,
+                updated_at=r.updated_at.isoformat() if r.updated_at else None,
+            )
+            for r in recipes
+        ]
+
     async def mine_new_executions(self) -> int:
         """Distil any completed crew runs that have no recipe yet.
 
@@ -256,8 +390,16 @@ class WorkflowRecipeService:
 
     @staticmethod
     async def sweep() -> int:
-        """Entry point for the periodic parent-side task."""
+        """Entry point for the periodic parent-side task.
+
+        Mines first, then fills in any missing vectors — so a recipe is always
+        captured even when the embedder is unavailable, and becomes retrievable
+        on a later pass.
+        """
         from src.db.session import async_session_factory
 
         async with async_session_factory() as session:
-            return await WorkflowRecipeService(session).mine_new_executions()
+            service = WorkflowRecipeService(session)
+            mined = await service.mine_new_executions()
+            await service.backfill_embeddings()
+            return mined
