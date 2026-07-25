@@ -2072,13 +2072,14 @@ class ProcessCrewExecutor:
             if old_lakebase_instance is not None:
                 os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
-        # Start a background task to relay live events (LLM token chunks)
-        # from the subprocess to the main process for real-time SSE. Created
-        # before the try so the finally below can always reference it.
+        # Start a background task to relay live events (LLM token chunks +
+        # task/tool/LLM lifecycle trace frames) from the subprocess to the
+        # main process for real-time SSE. Created before the try so the
+        # finally below can always reference it.
         from src.services.execution_event_pipe import relay_execution_events
 
         relay_task = asyncio.create_task(
-            relay_execution_events(log_queue, execution_id)
+            relay_execution_events(log_queue, execution_id, group_context)
         )
 
         try:

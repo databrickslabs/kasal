@@ -1408,11 +1408,14 @@ class ProcessFlowExecutor:
         )
         self._running_futures[execution_id] = future
 
-        # Live event relay (LLM token chunks → SSE). The flow path never had a
-        # child→parent reader; the crew path's relay is reused here.
+        # Live event relay (LLM token chunks + lifecycle trace frames → SSE).
+        # The flow path never had a child→parent reader; the crew path's
+        # relay is reused here.
         from src.services.execution_event_pipe import relay_execution_events
 
-        relay_task = asyncio.create_task(relay_execution_events(log_queue, execution_id))
+        relay_task = asyncio.create_task(
+            relay_execution_events(log_queue, execution_id, group_context)
+        )
 
         try:
             result = await future

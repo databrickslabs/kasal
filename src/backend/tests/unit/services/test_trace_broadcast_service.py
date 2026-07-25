@@ -403,6 +403,105 @@ class TestBroadcastNewTracesForJob:
             assert service._last_trace_ids["job-123"] == 25
 
     @pytest.mark.asyncio
+    async def test_live_pipe_suppresses_piped_event_types(self):
+        """While an execution's event pipe relay is live, DB rows for the
+        event types the pipe carries must NOT be re-broadcast (the pipe
+        already delivered them, and piped frames have no DB id to dedup on).
+        The cursor must still advance."""
+        from src.services import execution_event_pipe as pipe
+
+        service = TraceBroadcastService()
+        service._last_trace_ids["job-123"] = 10
+        mock_session = AsyncMock()
+
+        mock_traces = [
+            MockExecutionTrace(id=11, event_type="task_started"),
+            MockExecutionTrace(id=12, event_type="memory_write"),  # NOT piped
+            MockExecutionTrace(id=13, event_type="tool_usage"),
+        ]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute.return_value = mock_result
+
+        pipe._mark_relay_started("job-123")
+        try:
+            with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+                mock_manager.broadcast_to_job = AsyncMock(return_value=1)
+
+                await service._broadcast_new_traces_for_job(mock_session, "job-123")
+
+                # Only the non-piped event type broadcasts
+                assert mock_manager.broadcast_to_job.call_count == 1
+                event = mock_manager.broadcast_to_job.call_args[0][1]
+                assert event.data["event_type"] == "memory_write"
+                # Cursor advanced past ALL rows, including suppressed ones
+                assert service._last_trace_ids["job-123"] == 13
+        finally:
+            pipe._mark_relay_finished("job-123")
+            pipe._recently_closed_pipes.pop("job-123", None)
+
+    @pytest.mark.asyncio
+    async def test_suppression_persists_through_close_grace_then_lifts(self):
+        """Rows the poller only sees after the relay ended (tail race) are
+        still suppressed during the grace window; once it expires, piped
+        event types broadcast normally again."""
+        from src.services import execution_event_pipe as pipe
+
+        service = TraceBroadcastService()
+        service._last_trace_ids["job-123"] = 10
+        mock_session = AsyncMock()
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [
+            MockExecutionTrace(id=11, event_type="task_completed"),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        pipe._mark_relay_started("job-123")
+        pipe._mark_relay_finished("job-123")
+        try:
+            with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+                mock_manager.broadcast_to_job = AsyncMock(return_value=1)
+
+                # Within grace: suppressed
+                await service._broadcast_new_traces_for_job(mock_session, "job-123")
+                mock_manager.broadcast_to_job.assert_not_called()
+
+                # Expire the grace window
+                pipe._recently_closed_pipes["job-123"] = (
+                    __import__("time").monotonic() - pipe._CLOSED_PIPE_GRACE - 1
+                )
+                service._last_trace_ids["job-123"] = 10
+                await service._broadcast_new_traces_for_job(mock_session, "job-123")
+                assert mock_manager.broadcast_to_job.call_count == 1
+                # Expired entry is purged
+                assert "job-123" not in pipe._recently_closed_pipes
+        finally:
+            pipe._live_piped_executions.discard("job-123")
+            pipe._recently_closed_pipes.pop("job-123", None)
+
+    @pytest.mark.asyncio
+    async def test_no_pipe_means_no_suppression(self):
+        """Executions without a live pipe (in-process runs, restarts)
+        broadcast piped-type rows exactly as before."""
+        service = TraceBroadcastService()
+        service._last_trace_ids["job-999"] = 0
+        mock_session = AsyncMock()
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [
+            MockExecutionTrace(id=1, job_id="job-999", event_type="task_started"),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+            mock_manager.broadcast_to_job = AsyncMock(return_value=1)
+
+            await service._broadcast_new_traces_for_job(mock_session, "job-999")
+
+            assert mock_manager.broadcast_to_job.call_count == 1
+
+    @pytest.mark.asyncio
     async def test_handles_database_errors(self):
         """Test that database errors are handled gracefully."""
         service = TraceBroadcastService()

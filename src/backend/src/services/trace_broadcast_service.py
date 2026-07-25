@@ -25,6 +25,7 @@ from src.core.sse_manager import sse_manager, SSEEvent
 from src.db.session import async_session_factory
 from src.models.execution_trace import ExecutionTrace
 from src.models.execution_history import ExecutionHistory
+from src.services.execution_event_pipe import suppresses_poller_broadcast
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,20 @@ class TraceBroadcastService:
                 for trace in traces:
                     # Update last seen ID
                     self._last_trace_ids[job_id] = trace.id
+
+                    # Executions with a live event pipe already got this
+                    # logical event over SSE the instant it happened — piped
+                    # frames carry no DB id, so the frontend cannot collapse
+                    # the pair; suppress the DB copy instead. Cursor above
+                    # still advances so the row is never revisited. Only the
+                    # pipe-carried event types are skipped; everything else
+                    # (memory, knowledge, reasoning, …) broadcasts as before.
+                    if suppresses_poller_broadcast(job_id, trace.event_type):
+                        logger.debug(
+                            f"[TraceBroadcastService] Skipping trace {trace.id} "
+                            f"({trace.event_type}) for live-piped job {job_id}"
+                        )
+                        continue
 
                     # Create trace data for SSE
                     trace_data = {
