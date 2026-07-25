@@ -458,17 +458,23 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 value, so a long model id used to widen this control and shove
                 the Start button onto its own line. Truncate instead, so the row
                 is laid out identically whatever models are picked. */}
+            {/* Labelled "Optimizer model", not "Model": it does NOT change what
+                the crew runs on. Each agent keeps its own configured llm during
+                optimization, so this drives the reflection model that WRITES the
+                improved prompts (and stands in for agents that declare no llm).
+                Left on Default it now resolves to the crew's own model rather
+                than a global default that never executes anything. */}
             <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
-              <InputLabel>Model</InputLabel>
+              <InputLabel>Optimizer model</InputLabel>
               <Select
                 value={model}
-                label="Model"
+                label="Optimizer model"
                 onChange={(e) => setModel(e.target.value)}
-                SelectDisplayProps={{ title: model || 'Default' }}
+                SelectDisplayProps={{ title: model || "Default (crew's model)" }}
                 sx={ELLIPSIS_SELECT_SX}
               >
                 <MenuItem value="">
-                  <em>Default</em>
+                  <em>Default (crew&apos;s model)</em>
                 </MenuItem>
                 {models.map((key) => (
                   <MenuItem key={key} value={key}>
@@ -477,27 +483,25 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 ))}
               </Select>
             </FormControl>
-            <Tooltip title="The model that grades each deliverable. Pick a DIFFERENT model from the crew's — a model judging its own work prefers it, so the score climbs without the prompts getting better. The judge also commits to its own answer before it sees any candidate.">
-              <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
-                <InputLabel>Judge model</InputLabel>
-                <Select
-                  value={runJudgeModel}
-                  label="Judge model"
-                  onChange={(e) => setRunJudgeModel(e.target.value)}
-                  SelectDisplayProps={{ title: runJudgeModel || 'Default (configured judge)' }}
-                  sx={ELLIPSIS_SELECT_SX}
-                >
-                  <MenuItem value="">
-                    <em>Default (configured judge)</em>
+            <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
+              <InputLabel>Judge model</InputLabel>
+              <Select
+                value={runJudgeModel}
+                label="Judge model"
+                onChange={(e) => setRunJudgeModel(e.target.value)}
+                SelectDisplayProps={{ title: runJudgeModel || 'Default (configured judge)' }}
+                sx={ELLIPSIS_SELECT_SX}
+              >
+                <MenuItem value="">
+                  <em>Default (configured judge)</em>
+                </MenuItem>
+                {models.map((key) => (
+                  <MenuItem key={key} value={key}>
+                    {key}
                   </MenuItem>
-                  {models.map((key) => (
-                    <MenuItem key={key} value={key}>
-                      {key}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Tooltip>
+                ))}
+              </Select>
+            </FormControl>
             <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. The baseline costs 1 execution; each further execution evaluates one NEW candidate prompt set (re-evaluations are cached and free). Executions have real side effects (tools, emails, database writes).">
               <TextField
                 size="small"

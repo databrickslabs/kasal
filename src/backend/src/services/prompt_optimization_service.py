@@ -733,6 +733,22 @@ def _stored_judge_model_to_key(stored: Any) -> Optional[str]:
     return text
 
 
+def _crew_target_model(agents: Any) -> Optional[str]:
+    """The model a crew actually runs on: the most common agent ``llm``.
+
+    There is no crew-level model column — the model lives per agent — so the
+    honest answer for "what is this crew's model" is whichever one most of its
+    agents use. Returns None when no agent declares one, leaving the caller to
+    fall back to the global default.
+    """
+    from collections import Counter
+
+    declared = [a.llm for a in (agents or []) if getattr(a, "llm", None)]
+    if not declared:
+        return None
+    return Counter(declared).most_common(1)[0][0]
+
+
 def _resolve_judge_model(requested: Optional[str], target_model: str, what: str) -> str:
     """Pick the correctness judge's model, preferring anything but the target.
 
@@ -1683,7 +1699,16 @@ class PromptOptimizationService:
         except Exception as feedback_err:
             logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
 
-        target_model = request.model or DEFAULT_TARGET_MODEL
+        # Fall back to the model the crew ACTUALLY runs on, not a global default.
+        # Each agent keeps its own ``llm`` during optimization (agents_yaml below
+        # carries it, and agent_builder prefers the spec's llm over the crew-level
+        # model), so DEFAULT_DISPATCHER_MODEL named a model that never executes
+        # anything here. That mattered because target_model is what the judge is
+        # checked against — comparing the judge to a phantom model let a judge
+        # that IS the crew's model pass as "different".
+        target_model = (
+            request.model or _crew_target_model(agents) or DEFAULT_TARGET_MODEL
+        )
         # NOT `or target_model`: the crew judge grades deliverables the target
         # model produced, so target == judge is self-preference — and the crew
         # judge is the one whose grade drives accept/reject.
