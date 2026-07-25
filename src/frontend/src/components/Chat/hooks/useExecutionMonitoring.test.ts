@@ -13,6 +13,10 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useExecutionMonitoring } from './useExecutionMonitoring';
 
 // Mock dependencies
+vi.mock('../../ChatMode/api/streaming', () => ({
+  streamExecution: vi.fn(() => () => {}),
+}));
+
 vi.mock('../../../utils/taskIdUtils', () => ({
   extractTaskId: vi.fn().mockReturnValue(null),
   extractTaskName: vi.fn().mockReturnValue(null),

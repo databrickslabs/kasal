@@ -32,6 +32,140 @@ interface ChatMessageItemProps {
   onOpenLogs?: (jobId: string) => void;
 }
 
+/** Pick the human-readable answer out of a result envelope object: the runner
+ *  emits `{text, a2ui}`, older runs stored `{value: "<markdown>"}`. */
+const pickEnvelopeText = (obj: Record<string, unknown>): string | null => {
+  for (const key of ['text', 'value']) {
+    const v = obj[key];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return null;
+};
+
+/**
+ * Extract the markdown answer text from a result message's content, or null
+ * when there is none (plain markdown, raw JSON without a text field, …).
+ * Accepts the `{text, a2ui}` envelope, the legacy `{value}` shape, and the
+ * same one-level `{result: {…}}` / `{output: "<json>"}` wrappers `toSurface`
+ * unwraps — deliberately WITHOUT a deep walk, so a component's own `text`
+ * prop inside the a2ui surface can never be mistaken for the answer.
+ */
+const extractResultText = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  const direct = pickEnvelopeText(obj);
+  if (direct) return direct;
+  for (const key of ['result', 'output']) {
+    const wrapped = obj[key];
+    if (typeof wrapped === 'string') {
+      const nested = extractResultText(wrapped);
+      if (nested) return nested;
+    } else if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
+      const nested = pickEnvelopeText(wrapped as Record<string, unknown>);
+      if (nested) return nested;
+    }
+  }
+  return null;
+};
+
+/** Normalize a result's markdown: trim lines, drop empty ones, and re-insert
+ *  single blank lines around headers / after lists / between paragraphs so the
+ *  rendered markdown stays compact without excessive line breaks. */
+const normalizeResultMarkdown = (content: string): string => {
+  const lines = content.split('\n').map((line: string) => line.trim());
+  const processedLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const nextLine = lines[i + 1] || '';
+
+    // Skip empty lines
+    if (line === '') continue;
+
+    // Check if this is a list item
+    const isListItem = line.match(/^[-*•]\s/) || line.match(/^\d+\.\s/);
+    const nextIsListItem = nextLine.match(/^[-*•]\s/) || nextLine.match(/^\d+\.\s/);
+
+    // Check if this is a header
+    const isHeader = line.match(/^#+\s/);
+
+    processedLines.push(line);
+
+    // Add spacing logic
+    if (isHeader && i < lines.length - 1) {
+      // Add blank line after headers
+      processedLines.push('');
+    } else if (isListItem && !nextIsListItem && nextLine !== '') {
+      // Add blank line after list ends
+      processedLines.push('');
+    } else if (!isListItem && !isHeader && nextLine !== '' && !nextIsListItem) {
+      // Add blank line between paragraphs
+      processedLines.push('');
+    }
+  }
+
+  return processedLines.join('\n').trim();
+};
+
+/** Styling for the final answer text: plain content on the chat's default
+ *  background — no border, no card chrome — with compact markdown typography. */
+const resultTextSx = {
+  py: 0.5,
+  maxWidth: '100%',
+  width: '100%',
+  boxSizing: 'border-box',
+  color: 'text.primary',
+  // Override markdown default spacing for compact display
+  '& h1, & h2, & h3': {
+    marginTop: '0.75em',
+    marginBottom: '0.5em',
+    fontSize: '1.1em',
+    fontWeight: 600,
+  },
+  '& h4, & h5, & h6': {
+    marginTop: '0.5em',
+    marginBottom: '0.25em',
+    fontSize: '1em',
+    fontWeight: 600,
+  },
+  '& p': {
+    margin: '0.4em 0',
+    lineHeight: 1.4,
+  },
+  '& ul, & ol': {
+    margin: '0.4em 0',
+    paddingLeft: '1.5em',
+  },
+  '& li': {
+    margin: '0.2em 0',
+    lineHeight: 1.4,
+  },
+  '& li p': {
+    margin: 0,
+    display: 'inline',
+  },
+  '& > *:first-of-type': {
+    marginTop: 0,
+  },
+  '& > *:last-child': {
+    marginBottom: 0,
+  },
+  // Remove empty paragraphs
+  '& p:empty': {
+    display: 'none',
+  },
+  // Compact line height
+  lineHeight: 1.5,
+} as const;
+
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs }) => {
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
@@ -75,230 +209,73 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       // A2UI surfaces render as their designed layout (like Chat mode's
       // preview), not as raw JSON. toSurface accepts the new envelope, a bare
       // surface, or an older legacy document (adapted) — one renderer for all.
+      // When the envelope also carries the markdown answer ({text, a2ui}),
+      // show the answer FIRST (plain, no card chrome) and the Generated UI
+      // card below it.
       const surface = toSurface(processedContent);
+      const answerText = extractResultText(processedContent);
       if (surface) {
-        return <UiSurfaceResult surface={surface} />;
+        return (
+          <Box sx={{ width: '100%', maxWidth: '100%' }}>
+            {answerText && (
+              <Box data-testid="result-text" sx={{ ...resultTextSx, mb: 1.5 }}>
+                <MessageContent content={normalizeResultMarkdown(answerText)} />
+              </Box>
+            )}
+            <UiSurfaceResult surface={surface} />
+          </Box>
+        );
+      }
+
+      // Envelope / legacy {value} text without a surface: plain markdown.
+      if (answerText) {
+        return (
+          <Box data-testid="result-text" sx={resultTextSx}>
+            <MessageContent content={normalizeResultMarkdown(answerText)} />
+          </Box>
+        );
       }
 
       // Try to parse as JSON
       try {
         const jsonContent = JSON.parse(processedContent);
-          
-          // Check if the JSON has a 'value' field with escaped newlines
-          if (jsonContent.value && typeof jsonContent.value === 'string') {
-            // Preprocess content to remove excessive line breaks
-            const lines = jsonContent.value.split('\n').map((line: string) => line.trim());
-            const processedLines: string[] = [];
-            
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
-              const nextLine = lines[i + 1] || '';
-              
-              // Skip empty lines
-              if (line === '') continue;
-              
-              // Check if this is a list item
-              const isListItem = line.match(/^[-*•]\s/) || line.match(/^\d+\.\s/);
-              const nextIsListItem = nextLine.match(/^[-*•]\s/) || nextLine.match(/^\d+\.\s/);
-              
-              // Check if this is a header
-              const isHeader = line.match(/^#+\s/);
-              
-              processedLines.push(line);
-              
-              // Add spacing logic
-              if (isHeader && i < lines.length - 1) {
-                // Add blank line after headers
-                processedLines.push('');
-              } else if (isListItem && !nextIsListItem && nextLine !== '') {
-                // Add blank line after list ends
-                processedLines.push('');
-              } else if (!isListItem && !isHeader && nextLine !== '' && !nextIsListItem) {
-                // Add blank line between paragraphs
-                processedLines.push('');
-              }
-            }
-            
-            const cleanedContent = processedLines.join('\n').trim();
-            
-            // Render the value as markdown with reduced spacing
-            return (
-              <Box
-                sx={{
-                  backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                  p: 2,
-                  borderRadius: 1,
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  maxWidth: '100%',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  color: 'text.primary',
-                  // Override markdown default spacing for compact display
-                  '& h1, & h2, & h3': {
-                    marginTop: '0.75em',
-                    marginBottom: '0.5em',
-                    fontSize: '1.1em',
-                    fontWeight: 600,
-                  },
-                  '& h4, & h5, & h6': {
-                    marginTop: '0.5em',
-                    marginBottom: '0.25em',
-                    fontSize: '1em',
-                    fontWeight: 600,
-                  },
-                  '& p': {
-                    margin: '0.4em 0',
-                    lineHeight: 1.4,
-                  },
-                  '& ul, & ol': {
-                    margin: '0.4em 0',
-                    paddingLeft: '1.5em',
-                  },
-                  '& li': {
-                    margin: '0.2em 0',
-                    lineHeight: 1.4,
-                  },
-                  '& li p': {
-                    margin: 0,
-                    display: 'inline',
-                  },
-                  '& > *:first-of-type': {
-                    marginTop: 0,
-                  },
-                  '& > *:last-child': {
-                    marginBottom: 0,
-                  },
-                  // Remove empty paragraphs
-                  '& p:empty': {
-                    display: 'none',
-                  },
-                  // Compact line height
-                  lineHeight: 1.5,
-                }}
-              >
-                <MessageContent content={cleanedContent} />
-              </Box>
-            );
-          } else {
-            // Regular JSON, display formatted
-            return (
-              <Box
-                component="pre"
-                sx={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  maxHeight: '600px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                  p: 2,
-                  borderRadius: 1,
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  m: 0,
-                  maxWidth: '100%',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  minWidth: 0,
-                  overflowX: 'auto',
-                  overflowY: 'auto',
-                  '& code': {
-                    display: 'block',
-                    whiteSpace: 'pre',
-                    wordBreak: 'normal',
-                    overflowWrap: 'normal',
-                  }
-                }}
-              >
-                <code>{JSON.stringify(jsonContent, null, 2)}</code>
-              </Box>
-            );
-          }
-      } catch (e) {
-        // Not JSON, render as markdown in a box for final results
-        // Preprocess content to remove excessive line breaks
-        const lines = processedContent.split('\n').map((line: string) => line.trim());
-        const processedLines: string[] = [];
-        
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const nextLine = lines[i + 1] || '';
-          
-          // Skip empty lines
-          if (line === '') continue;
-          
-          // Check if this is a list item
-          const isListItem = line.match(/^[-*•]\s/) || line.match(/^\d+\.\s/);
-          const nextIsListItem = nextLine.match(/^[-*•]\s/) || nextLine.match(/^\d+\.\s/);
-          
-          // Check if this is a header
-          const isHeader = line.match(/^#+\s/);
-          
-          processedLines.push(line);
-          
-          // Add spacing logic
-          if (isHeader && i < lines.length - 1) {
-            // Add blank line after headers
-            processedLines.push('');
-          } else if (isListItem && !nextIsListItem && nextLine !== '') {
-            // Add blank line after list ends
-            processedLines.push('');
-          } else if (!isListItem && !isHeader && nextLine !== '' && !nextIsListItem) {
-            // Add blank line between paragraphs
-            processedLines.push('');
-          }
-        }
-        
-        const cleanedContent = processedLines.join('\n').trim();
-        
+        // Regular JSON, display formatted
         return (
           <Box
+            component="pre"
             sx={{
+              fontFamily: 'monospace',
+              fontSize: '0.875rem',
+              overflow: 'auto',
+              maxHeight: '600px',
               backgroundColor: 'rgba(0, 0, 0, 0.05)',
               p: 2,
               borderRadius: 1,
               border: '1px solid rgba(0, 0, 0, 0.1)',
+              m: 0,
               maxWidth: '100%',
               width: '100%',
               boxSizing: 'border-box',
-              color: 'text.primary',
-              // Override markdown default spacing
-              '& h1, & h2, & h3, & h4, & h5, & h6': {
-                marginTop: '1em',
-                marginBottom: '0.5em',
-              },
-              '& p': {
-                margin: 0,
-                lineHeight: 1.4,
-              },
-              '& p + p': {
-                marginTop: '0.75em',
-              },
-              '& ul, & ol': {
-                margin: '0.5em 0',
-                paddingLeft: '1.5em',
-              },
-              '& li': {
-                margin: '0.25em 0',
-                lineHeight: 1.4,
-                '& p': {
-                  margin: 0,
-                  display: 'inline',
-                },
-              },
-              '& > *:first-of-type': {
-                marginTop: 0,
-              },
-              '& > *:last-child': {
-                marginBottom: 0,
-              },
-              // Remove empty paragraphs and breaks
-              '& p:empty, & br': {
-                display: 'none',
-              },
-              // Compact the entire content
-              lineHeight: 1.5,
+              minWidth: 0,
+              overflowX: 'auto',
+              overflowY: 'auto',
+              '& code': {
+                display: 'block',
+                whiteSpace: 'pre',
+                wordBreak: 'normal',
+                overflowWrap: 'normal',
+              }
             }}
           >
-            <MessageContent content={cleanedContent} />
+            <code>{JSON.stringify(jsonContent, null, 2)}</code>
+          </Box>
+        );
+      } catch (e) {
+        // Not JSON: the final answer markdown renders as plain content on the
+        // chat's default background — no border, no card chrome.
+        return (
+          <Box data-testid="result-text" sx={resultTextSx}>
+            <MessageContent content={normalizeResultMarkdown(processedContent)} />
           </Box>
         );
       }

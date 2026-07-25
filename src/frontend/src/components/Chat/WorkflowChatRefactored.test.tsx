@@ -1190,7 +1190,7 @@ describe('WorkflowChat - model display name mapping', () => {
   });
 });
 
-describe('Run activity rendering (trace groups + live placeholder)', () => {
+describe('Run activity rendering (removed from chat — lives in ShowTrace)', () => {
   const activityProps = {
     onNodesGenerated: vi.fn(),
     onLoadingStateChange: vi.fn(),
@@ -1224,7 +1224,7 @@ describe('Run activity rendering (trace groups + live placeholder)', () => {
     (await getExecState()).__execState.executingJobId = null;
   });
 
-  it('marks the trace group as running while its job executes', async () => {
+  it('does not render trace messages — run activity lives in ShowTrace', async () => {
     (await getExecState()).__execState.executingJobId = 'job-1';
     (await getStore()).__storeState.messagesBySession['test-session-123'] = [
       { id: 'u1', type: 'user', content: 'run crew', timestamp: new Date() },
@@ -1234,57 +1234,35 @@ describe('Run activity rendering (trace groups + live placeholder)', () => {
 
     render(<WorkflowChat {...activityProps} />);
 
-    const groups = screen.getAllByTestId('grouped-trace-messages');
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toHaveAttribute('data-running', 'true');
-    expect(groups[0]).toHaveTextContent('2 trace messages');
+    expect(screen.queryAllByTestId('grouped-trace-messages')).toHaveLength(0);
+    expect(screen.queryByText('step one')).not.toBeInTheDocument();
+    expect(screen.getByText('run crew')).toBeInTheDocument();
   });
 
-  it('shows the trace group as done once execution ends', async () => {
+  it('does not render historical trace messages either', async () => {
     (await getStore()).__storeState.messagesBySession['test-session-123'] = [
-      { id: 't1', type: 'trace', content: 'step one', timestamp: new Date(), jobId: 'job-1' },
+      { id: 't1', type: 'trace', content: 'old step', timestamp: new Date(), jobId: 'job-9' },
+      { id: 'a1', type: 'assistant', content: 'final answer', timestamp: new Date() },
     ];
 
     render(<WorkflowChat {...activityProps} />);
 
-    expect(screen.getByTestId('grouped-trace-messages')).toHaveAttribute('data-running', 'false');
+    expect(screen.queryAllByTestId('grouped-trace-messages')).toHaveLength(0);
+    expect(screen.queryByText('old step')).not.toBeInTheDocument();
+    expect(screen.getByText('final answer')).toBeInTheDocument();
   });
 
-  it('replaces the "Preparing to execute" bubble with a live activity placeholder', async () => {
+  it('shows no live activity placeholder while executing', async () => {
+    (await getExecState()).__execState.executingJobId = 'job-1';
     (await getStore()).__storeState.messagesBySession['test-session-123'] = [
+      { id: 'u1', type: 'user', content: 'run crew', timestamp: new Date() },
       { id: 'exec-pending-1', type: 'execution', content: '⏳ Preparing to execute crew...', timestamp: new Date() },
     ];
 
     render(<WorkflowChat {...activityProps} />);
 
+    expect(screen.queryAllByTestId('grouped-trace-messages')).toHaveLength(0);
     expect(screen.queryByText(/Preparing to execute/)).not.toBeInTheDocument();
-    const group = screen.getByTestId('grouped-trace-messages');
-    expect(group).toHaveAttribute('data-running', 'true');
-    expect(group).toHaveTextContent('0 trace messages');
-  });
-
-  it('shows an empty live placeholder while executing before any trace arrives', async () => {
-    (await getExecState()).__execState.executingJobId = 'job-1';
-    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
-      { id: 'u1', type: 'user', content: 'run crew', timestamp: new Date() },
-    ];
-
-    render(<WorkflowChat {...activityProps} />);
-
-    const group = screen.getByTestId('grouped-trace-messages');
-    expect(group).toHaveAttribute('data-running', 'true');
-    expect(group).toHaveTextContent('0 trace messages');
-  });
-
-  it('does not add an extra placeholder when the executing job already has traces', async () => {
-    (await getExecState()).__execState.executingJobId = 'job-1';
-    (await getStore()).__storeState.messagesBySession['test-session-123'] = [
-      { id: 't1', type: 'trace', content: 'step', timestamp: new Date(), jobId: 'job-1' },
-    ];
-
-    render(<WorkflowChat {...activityProps} />);
-
-    expect(screen.getAllByTestId('grouped-trace-messages')).toHaveLength(1);
   });
 
   it('still filters execution start/complete noise messages', async () => {

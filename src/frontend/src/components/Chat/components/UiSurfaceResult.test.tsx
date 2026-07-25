@@ -38,6 +38,20 @@ function makeSurface(): Surface {
   };
 }
 
+function makeDeckSurface(): Surface {
+  return {
+    surfaceKind: 'presentation',
+    root: 'deck',
+    components: [
+      { id: 'deck', component: 'SlideDeck', children: ['s1', 's2'] },
+      { id: 's1', component: 'Slide', variant: 'title', title: 'Deck Title' },
+      { id: 's2', component: 'Slide', title: 'Second Slide', children: ['s2t'] },
+      { id: 's2t', component: 'Text', text: 'Slide body' },
+    ],
+    dataModel: {},
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetConfig.mockResolvedValue({ enabled: false });
@@ -68,6 +82,37 @@ describe('UiSurfaceResult (A2UI result card)', () => {
     render(<UiSurfaceResult surface={makeSurface()} />);
     fireEvent.click(screen.getByText('Hello Report'));
     expect(screen.getAllByText('Hello Report')).toHaveLength(2);
+  });
+
+  // The shared renderer's Tailwind utilities are compiled under the
+  // `.kasal-chat-root` scope (tailwind.config.js `important`); this chat lives
+  // outside the chat-mode root, so the card must recreate the scope or every
+  // utility no-ops (the "SlideDeck collapses to text height" defect).
+  it('renders the surface inside a .kasal-chat-root scope with a data-theme', () => {
+    const { container } = render(<UiSurfaceResult surface={makeSurface()} />);
+    const scope = container.querySelector('.kasal-chat-root');
+    expect(scope).not.toBeNull();
+    expect(scope!.getAttribute('data-theme')).toMatch(/^(light|dark)$/);
+    // The surface renders INSIDE the scope, not beside it.
+    expect(scope!.querySelector('.kasal-a2ui')).not.toBeNull();
+  });
+});
+
+describe('UiSurfaceResult (presentation deck)', () => {
+  it('keeps the deck navigable in place: nav works and does not open the dialog', () => {
+    render(<UiSurfaceResult surface={makeDeckSurface()} />);
+    expect(screen.getByText('Deck Title')).toBeInTheDocument();
+    // Navigating with the deck's own controls advances the slide…
+    fireEvent.click(screen.getByText('Next ›'));
+    expect(screen.getByText('Second Slide')).toBeInTheDocument();
+    // …and the click did NOT bubble into a full-view dialog (still one render).
+    expect(screen.getAllByText('Second Slide')).toHaveLength(1);
+  });
+
+  it('still offers the explicit expand control for decks', () => {
+    render(<UiSurfaceResult surface={makeDeckSurface()} />);
+    fireEvent.click(screen.getByLabelText('Open full view'));
+    expect(screen.getAllByText('Deck Title').length).toBeGreaterThan(1);
   });
 });
 

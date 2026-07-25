@@ -402,6 +402,35 @@ describe('ChatMessageItem', () => {
       expect(messageContent.textContent).toContain('Plain result text');
     });
 
+    it('renders the final answer text plain — no border and no background card', () => {
+      render(
+        <ChatMessageItem
+          message={makeMessage({ type: 'result', content: 'Plain result text' })}
+        />
+      );
+
+      const textBox = screen.getByTestId('result-text');
+      const style = window.getComputedStyle(textBox);
+      // No bordered container…
+      expect(['', '0px', 'medium']).toContain(style.borderWidth);
+      expect(style.borderStyle === '' || style.borderStyle === 'none').toBe(true);
+      // …and no card background: plain content on the chat's default background.
+      expect(['', 'transparent', 'rgba(0, 0, 0, 0)']).toContain(style.backgroundColor);
+    });
+
+    it('renders the legacy {value} result text plain as well', () => {
+      const jsonContent = JSON.stringify({ value: '# Report\n\nDone.' });
+
+      render(
+        <ChatMessageItem message={makeMessage({ type: 'result', content: jsonContent })} />
+      );
+
+      const textBox = screen.getByTestId('result-text');
+      const style = window.getComputedStyle(textBox);
+      expect(style.borderStyle === '' || style.borderStyle === 'none').toBe(true);
+      expect(['', 'transparent', 'rgba(0, 0, 0, 0)']).toContain(style.backgroundColor);
+    });
+
     it('strips empty lines from result JSON value content', () => {
       const jsonContent = JSON.stringify({
         value: 'Line 1\n\n\n\nLine 2',
@@ -899,6 +928,21 @@ describe('ChatMessageItem', () => {
       ],
     });
 
+    // The runner's terminal result: markdown answer + composed surface in one
+    // envelope. The answer must render FIRST, the Generated UI card second.
+    const a2uiEnvelope = JSON.stringify({
+      text: '# Final Answer\n\nEverything went well.',
+      a2ui: {
+        surfaceKind: 'presentation',
+        root: 'deck',
+        components: [
+          { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+          { id: 's1', component: 'Slide', variant: 'title', title: 'Slide One' },
+        ],
+        dataModel: {},
+      },
+    });
+
     it('renders an A2UI result message as the designed surface, not raw JSON', () => {
       render(
         <ChatMessageItem message={makeMessage({ type: 'result', content: a2uiDoc })} />
@@ -907,6 +951,32 @@ describe('ChatMessageItem', () => {
       expect(screen.getByTestId('ui-surface-result')).toBeInTheDocument();
       // The raw JSON dump must NOT also render.
       expect(screen.queryByText(/createSurface/)).not.toBeInTheDocument();
+      // A legacy doc carries no answer text — nothing extra renders above the card.
+      expect(screen.queryByTestId('result-text')).not.toBeInTheDocument();
+    });
+
+    it('renders the answer text BEFORE the Generated UI card for {text, a2ui} envelopes', () => {
+      render(
+        <ChatMessageItem message={makeMessage({ type: 'result', content: a2uiEnvelope })} />
+      );
+
+      const textBox = screen.getByTestId('result-text');
+      const card = screen.getByTestId('ui-surface-result');
+      expect(textBox.textContent).toContain('Final Answer');
+      // DOM order: the answer text precedes the Generated UI card.
+      expect(
+        textBox.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it('renders the envelope answer text plain (no bordered container)', () => {
+      render(
+        <ChatMessageItem message={makeMessage({ type: 'result', content: a2uiEnvelope })} />
+      );
+
+      const style = window.getComputedStyle(screen.getByTestId('result-text'));
+      expect(style.borderStyle === '' || style.borderStyle === 'none').toBe(true);
+      expect(['', 'transparent', 'rgba(0, 0, 0, 0)']).toContain(style.backgroundColor);
     });
 
     it('keeps the raw JSON rendering for non-A2UI result messages', () => {

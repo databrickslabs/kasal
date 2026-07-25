@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types';
+import { streamExecution } from '../../ChatMode/api/streaming';
 
 import { runService } from '../../../api/ExecutionHistoryService';
 import { Run } from '../../../types/run';
@@ -384,20 +385,12 @@ export const useExecutionMonitoring = (
           return;
         }
 
-        const traceMessage: ChatMessage = {
-          id: `trace-${traceId}`,
-          type: 'trace',
-          content: traceContent || `[${trace.event_type}]`,
-          timestamp: new Date(trace.created_at || Date.now()),
-          isIntermediate: true,
-          eventSource: trace.event_source,
-          eventContext: trace.event_context,
-          eventType: trace.event_type,
-          jobId
-        };
-
-        addMessage(sessionId, traceMessage);
-        saveMessageToBackend(traceMessage);
+        // Traces are NOT posted into the chat anymore: the run's live output
+        // streams token-by-token into an assistant bubble (see the llm_chunk
+        // stream effect below), and the full trace detail lives in ShowTrace —
+        // posting rows here rendered the same information twice. The trace is
+        // still consumed above for the task state machine (canvas node status).
+        void traceContent;
 
         // Mark this trace as processed (both the specific ID and event signature
         // to prevent duplicates from relay + DB-poll paths)
@@ -493,6 +486,47 @@ export const useExecutionMonitoring = (
   const markPendingExecution = useCallback(() => {
     pendingExecutionRef.current = true;
   }, []);
+
+  // ── Live token streaming into the chat ────────────────────────────────
+  // While a job runs, llm_chunk frames (crew subprocess → event pipe → SSE)
+  // append into ONE assistant bubble — the live view that replaced per-trace
+  // chat rows (full trace detail lives in ShowTrace). SSE-gated: without SSE
+  // the completion message still arrives via polling exactly as before. The
+  // bubble is transient — the terminal result message is authoritative, so
+  // the cleanup drops it when the run ends (or the session/tab switches).
+  const streamBubbleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!executingJobId) return;
+    const jobId = executingJobId;
+    const bubbleId = `stream-${jobId}`;
+    streamBubbleRef.current = null;
+    const close = streamExecution(jobId, (event) => {
+      if (event.event !== 'llm_chunk') return;
+      const chunk = (event.data.chunk as string) || '';
+      if (!chunk) return;
+      const store = useChatMessagesStore.getState();
+      if (streamBubbleRef.current !== bubbleId) {
+        streamBubbleRef.current = bubbleId;
+        store.addMessage(sessionId, {
+          id: bubbleId,
+          type: 'assistant',
+          content: chunk,
+          timestamp: new Date(),
+          isIntermediate: true,
+          jobId,
+        } as ChatMessage);
+      } else {
+        store.appendToMessage(sessionId, bubbleId, chunk);
+      }
+    });
+    return () => {
+      close();
+      if (streamBubbleRef.current) {
+        useChatMessagesStore.getState().removeMessage(sessionId, streamBubbleRef.current);
+        streamBubbleRef.current = null;
+      }
+    };
+  }, [executingJobId, sessionId]);
 
   return {
     executingJobId,

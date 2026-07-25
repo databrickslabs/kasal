@@ -3,6 +3,17 @@ import { Box, Dialog, DialogContent, IconButton, Tooltip, Typography } from '@mu
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import A2uiSurface from '../../ChatMode/components/Chat/A2uiSurface';
+// The shared A2UI renderer is styled by the chat-mode CSS, whose Tailwind
+// utilities are ALL scoped under the `.kasal-chat-root` class
+// (tailwind.config.js `important: '.kasal-chat-root'`). This chat lives outside
+// that scope, so without the stylesheet + a scope wrapper every utility in the
+// renderer silently no-ops (a SlideDeck's slide collapses to its text height,
+// loses padding/centering, and its nav dots render unsized). Import the CSS and
+// render each surface inside a `.kasal-chat-root` wrapper — the same recipe as
+// `Jobs/ShowResult.tsx`. It's a CLASS (not the chat workspace's id), so it
+// coexists cleanly with the chat-mode root.
+import '../../ChatMode/chat.css';
+import { useThemeStore } from '../../../store/theme';
 import type { Surface } from '../../../shared/a2ui';
 
 /** The width an A2UI surface is laid out at before being scaled into the
@@ -15,9 +26,16 @@ const MAX_PREVIEW_HEIGHT = 480;
  * Full-size themed A2UI render: the shared A2uiSurface wrapper re-resolves the
  * workspace UI-Configurator branding (source of truth) and draws through the
  * shared A2UIRenderer — the same one implementation used everywhere + the export.
+ * Wrapped in the `.kasal-chat-root` scope (with the current light/dark theme) so
+ * the renderer's class-scoped Tailwind utilities and `--a2-*` vars resolve here.
  */
 export const UiSurfaceView: React.FC<{ surface: Surface }> = ({ surface }) => {
-  return <A2uiSurface surface={surface} />;
+  const isDarkMode = useThemeStore((s) => s.isDarkMode);
+  return (
+    <div className="kasal-chat-root" data-theme={isDarkMode ? 'dark' : 'light'}>
+      <A2uiSurface surface={surface} />
+    </div>
+  );
 };
 
 /**
@@ -31,6 +49,11 @@ export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => 
   const innerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState<number | null>(null);
+  // A presentation is navigated in place (Prev/Next/dots), so the card must not
+  // hijack those clicks to open the dialog, and must not clip away the deck's
+  // bottom navigation — its height is already bounded by the 16:9 stage. Other
+  // kinds keep the click-to-expand + readable-height clip behavior.
+  const isDeck = surface.surfaceKind === 'presentation';
 
   // Shrink-to-fit: the surface renders at NATURAL_WIDTH and is scaled down to
   // the chat column's width; the wrapper's height tracks the scaled content.
@@ -50,8 +73,9 @@ export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => 
     return () => ro.disconnect();
   }, []);
 
-  const clipped = scaledHeight !== null && scaledHeight > MAX_PREVIEW_HEIGHT;
-  const previewHeight = scaledHeight === null ? 'auto' : Math.min(scaledHeight, MAX_PREVIEW_HEIGHT);
+  const clipped = !isDeck && scaledHeight !== null && scaledHeight > MAX_PREVIEW_HEIGHT;
+  const previewHeight =
+    scaledHeight === null ? 'auto' : isDeck ? scaledHeight : Math.min(scaledHeight, MAX_PREVIEW_HEIGHT);
 
   return (
     <Box sx={{ width: '100%', minWidth: 0, whiteSpace: 'normal' }}>
@@ -81,11 +105,16 @@ export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => 
         </Box>
         <Box
           ref={outerRef}
-          onClick={() => setDialogOpen(true)}
-          sx={{ position: 'relative', overflow: 'hidden', height: previewHeight, cursor: 'pointer' }}
+          onClick={isDeck ? undefined : () => setDialogOpen(true)}
+          sx={{
+            position: 'relative',
+            overflow: 'hidden',
+            height: previewHeight,
+            cursor: isDeck ? 'default' : 'pointer',
+          }}
         >
           <Box ref={innerRef} sx={{ width: NATURAL_WIDTH, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-            <A2uiSurface surface={surface} />
+            <UiSurfaceView surface={surface} />
           </Box>
           {clipped && (
             <Box
@@ -121,7 +150,7 @@ export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => 
           <CloseIcon fontSize="small" />
         </IconButton>
         <DialogContent sx={{ p: 0 }}>
-          <A2uiSurface surface={surface} />
+          <UiSurfaceView surface={surface} />
         </DialogContent>
       </Dialog>
     </Box>

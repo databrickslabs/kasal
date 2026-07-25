@@ -1791,8 +1791,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               const deduplicatedMessages = messages;
 
               const filteredMessages = deduplicatedMessages.filter(message => {
-                // Filter out execution start/pending/completion messages — the
-                // run-activity container (below) is the live status indicator.
+                // Run activity does not render in this chat: trace rows
+                // (including historical ones) live in ShowTrace, and the live
+                // view is the streamed answer bubble. Only conversation
+                // messages and results belong here.
+                if (message.type === 'trace') {
+                  return false;
+                }
                 if (message.type === 'execution' && (
                   message.content.includes('🚀 Started execution:') ||
                   message.content.includes('✅ Execution completed successfully') ||
@@ -1824,19 +1829,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               if (currentTraceGroup.length > 0) {
                 groupedMessages.push(currentTraceGroup);
               }
-
-              // Live status: while a job executes its trace group shows
-              // "Working…" with a pulsing dot (run-activity container). Before
-              // any trace arrives — including the gap between pressing run and
-              // the jobCreated event — an empty live container stands in.
-              const hasLiveTraceGroup = Boolean(executingJobId) && groupedMessages.some(
-                item => Array.isArray(item) && item.some(m => m.jobId === executingJobId)
-              );
-              const lastRawMessage = deduplicatedMessages[deduplicatedMessages.length - 1];
-              const awaitingJobStart = lastRawMessage?.type === 'execution' &&
-                lastRawMessage.content.includes('⏳ Preparing to execute');
-              const showLivePlaceholder = (Boolean(executingJobId) && !hasLiveTraceGroup) ||
-                (awaitingJobStart && !executingJobId);
 
               return (
                 <>
@@ -1871,9 +1863,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       );
                     }
                   })}
-                  {showLivePlaceholder && (
-                    <GroupedTraceMessages key="run-activity-live" messages={[]} running onOpenLogs={onOpenLogs} />
-                  )}
                 </>
               );
             })()}
