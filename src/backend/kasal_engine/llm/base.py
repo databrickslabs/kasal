@@ -150,14 +150,38 @@ class BaseLLM(BaseModel):
         try:
             result = function(**arguments)
         except Exception as e:
-            # A blocked call (denied approval / policy hook) is an answer, not
-            # a crash: hand the denial to the LLM as the tool result so the
-            # agent can adapt or explain. Other tool errors keep propagating.
+            # EVERY tool failure is an answer, not a crash.
+            #
+            # A blocked call (denied approval / policy hook) was already handled
+            # this way; everything else propagated — out of call(), through
+            # run_agent's retry loop, and finally out of the crew, so one dead
+            # link ended the run. Observed: a news site answering 302-redirect-loop
+            # then 404 killed a 51s crew after three full agent turns, each one
+            # re-running every tool call that had already succeeded.
+            #
+            # The model is the right place to decide what a failed tool call
+            # means: handed the error as the result, it can try another source,
+            # use what it already gathered, or say why it cannot continue.
+            # Runaway retrying is bounded by the tool-round cap and max_iter.
+            #
+            # NOT swallowed: BaseException (KeyboardInterrupt, SystemExit,
+            # asyncio.CancelledError), so cancelling an execution still stops it.
             from ..core.executor import ToolExecutionBlockedError
 
             if isinstance(e, ToolExecutionBlockedError):
                 return f"Tool call blocked: {e}"
-            raise
+            logger.warning("tool %r failed: %s", name, e, exc_info=True)
+            # Truncated: a verbose error (or one echoing a whole page) would
+            # otherwise eat the context window it is reported into.
+            detail = f"{type(e).__name__}: {e}"
+            if len(detail) > 500:
+                detail = detail[:500] + "…"
+            return (
+                f"Tool {name!r} failed — {detail}. "
+                "This is the tool's result, not a crash: do not repeat the same "
+                "call. Try a different input or source, or continue with what you "
+                "already have."
+            )
         return result if isinstance(result, str) else str(result)
 
     def _track_token_usage_internal(self, usage: dict[str, Any] | None) -> None:

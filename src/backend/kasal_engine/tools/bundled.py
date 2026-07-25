@@ -72,9 +72,17 @@ def _safe_fetch(url: str, headers: dict[str, str], timeout: int = 15) -> str:
         ):
             raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="replace")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            return response.read().decode(charset, errors="replace")
+    except urllib.error.HTTPError as e:
+        # urllib's message is just "HTTP Error 404: Not Found" — no URL. The
+        # model receives this as the tool result and needs to know WHICH source
+        # is dead to pick another. Redirect loops arrive as HTTPError too.
+        raise RuntimeError(f"HTTP {e.code} fetching {url}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Could not reach {url}: {e.reason}") from e
 
 
 class _TextExtractor(HTMLParser):
