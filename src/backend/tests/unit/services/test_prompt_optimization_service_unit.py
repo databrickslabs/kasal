@@ -2327,3 +2327,106 @@ class TestCrewOptimizationOrchestration:
         # Metric calls are DECOUPLED from executions: cached re-scores must not
         # consume the user's execution budget.
         assert captured["optimizer"].max_metric_calls == 7 * 2 + 3
+
+
+class TestCrewNodeSync:
+    """A crew's graph is stored TWICE: the agents/tasks rows, and a
+    denormalised copy in ``crews.nodes`` that the canvas renders and the JSON
+    export serialises. Applying to only the rows reported success while the
+    canvas still showed the old prompts — real change, invisible where the user
+    looks for it. Revert has the same shape mirrored.
+    """
+
+    @staticmethod
+    def _crew(nodes):
+        return SimpleNamespace(nodes=nodes)
+
+    @staticmethod
+    def _nodes():
+        return [
+            {
+                "type": "agentNode",
+                "data": {"agentId": "a1", "role": "Old role", "goal": "Old goal"},
+            },
+            {
+                "type": "taskNode",
+                "data": {
+                    "taskId": "t1",
+                    "description": "Old description",
+                    "expected_output": "Old output",
+                },
+            },
+            {
+                "type": "taskNode",
+                "data": {"taskId": "other", "description": "Untouched"},
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_apply_patches_the_matching_nodes(self, monkeypatch):
+        import src.repositories.crew_repository as crew_repo_module
+
+        crew = self._crew(self._nodes())
+        committed = {"n": 0}
+
+        class FakeRepo:
+            def __init__(self, session):
+                pass
+
+            async def get(self, _id):
+                return crew
+
+        class FakeSession:
+            async def commit(self):
+                committed["n"] += 1
+
+        monkeypatch.setattr(crew_repo_module, "CrewRepository", FakeRepo)
+        svc = PromptOptimizationService.__new__(PromptOptimizationService)
+        svc.session = FakeSession()
+
+        patched = await svc._sync_crew_nodes(
+            "11dc3d57-8798-4b59-8d70-9f504f03ecef",
+            {
+                ("agent", "a1"): {"goal": "New goal"},
+                ("task", "t1"): {"expected_output": "New output"},
+            },
+        )
+
+        assert patched == 2
+        assert committed["n"] == 1
+        by_id = {
+            (n["data"].get("agentId") or n["data"].get("taskId")): n["data"]
+            for n in crew.nodes
+        }
+        assert by_id["a1"]["goal"] == "New goal"
+        assert by_id["a1"]["role"] == "Old role", "untouched fields survive"
+        assert by_id["t1"]["expected_output"] == "New output"
+        assert by_id["t1"]["description"] == "Old description"
+        assert by_id["other"]["description"] == "Untouched", "other tasks untouched"
+
+    @pytest.mark.asyncio
+    async def test_sync_is_best_effort_and_never_raises(self, monkeypatch):
+        """The rows are the system of record and are already written by the time
+        this runs, so a snapshot failure must not fail or half-undo the apply."""
+        import src.repositories.crew_repository as crew_repo_module
+
+        class ExplodingRepo:
+            def __init__(self, session):
+                pass
+
+            async def get(self, _id):
+                raise RuntimeError("crew table on fire")
+
+        monkeypatch.setattr(crew_repo_module, "CrewRepository", ExplodingRepo)
+        svc = PromptOptimizationService.__new__(PromptOptimizationService)
+        svc.session = SimpleNamespace()
+
+        result = await svc._sync_crew_nodes("some-crew", {("task", "t1"): {"x": "y"}})
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_no_crew_or_no_changes_is_a_noop(self):
+        svc = PromptOptimizationService.__new__(PromptOptimizationService)
+        svc.session = SimpleNamespace()
+        assert await svc._sync_crew_nodes(None, {("task", "t"): {"a": "b"}}) == 0
+        assert await svc._sync_crew_nodes("crew-1", {}) == 0

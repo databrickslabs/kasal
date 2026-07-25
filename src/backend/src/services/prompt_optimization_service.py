@@ -3194,9 +3194,15 @@ class PromptOptimizationService:
 
         before_image = await self._read_crew_fields(changes)
         applied = await self._write_crew_fields(changes)
+        # The canvas renders crews.nodes, NOT the agent/task rows — the graph is
+        # stored twice. Writing only the rows made an apply report success while
+        # the canvas and the exported JSON still showed the old prompts, which
+        # reads as "apply is broken" even though the database was correct.
+        synced = await self._sync_crew_nodes(row.crew_id, changes)
         logger.info(
             f"Crew optimization {row.id} applied to {applied} entities "
-            f"({len(before_image)} fields snapshotted for revert)"
+            f"({len(before_image)} fields snapshotted for revert; "
+            f"{synced} canvas node(s) synced)"
         )
         return {
             "run_id": row.id,
@@ -3204,6 +3210,71 @@ class PromptOptimizationService:
             "applied": True,
             "before_image": before_image,
         }
+
+    async def _sync_crew_nodes(
+        self, crew_id: Optional[str], changes: Dict[tuple, Dict[str, str]]
+    ) -> int:
+        """Mirror an apply onto the crew's canvas snapshot.
+
+        A crew's graph lives in two places: the ``agents``/``tasks`` rows, and a
+        denormalised copy inside ``crews.nodes`` that the canvas renders and the
+        JSON export serialises. An apply that writes only the rows leaves the
+        snapshot stale, so the user is told "applied" and then sees the old
+        prompts — the change is real but invisible where they look for it.
+
+        Best-effort by design: the rows are the system of record and were
+        already written, so a failure here must not fail (or half-undo) the
+        apply. Returns the number of nodes patched.
+        """
+        if not crew_id or not changes:
+            return 0
+        try:
+            import copy
+            from uuid import UUID
+
+            from src.repositories.crew_repository import CrewRepository
+
+            crew_repo = CrewRepository(self.session)
+            crew = await crew_repo.get(UUID(str(crew_id)))
+            if crew is None or not crew.nodes:
+                return 0
+
+            # entity id -> {field: value}, keyed by the node's own id field.
+            by_agent = {
+                eid: patch for (kind, eid), patch in changes.items() if kind == "agent"
+            }
+            by_task = {
+                eid: patch for (kind, eid), patch in changes.items() if kind == "task"
+            }
+
+            patched = 0
+            nodes = copy.deepcopy(crew.nodes)
+            for node in nodes:
+                data = node.get("data")
+                if not isinstance(data, dict):
+                    continue
+                if node.get("type") == "agentNode":
+                    patch = by_agent.get(str(data.get("agentId") or ""))
+                elif node.get("type") == "taskNode":
+                    patch = by_task.get(str(data.get("taskId") or ""))
+                else:
+                    continue
+                if not patch:
+                    continue
+                data.update(patch)
+                patched += 1
+
+            if patched:
+                # Reassign rather than mutate so SQLAlchemy marks the JSON dirty.
+                crew.nodes = nodes
+                await self.session.commit()
+            return patched
+        except Exception as sync_err:  # noqa: BLE001
+            logger.warning(
+                f"Applied crew fields but could not sync the canvas snapshot "
+                f"for crew {crew_id}: {sync_err}"
+            )
+            return 0
 
     async def _read_crew_fields(
         self, changes: Dict[tuple, Dict[str, str]]
@@ -3288,8 +3359,12 @@ class PromptOptimizationService:
                     continue
                 changes.setdefault((entity_kind, entity_id), {})[field] = value
             restored = await self._write_crew_fields(changes)
+            # Same two-copy problem as apply, mirrored: restoring only the rows
+            # would leave the canvas still showing the reverted-away prompts.
+            synced = await self._sync_crew_nodes(row.crew_id, changes)
             logger.info(
-                f"Crew optimization {run_id} reverted across {restored} entities"
+                f"Crew optimization {run_id} reverted across {restored} entities "
+                f"({synced} canvas node(s) synced)"
             )
         else:
             template_service = TemplateService(self.session)
