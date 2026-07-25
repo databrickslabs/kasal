@@ -225,23 +225,45 @@ try:
     from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
     from src.seeds.model_configs import MODEL_CONFIGS
 
+    # The litellm model-id prefix each provider is called with — must match the
+    # `prefixed_model` built in configure_crewai_llm, or the lookup misses.
+    # "openai/" for vllm/airllm/kimi is a ROUTING prefix, not a claim about who
+    # made the model: those endpoints are OpenAI-compatible, so litellm reaches
+    # them through its openai client with an explicit api_base (Moonshot for
+    # kimi, the self-hosted box for vllm). OpenAI itself takes no prefix.
+    _PROVIDER_PREFIXES = {
+        'databricks': 'databricks/',
+        'vllm': 'openai/',
+        'airllm': 'openai/',
+        'kimi': 'openai/',
+        'openai': '',
+        'anthropic': 'anthropic/',
+        'gemini': 'gemini/',
+        'deepseek': 'deepseek/',
+        'ollama': 'ollama/',
+    }
+
     registered_count = 0
     for model_name, config in MODEL_CONFIGS.items():
         provider = config.get('provider')
         context_window = config.get('context_window', 128000)
-        # Map each provider to the litellm model id CrewAI looks up. Self-hosted
-        # vLLM (and legacy "airllm") endpoints are OpenAI-compatible → "openai/<name>".
-        # Registering non-databricks models too means CrewAI's respect_context_window
-        # AND our max_tokens clamp use the REAL window instead of the 8192 default —
-        # otherwise a small self-hosted model silently overflows / empties out.
-        if provider == 'databricks':
-            keys = [f"databricks/{model_name}"]
-        elif provider in ('vllm', 'airllm', 'kimi'):
-            # Kimi (Moonshot AI) is also routed through litellm's OpenAI-compatible
-            # path ("openai/<name>"), so register its real window the same way.
-            keys = [f"openai/{model_name}", model_name]
-        else:
+        # EVERY seeded model is registered, not just the Databricks/self-hosted
+        # ones. An unregistered model falls back to DEFAULT_CONTEXT_WINDOW_SIZE
+        # (8192 → 6963 after the 0.85 derate), so CrewAI's respect_context_window
+        # and our max_tokens clamp would compact a 1M-token model at ~7k. The
+        # engine's built-in table happened to cover the older catalogue (gpt-4o,
+        # gemini-2.0-flash, deepseek-chat), which hid the gap; their replacements
+        # — gpt-5.6, claude-5, gemini-3.x, deepseek-v4 — predate no table at all.
+        if provider not in _PROVIDER_PREFIXES:
+            logger.debug(f"No litellm prefix known for provider {provider!r}; skipping {model_name}")
             continue
+        prefix = _PROVIDER_PREFIXES[provider]
+        # Register the bare name too: an agent config may carry it unprefixed,
+        # and the lookup is by exact key.
+        keys = [f"{prefix}{model_name}", model_name] if prefix else [model_name]
+        # Ollama ids are normalized hyphen→colon before the call.
+        if provider == 'ollama' and "-" in model_name:
+            keys.append(f"{prefix}{model_name.replace('-', ':')}")
         for key in keys:
             LLM_CONTEXT_WINDOW_SIZES[key] = context_window
         registered_count += 1
