@@ -69,8 +69,6 @@ interface CrewCanvasProps {
   // FitView handler
   handleUIAwareFitView: () => void;
   // Runtime features props
-  planningEnabled: boolean;
-  setPlanningEnabled: (enabled: boolean) => void;
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
@@ -109,8 +107,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onPaneContextMenu,
   onInit,
   handleUIAwareFitView,
-  planningEnabled: _planningEnabled,
-  setPlanningEnabled: _setPlanningEnabled,
   reasoningEnabled: _reasoningEnabled,
   setReasoningEnabled: _setReasoningEnabled,
   schemaDetectionEnabled: _schemaDetectionEnabled,

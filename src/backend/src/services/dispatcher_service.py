@@ -1256,7 +1256,7 @@ Please analyze this message and provide your intent classification."""
                         # search tool so the run grounds on the just-uploaded doc.
                         knowledge_file_paths=request.knowledge_file_paths or [],
                         # ChatMode answer mode (chat|research|deep) → drives
-                        # reasoning/planning/execution_type at config-build time.
+                        # reasoning/execution_type at config-build time.
                         chat_mode_type=request.chat_mode_type or "chat",
                     )
                     # Spawn progressive generation in background
@@ -1303,8 +1303,6 @@ Please analyze this message and provide your intent classification."""
                                     "nodes": crew.nodes or [],
                                     "edges": crew.edges or [],
                                     "process": crew.process,
-                                    "planning": crew.planning,
-                                    "planning_llm": crew.planning_llm,
                                     "memory": crew.memory,
                                     "verbose": crew.verbose,
                                     "max_rpm": crew.max_rpm,
@@ -1327,8 +1325,6 @@ Please analyze this message and provide your intent classification."""
                                         "nodes": crew.nodes or [],
                                         "edges": crew.edges or [],
                                         "process": crew.process,
-                                        "planning": crew.planning,
-                                        "planning_llm": crew.planning_llm,
                                         "memory": crew.memory,
                                         "verbose": crew.verbose,
                                         "max_rpm": crew.max_rpm,
@@ -1506,8 +1502,6 @@ Please analyze this message and provide your intent classification."""
                                     "nodes": crew.nodes or [],
                                     "edges": crew.edges or [],
                                     "process": crew.process,
-                                    "planning": crew.planning,
-                                    "planning_llm": crew.planning_llm,
                                     "memory": crew.memory,
                                     "verbose": crew.verbose,
                                     "max_rpm": crew.max_rpm,
@@ -1534,8 +1528,6 @@ Please analyze this message and provide your intent classification."""
                                         "nodes": crew.nodes or [],
                                         "edges": crew.edges or [],
                                         "process": crew.process,
-                                        "planning": crew.planning,
-                                        "planning_llm": crew.planning_llm,
                                         "memory": crew.memory,
                                         "verbose": crew.verbose,
                                         "max_rpm": crew.max_rpm,

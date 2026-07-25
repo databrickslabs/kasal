@@ -18,7 +18,6 @@ interface CrewConfig {
   agents_yaml: Record<string, AgentYaml>;  // For flows: empty {} - loaded from database using crew IDs from nodes
   tasks_yaml: Record<string, TaskYaml>;    // For flows: empty {} - loaded from database using crew IDs from nodes
   inputs: Record<string, unknown>;
-  planning?: boolean;
   reasoning?: boolean;
   model?: string;
   execution_type?: string;
@@ -49,7 +48,6 @@ export class JobExecutionService {
   async executeJob(
     nodes: Node[],
     edges: Edge[],
-    planning = false,
     model?: string,
     executionType: 'crew' | 'flow' = 'crew',
     additionalInputs: Record<string, unknown> = {},
@@ -74,7 +72,6 @@ export class JobExecutionService {
         agents_yaml: {},  // Empty for flows - loaded from database using crew IDs
         tasks_yaml: {},   // Empty for flows - loaded from database using crew IDs
         inputs: additionalInputs,
-        planning,
         reasoning,
         model,
         execution_type: executionType,

@@ -52,8 +52,6 @@ export interface CatalogLoadResult {
     nodes: unknown[];
     edges: unknown[];
     process?: string;
-    planning?: boolean;
-    planning_llm?: string;
     memory?: boolean;
     verbose?: boolean;
     max_rpm?: number;

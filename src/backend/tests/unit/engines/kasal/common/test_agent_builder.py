@@ -8,8 +8,16 @@ from src.engines.kasal.kernel.agent_builder import (
     build_agent,
     build_agent_kwargs,
     build_agent_llm,
-    DEFAULT_REASONING_CONFIG,
+    DEFAULT_REASONING_EFFORT,
 )
+
+
+class _FakeLLM:
+    """Stand-in for a built engine LLM (kasal_engine.llm.LLM subclass), which
+    carries the resolved provider model and an optional reasoning_effort field."""
+
+    def __init__(self, model):
+        self.model = model
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -60,64 +68,27 @@ class TestBuildAgentKwargs:
         # None values are not propagated
         assert "max_rpm" not in kw
 
-    # ── Reasoning → PlanningConfig (CrewAI 1.14.x migration) ──────────────────
-    def test_reasoning_off_sets_no_planning_config(self):
-        """No reasoning => no planning_config, and the deprecated reasoning flags
-        are never passed to the Agent."""
-        kw = build_agent_kwargs(self._spec(), [], None)
-        assert "planning_config" not in kw
-        assert "reasoning" not in kw
-        assert "max_reasoning_attempts" not in kw
+    # ── Reasoning is NOT an Agent kwarg anymore ───────────────────────────────
+    # The CrewAI-style planner/replan loop was removed; reasoning is the MODEL's
+    # native reasoning budget and lands on the agent's LLM in build_agent_llm.
+    def test_reasoning_never_reaches_the_agent(self):
+        """Neither the deprecated reasoning flags nor the (inert) planning fields
+        are ever passed to the Agent, with or without reasoning enabled."""
+        for spec in (
+            self._spec(),
+            self._spec(reasoning=True),
+            self._spec(reasoning=True, reasoning_config={"reasoning_effort": "high"}),
+            self._spec(reasoning=True, max_reasoning_attempts=5),
+        ):
+            kw = build_agent_kwargs(spec, [], None)
+            assert "planning_config" not in kw
+            assert "planning" not in kw
+            assert "reasoning" not in kw
+            assert "max_reasoning_attempts" not in kw
 
-    def test_reasoning_on_builds_bounded_planning_config(self):
-        """reasoning=True => a bounded PlanningConfig (NOT CrewAI's expansive
-        defaults), and the deprecated reasoning flags are dropped to avoid the
-        'pass both → cap ignored' footgun."""
-        kw = build_agent_kwargs(self._spec(reasoning=True), [], None)
-        assert "reasoning" not in kw and "max_reasoning_attempts" not in kw
-        pc = kw["planning_config"]
-        assert pc.reasoning_effort == DEFAULT_REASONING_CONFIG["reasoning_effort"]
-        assert pc.max_attempts == DEFAULT_REASONING_CONFIG["max_attempts"]
-        assert pc.max_steps == DEFAULT_REASONING_CONFIG["max_steps"]
-        assert pc.max_step_iterations == DEFAULT_REASONING_CONFIG["max_step_iterations"]
-        assert pc.step_timeout == DEFAULT_REASONING_CONFIG["step_timeout"]
-        assert pc.max_replans == DEFAULT_REASONING_CONFIG["max_replans"]
-        # The bound that matters most: max_attempts must NOT be None (CrewAI's default),
-        # else the plan-refine loop runs `while not ready` forever.
-        assert pc.max_attempts is not None
-
-    def test_reasoning_config_overrides_apply(self):
-        kw = build_agent_kwargs(
-            self._spec(reasoning=True, reasoning_config={
-                "reasoning_effort": "low", "max_steps": 4,
-                "max_step_iterations": 3, "step_timeout": 30, "max_replans": 0,
-            }),
-            [], None,
-        )
-        pc = kw["planning_config"]
-        assert pc.reasoning_effort == "low"
-        assert pc.max_steps == 4
-        assert pc.max_step_iterations == 3
-        assert pc.step_timeout == 30
-        assert pc.max_replans == 0  # 0 is valid (no replanning) and must be honored
-
-    def test_legacy_max_reasoning_attempts_maps_to_max_attempts(self):
-        """The legacy/flow field still feeds PlanningConfig.max_attempts."""
-        kw = build_agent_kwargs(self._spec(reasoning=True, max_reasoning_attempts=5), [], None)
-        assert kw["planning_config"].max_attempts == 5
-
-    def test_default_profile_is_low_and_small(self):
-        """Pin the shipped default to the validated low/small profile (self-terminates
-        ~15s on the real model). A regression to medium/large reintroduces the
-        rate-limit retry-loop runaway."""
-        assert DEFAULT_REASONING_CONFIG == {
-            "reasoning_effort": "low",
-            "max_attempts": 1,
-            "max_steps": 3,
-            "max_step_iterations": 3,
-            "step_timeout": 20,
-            "max_replans": 0,
-        }
+    def test_default_reasoning_effort_is_low(self):
+        """Pin the shipped default thinking budget."""
+        assert DEFAULT_REASONING_EFFORT == "low"
 
     def test_memory_never_propagated(self):
         kw = build_agent_kwargs(self._spec(memory=True), [], None)
@@ -206,6 +177,90 @@ class TestBuildAgentLlm:
             MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
             out = await build_agent_llm({"llm": "fallback-model"}, group_id="grp")
             assert out == "fallback-model"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reasoning = the MODEL's native reasoning budget on the agent's own LLM.
+# The effort must reach the provider for models that support the parameter and
+# must be DROPPED SILENTLY for models that do not (sending it would 400 on a
+# strict gateway and break previously-working runs).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestReasoningEffortReachesTheLLM:
+    async def _build(self, model, **spec_over):
+        spec = {"llm": model}
+        spec.update(spec_over)
+        fake = _FakeLLM(f"databricks/{model}")
+        with patch("src.core.llm_manager.LLMManager") as MockLM:
+            MockLM.configure_kasal_llm = AsyncMock(return_value=fake)
+            out = await build_agent_llm(spec, group_id="grp", label="A")
+        return out
+
+    @pytest.mark.asyncio
+    async def test_effort_lands_on_supported_model(self):
+        """gpt-5 accepts a native reasoning budget → the param is set on the LLM,
+        which kasal_engine emits as reasoning_effort (chat) / reasoning.effort
+        (Responses API)."""
+        llm = await self._build(
+            "databricks-gpt-5-2",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "high"},
+        )
+        assert llm.reasoning_effort == "high"
+
+    @pytest.mark.asyncio
+    async def test_effort_defaults_to_low_when_unspecified(self):
+        llm = await self._build("databricks-gpt-5-2", reasoning=True)
+        assert llm.reasoning_effort == DEFAULT_REASONING_EFFORT
+
+    @pytest.mark.asyncio
+    async def test_effort_absent_for_unsupported_model(self):
+        """Claude uses `thinking: {budget_tokens}`, not reasoning_effort — the
+        preference must be dropped, never sent."""
+        llm = await self._build(
+            "databricks-claude-sonnet-4-5",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "high"},
+        )
+        assert not hasattr(llm, "reasoning_effort")
+
+    @pytest.mark.asyncio
+    async def test_effort_absent_when_reasoning_toggle_off(self):
+        llm = await self._build(
+            "databricks-gpt-5-2", reasoning_config={"reasoning_effort": "high"}
+        )
+        assert not hasattr(llm, "reasoning_effort")
+
+    @pytest.mark.asyncio
+    async def test_unknown_effort_value_is_ignored(self):
+        llm = await self._build(
+            "databricks-gpt-5-2", reasoning=True, reasoning_config={"reasoning_effort": "turbo"}
+        )
+        assert not hasattr(llm, "reasoning_effort")
+
+    @pytest.mark.asyncio
+    async def test_string_fallback_llm_is_never_mutated(self):
+        """A configuration failure yields a bare model-name string — applying the
+        budget must not raise."""
+        with patch("src.core.llm_manager.LLMManager") as MockLM:
+            MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
+            out = await build_agent_llm(
+                {"llm": "databricks-gpt-5-2", "reasoning": True}, group_id="grp"
+            )
+        assert out == "databricks-gpt-5-2"
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_env_disables_effort(self, monkeypatch):
+        monkeypatch.setenv("KASAL_REASONING_EFFORT_DISABLED", "true")
+        llm = await self._build("databricks-gpt-5-2", reasoning=True)
+        assert not hasattr(llm, "reasoning_effort")
+
+    @pytest.mark.asyncio
+    async def test_env_allow_list_extends_supported_models(self, monkeypatch):
+        monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "my-thinking-endpoint")
+        llm = await self._build("my-thinking-endpoint", reasoning=True)
+        assert llm.reasoning_effort == "low"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

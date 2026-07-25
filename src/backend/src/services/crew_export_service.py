@@ -165,10 +165,9 @@ class CrewExportService:
             "databricks_schema": schema,
             "databricks_warehouse_id": warehouse_id,
             # Crew-level execution settings so exports match Kasal's runtime
-            # (process, planning, reasoning, manager, memory).
+            # (process, reasoning, manager, memory). Planning is absent: Kasal has
+            # no planner, so exporting a planning flag would not match the runtime.
             "process": crew.process or "sequential",
-            "planning": bool(crew.planning),
-            "planning_llm": crew.planning_llm,
             "reasoning": bool(crew.reasoning),
             "reasoning_llm": crew.reasoning_llm,
             "reasoning_config": crew.reasoning_config,

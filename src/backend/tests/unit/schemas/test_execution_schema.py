@@ -193,11 +193,31 @@ class TestCrewConfig:
         assert config.agents_yaml == {"agent1": {"role": "worker", "goal": "work"}}
         assert config.tasks_yaml == {"task1": {"description": "do work", "agent": "agent1"}}
         assert config.inputs == {"data": "test_data"}
-        assert config.planning is False  # Default
         assert config.reasoning is False  # Default
         assert config.execution_type == "crew"  # Default
         assert config.schema_detection_enabled is True  # Default
-    
+
+    def test_crew_config_has_no_planning_field(self):
+        """Regression: the CrewAI-style planner was removed end to end, so
+        ``planning`` is no longer a declared CrewConfig field.
+
+        CrewConfig sets ``extra="allow"``, so a legacy client still sending
+        ``planning=True`` must not be rejected -- but the value must stay an
+        untyped extra and must never reappear as a field with a default that
+        the engine could read back and act on.
+        """
+        assert "planning" not in CrewConfig.model_fields
+        assert "planning_llm" not in CrewConfig.model_fields
+
+        config = CrewConfig()
+        assert not hasattr(config, "planning")
+        assert "planning" not in config.model_dump()
+
+        # Legacy payloads are tolerated, not promoted to fields.
+        legacy = CrewConfig(planning=True)
+        assert "planning" not in type(legacy).model_fields
+
+
     def test_valid_crew_config_full(self):
         """Test CrewConfig with all fields."""
         config_data = {
@@ -208,7 +228,6 @@ class TestCrewConfig:
                 "analysis": {"description": "Analyze dataset", "agent": "analyst"}
             },
             "inputs": {"dataset": "sales_data.csv", "period": "Q4"},
-            "planning": True,
             "reasoning": True,
             "model": "databricks-llama-4-maverick",
             "llm_provider": "databricks",
@@ -216,7 +235,6 @@ class TestCrewConfig:
             "schema_detection_enabled": False
         }
         config = CrewConfig(**config_data)
-        assert config.planning is True
         assert config.reasoning is True
         assert config.model == "databricks-llama-4-maverick"
         assert config.llm_provider == "databricks"
@@ -231,7 +249,6 @@ class TestCrewConfig:
         assert config.agents_yaml == {}
         assert config.tasks_yaml == {}
         assert config.inputs == {}
-        assert config.planning is False
         assert config.reasoning is False
         assert config.execution_type == "crew"
     
@@ -418,7 +435,6 @@ class TestCrewConfigFlowFields:
             edges=edges,
             flow_config=flow_config,
             inputs={"topic": "AI research"},
-            planning=True,
             model="gpt-4"
         )
 
@@ -428,7 +444,7 @@ class TestCrewConfigFlowFields:
         assert len(config.edges) == 2
         assert config.flow_config["checkpoint_enabled"] is True
         assert config.inputs["topic"] == "AI research"
-        assert config.planning is True
+        assert config.model == "gpt-4"
 
     def test_crew_config_flow_fields_nullable_for_crew(self):
         """Test CrewConfig flow fields are nullable for crew execution."""
@@ -759,9 +775,30 @@ class TestFlowConfig:
         assert config.execution_type == "flow"  # Default
         assert config.tools == []  # Default
         assert config.max_rpm == 10  # Default
-        assert config.planning is False  # Default
         assert config.reasoning is False  # Default
-    
+
+    def test_flow_config_has_no_planning_fields(self):
+        """Regression: the CrewAI-style planner was removed end to end, so
+        ``planning``/``planning_llm`` are neither FlowConfig fields nor keys of
+        the normalized dict the flow engine consumes.
+
+        A legacy payload carrying them must still validate (they are simply
+        dropped) so old saved flows keep loading.
+        """
+        assert "planning" not in FlowConfig.model_fields
+        assert "planning_llm" not in FlowConfig.model_fields
+
+        config = FlowConfig(name="Legacy Flow", planning=True, planning_llm="gpt-4")
+        assert not hasattr(config, "planning")
+        assert not hasattr(config, "planning_llm")
+
+        normalized = config.normalize()
+        assert "planning" not in normalized
+        assert "planning_llm" not in normalized
+        # The reasoning budget replaced the planner and is still normalized.
+        assert normalized["reasoning"] is False
+        assert normalized["reasoning_llm"] is None
+
     def test_valid_flow_config_full(self):
         """Test FlowConfig with all fields."""
         config_data = {
@@ -788,8 +825,6 @@ class TestFlowConfig:
             ],
             "max_rpm": 50,
             "output_dir": "/outputs/flow_123",
-            "planning": True,
-            "planning_llm": "gpt-4",
             "reasoning": True,
             "reasoning_llm": "claude-3-sonnet"
         }
@@ -808,8 +843,6 @@ class TestFlowConfig:
         assert len(config.tools) == 2
         assert config.max_rpm == 50
         assert config.output_dir == "/outputs/flow_123"
-        assert config.planning is True
-        assert config.planning_llm == "gpt-4"
         assert config.reasoning is True
         assert config.reasoning_llm == "claude-3-sonnet"
     
@@ -840,7 +873,7 @@ class TestFlowConfig:
         expected_keys = {
             "id", "name", "listeners", "actions", "startingPoints", "type",
             "crewName", "crewRef", "model", "llm_provider", "tools", "max_rpm",
-            "output_dir", "planning", "planning_llm", "reasoning", "reasoning_llm"
+            "output_dir", "reasoning", "reasoning_llm"
         }
         assert set(normalized.keys()) == expected_keys
         
@@ -908,7 +941,7 @@ class TestSchemaIntegration:
             agents_yaml=name_request.agents_yaml,
             tasks_yaml=name_request.tasks_yaml,
             inputs={"sales_data": "q4_sales.csv", "year": 2023},
-            planning=True,
+            reasoning=True,
             model=name_request.model,
             llm_provider="databricks"
         )
@@ -930,7 +963,7 @@ class TestSchemaIntegration:
             run_name=create_response.run_name,
             crew_id=123,
             execution_inputs=crew_config.inputs,
-            execution_config={"model": crew_config.model, "planning": crew_config.planning},
+            execution_config={"model": crew_config.model, "reasoning": crew_config.reasoning},
             started_at=now,
             completed_at=now,
             group_email="analyst@company.com"
@@ -962,7 +995,6 @@ class TestSchemaIntegration:
             ],
             model="claude-3-sonnet",
             llm_provider="anthropic",
-            planning=True,
             reasoning=True,
             max_rpm=20
         )
@@ -991,8 +1023,9 @@ class TestSchemaIntegration:
         assert flow_config.execution_type == "flow"
         assert execution_response.flow_id == flow_id_str
         assert execution_response.execution_config["name"] == "Customer Analytics Flow"
-        assert execution_response.execution_config["planning"] is True
         assert execution_response.execution_config["reasoning"] is True
+        # The removed planner must not leak back into the persisted flow config.
+        assert "planning" not in execution_response.execution_config
         assert execution_response.execution_config["max_rpm"] == 20
     
     def test_execution_error_scenarios(self):
@@ -1069,7 +1102,6 @@ class TestSchemaIntegration:
                 "analysis_period": "2023-Q4",
                 "confidence_level": 0.95
             },
-            planning=True,
             reasoning=True,
             model="databricks-llama-4-maverick",
             llm_provider="databricks",
@@ -1104,9 +1136,7 @@ class TestSchemaIntegration:
             ],
             model="gpt-4",
             llm_provider="openai",
-            planning=True,
-            planning_llm="gpt-4",
-            reasoning=True, 
+            reasoning=True,
             reasoning_llm="claude-3-sonnet",
             max_rpm=100,
             output_dir="/ml_pipeline/outputs"
@@ -1116,7 +1146,6 @@ class TestSchemaIntegration:
         assert simple_crew.execution_type == "crew"
         assert len(simple_crew.agents) == 1
         
-        assert advanced_crew.planning is True
         assert advanced_crew.reasoning is True
         assert len(advanced_crew.agents) == 2
         assert advanced_crew.inputs["confidence_level"] == 0.95
@@ -1128,5 +1157,4 @@ class TestSchemaIntegration:
         assert len(complex_flow.actions) == 6
         assert len(complex_flow.tools) == 3
         assert complex_flow.max_rpm == 100
-        assert complex_flow.planning_llm == "gpt-4"
         assert complex_flow.reasoning_llm == "claude-3-sonnet"

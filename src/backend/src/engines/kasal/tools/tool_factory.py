@@ -857,7 +857,10 @@ class ToolFactory:
                         logger.info(f"[ToolFactory] Found nested execution_inputs for {tool_name}: {list(execution_inputs.keys())}")
                     else:
                         # Fallback: try direct inputs (might contain agents_yaml, tasks_yaml, etc.)
-                        # Filter out non-user inputs
+                        # Filter out non-user inputs. 'planning' is LEGACY-ONLY here:
+                        # Kasal no longer models planning, but payloads saved before
+                        # its removal can still carry the key, and it must not be
+                        # treated as a user input for parameter resolution.
                         user_inputs = {k: v for k, v in self.config['inputs'].items()
                                       if k not in ['agents_yaml', 'tasks_yaml', 'planning', 'model', 'execution_type',
                                                    'schema_detection_enabled', 'process', 'run_name']}

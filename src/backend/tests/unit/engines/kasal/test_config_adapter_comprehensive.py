@@ -145,13 +145,17 @@ class TestAdaptConfig:
         assert result["tools"] == []
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
-    def test_planning_true_sets_flag(self, mock_extract):
+    def test_planning_never_forwarded_to_engine(self, mock_extract):
+        """The CrewAI-style planner was removed: `planning` is legacy request/DB
+        compatibility only and must never reach the engine config, even when a
+        stored crew still has planning=True."""
         from src.engines.kasal.config_adapter import adapt_config
 
         cfg = _make_crew_config(planning=True)
         result = adapt_config(cfg)
 
-        assert result["crew"]["planning"] is True
+        assert "planning" not in result["crew"]
+        assert "planning" not in result["original_config"]
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_reasoning_true_sets_flag(self, mock_extract):
@@ -163,13 +167,14 @@ class TestAdaptConfig:
         assert result["crew"]["reasoning"] is True
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
-    def test_planning_llm_in_inputs(self, mock_extract):
+    def test_planning_llm_in_inputs_is_ignored(self, mock_extract):
+        """A legacy inputs.planning_llm must not resolve a planner model."""
         from src.engines.kasal.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"planning_llm": "gpt-4"}, planning=True)
         result = adapt_config(cfg)
 
-        assert result["crew"]["planning_llm"] == "gpt-4"
+        assert "planning_llm" not in result["crew"]
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_reasoning_llm_in_inputs(self, mock_extract):
@@ -248,7 +253,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_planning_llm_absent_when_not_in_inputs(self, mock_extract):
-        """When planning is True but no planning_llm in inputs, no planning_llm key in crew."""
+        """No planner => never a planning_llm key in the crew config."""
         from src.engines.kasal.config_adapter import adapt_config
 
         cfg = _make_crew_config(planning=True, inputs=None)

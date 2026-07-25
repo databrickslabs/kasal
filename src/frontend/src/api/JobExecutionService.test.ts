@@ -506,8 +506,9 @@ describe('JobExecutionService', () => {
       expect(config).toHaveProperty('agents_yaml');
       expect(config).toHaveProperty('tasks_yaml');
       expect(config).toHaveProperty('inputs');
-      expect(config).toHaveProperty('planning');
+      expect(config).toHaveProperty('reasoning');
       expect(config).toHaveProperty('execution_type');
+      expect(config).not.toHaveProperty('planning');
     });
   });
 
@@ -599,7 +600,7 @@ describe('JobExecutionService', () => {
       const mockResponse = createMockJobResponse();
       (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
 
-      await service.executeJob([crewNode], [], false, undefined, 'flow');
+      await service.executeJob([crewNode], [], undefined, 'flow');
 
       expect(apiClient.post).toHaveBeenCalledTimes(1);
       const callArgs = (apiClient.post as Mock).mock.calls[0];
@@ -772,7 +773,7 @@ describe('JobExecutionService', () => {
       const taskNode = createMockTaskNode('task-only');
 
       await expect(
-        service.executeJob([taskNode], [], false, undefined, 'crew')
+        service.executeJob([taskNode], [], undefined, 'crew')
       ).rejects.toThrow('No agents configured');
     });
 
@@ -782,7 +783,7 @@ describe('JobExecutionService', () => {
       });
 
       await expect(
-        service.executeJob([agentNode], [], false, undefined, 'crew')
+        service.executeJob([agentNode], [], undefined, 'crew')
       ).rejects.toThrow('No tasks configured');
     });
   });

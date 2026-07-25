@@ -9,7 +9,6 @@ export interface ScheduleDialogProps {
   onClose: () => void;
   nodes: Node<AgentNodeData | TaskNodeData>[];
   edges: Edge[];
-  planningEnabled: boolean;
   selectedModel: string;
 }
 

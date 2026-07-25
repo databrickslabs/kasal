@@ -30,7 +30,6 @@ class MockScheduleResponse:
         self.agents_yaml = agents_yaml or {"agent1": {"role": "tester"}}
         self.tasks_yaml = tasks_yaml or {"task1": {"description": "test task"}}
         self.inputs = {"input1": "value1"}
-        self.planning = False
         self.model = "gpt-4o-mini"
         self.last_run_at = None
         self.next_run_at = datetime.utcnow()
@@ -47,7 +46,6 @@ class MockScheduleResponse:
             "agents_yaml": self.agents_yaml,
             "tasks_yaml": self.tasks_yaml,
             "inputs": self.inputs,
-            "planning": self.planning,
             "model": self.model,
             "last_run_at": self.last_run_at,
             "next_run_at": self.next_run_at.isoformat() if self.next_run_at else None,
@@ -178,7 +176,6 @@ def sample_schedule_create():
         tasks_yaml={"task1": {"description": "test task"}},
         inputs={"input1": "value1"},
         is_active=True,
-        planning=False,
         model="gpt-4o-mini"
     )
 
@@ -204,7 +201,6 @@ def sample_schedule_update():
         tasks_yaml={"task2": {"description": "updated test task"}},
         inputs={"input2": "value2"},
         is_active=False,
-        planning=True,
         model="gpt-4"
     )
 

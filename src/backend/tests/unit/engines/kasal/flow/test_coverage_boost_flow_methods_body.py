@@ -294,8 +294,14 @@ class TestStartingPointMethodBody:
         assert "process" in crew_kwargs_captured
 
     @pytest.mark.asyncio
-    async def test_planning_with_planning_llm(self):
-        """Covers lines 307-316: planning enabled with explicit planning_llm."""
+    async def test_legacy_planning_crew_data_is_ignored(self):
+        """Regression: a legacy crew row with planning=True + planning_llm set must
+        NOT produce a planner on the flow crew, and must NOT resolve a planner LLM.
+
+        Formerly ``test_planning_with_planning_llm``. The CrewAI-style prose planner
+        was removed (the vendored engine has no planner), so resolving a
+        ``planning_llm`` here was a wasted model lookup on every flow crew build.
+        """
         task = _make_task()
         crew_data = MagicMock()
         crew_data.memory = None
@@ -336,11 +342,21 @@ class TestStartingPointMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        assert crew_kwargs_captured.get("planning") is True
+            # No planner LLM was resolved for the removed planner.
+            MockLLM.get_llm.assert_not_awaited()
+
+        assert "planning" not in crew_kwargs_captured
+        assert "planning_llm" not in crew_kwargs_captured
+        # The crew is still built normally.
+        assert "tasks" in crew_kwargs_captured
 
     @pytest.mark.asyncio
-    async def test_planning_fallback_to_agent_llm(self):
-        """Covers line 317-320: planning enabled, no planning_llm, use agent's LLM."""
+    async def test_legacy_planning_does_not_borrow_agent_llm(self):
+        """Regression: planning=True with no planning_llm must not fall back to
+        borrowing the first agent's LLM as a planner LLM.
+
+        Formerly ``test_planning_fallback_to_agent_llm``.
+        """
         task = _make_task()
         crew_data = MagicMock()
         crew_data.memory = None
@@ -378,64 +394,25 @@ class TestStartingPointMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        # Should fall back to agent's LLM
-        assert crew_kwargs_captured.get("planning") is True
+        assert "planning" not in crew_kwargs_captured
+        assert "planning_llm" not in crew_kwargs_captured
 
     @pytest.mark.asyncio
-    async def test_planning_llm_creation_fails(self):
-        """Covers line 315-316: planning_llm creation fails, uses warning."""
+    async def test_reasoning_not_set_on_crew_or_agents(self):
+        """Regression: reasoning is the MODEL's native reasoning budget, applied to
+        each agent's LLM at build time (kernel/agent_builder._apply_reasoning_effort)
+        from the agent node's own reasoning/reasoning_config fields.
+
+        Formerly ``test_reasoning_propagated_to_agents``. crew_data.reasoning must no
+        longer become a Crew kwarg, and must no longer be stamped onto already-built
+        agents after the fact.
+        """
         task = _make_task()
+        task.agent.reasoning = False
         crew_data = MagicMock()
         crew_data.memory = None
         crew_data.process = None
         crew_data.verbose = None
-        crew_data.planning = True
-        crew_data.planning_llm = "bad-model"
-        crew_data.reasoning = False
-
-        method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name="starting_point_0",
-            task_list=[task],
-            crew_name="Test Crew",
-            callbacks={},
-            group_context=None,
-            create_execution_callbacks=_make_create_callbacks(),
-            crew_data=crew_data,
-        )
-
-        mock_flow = _make_flow_instance()
-
-        with patch("src.engines.kasal.paths.flow.modules.flow_methods.Crew") as MockCrew, \
-             patch("src.engines.kasal.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.core.llm_manager.LLMManager") as MockLLM:
-            MockLLM.get_llm = AsyncMock(side_effect=Exception("LLM error"))
-            crew_kwargs_captured = {}
-
-            def capture_kwargs(**kwargs):
-                crew_kwargs_captured.update(kwargs)
-                return MagicMock()
-
-            MockCrew.side_effect = capture_kwargs
-            mock_result = MagicMock()
-            mock_result.raw = "res"
-            mock_wait.return_value = mock_result
-
-            inner = method._meth
-            await inner(mock_flow)
-
-        # Should still work even if planning LLM creation fails
-        assert crew_kwargs_captured.get("planning") is True
-
-    @pytest.mark.asyncio
-    async def test_reasoning_propagated_to_agents(self):
-        """Covers lines 328-336: reasoning propagated to agents."""
-        task = _make_task()
-        task.agent.reasoning = False  # Not yet enabled
-        crew_data = MagicMock()
-        crew_data.memory = None
-        crew_data.process = None
-        crew_data.verbose = None
-        crew_data.planning = False
         crew_data.reasoning = True
 
         method = FlowMethodFactory.create_starting_point_crew_method(
@@ -466,8 +443,9 @@ class TestStartingPointMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        assert crew_kwargs_captured.get("reasoning") is True
-        assert task.agent.reasoning is True
+        assert "reasoning" not in crew_kwargs_captured
+        # The already-built agent is left untouched.
+        assert task.agent.reasoning is False
 
     @pytest.mark.asyncio
     async def test_embedder_configured_for_memory(self):
@@ -782,8 +760,12 @@ class TestListenerMethodBody:
         assert result == "done"
 
     @pytest.mark.asyncio
-    async def test_listener_planning_with_llm(self):
-        """Covers lines 665-677: planning in listener with planning_llm."""
+    async def test_listener_legacy_planning_crew_data_is_ignored(self):
+        """Regression: the listener crew builder must also ignore a legacy
+        planning=True / planning_llm crew row and resolve no planner LLM.
+
+        Formerly ``test_listener_planning_with_llm``.
+        """
         task = _make_task()
         crew_data = MagicMock()
         crew_data.memory = None
@@ -827,18 +809,26 @@ class TestListenerMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        assert crew_kwargs_captured.get("planning") is True
+            MockLLM.get_llm.assert_not_awaited()
+
+        assert "planning" not in crew_kwargs_captured
+        assert "planning_llm" not in crew_kwargs_captured
+        assert "tasks" in crew_kwargs_captured
 
     @pytest.mark.asyncio
-    async def test_listener_reasoning(self):
-        """Covers lines 683-691: reasoning for listener crew."""
+    async def test_listener_reasoning_not_set_on_crew_or_agents(self):
+        """Regression: the listener crew builder must not turn crew_data.reasoning
+        into a Crew kwarg, nor stamp it onto already-built agents.
+
+        Formerly ``test_listener_reasoning``. The reasoning budget is applied to each
+        agent's LLM at build time from the agent node's own fields.
+        """
         task = _make_task()
         task.agent.reasoning = False
         crew_data = MagicMock()
         crew_data.memory = None
         crew_data.process = None
         crew_data.verbose = None
-        crew_data.planning = False
         crew_data.reasoning = True
 
         method = FlowMethodFactory.create_listener_method(
@@ -872,8 +862,8 @@ class TestListenerMethodBody:
             inner = method._meth
             await inner(mock_flow)
 
-        assert crew_kwargs_captured.get("reasoning") is True
-        assert task.agent.reasoning is True
+        assert "reasoning" not in crew_kwargs_captured
+        assert task.agent.reasoning is False
 
     @pytest.mark.asyncio
     async def test_listener_json_tool_injection(self):

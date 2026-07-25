@@ -163,9 +163,10 @@ class TestPrepareAndRunCrew:
 
     @pytest.mark.asyncio
     async def test_reasoning_config_plumbed_into_crew_config(self, service, mock_config, mock_group_context):
-        """The sidebar's reasoning_config (PlanningConfig overrides) must reach the
-        engine on the crew config, so CrewPreparation can hand it to each agent."""
-        rc = {"reasoning_effort": "low", "max_steps": 4, "step_timeout": 30}
+        """The sidebar's reasoning_config (the model's reasoning budget) must reach
+        the engine on the crew config, so CrewPreparation can hand it to each agent
+        and the agent builder can put it on that agent's own LLM."""
+        rc = {"reasoning_effort": "low"}
         mock_config.inputs = {"reasoning_config": rc}
 
         with patch.object(service, '_prepare_engine', new_callable=AsyncMock) as mock_prepare:

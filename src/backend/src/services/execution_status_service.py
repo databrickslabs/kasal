@@ -576,7 +576,6 @@ class ExecutionStatusService:
                 "created_at": created_at,
                 "updated_at": dt.now().isoformat(),
                 "group_id": execution_data.get("group_id"),
-                "planning": execution_data.get("planning", False),
             }
 
             event = SSEEvent(

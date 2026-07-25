@@ -782,8 +782,8 @@ class CodeGenerator:
         task_guardrails = {id(t): _parse_task_guardrail(t) for t in tasks}
         has_llm_guardrail = any(g and g[0] == 'llm' for g in task_guardrails.values())
 
-        # Collect unique LLM models used by agents, the crew (planning/reasoning/
-        # manager) and any LLM guardrails, so every one gets an LLM instance.
+        # Collect unique LLM models used by agents, the crew (manager) and any LLM
+        # guardrails, so every one gets an LLM instance.
         llm_models = set()
         agent_llm_map = {}
         agent_id_llm = {}
@@ -795,7 +795,7 @@ class CodeGenerator:
                 agent_llm_map[agent_name] = llm
                 if agent.get('id'):
                     agent_id_llm[agent.get('id')] = llm
-        for key in ('planning_llm', 'manager_llm', 'reasoning_llm'):
+        for key in ('manager_llm',):
             if crew_config.get(key):
                 llm_models.add(crew_config[key])
         for g in task_guardrails.values():
@@ -828,8 +828,9 @@ class CodeGenerator:
         if has_llm_guardrail:
             code_parts.append('from crewai.tasks.llm_guardrail import LLMGuardrail\n\n')
 
-        if crew_config.get('reasoning'):
-            code_parts.append('from crewai.agent.planning_config import PlanningConfig\n\n')
+        # NOTE: no planner / PlanningConfig scaffold is emitted. Kasal's reasoning
+        # control is the model's native reasoning budget, not a prose plan/replan
+        # loop, so there is nothing crew- or agent-shaped to export here.
 
         # MCP servers configured on the crew: emit the connection params and build
         # the crew inside a create_crew(mcp_tools=None) function so the MCP tools
@@ -859,18 +860,6 @@ class CodeGenerator:
 
             if llm_model and llm_model in llm_var_map:
                 body.append(f'{agent_name}_config["llm"] = {llm_var_map[llm_model]}\n')
-
-            # reasoning is an Agent-level capability in CrewAI (not Crew-level),
-            # configured via a bounded PlanningConfig. reasoning_llm (if set) drives
-            # the reasoning loop; otherwise it uses the agent's own LLM.
-            if crew_config.get('reasoning'):
-                _rvar = llm_var_map.get(crew_config.get('reasoning_llm'))
-                _llm_kw = f', llm={_rvar}' if _rvar else ''
-                body.append(
-                    f'{agent_name}_config["planning_config"] = PlanningConfig('
-                    f'reasoning_effort="low", max_attempts=1, max_steps=3, '
-                    f'max_step_iterations=3, step_timeout=20, max_replans=0{_llm_kw})\n'
-                )
 
             if has_mcp:
                 body.append('if mcp_tools:\n')
@@ -970,10 +959,9 @@ class CodeGenerator:
         # Hierarchical process requires a manager LLM.
         if effective_process == 'hierarchical' and crew_config.get('manager_llm') in llm_var_map:
             crew_kwargs.append(f'    manager_llm={llm_var_map[crew_config["manager_llm"]]},\n')
-        if crew_config.get('planning'):
-            crew_kwargs.append('    planning=True,\n')
-            if crew_config.get('planning_llm') in llm_var_map:
-                crew_kwargs.append(f'    planning_llm={llm_var_map[crew_config["planning_llm"]]},\n')
+        # NOTE: Crew planning is deliberately not exported — Kasal removed the
+        # prose planner (a silent no-op in the engine), so exported code must not
+        # resurrect it.
         # Memory defaults to enabled; backend uses CrewAI's default embedder.
         if crew_config.get('memory', True):
             crew_kwargs.append('    memory=True,  # TODO: uses CrewAI default storage/embedder; wire your memory backend if needed\n')

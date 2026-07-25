@@ -34,6 +34,33 @@ class TestAgentDataToSpec:
         assert spec["max_iter"] == 9
         assert spec["system_template"] == "SYS"
 
+    def test_reasoning_config_implies_reasoning_enabled(self):
+        """A flow agent node carries reasoning_config but no separate `reasoning`
+        flag (the crew path fans out both from the crew). The budget must therefore
+        act as the enable signal, or the shared builder would receive the config and
+        drop it — leaving flow reasoning silently dead."""
+        spec = AgentConfig._agent_data_to_spec(
+            _agent(reasoning_config={"reasoning_effort": "high"})
+        )
+        assert spec["reasoning"] is True
+        assert spec["reasoning_config"] == {"reasoning_effort": "high"}
+
+    def test_explicit_reasoning_false_is_not_overridden_by_config(self):
+        spec = AgentConfig._agent_data_to_spec(
+            _agent(reasoning=False, reasoning_config={"reasoning_effort": "high"})
+        )
+        assert spec["reasoning"] is False
+
+    def test_no_reasoning_keys_when_node_sets_none(self):
+        spec = AgentConfig._agent_data_to_spec(_agent())
+        assert "reasoning" not in spec and "reasoning_config" not in spec
+
+    def test_legacy_replan_cap_is_not_propagated(self):
+        """max_reasoning_attempts bounded the removed CrewAI replan loop; it must
+        not reach the builder any more."""
+        spec = AgentConfig._agent_data_to_spec(_agent(max_reasoning_attempts=5))
+        assert "max_reasoning_attempts" not in spec
+
 
 class TestFlowCrewAgentKwargsParity:
     def test_flow_spec_and_crew_dict_produce_identical_shared_kwargs(self):

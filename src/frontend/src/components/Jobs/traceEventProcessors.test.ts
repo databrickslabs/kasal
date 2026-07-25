@@ -265,7 +265,7 @@ describe('processTraceEvent', () => {
   });
 
   it('returns null for explicitly skipped events', () => {
-    const trace = makeTrace({ event_type: 'reasoning_started' });
+    const trace = makeTrace({ event_type: 'guardrail_started' });
     const result = processTraceEvent(trace);
     expect(result).toBeNull();
   });

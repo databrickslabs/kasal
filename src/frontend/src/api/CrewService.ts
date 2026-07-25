@@ -344,8 +344,6 @@ export class CrewService {
         edges: cleanedEdges,
         // Include crew execution configuration if provided
         ...(crew.process && { process: crew.process }),
-        ...(crew.planning !== undefined && { planning: crew.planning }),
-        ...(crew.planning_llm && { planning_llm: crew.planning_llm }),
         ...(crew.reasoning !== undefined && { reasoning: crew.reasoning }),
         ...(crew.reasoning_llm && { reasoning_llm: crew.reasoning_llm }),
         ...(crew.reasoning_config && { reasoning_config: crew.reasoning_config }),
@@ -373,8 +371,6 @@ export class CrewService {
         updated_at: savedCrew.updated_at,
         // Include execution configuration in response
         process: savedCrew.process,
-        planning: savedCrew.planning,
-        planning_llm: savedCrew.planning_llm,
         reasoning: savedCrew.reasoning,
         reasoning_llm: savedCrew.reasoning_llm,
         reasoning_config: savedCrew.reasoning_config,
@@ -592,8 +588,6 @@ export class CrewService {
         edges: cleanedEdges,
         // Include crew execution configuration if provided
         ...(crew.process && { process: crew.process }),
-        ...(crew.planning !== undefined && { planning: crew.planning }),
-        ...(crew.planning_llm && { planning_llm: crew.planning_llm }),
         ...(crew.reasoning !== undefined && { reasoning: crew.reasoning }),
         ...(crew.reasoning_llm && { reasoning_llm: crew.reasoning_llm }),
         ...(crew.reasoning_config && { reasoning_config: crew.reasoning_config }),
@@ -620,8 +614,6 @@ export class CrewService {
         updated_at: updatedCrew.updated_at,
         // Include execution configuration in response
         process: updatedCrew.process,
-        planning: updatedCrew.planning,
-        planning_llm: updatedCrew.planning_llm,
         reasoning: updatedCrew.reasoning,
         reasoning_llm: updatedCrew.reasoning_llm,
         reasoning_config: updatedCrew.reasoning_config,

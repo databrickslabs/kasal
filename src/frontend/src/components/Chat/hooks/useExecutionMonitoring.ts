@@ -137,7 +137,7 @@ export const useExecutionMonitoring = (
   // Listen for execution events
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
-      const { jobId, jobName, planningEnabled } = event.detail;
+      const { jobId, jobName } = event.detail;
 
       // Check if this session initiated the execution via markPendingExecution
       const isPendingForThisSession = pendingExecutionRef.current;
@@ -163,11 +163,6 @@ export const useExecutionMonitoring = (
       // 'running' updates for tasks that were 'completed' in a previous run.
       useTaskExecutionStore.getState().clearTaskStates();
 
-      // Set planning phase indicator if planning is enabled
-      if (planningEnabled) {
-        useTaskExecutionStore.getState().setIsPlanningPhase(true);
-      }
-
       const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
       sessionJobNames[sessionId] = jobName;
       localStorage.setItem('chatSessionJobNames', JSON.stringify(sessionJobNames));
@@ -184,9 +179,6 @@ export const useExecutionMonitoring = (
       const shouldClear = currentExecutingJobId === jobId || jobId === currentLastExecutionJobId;
 
       if (shouldClear) {
-        // Clear planning phase when job completes
-        useTaskExecutionStore.getState().setIsPlanningPhase(false);
-
         // Transition any remaining "running" or "planning" tasks to "completed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -272,9 +264,6 @@ export const useExecutionMonitoring = (
       clearExecutionStateForJob(jobId);
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
-        // Clear planning phase when job fails
-        useTaskExecutionStore.getState().setIsPlanningPhase(false);
-
         // Transition all "running" or "planning" tasks to "failed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -336,11 +325,6 @@ export const useExecutionMonitoring = (
                            trace.event_type === 'task_failed';
 
         if (isTaskEvent) {
-          // Clear planning phase on first task event — tasks are now executing
-          if (useTaskExecutionStore.getState().isPlanningPhase) {
-            useTaskExecutionStore.getState().setIsPlanningPhase(false);
-          }
-
           const taskId = extractTaskId(trace);
           const taskName = extractTaskName(trace);
           const status = mapEventToStatus(trace.event_type);

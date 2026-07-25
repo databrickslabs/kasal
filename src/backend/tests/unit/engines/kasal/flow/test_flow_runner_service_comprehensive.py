@@ -526,7 +526,7 @@ class TestGetRequiredProviders:
         config = {
             'model': 'gpt-4',
             'crew': {
-                'planning_llm': 'claude-3',
+                'reasoning_llm': 'claude-3',
                 'manager_llm': 'gpt-4'
             }
         }
@@ -577,7 +577,7 @@ class TestGetRequiredProviders:
     async def test_get_required_providers_from_top_level_config(self, service, mock_session):
         """Test extracting providers from top-level config fields."""
         config = {
-            'planning_llm': 'gpt-4',
+            'manager_llm': 'gpt-4',
             'reasoning_llm': 'claude-3'
         }
 
@@ -597,6 +597,31 @@ class TestGetRequiredProviders:
             providers = await service._get_required_providers(mock_session, config)
 
             assert len(providers) == 2
+
+    @pytest.mark.asyncio
+    async def test_legacy_planning_llm_contributes_no_provider(self, service, mock_session):
+        """Regression: ``planning_llm`` was dropped from provider collection.
+
+        The CrewAI-style planner is gone, so a legacy saved flow that still carries
+        ``planning_llm`` (at either nesting level) must not cause its provider's
+        credentials to be treated as required for the run.
+        """
+        config = {
+            'planning_llm': 'gpt-4',
+            'crew': {'planning_llm': 'gpt-4'},
+        }
+
+        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+            mock_model_svc_instance = MagicMock()
+            mock_model_svc_instance.get_model_config = AsyncMock(
+                return_value={'provider': 'openai'}
+            )
+            mock_model_svc.return_value = mock_model_svc_instance
+
+            providers = await service._get_required_providers(mock_session, config)
+
+            assert providers == []
+            mock_model_svc_instance.get_model_config.assert_not_called()
 
 
 class TestRunFlowExecution:

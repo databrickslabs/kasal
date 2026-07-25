@@ -571,43 +571,32 @@ describe('crewExecution - task refresh before execution', () => {
 });
 
 /**
- * Tests for the planningEnabled flag in jobCreated event detail.
- * Verifies that execution functions include planningEnabled in the
- * dispatched event so useExecutionMonitoring can set the planning phase.
+ * Tests for the jobCreated event detail shape.
+ * The crew-level planner was removed, so the detail no longer carries a
+ * planningEnabled flag — consumers must not depend on one.
  */
-describe('crewExecution - planningEnabled in jobCreated event', () => {
+describe('crewExecution - jobCreated event detail', () => {
   // Replicates the event detail construction from executeCrew/executeTab
-  const buildJobCreatedDetail = (
-    jobId: string,
-    jobName: string,
-    planningEnabled: boolean
-  ) => {
+  const buildJobCreatedDetail = (jobId: string, jobName: string) => {
     return {
       jobId,
       jobName,
       status: 'running',
-      groupId: 'test-group',
-      planningEnabled
+      groupId: 'test-group'
     };
   };
 
-  it('should include planningEnabled: true when planning is enabled', () => {
-    const detail = buildJobCreatedDetail('job-1', 'Crew Execution', true);
-    expect(detail.planningEnabled).toBe(true);
-  });
-
-  it('should include planningEnabled: false when planning is disabled', () => {
-    const detail = buildJobCreatedDetail('job-1', 'Crew Execution', false);
-    expect(detail.planningEnabled).toBe(false);
-  });
-
-  it('should preserve other event detail fields alongside planningEnabled', () => {
-    const detail = buildJobCreatedDetail('job-123', 'My Crew', true);
+  it('should carry the job identity and status fields', () => {
+    const detail = buildJobCreatedDetail('job-123', 'My Crew');
     expect(detail.jobId).toBe('job-123');
     expect(detail.jobName).toBe('My Crew');
     expect(detail.status).toBe('running');
     expect(detail.groupId).toBe('test-group');
-    expect(detail.planningEnabled).toBe(true);
+  });
+
+  it('should not carry a planningEnabled flag', () => {
+    const detail = buildJobCreatedDetail('job-1', 'Crew Execution');
+    expect(detail).not.toHaveProperty('planningEnabled');
   });
 });
 

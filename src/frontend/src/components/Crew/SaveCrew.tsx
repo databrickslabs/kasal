@@ -31,8 +31,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   // Get execution configuration from the store
   const {
     processType,
-    planningEnabled,
-    planningLLM,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
@@ -103,8 +101,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         const executionStore = useCrewExecutionStore.getState();
         const executionConfig = {
           process: executionStore.processType,
-          planning: executionStore.planningEnabled,
-          planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
           reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
@@ -229,8 +225,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         const executionStore = useCrewExecutionStore.getState();
         const executionConfig = {
           process: executionStore.processType,
-          planning: executionStore.planningEnabled,
-          planning_llm: executionStore.planningEnabled && executionStore.planningLLM ? executionStore.planningLLM : undefined,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
           reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
@@ -516,8 +510,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       // Build execution configuration
       const executionConfig = {
         process: processType,
-        planning: planningEnabled,
-        planning_llm: planningEnabled && planningLLM ? planningLLM : undefined,
         reasoning: reasoningEnabled,
         reasoning_llm: reasoningEnabled && reasoningLLM ? reasoningLLM : undefined,
         reasoning_config: reasoningEnabled ? reasoningConfig : undefined,

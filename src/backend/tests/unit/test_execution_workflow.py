@@ -52,7 +52,6 @@ def sample_crew_config():
             }
         },
         model="gpt-4o-mini",
-        planning=True,
         execution_type="crew",
         inputs={"topic": "artificial intelligence"},
         schema_detection_enabled=True
@@ -67,7 +66,6 @@ def sample_flow_config():
         agents_yaml={},
         tasks_yaml={},
         model="gpt-4o-mini",
-        planning=False,
         execution_type="flow",
         inputs={"flow_id": str(flow_id)},
         schema_detection_enabled=False
@@ -274,8 +272,7 @@ class TestExecutionService:
             agents_yaml={},
             tasks_yaml={},
             model="gpt-4o-mini",
-            planning=False,
-            execution_type="flow",
+                execution_type="flow",
             inputs={},
             schema_detection_enabled=False
         )
@@ -312,8 +309,7 @@ class TestExecutionService:
             agents_yaml={"agent": {"role": "test"}},
             tasks_yaml={"task": {"description": "test"}},
             model=None,  # None model
-            planning=False,
-            execution_type="crew",
+                execution_type="crew",
             inputs={},
             schema_detection_enabled=True
         )
@@ -1090,8 +1086,7 @@ class TestExecutionWorkflowIntegration:
             agents_yaml={},
             tasks_yaml={},
             model="gpt-4o-mini",
-            planning=False,
-            execution_type="flow",
+                execution_type="flow",
             inputs={},  # No flow_id
             schema_detection_enabled=False
         )

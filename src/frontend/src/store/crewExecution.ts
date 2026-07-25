@@ -18,7 +18,7 @@ interface RunHistoryItem {
   error?: string;
 }
 
-// Agent-reasoning controls (CrewAI 1.14.x PlanningConfig). Defined in types/crews
+// Reasoning controls (the model's native thinking budget). Defined in types/crews
 // (a leaf module) and re-exported here so existing imports keep working without an
 // import cycle (tabManager <-> crewExecution). Sent to the backend as
 // `reasoning_config` only when reasoning is enabled.
@@ -88,24 +88,17 @@ const warnOnConfigMismatch = (
   }
 };
 
-// Low/small by default: validated to make a non-converging agent self-terminate in
-// ~15s with a synthesized answer (vs. the medium/large profile that tripped the
-// workspace rate limit and retry-looped for minutes). Users can raise per crew.
+// Low by default: the smallest thinking budget is the fastest and cheapest, and
+// models without a native reasoning budget ignore the setting entirely. Users can
+// raise it per crew.
 export const DEFAULT_REASONING_CONFIG: ReasoningConfig = {
   reasoning_effort: 'low',
-  max_attempts: 1,
-  max_steps: 3,
-  max_step_iterations: 3,
-  step_timeout: 20,
-  max_replans: 0,
 };
 
 interface CrewExecutionState {
   // Execution state
   isExecuting: boolean;
   selectedModel: string;
-  planningEnabled: boolean;
-  planningLLM: string;
   reasoningEnabled: boolean;
   reasoningLLM: string;
   reasoningConfig: ReasoningConfig;
@@ -156,8 +149,6 @@ interface CrewExecutionState {
 
   // Setters
   setSelectedModel: (model: string) => void;
-  setPlanningEnabled: (enabled: boolean) => void;
-  setPlanningLLM: (model: string) => void;
   setReasoningEnabled: (enabled: boolean) => void;
   setReasoningLLM: (model: string) => void;
   setReasoningConfig: (cfg: Partial<ReasoningConfig>) => void;
@@ -217,8 +208,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
   selectedModel: 'databricks-gpt-5-3-codex',
-  planningEnabled: false,
-  planningLLM: '',
   reasoningEnabled: false,
   reasoningLLM: '',
   reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
@@ -262,8 +251,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // State setters
   setSelectedModel: (model) => set({ selectedModel: model as string }),
-  setPlanningEnabled: (enabled) => set({ planningEnabled: enabled }),
-  setPlanningLLM: (model) => set({ planningLLM: model }),
   setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
   setReasoningLLM: (model) => set({ reasoningLLM: model }),
   setReasoningConfig: (cfg) => set((state) => ({ reasoningConfig: { ...state.reasoningConfig, ...cfg } })),
@@ -425,7 +412,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeCrew - nodes:', nodes);
     console.log('[CrewExecution] executeCrew - edges:', edges);
 
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
+    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -539,14 +526,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           }))
       );
 
-      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      // Prepare additionalInputs with reasoning_llm, process type, and manager_llm
       const additionalInputs: Record<string, unknown> = {
         ...inputVariables,
         process: processType
       };
-      if (planningEnabled && planningLLM) {
-        additionalInputs.planning_llm = planningLLM;
-      }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
@@ -562,7 +546,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const response = await jobExecutionService.executeJob(
         nodes,
         edges,
-        planningEnabled,
         selectedModel,
         'crew',
         additionalInputs,
@@ -588,8 +571,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
-          planningEnabled
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -650,7 +632,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
     console.log('[CrewExecution] executeFlow - resumeFromCrewSequence:', resumeFromCrewSequence);
 
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled } = get();
+    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
@@ -683,11 +665,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         }))
       );
 
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
+      // Prepare additionalInputs with reasoning_llm if enabled
       const additionalInputs: Record<string, unknown> = {};
-      if (planningEnabled && planningLLM) {
-        additionalInputs.planning_llm = planningLLM;
-      }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
@@ -696,14 +675,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       }
 
       console.log('[FlowExecution] Executing flow with model:', selectedModel);
-      console.log('[FlowExecution] Planning enabled:', planningEnabled);
       console.log('[FlowExecution] Reasoning enabled:', reasoningEnabled);
       console.log('[FlowExecution] Schema detection enabled:', schemaDetectionEnabled);
 
       const response = await jobExecutionService.executeJob(
         nodes,
         edges,
-        planningEnabled,
         selectedModel,
         'flow',
         additionalInputs,
@@ -730,8 +707,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobName: response.run_name || `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
           groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
-          isFlow: true, // Flag to indicate this is a flow execution
-          planningEnabled
+          isFlow: true // Flag to indicate this is a flow execution
         }
       });
       console.log('[FlowExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -773,7 +749,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeTab: async (tabId, nodes, edges, tabName) => {
-    const { selectedModel, planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, processType, managerLLM } = get();
+    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -865,13 +841,10 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         );
       }
 
-      // Prepare additionalInputs with planning_llm, reasoning_llm, process type, and manager_llm
+      // Prepare additionalInputs with reasoning_llm, process type, and manager_llm
       const additionalInputs: Record<string, unknown> = {
         process: processType
       };
-      if (planningEnabled && planningLLM) {
-        additionalInputs.planning_llm = planningLLM;
-      }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
@@ -887,7 +860,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const response = await jobExecutionService.executeJob(
         nodes,
         edges,
-        planningEnabled,
         selectedModel,
         executionType,
         additionalInputs,
@@ -909,8 +881,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
-          planningEnabled
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -1183,15 +1154,12 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   handleGenerateCrew: async () => {
     const { nodes, edges } = useWorkflowStore.getState();
-    const { planningEnabled, planningLLM, reasoningEnabled, reasoningLLM, reasoningConfig, selectedModel, schemaDetectionEnabled } = get();
+    const { reasoningEnabled, reasoningLLM, reasoningConfig, selectedModel, schemaDetectionEnabled } = get();
     set({ isExecuting: true });
 
     try {
-      // Prepare additionalInputs with planning_llm and reasoning_llm if enabled
+      // Prepare additionalInputs with reasoning_llm if enabled
       const additionalInputs: Record<string, unknown> = { generate: true };
-      if (planningEnabled && planningLLM) {
-        additionalInputs.planning_llm = planningLLM;
-      }
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
@@ -1202,7 +1170,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const response = await jobExecutionService.executeJob(
         nodes,
         edges,
-        planningEnabled,
         selectedModel,
         'crew',
         additionalInputs,
@@ -1210,7 +1177,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         reasoningEnabled
       );
 
-      set({ 
+      set({
         successMessage: 'Crew generated successfully',
         showSuccess: true,
         jobId: response.job_id
@@ -1222,8 +1189,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Crew Generation (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
-          planningEnabled
+          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
         }
       }));
 

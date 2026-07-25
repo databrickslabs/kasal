@@ -162,10 +162,6 @@
       "label": "Modell auswählen",
       "provider": "Anbieter"
     },
-    "planning": {
-      "label": "Planung",
-      "tooltip": "Wenn aktiviert, erstellt ein KI-Planer vor der Ausführung einen schrittweisen Plan für Ihr Team, der die Aufgabenkoordination und -leistung verbessert"
-    },
     "buttons": {
       "schedule": "Zeitplan",
       "addAgent": "Agent hinzufügen",

@@ -149,7 +149,6 @@ interface ScheduleCreateData {
   // Common fields
   inputs?: Record<string, unknown>;
   is_active?: boolean;
-  planning?: boolean;
   model?: string;
 }
 
@@ -464,7 +463,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
           flow_config: flow_config || {},
           inputs: selectedRunForSchedule.inputs?.inputs || {},
           is_active: true,
-          planning: selectedRunForSchedule.inputs?.planning || false,
           model: selectedRunForSchedule.inputs?.model,
         };
 
@@ -539,7 +537,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
           tasks_yaml: tasks_yaml,
           inputs: selectedRunForSchedule.inputs?.inputs || {},
           is_active: true,
-          planning: selectedRunForSchedule.inputs?.planning || false,
           model: selectedRunForSchedule.inputs?.model,
         };
 

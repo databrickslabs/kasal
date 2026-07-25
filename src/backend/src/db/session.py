@@ -812,8 +812,16 @@ async def _ensure_chat_sessions_columns(conn) -> None:
 async def _ensure_crew_columns(conn) -> None:
     """Idempotently add reasoning_config to crews. create_all never ALTERs an
     existing table, so DBs created before this column existed (e.g. deployed
-    customer instances) would silently drop the saved reasoning PlanningConfig
-    on save/reload. Safe to run every startup; column is nullable JSON/TEXT."""
+    customer instances) would silently drop the saved reasoning budget
+    ({"reasoning_effort": ...}) on save/reload. Safe to run every startup; column
+    is nullable JSON/TEXT.
+
+    NOTE: the removed planner columns (crews.planning / crews.planning_llm /
+    schedule.planning) are dropped by the alembic migration
+    20260725_drop_planner_columns. They are deliberately NOT dropped here — a
+    self-healing deployed DB keeps the orphan columns harmlessly (nullable and no
+    longer mapped), and running DROP COLUMN on every startup is riskier than
+    leaving them behind."""
     is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
     try:
         if is_sqlite:

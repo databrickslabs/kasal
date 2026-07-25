@@ -150,8 +150,16 @@ class TestManagerConfigBuilder:
             assert 'manager_llm' not in result  # Should not have manager_llm when agent is provided
 
     @pytest.mark.asyncio
-    async def test_configure_manager_sequential_with_planning(self, config_with_group_id):
-        """Test sequential process with planning enabled."""
+    async def test_configure_manager_sequential_ignores_legacy_planning(self, config_with_group_id):
+        """Regression: a legacy crew config with planning=True must NOT get a
+        manager_llm on the sequential path.
+
+        Formerly ``test_configure_manager_sequential_with_planning``. A sequential
+        crew has no manager; the old sequential branch only set ``manager_llm`` to
+        keep the removed prose planner off OpenAI. With the planner gone the whole
+        ``_configure_sequential_planning`` method was deleted, so no LLM should be
+        resolved at all.
+        """
         config_with_group_id['crew']['planning'] = True
         manager_builder = ManagerConfigBuilder(config_with_group_id)
 
@@ -163,19 +171,27 @@ class TestManagerConfigBuilder:
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.sequential)
 
-            assert 'manager_llm' in result
-            assert result['manager_llm'] == mock_llm
-            mock_configure.assert_called_with("databricks-llama-4-maverick", "test_group_123")
+            assert 'manager_llm' not in result
+            mock_configure.assert_not_called()
+
+        # The planner-only helper is gone for good.
+        assert not hasattr(manager_builder, '_configure_sequential_planning')
 
     @pytest.mark.asyncio
-    async def test_configure_manager_sequential_without_planning(self, manager_builder):
-        """Test sequential process without planning enabled."""
+    async def test_configure_manager_sequential_sets_no_manager_llm(self, manager_builder):
+        """A sequential crew never gets a manager_llm (it has no manager).
+
+        Formerly ``test_configure_manager_sequential_without_planning``; the name
+        implied planning was the deciding factor, which is no longer true -- the
+        sequential path now configures nothing unconditionally.
+        """
         crew_kwargs = {}
 
-        result = await manager_builder.configure_manager(crew_kwargs, Process.sequential)
+        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
+            result = await manager_builder.configure_manager(crew_kwargs, Process.sequential)
 
-        # Should not add manager_llm when planning is False
-        assert 'manager_llm' not in result
+            assert 'manager_llm' not in result
+            mock_configure.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_set_fallback_manager_llm_success(self, manager_builder):

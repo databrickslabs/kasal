@@ -54,7 +54,6 @@ export interface GroupedTrace {
   startTime: Date;
   endTime: Date;
   duration: number;
-  agentEvents: TraceEvent[];
   tasks: {
     taskName: string;
     taskId?: string;
@@ -111,7 +110,6 @@ export interface ProcessedTraces {
     start: Trace[];
     end: Trace[];
   };
-  crewPlanningEvents: TraceEvent[];
   runConfig?: RunConfig;
 }
 

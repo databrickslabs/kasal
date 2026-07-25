@@ -56,13 +56,14 @@ const SLASH_COMMANDS = [
 ];
 
 // Answer modes shown in the composer's mode pill. 'chat' runs a single light
-// agent (fast); 'research'/'deep' build a crew (with reasoning, +planning).
+// agent (fast); 'research'/'deep' build a crew with progressively deeper
+// model reasoning.
 // `label` is the full name (dropdown rows + aria); `short` is the compact label
 // shown on the collapsed trigger pill so the composer's control row stays tidy.
 const MODES = [
   { id: 'chat', label: 'Chat', short: 'Chat', hint: 'Quick answer from a single agent' },
   { id: 'research', label: 'Research', short: 'Research', hint: 'Full crew with reasoning' },
-  { id: 'deep', label: 'Deep Research', short: 'Deep', hint: 'Deep tools with planning & reasoning' },
+  { id: 'deep', label: 'Deep Research', short: 'Deep', hint: 'Deep tools with maximum reasoning' },
 ] as const;
 
 // Memory modes shown in the composer's memory pill — same labelled-dropdown
@@ -788,8 +789,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {/* Answer-mode pill + dropdown. The dropdown is anchored to THIS
                 pill (right-0, under the chat controls) and opens up/down per
                 menuPlacement — never off at the screen's side. Chat = single
-                light agent; Research = crew + reasoning; Deep Research = crew +
-                planning + reasoning. Store-owned so it persists. */}
+                light agent; Research = crew + balanced reasoning; Deep Research
+                = crew + maximum reasoning. Store-owned so it persists. */}
             <div className="relative" ref={modePickerRef}>
               <button
                 type="button"

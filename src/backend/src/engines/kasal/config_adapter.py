@@ -58,12 +58,11 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     if config.inputs and "tools" in config.inputs:
         tools = config.inputs["tools"]
     
-    # Log planning settings
-    if config.planning:
-        logger.info(f"Planning is enabled for execution")
-    else:
-        logger.debug("Planning is disabled for execution")
-        
+    # NOTE: config.planning / inputs['planning_llm'] are deliberately NOT forwarded.
+    # The CrewAI-style prose planner was removed — the engine has no planner, so the
+    # fields are legacy request/DB compatibility only and are ignored here. Existing
+    # crews saved with planning=true simply run without it.
+
     # Log reasoning settings
     if config.reasoning:
         logger.info(f"Reasoning is enabled for execution")
@@ -79,7 +78,6 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             "process": config.inputs.get("process", "sequential") if config.inputs else "sequential",
             "verbose": True,
             "memory": True,
-            "planning": config.planning,
             "reasoning": config.reasoning
         },
         "model": config.model or "gpt-4o",
@@ -91,20 +89,10 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             "agents_yaml": config.agents_yaml,
             "tasks_yaml": config.tasks_yaml,
             "inputs": config.inputs,
-            "planning": config.planning,
             "reasoning": config.reasoning
         }
     }
-    
-    # If planning_llm is specified in inputs, add it to the crew config
-    if config.inputs and "planning_llm" in config.inputs:
-        planning_llm = config.inputs["planning_llm"]
-        engine_config["crew"]["planning_llm"] = planning_llm
-        logger.info(f"Using specific planning LLM: {planning_llm}")
-    elif config.planning:
-        # Log that we're using the default model for planning
-        logger.info(f"Using default model for planning: {engine_config['model']}")
-    
+
     # If reasoning_llm is specified in inputs, add it to the crew config
     if config.inputs and "reasoning_llm" in config.inputs:
         reasoning_llm = config.inputs["reasoning_llm"]

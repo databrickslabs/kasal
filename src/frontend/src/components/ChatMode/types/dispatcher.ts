@@ -45,7 +45,7 @@ export interface DispatcherRequest {
   agentbricks_endpoints?: string[];
   /** Paths of files attached this turn — scopes the knowledge search tool to them. */
   knowledge_file_paths?: string[];
-  /** Answer mode: 'chat' = single light agent, 'research' = crew+reasoning, 'deep' = crew+planning+reasoning. */
+  /** Answer mode: 'chat' = single light agent, 'research' = crew + medium reasoning effort, 'deep' = crew + high reasoning effort. */
   chat_mode_type?: 'chat' | 'research' | 'deep';
 }
 
@@ -148,8 +148,6 @@ export interface CatalogLoadResult {
     nodes: unknown[];
     edges: unknown[];
     process?: string;
-    planning?: boolean;
-    planning_llm?: string;
     memory?: boolean;
     verbose?: boolean;
     max_rpm?: number;

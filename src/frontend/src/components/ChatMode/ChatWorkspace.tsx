@@ -1614,12 +1614,10 @@ const ChatWorkspace: React.FC = () => {
           data.user_request,
           // Agent Bricks endpoints picked via the chat input's "+" menu.
           useExecutionStore.getState().selectedAgentBricksEndpoints,
-          // Answer mode → reasoning (research/deep) + planning (+planning_llm, deep)
-          // so a manually re-run crew matches what the mode (and save) produced.
+          // Answer mode → reasoning (research/deep) so a manually re-run crew
+          // matches what the mode (and save) produced.
           useExecutionStore.getState().chatModeType === 'research' ||
             useExecutionStore.getState().chatModeType === 'deep',
-          useExecutionStore.getState().chatModeType === 'deep',
-          useExecutionStore.getState().chatModeType === 'deep' ? (selectedModel || undefined) : undefined,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -1761,8 +1759,8 @@ const ChatWorkspace: React.FC = () => {
       // Capture the chat's current memory choice so the saved crew matches what
       // the user sees here (no-memory mode → saved crew has memory disabled).
       // opts carries overwrite + the picked Genie space from the crew card.
-      // Answer mode → persist reasoning/planning so a Research/Deep crew reloads
-      // with the same behaviour (planning_llm only matters for Deep).
+      // Answer mode → persist reasoning so a Research/Deep crew reloads with the
+      // same behaviour.
       const mode = useExecutionStore.getState().chatModeType;
       return saveGeneratedCrew(data, undefined, {
         ...opts,
@@ -1773,15 +1771,13 @@ const ChatWorkspace: React.FC = () => {
         // reloads with the agent assigned and runs against it.
         agentBricksEndpoints: useExecutionStore.getState().selectedAgentBricksEndpoints,
         reasoning: mode === 'research' || mode === 'deep',
-        planning: mode === 'deep',
-        planningLlm: mode === 'deep' ? (selectedModel || undefined) : undefined,
       }).then((r) => {
         // Surface the freshly saved crew in the rail library.
         void refreshLibrary();
         return r;
       });
     },
-    [refreshLibrary, selectedModel],
+    [refreshLibrary],
   );
 
   // --- Answer mode: distill a reusable crew from the conversation and SAVE it ---
@@ -2017,8 +2013,6 @@ const ChatWorkspace: React.FC = () => {
           const saved = await saveGeneratedCrew(data, name || undefined, {
             overwrite, memoryEnabled, mcpServers, agentBricksEndpoints,
             reasoning: saveMode === 'research' || saveMode === 'deep',
-            planning: saveMode === 'deep',
-            planningLlm: saveMode === 'deep' ? (selectedModel || undefined) : undefined,
           });
           void refreshLibrary();
           addMessage(
@@ -2041,7 +2035,7 @@ const ChatWorkspace: React.FC = () => {
 
       return false;
     },
-    [addMessage, clearMessages, executionStream, handleRefine, selectedModel],
+    [addMessage, clearMessages, executionStream, handleRefine],
   );
 
   const handleSend = useCallback(

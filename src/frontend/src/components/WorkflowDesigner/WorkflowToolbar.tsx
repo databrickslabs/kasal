@@ -27,8 +27,6 @@ import { hasCrewContent } from '../Chat/utils/chatHelpers';
 interface WorkflowToolbarProps {
   selectedModel: string;
   setSelectedModel: (model: string) => void;
-  planningEnabled: boolean;
-  setPlanningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   reasoningEnabled: boolean;

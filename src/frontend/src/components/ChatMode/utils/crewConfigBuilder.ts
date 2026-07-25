@@ -30,7 +30,6 @@ export interface CrewExecutionConfig {
   agents_yaml: Record<string, Record<string, unknown>>;
   tasks_yaml: Record<string, Record<string, unknown>>;
   inputs: Record<string, unknown>;
-  planning: boolean;
   reasoning: boolean;
   model?: string;
   execution_type: string;
@@ -49,7 +48,6 @@ export interface FlowExecutionConfig {
   agents_yaml: Record<string, Record<string, unknown>>;
   tasks_yaml: Record<string, Record<string, unknown>>;
   inputs: Record<string, unknown>;
-  planning: boolean;
   reasoning: boolean;
   model?: string;
   execution_type: string;
@@ -80,7 +78,6 @@ export function buildCrewConfig(plan: {
   nodes: unknown[];
   edges: unknown[];
   process?: string;
-  planning?: boolean;
 }, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true,
    agentBricksEndpoints: string[] = []): CrewExecutionConfig {
   const nodes = plan.nodes as FlowNode[];
@@ -230,7 +227,6 @@ export function buildCrewConfig(plan: {
     agents_yaml,
     tasks_yaml,
     inputs: inputs || {},
-    planning: plan.planning || false,
     reasoning: false,
     model: model || undefined,
     execution_type: 'crew',
@@ -257,8 +253,6 @@ export function buildCrewConfigFromGenerated(
   userRequest?: string,
   agentBricksEndpoints: string[] = [],
   reasoning: boolean = false,
-  planning: boolean = false,
-  planningLlm?: string,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -444,11 +438,7 @@ export function buildCrewConfigFromGenerated(
   return {
     agents_yaml,
     tasks_yaml,
-    // planning_llm must ride in inputs — the backend reads it from
-    // inputs.planning_llm, not a top-level config key (and Deep planning without
-    // an explicit planning_llm defaults to OpenAI → 401 on a Databricks app).
-    inputs: { ...(inputs || {}), ...(planning && planningLlm ? { planning_llm: planningLlm } : {}) },
-    planning,
+    inputs: inputs || {},
     reasoning,
     model: model || undefined,
     execution_type: 'crew',
@@ -493,7 +483,6 @@ export function buildFlowConfig(flow: {
     agents_yaml: {},
     tasks_yaml: {},
     inputs: {},
-    planning: false,
     reasoning: false,
     model: model || undefined,
     execution_type: 'flow',

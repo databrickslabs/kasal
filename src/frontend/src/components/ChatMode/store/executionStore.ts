@@ -87,8 +87,8 @@ interface ExecutionState {
   /**
    * ChatMode answer mode chosen in the chat input's mode pill:
    *   'chat'     – a single light agent (Agent.kickoff_async), fast, no crew;
-   *   'research' – a full crew with reasoning;
-   *   'deep'     – a full crew with planning + reasoning.
+   *   'research' – a full crew with balanced model reasoning;
+   *   'deep'     – a full crew with maximum model reasoning.
    * Persisted (like ``memoryEnabled``) so the choice survives a reload.
    */
   chatModeType: 'chat' | 'research' | 'deep';
@@ -594,7 +594,7 @@ export const useExecutionStore = create<ExecutionStore>()(
       // exists, never divert to the opt-in (hidden) preview pane just because the
       // raw answer text ALSO looks previewable — that path posts no message, so
       // `runExtra` (the inline surface) would be silently dropped. This bit deep
-      // mode specifically: planning produces a structured deck `text` that trips
+      // mode specifically: it produces a structured deck `text` that trips
       // parsePreviewContent, while research's conversational text falls through to
       // the inline path — so the presentation showed for research but not deep.
       if (preview && !surface) {

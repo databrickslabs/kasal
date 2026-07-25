@@ -37,7 +37,6 @@ const STATUS_PRECEDENCE: Record<TaskStatus, number> = {
 
 interface TaskExecutionState {
   taskStates: Map<string, TaskState>;
-  isPlanningPhase: boolean;
 
   // Guarded transition - returns false if transition is invalid
   transition: (taskId: string, newStatus: TaskStatus, metadata?: Partial<TaskState>) => boolean;
@@ -47,12 +46,10 @@ interface TaskExecutionState {
   clearTaskStates: () => void;
   isTaskRunning: (taskId: string) => boolean;
   getTaskStatus: (taskId: string) => TaskState | undefined;
-  setIsPlanningPhase: (value: boolean) => void;
 }
 
 export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
   taskStates: new Map(),
-  isPlanningPhase: false,
 
   transition: (taskId: string, newStatus: TaskStatus, metadata?: Partial<TaskState>) => {
     const current = get().taskStates.get(taskId);
@@ -159,7 +156,6 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
   },
 
   clearTaskStates: () => {
-    // Only clear task states - preserve isPlanningPhase (managed by setIsPlanningPhase)
     set({ taskStates: new Map() });
   },
 
@@ -170,10 +166,6 @@ export const useTaskExecutionStore = create<TaskExecutionState>((set, get) => ({
 
   getTaskStatus: (taskId: string) => {
     return get().taskStates.get(taskId);
-  },
-
-  setIsPlanningPhase: (value: boolean) => {
-    set({ isPlanningPhase: value });
   }
 }));
 
@@ -198,11 +190,6 @@ if (typeof window !== 'undefined') {
 
     if (!isTaskEvent) return;
 
-    // Clear planning phase on first task event
-    if (useTaskExecutionStore.getState().isPlanningPhase) {
-      useTaskExecutionStore.getState().setIsPlanningPhase(false);
-    }
-
     const taskId = extractTaskId(trace);
     const taskName = extractTaskName(trace);
     const status = mapEventToStatus(trace.event_type);
@@ -225,7 +212,6 @@ if (typeof window !== 'undefined') {
   }) as EventListener);
 
   window.addEventListener('jobCompleted', (() => {
-    useTaskExecutionStore.getState().setIsPlanningPhase(false);
     useTaskExecutionStore.getState().transitionAll(
       ['running', 'planning'],
       'completed',
@@ -234,7 +220,6 @@ if (typeof window !== 'undefined') {
   }) as EventListener);
 
   window.addEventListener('jobFailed', (() => {
-    useTaskExecutionStore.getState().setIsPlanningPhase(false);
     useTaskExecutionStore.getState().transitionAll(
       ['running', 'planning'],
       'failed',
@@ -243,7 +228,6 @@ if (typeof window !== 'undefined') {
   }) as EventListener);
 
   window.addEventListener('jobStopped', (() => {
-    useTaskExecutionStore.getState().setIsPlanningPhase(false);
     useTaskExecutionStore.getState().clearTaskStates();
   }) as EventListener);
 }

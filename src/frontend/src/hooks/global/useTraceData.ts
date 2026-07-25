@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ProcessedTraces, TraceEvent, RunConfig, RunConfigAgent, RunConfigTask } from '../../types/trace';
+import { ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask } from '../../types/trace';
 import {
   processTraceEvent,
   extractOutputForDisplay,
@@ -96,7 +96,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   );
 
   if (sorted.length === 0) {
-    return { agents: [], globalEvents: { start: [], end: [] }, crewPlanningEvents: [] };
+    return { agents: [], globalEvents: { start: [], end: [] } };
   }
 
   const globalStart = new Date(sorted[0].created_at);
@@ -113,50 +113,6 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       (t.event_source === 'flow' && t.event_type === 'flow_completed')
     )
   };
-
-  // Crew-level planning events
-  const crewPlannerTraces = sorted.filter(t =>
-    t.event_source === 'Task Execution Planner'
-  );
-
-  const crewPlanningEvents: TraceEvent[] = crewPlannerTraces
-    .filter(trace =>
-      trace.event_type === 'llm_response' || trace.event_type === 'task_completed'
-    )
-    .map((trace, idx, arr) => {
-      const timestamp = new Date(trace.created_at);
-      const nextTrace = arr[idx + 1];
-      const duration = nextTrace
-        ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
-        : undefined;
-
-      let outputContent: string | Record<string, unknown> | undefined = trace.output;
-      if (trace.output && typeof trace.output === 'object' && 'content' in trace.output) {
-        const content = (trace.output as Record<string, unknown>).content;
-        if (typeof content === 'string' || (typeof content === 'object' && content !== null)) {
-          outputContent = content as string | Record<string, unknown>;
-        }
-      }
-
-      let description = 'Crew Planning';
-      if (trace.event_type === 'llm_response') {
-        const outputLen = typeof outputContent === 'string'
-          ? outputContent.length
-          : JSON.stringify(outputContent || '').length;
-        description = `Execution Plan (${outputLen.toLocaleString()} chars)`;
-      } else if (trace.event_type === 'task_completed') {
-        description = 'Planning Complete';
-      }
-
-      return {
-        type: 'crew_planning',
-        description,
-        timestamp,
-        duration,
-        output: outputContent,
-        extraData: trace.extra_data as Record<string, unknown> | undefined
-      };
-    });
 
   // Group by agent
   const agentMap = new Map<string, Trace[]>();
@@ -207,7 +163,6 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
         src === 'task' ||
         src === 'system' ||
         trace.event_source === 'Task Orchestrator' ||
-        trace.event_source === 'Task Execution Planner' ||
         trace.event_context === 'task_management')) {
       return;
     }
@@ -267,34 +222,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     const taskMap = new Map<string, Trace[]>();
     const taskIdToUniqueKey = new Map<string, string>();
     let taskCounter = 0;
-    const agentLevelTraces: Trace[] = [];
 
     agentTraces.forEach(trace => {
-      if (trace.event_type === 'agent_reasoning' || trace.event_type === 'agent_reasoning_error') {
-        let metadata: Record<string, unknown> | null = null;
-        if (trace.trace_metadata) {
-          if (typeof trace.trace_metadata === 'string') {
-            try {
-              metadata = JSON.parse(trace.trace_metadata);
-            } catch {
-              metadata = null;
-            }
-          } else if (typeof trace.trace_metadata === 'object') {
-            metadata = trace.trace_metadata as Record<string, unknown>;
-          }
-        }
-        let extraData: Record<string, unknown> | null = null;
-        if (trace.output && typeof trace.output === 'object' && 'extra_data' in trace.output) {
-          extraData = (trace.output as Record<string, unknown>).extra_data as Record<string, unknown>;
-        }
-
-        const operation = metadata?.operation || extraData?.operation;
-        if (operation !== 'reasoning_started') {
-          agentLevelTraces.push(trace);
-        }
-        return;
-      }
-
       const traceTaskId = getTaskId(trace)
         || (trace.parent_span_id ? spanIdToTaskId.get(trace.parent_span_id) : undefined)
         || undefined;
@@ -382,31 +311,11 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       };
     });
 
-    const agentEvents: TraceEvent[] = agentLevelTraces.map((trace, idx) => {
-      const timestamp = new Date(trace.created_at);
-      const nextTrace = agentLevelTraces[idx + 1];
-      const duration = nextTrace
-        ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
-        : undefined;
-
-      const processed = processTraceEvent(trace);
-      return {
-        type: processed?.type ?? 'agent_reasoning',
-        description: processed?.description ?? 'Agent Reasoning',
-        timestamp,
-        duration,
-        intrinsicMs: processed?.durationMs,
-        output: extractOutputForDisplay(trace.output),
-        extraData: extractExtraData(trace)
-      };
-    });
-
     agents.push({
       agent: agentName,
       startTime: agentStart,
       endTime: agentEnd,
       duration: agentEnd.getTime() - agentStart.getTime(),
-      agentEvents,
       tasks
     });
   });
@@ -435,7 +344,6 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     totalDuration,
     agents,
     globalEvents,
-    crewPlanningEvents,
     runConfig,
   };
 }

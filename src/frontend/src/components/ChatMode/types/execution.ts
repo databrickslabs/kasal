@@ -9,7 +9,6 @@ export interface ExecutionConfig {
   agents_yaml: Record<string, Record<string, unknown>>;
   tasks_yaml: Record<string, Record<string, unknown>>;
   inputs?: Record<string, unknown>;
-  planning?: boolean;
   reasoning?: boolean;
   model?: string;
   execution_type?: string;

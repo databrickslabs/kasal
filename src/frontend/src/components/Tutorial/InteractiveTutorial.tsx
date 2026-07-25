@@ -176,7 +176,7 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
     },
     {
       target: '[data-tour="runtime-features"]',
-      content: 'Advanced Features: Configure how AI agents work:\n• Planning: Enable agents to plan before executing\n• Reasoning: Allow agents to explain their decisions\n• Process Type: Choose Sequential (one-by-one) or Hierarchical (manager delegates)',
+      content: 'Advanced Features: Configure how AI agents work:\n• Reasoning: Let agents think before answering, and pick how much thinking budget the model gets\n• Process Type: Choose Sequential (one-by-one) or Hierarchical (manager delegates)',
       placement: 'right',
     },
     {

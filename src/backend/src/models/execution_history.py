@@ -37,7 +37,9 @@ class ExecutionHistory(Base):
         inputs: JSON input parameters for the execution
         result: JSON output/results from the execution
         error: Error message if execution failed
-        planning: Boolean flag for planning mode execution
+        planning: LEGACY historical flag. Kasal removed the CrewAI-style prose
+            planner, so this is never populated from a request any more and stays
+            at its False default; it is kept so pre-removal rows still read back.
         trigger_type: How execution was triggered (api, schedule, etc.)
         created_at: Timestamp when execution started
         completed_at: Timestamp when execution completed
@@ -86,6 +88,8 @@ class ExecutionHistory(Base):
     inputs = Column(JSON, default=dict)
     result = Column(JSON)
     error = Column(String)
+    # LEGACY: kept so pre-planner-removal rows still read back. Never written from
+    # a request any more (the planner is gone), so new rows use the False default.
     planning = Column(Boolean, default=False)
     trigger_type = Column(String, default="api")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)  # Use timezone-naive UTC time

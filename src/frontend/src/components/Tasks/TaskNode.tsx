@@ -115,9 +115,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   // Get current layout orientation
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
-  // Planning phase indicator — shown on all task nodes during crew planning
-  const isPlanningPhase = useTaskExecutionStore(state => state.isPlanningPhase);
-
   // Deterministic task execution state lookup using shared utility
   const taskStatus = useTaskExecutionStore(state => {
     const key = findTaskStoreKey(state.taskStates, data.taskId, data.label);
@@ -365,23 +362,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const getStatusIcon = () => {
-    // Show planning indicator when crew is in planning phase (before any task starts)
-    if (isPlanningPhase && !taskStatus) {
-      return (
-        <AutoAwesomeIcon
-          sx={{
-            fontSize: 16,
-            color: 'warning.main',
-            animation: 'planningPulse 1.5s ease-in-out infinite',
-            '@keyframes planningPulse': {
-              '0%, 100%': { opacity: 0.4, transform: 'scale(0.85)' },
-              '50%': { opacity: 1, transform: 'scale(1.1)' },
-            },
-          }}
-        />
-      );
-    }
-
     if (!taskStatus) return null;
 
     switch (taskStatus.status) {
@@ -411,7 +391,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   };
 
   const getTaskStyles = () => {
-    const isPlanning = isPlanningPhase && !taskStatus;
     const isRunning = taskStatus?.status === 'running';
     const isCompleted = taskStatus?.status === 'completed';
     const isFailed = taskStatus?.status === 'failed';
@@ -430,7 +409,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       border: '1px solid',
       borderColor: (theme: Theme) => {
         if (data.error) return theme.palette.error.main;
-        if (isPlanning || taskStatus?.status === 'planning') return theme.palette.warning.main;
+        if (taskStatus?.status === 'planning') return theme.palette.warning.main;
         if (isRunning) return theme.palette.info.main;
         if (isCompleted) return theme.palette.success.main;
         if (isFailed) return theme.palette.error.main;
@@ -443,7 +422,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
       animation: data.loading
         ? 'pulse 2s infinite'
-        : (isPlanning || taskStatus?.status === 'planning')
+        : taskStatus?.status === 'planning'
           ? 'planningGlow 2.5s ease-in-out infinite'
           : isRunning ? 'pulse 2s infinite' : 'none',
       '@keyframes planningGlow': {
@@ -607,7 +586,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           </Box>
         )}
 
-        {(taskStatus || isPlanningPhase) && (
+        {taskStatus && (
           <Box
             sx={{
               position: 'absolute',
@@ -661,7 +640,6 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               fontWeight: 500,
               color: (theme: Theme) => {
                 // Match CrewNode's status-based text color
-                if (isPlanningPhase && !taskStatus) return theme.palette.warning.main;
                 if (taskStatus?.status === 'planning') return theme.palette.warning.main;
                 if (taskStatus?.status === 'running') return theme.palette.info.main;
                 if (taskStatus?.status === 'completed') return theme.palette.success.main;

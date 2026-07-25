@@ -336,7 +336,6 @@ describe('TraceTimelineContent RunConfig UI', () => {
     totalDuration: 300000,
     agents: [],
     globalEvents: { start: [], end: [] },
-    crewPlanningEvents: [],
   };
 
   const baseProps: TraceTimelineContentProps = {
@@ -700,7 +699,6 @@ describe('TraceTimelineContent RunConfig UI', () => {
           startTime: t0,
           endTime: t1,
           duration: 13000,
-          agentEvents: [],
           tasks: [
             {
               taskName: 'Top Swiss news today',
@@ -746,7 +744,6 @@ describe('TraceTimelineContent RunConfig UI', () => {
             startTime: t0,
             endTime: t1,
             duration: 13000,
-            agentEvents: [],
             tasks: [
               {
                 taskName: 'Research the topic',

@@ -377,23 +377,23 @@ describe('crewConfigBuilder', () => {
       expect(config.tasks_yaml.task_z.agent).toBe('agent_agentA');
     });
 
-    it('passes through planning flag and model, with defaults when omitted', () => {
+    it('passes through model and inputs, with defaults when omitted, and never sends planning', () => {
       const withModel = buildCrewConfig(
-        { nodes: [], edges: [], planning: true },
+        { nodes: [], edges: [] },
         'my-model',
         { foo: 'bar' }
       );
-      expect(withModel.planning).toBe(true);
       expect(withModel.model).toBe('my-model');
       expect(withModel.reasoning).toBe(false);
       expect(withModel.execution_type).toBe('crew');
       expect(withModel.schema_detection_enabled).toBe(true);
       expect(withModel.inputs).toEqual({ foo: 'bar' });
+      expect(withModel).not.toHaveProperty('planning');
 
       const noModel = buildCrewConfig({ nodes: [], edges: [] });
-      expect(noModel.planning).toBe(false);
       expect(noModel.model).toBeUndefined();
       expect(noModel.inputs).toEqual({});
+      expect(noModel).not.toHaveProperty('planning');
     });
 
     it('ignores nodes that are neither agent nor task', () => {
@@ -792,7 +792,7 @@ describe('crewConfigBuilder', () => {
       });
       expect(config.model).toBe('model-z');
       expect(config.inputs).toEqual({ topic: 'AI' });
-      expect(config.planning).toBe(false);
+      expect(config).not.toHaveProperty('planning');
       expect(config.reasoning).toBe(false);
       expect(config.execution_type).toBe('crew');
       expect(config.schema_detection_enabled).toBe(true);
@@ -894,7 +894,7 @@ describe('crewConfigBuilder', () => {
       expect(config.agents_yaml).toEqual({});
       expect(config.tasks_yaml).toEqual({});
       expect(config.inputs).toEqual({});
-      expect(config.planning).toBe(false);
+      expect(config).not.toHaveProperty('planning');
       expect(config.reasoning).toBe(false);
       expect(config.schema_detection_enabled).toBe(true);
     });

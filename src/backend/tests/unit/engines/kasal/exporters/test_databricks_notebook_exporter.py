@@ -878,18 +878,19 @@ class TestExportProducesNonBrokenNotebook:
         assert 'Process.sequential' not in joined.split('def predict')[0]  # no stray sequential in crew build
 
     @pytest.mark.asyncio
-    async def test_planning_reasoning_memory_exported(self, exporter):
-        """Planning (Crew), reasoning (Agent PlanningConfig + reasoning_llm) and memory."""
+    async def test_planner_scaffold_never_exported_memory_still_is(self, exporter):
+        """The CrewAI planner was removed from Kasal, so exports must NOT resurrect
+        it: no Crew(planning=...)/planning_llm and no agent PlanningConfig scaffold,
+        even for a legacy crew row that still carries those fields. Memory (a real
+        setting) is still exported."""
         crew = self._full_crew(planning=True, planning_llm='databricks-claude-opus-4-5',
                                reasoning=True, reasoning_llm='databricks-llama-4-maverick', memory=True)
         r = await exporter.export(crew, {'include_deployment': True})
         joined = '\n'.join(''.join(c['source']) for c in r['notebook']['cells'] if c['cell_type'] == 'code')
-        assert 'planning=True' in joined
-        assert 'planning_llm=' in joined
-        # reasoning → bounded PlanningConfig on agents, using the reasoning_llm
-        assert 'planning_config' in joined
-        assert 'PlanningConfig(' in joined
-        assert 'databricks/databricks-llama-4-maverick' in joined  # reasoning_llm built
+        assert 'planning=True' not in joined
+        assert 'planning_llm' not in joined
+        assert 'planning_config' not in joined
+        assert 'PlanningConfig(' not in joined
         assert 'memory=True' in joined
 
     @pytest.mark.asyncio

@@ -239,8 +239,9 @@ MCP_SERVERS = [
 {{MCP_SERVERS}}]
 # Crew execution settings — mirror how Kasal runs this crew.
 PROCESS = "{{PROCESS}}"  # 'sequential' or 'hierarchical'
-PLANNING = {{PLANNING}}  # plan all tasks up front before execution
-PLANNING_LLM = {{PLANNING_LLM}}  # None, or a model name for the planner
+# NOTE: no PLANNING / PLANNING_LLM. Kasal removed the prose planner (a plan-first
+# pass over a capable executor measurably hurt results), so exported apps never
+# enable CrewAI's Crew(planning=...) either.
 REASONING = {{REASONING}}  # agents reason/reflect before acting
 MANAGER_LLM = {{MANAGER_LLM}}  # None, or a model name for the hierarchical manager
 MEMORY = {{MEMORY}}  # enable CrewAI memory
@@ -455,7 +456,7 @@ def _build_agents(mcp_by_server: Dict[str, List[Any]] | None = None) -> Dict[str
             # Optional hard wall-clock cap per agent (CrewAI raises when exceeded);
             # off unless AGENT_MAX_EXECUTION_TIME (or per-agent config) is set.
             max_execution_time=cfg.get("max_execution_time", AGENT_MAX_EXECUTION_TIME),
-            # Reasoning in research + deep; planning is added in deep (build_crew).
+            # Reasoning in research + deep. (No planner in any mode — see build_crew.)
             reasoning=REASONING_ENABLED and mode in ("research", "deep"),
             # Inject today's date so agents answer "latest/current" correctly.
             inject_date=cfg.get("inject_date", True),
@@ -515,8 +516,10 @@ def build_crew(
 ) -> Crew:
     """Assemble the crew; inject runtime MCP tools into the agents when provided.
 
-    Honors the crew's configured process (sequential/hierarchical), planning,
-    reasoning and memory settings — mirroring how Kasal runs it.
+    Honors the crew's configured process (sequential/hierarchical), reasoning and
+    memory settings — mirroring how Kasal runs it. Kasal removed the prose planner
+    (it was a measurable regression over a capable executor), so this app never
+    enables CrewAI planning either.
 
     When ``conversation_id`` is given, the crew's step/task callbacks abort the
     kickoff (raising :class:`cancel.CrewCancelled`) as soon as that conversation
@@ -524,15 +527,15 @@ def build_crew(
     LLM call rather than running to completion.
     """
     agents = _build_agents(mcp_by_server)
-    # Planning runs when the crew is configured for it OR deep mode is active
-    # (deep = planning + reasoning).
-    planning_on = PLANNING or _current_mode() == "deep"
+    # No `planning=` kwarg at all (CrewAI defaults it off). Deep mode used to
+    # re-enable the planner here even when the crew had it disabled, so an exported
+    # app planned where Kasal did not; deep mode now means a larger REASONING
+    # budget instead.
     kwargs: Dict[str, Any] = dict(
         agents=list(agents.values()),
         tasks=_build_tasks(agents),
         process=Process.hierarchical if PROCESS == "hierarchical" else Process.sequential,
         memory=MEMORY,
-        planning=planning_on,
         verbose=True,
     )
     if conversation_id:
@@ -542,12 +545,6 @@ def build_crew(
 
         kwargs["step_callback"] = _abort_if_cancelled
         kwargs["task_callback"] = _abort_if_cancelled
-    if planning_on:
-        # Always give the planner an explicit LLM. Without one, CrewAI's planning
-        # step falls back to a default OpenAI model and 401s when no OPENAI_API_KEY
-        # is set (deep mode enables planning even when the crew configured no
-        # PLANNING_LLM). Route through _make_llm so the local/Databricks rules apply.
-        kwargs["planning_llm"] = _make_llm(PLANNING_LLM or _conversation_model())
     if PROCESS == "hierarchical":
         # Hierarchical needs a manager; use the configured manager LLM, else the
         # override/default model.

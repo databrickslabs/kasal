@@ -259,10 +259,6 @@
       "label": "Choose Model",
       "provider": "Provider"
     },
-    "planning": {
-      "label": "Planning",
-      "tooltip": "When enabled, an AI planner will create a step-by-step plan for your crew before execution, improving task coordination and performance"
-    },
     "buttons": {
       "schedule": "Schedule",
       "addAgent": "Add Agent",

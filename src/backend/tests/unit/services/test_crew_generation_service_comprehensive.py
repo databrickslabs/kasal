@@ -3914,9 +3914,11 @@ class TestBuildCrewConfigFromGenerated:
         # description grounded with the user request
         assert "find swiss poets" in cfg["tasks_yaml"]["task_t1"]["description"]
         # top-level execution config. Default answer mode is 'chat' → a single
-        # light agent (execution_type='agent'), no planning/reasoning.
+        # light agent (execution_type='agent'), no reasoning budget; the removed
+        # planner must not reappear as a config key.
         assert cfg["model"] == "m1" and cfg["execution_type"] == "agent"
-        assert cfg["planning"] is False and cfg["reasoning"] is False
+        assert cfg["reasoning"] is False
+        assert "planning" not in cfg and "planning_llm" not in cfg
         assert cfg["session_id"] == "s1" and cfg["memory_workspace_scope"] is False
 
     def test_request_model_applied_as_agent_llm_when_absent(self):
@@ -3951,12 +3953,14 @@ class TestBuildCrewConfigFromGenerated:
         )
         assert "llm" not in cfg["agents_yaml"]["agent_a1"]
 
-    def test_chat_mode_type_drives_reasoning_planning_execution_type(self, monkeypatch):
-        """The ChatMode answer mode maps to reasoning / planning / execution_type:
-        chat → single light agent; research → crew + reasoning; deep → crew +
-        planning (with an explicit planning_llm) + reasoning."""
-        # Local-model reasoning guard must be off so research/deep reason here.
-        monkeypatch.delenv("LOCAL_LLM_BASE_URL", raising=False)
+    def test_chat_mode_type_drives_reasoning_budget_and_execution_type(self, monkeypatch):
+        """The ChatMode answer mode maps to a MODEL reasoning budget (thinking
+        effort) + execution_type: chat → single light agent, no extra thinking;
+        research → crew at medium effort; deep → crew at high effort. The old
+        `planning` / `planning_llm` flags are gone (the prose planner was a no-op
+        and was removed), so they must never appear in the config."""
+        # The old local-model reasoning kill switch is gone; assert it stays gone.
+        monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://localhost:8081/v1")
         agents = [{"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": []}]
         tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
 
@@ -3964,36 +3968,40 @@ class TestBuildCrewConfigFromGenerated:
             self._req(chat_mode_type="chat", model="m1"), agents, tasks
         )
         assert chat["execution_type"] == "agent"
-        assert chat["planning"] is False and chat["reasoning"] is False
-        assert "planning_llm" not in chat["inputs"]
+        assert chat["reasoning"] is False
+        assert "reasoning_config" not in chat["inputs"]
+        assert "planning" not in chat and "planning_llm" not in chat["inputs"]
 
         research = CrewGenerationService.build_crew_config_from_generated(
             self._req(chat_mode_type="research", model="m1"), agents, tasks
         )
         assert research["execution_type"] == "crew"
-        assert research["reasoning"] is True and research["planning"] is False
-        assert "planning_llm" not in research["inputs"]
+        assert research["reasoning"] is True
+        assert research["inputs"]["reasoning_config"] == {"reasoning_effort": "medium"}
+        assert "planning" not in research and "planning_llm" not in research["inputs"]
 
         deep = CrewGenerationService.build_crew_config_from_generated(
             self._req(chat_mode_type="deep", model="m1"), agents, tasks
         )
         assert deep["execution_type"] == "crew"
-        assert deep["reasoning"] is True and deep["planning"] is True
-        # Deep planning must carry an explicit planning_llm (no OpenAI default 401).
-        assert deep["inputs"].get("planning_llm") == "m1"
+        assert deep["reasoning"] is True
+        assert deep["inputs"]["reasoning_config"] == {"reasoning_effort": "high"}
+        assert "planning" not in deep and "planning_llm" not in deep["inputs"]
 
-    def test_local_llm_disables_reasoning(self, monkeypatch):
-        """CrewAI structured reasoning breaks on local endpoints, so reasoning is
-        force-disabled when LOCAL_LLM_BASE_URL is set (even for research/deep)."""
+    def test_local_llm_no_longer_disables_reasoning(self, monkeypatch):
+        """The blanket LOCAL_LLM_BASE_URL kill switch was CrewAI-specific (its
+        StepObservation reasoning broke on OpenAI-compatible endpoints). A native
+        `reasoning_effort` parameter has no such problem, and unsupported models are
+        already dropped by the per-model capability gate — so a local reasoning-capable
+        model must now be allowed to use its budget."""
         monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://localhost:8081/v1")
         cfg = CrewGenerationService.build_crew_config_from_generated(
             self._req(chat_mode_type="deep", model="m1"),
             [{"id": "a1", "role": "r"}],
             [{"id": "t1", "description": "d", "agent_id": "a1"}],
         )
-        assert cfg["reasoning"] is False
-        # planning still on for deep (only reasoning is gated by the local guard)
-        assert cfg["planning"] is True
+        assert cfg["reasoning"] is True
+        assert cfg["inputs"]["reasoning_config"] == {"reasoning_effort": "high"}
 
     def test_mcp_servers_injected_into_agents_and_tasks(self):
         req = self._req(mcp_servers=["Databricks Genie: Sales"])
@@ -4167,7 +4175,9 @@ class TestChatFastPath:
         exec_instance.create_execution.assert_awaited_once()
         crew_config = exec_instance.create_execution.await_args.kwargs["config"]
         assert crew_config.execution_type == "agent"           # light path
-        assert crew_config.planning is False and crew_config.reasoning is False
+        assert crew_config.reasoning is False
+        # CrewConfig no longer models the removed planner at all.
+        assert not hasattr(crew_config, "planning")
         assert crew_config.session_id == "s1"
         # Exactly one default assistant agent + one task, carrying the attached tool.
         assert len(crew_config.agents_yaml) == 1

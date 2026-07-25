@@ -54,14 +54,12 @@ def test_crew_schemas_carry_reasoning_config():
 
 
 def test_crew_to_response_carries_execution_config():
-    """Regression: the response serializer must include reasoning_config / planning /
+    """Regression: the response serializer must include reasoning_config /
     reasoning / llms — they were dropped before, so a catalog-saved crew reloaded
     with empty execution config."""
     from src.api.crews_router import _crew_to_response
     crew = make_crew()
     crew.process = "hierarchical"
-    crew.planning = True
-    crew.planning_llm = "databricks-claude-haiku-4-5"
     crew.reasoning = True
     crew.reasoning_llm = "databricks-claude-haiku-4-5"
     crew.reasoning_config = {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
@@ -74,8 +72,6 @@ def test_crew_to_response_carries_execution_config():
     resp = _crew_to_response(crew)
     assert resp.reasoning is True
     assert resp.reasoning_config == {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
-    assert resp.planning is True
-    assert resp.planning_llm == "databricks-claude-haiku-4-5"
     assert resp.process == "hierarchical"
 
     # defensive default path (stub without config fields) must not raise

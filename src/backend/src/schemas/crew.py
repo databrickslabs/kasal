@@ -122,11 +122,9 @@ class CrewBase(BaseModel):
 
     # Crew execution configuration
     process: Optional[str] = Field("sequential", description="Execution process type: sequential or hierarchical")
-    planning: Optional[bool] = Field(False, description="Enable planning mode for strategic task orchestration")
-    planning_llm: Optional[str] = Field(None, description="LLM model for planning operations")
-    reasoning: Optional[bool] = Field(False, description="Enable reasoning mode for enhanced decision-making")
+    reasoning: Optional[bool] = Field(False, description="Enable the model's native reasoning budget for this crew's agents")
     reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
-    reasoning_config: Optional[Dict[str, Any]] = Field(None, description="Reasoning PlanningConfig overrides (effort, step/replan caps)")
+    reasoning_config: Optional[Dict[str, Any]] = Field(None, description="Reasoning budget, e.g. {'reasoning_effort': 'low'|'medium'|'high'}")
     manager_llm: Optional[str] = Field(None, description="LLM model for hierarchical process manager")
     tool_configs: Optional[Dict[str, Any]] = Field(None, description="Crew-level tool configurations (MCP servers, etc.)")
     memory: Optional[bool] = Field(True, description="Enable crew memory")
@@ -150,8 +148,6 @@ class CrewUpdate(BaseModel):
     edges: Optional[List[Edge]] = None
     # Crew execution configuration
     process: Optional[str] = None
-    planning: Optional[bool] = None
-    planning_llm: Optional[str] = None
     reasoning: Optional[bool] = None
     reasoning_llm: Optional[str] = None
     reasoning_config: Optional[Dict[str, Any]] = None
@@ -191,8 +187,6 @@ class CrewResponse(BaseModel):
     updated_at: str
     # Crew execution configuration
     process: Optional[str] = "sequential"
-    planning: Optional[bool] = False
-    planning_llm: Optional[str] = None
     reasoning: Optional[bool] = False
     reasoning_llm: Optional[str] = None
     reasoning_config: Optional[Dict[str, Any]] = None
@@ -320,7 +314,7 @@ class CrewStreamingRequest(BaseModel):
     mcp_servers: Optional[List[str]] = Field(default_factory=list, description="MCP server names to equip the auto-executed crew with")
     agentbricks_endpoints: Optional[List[str]] = Field(default_factory=list, description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew")
     knowledge_file_paths: Optional[List[str]] = Field(default_factory=list, description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document")
-    chat_mode_type: Optional[str] = Field("chat", description="ChatMode answer mode (chat|research|deep): drives reasoning/planning/execution_type in build_crew_config_from_generated. 'chat' = single light agent, 'research' = crew+reasoning, 'deep' = crew+planning+reasoning")
+    chat_mode_type: Optional[str] = Field("chat", description="ChatMode answer mode (chat|research|deep): drives the reasoning budget and execution_type in build_crew_config_from_generated. 'chat' = single light agent (no extra thinking), 'research' = crew with a medium reasoning budget, 'deep' = crew with a high reasoning budget")
 
 
 class CrewStreamingResponse(BaseModel):

@@ -157,10 +157,6 @@
       "label": "选择模型",
       "provider": "提供商"
     },
-    "planning": {
-      "label": "规划",
-      "tooltip": "启用后，AI规划器将在执行前为您的团队创建一个逐步计划，改善任务协调和性能"
-    },
     "buttons": {
       "schedule": "调度",
       "addAgent": "添加代理",

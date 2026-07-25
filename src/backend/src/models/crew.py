@@ -22,11 +22,9 @@ class Crew(Base):
 
     # Crew execution configuration
     process = Column(String(50), default='sequential')  # sequential or hierarchical
-    planning = Column(Boolean, default=False)  # Enable planning mode
-    planning_llm = Column(String(255), nullable=True)  # LLM for planning
-    reasoning = Column(Boolean, default=False)  # Enable reasoning mode
+    reasoning = Column(Boolean, default=False)  # Enable the model's native reasoning budget
     reasoning_llm = Column(String(255), nullable=True)  # LLM for reasoning
-    reasoning_config = Column(JSON, nullable=True)  # PlanningConfig overrides (effort, step/replan caps)
+    reasoning_config = Column(JSON, nullable=True)  # {"reasoning_effort": "low"|"medium"|"high"}
     manager_llm = Column(String(255), nullable=True)  # LLM for hierarchical manager
     tool_configs = Column(JSON, nullable=True)  # Crew-level tool configurations (MCP servers, etc.)
     memory = Column(Boolean, default=True)  # Enable memory

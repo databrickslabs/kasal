@@ -35,8 +35,29 @@ class TestScheduleBase:
         assert schedule.tasks_yaml == {"task1": {"description": "Analysis task"}}
         assert schedule.inputs == {}  # Default
         assert schedule.is_active is True  # Default
-        assert schedule.planning is False  # Default
         assert schedule.model == "gpt-4o-mini"  # Default
+
+    def test_schedule_schemas_have_no_planning_field(self):
+        """Regression: the CrewAI-style planner was removed end to end, so no
+        schedule schema carries a ``planning`` field any more.
+
+        ``model`` stays -- it is the model the scheduled RUN uses, not a planner
+        model (the old field comment claimed otherwise).
+        """
+        for schema in (ScheduleBase, ScheduleCreate, ScheduleUpdate, ScheduleResponse):
+            assert "planning" not in schema.model_fields, schema.__name__
+            assert "model" in schema.model_fields, schema.__name__
+
+        # Legacy payloads still validate; the dropped key is simply ignored.
+        schedule = ScheduleBase(
+            name="legacy-schedule",
+            cron_expression="0 9 * * *",
+            agents_yaml={"agent1": {"role": "analyst"}},
+            tasks_yaml={"task1": {"description": "Analysis task"}},
+            planning=True,
+        )
+        assert not hasattr(schedule, "planning")
+        assert "planning" not in schedule.model_dump()
 
     def test_valid_schedule_base_full(self):
         """Test ScheduleBase with all fields specified."""
@@ -53,7 +74,6 @@ class TestScheduleBase:
             },
             "inputs": {"topic": "AI trends", "format": "report"},
             "is_active": False,
-            "planning": True,
             "model": "gpt-4"
         }
         schedule = ScheduleBase(**data)
@@ -63,7 +83,6 @@ class TestScheduleBase:
         assert len(schedule.tasks_yaml) == 2
         assert schedule.inputs == {"topic": "AI trends", "format": "report"}
         assert schedule.is_active is False
-        assert schedule.planning is True
         assert schedule.model == "gpt-4"
 
     def test_schedule_base_missing_required_fields(self):
@@ -107,12 +126,10 @@ class TestScheduleBase:
             "cron_expression": "0 8 * * *",
             "agents_yaml": {"agent": {"role": "test"}},
             "tasks_yaml": {"task": {"description": "test"}},
-            "is_active": "false",
-            "planning": 1
+            "is_active": "false"
         }
         schedule = ScheduleBase(**data)
         assert schedule.is_active is False
-        assert schedule.planning is True
 
 
 class TestScheduleCreate:
@@ -135,8 +152,9 @@ class TestScheduleCreate:
         assert hasattr(create_schedule, 'tasks_yaml')
         assert hasattr(create_schedule, 'inputs')
         assert hasattr(create_schedule, 'is_active')
-        assert hasattr(create_schedule, 'planning')
         assert hasattr(create_schedule, 'model')
+        # The planner was removed, so the inherited surface must NOT include it.
+        assert not hasattr(create_schedule, 'planning')
         
         # Should behave like base class
         assert create_schedule.name == "create-schedule"
@@ -151,13 +169,11 @@ class TestScheduleCreate:
             "agents_yaml": {"custom_agent": {"role": "custom"}},
             "tasks_yaml": {"custom_task": {"description": "custom task"}},
             "inputs": {"custom_input": "value"},
-            "planning": True,
             "model": "claude-3"
         }
         create_schedule = ScheduleCreate(**data)
         assert create_schedule.name == "custom-create-schedule"
         assert create_schedule.inputs == {"custom_input": "value"}
-        assert create_schedule.planning is True
         assert create_schedule.model == "claude-3"
 
 
@@ -234,8 +250,9 @@ class TestScheduleUpdate:
         assert hasattr(update_schedule, 'tasks_yaml')
         assert hasattr(update_schedule, 'inputs')
         assert hasattr(update_schedule, 'is_active')
-        assert hasattr(update_schedule, 'planning')
         assert hasattr(update_schedule, 'model')
+        # The planner was removed, so the inherited surface must NOT include it.
+        assert not hasattr(update_schedule, 'planning')
         
         # Should behave like base class
         assert update_schedule.name == "update-schedule"
@@ -285,8 +302,8 @@ class TestScheduleResponse:
         # Should inherit all base class defaults
         assert response.inputs == {}
         assert response.is_active is True
-        assert response.planning is False
         assert response.model == "gpt-4o-mini"
+        assert not hasattr(response, 'planning')
 
     def test_schedule_response_config(self):
         """Test ScheduleResponse model config."""
@@ -466,8 +483,23 @@ class TestCrewConfig:
         assert config.agents_yaml == {"agent": {"role": "worker"}}
         assert config.tasks_yaml == {"task": {"description": "work task"}}
         assert config.inputs == {}  # Default
-        assert config.planning is False  # Default
         assert config.model == "gpt-4o-mini"  # Default
+
+    def test_crew_config_has_no_planning_field(self):
+        """Regression: the schedule CrewConfig no longer carries ``planning``.
+
+        A legacy scheduled-job payload still validates -- the key is dropped
+        rather than rejected -- but it must never reappear as a field.
+        """
+        assert "planning" not in CrewConfig.model_fields
+
+        config = CrewConfig(
+            agents_yaml={"agent": {"role": "worker"}},
+            tasks_yaml={"task": {"description": "work task"}},
+            planning=True,
+        )
+        assert not hasattr(config, "planning")
+        assert "planning" not in config.model_dump()
 
     def test_valid_crew_config_full(self):
         """Test CrewConfig with all fields specified."""
@@ -481,14 +513,12 @@ class TestCrewConfig:
                 "reporting": {"description": "write the report", "agent": "reporter"}
             },
             "inputs": {"dataset": "sales_data.csv", "period": "Q4"},
-            "planning": True,
             "model": "gpt-4"
         }
         config = CrewConfig(**data)
         assert len(config.agents_yaml) == 2
         assert len(config.tasks_yaml) == 2
         assert config.inputs == {"dataset": "sales_data.csv", "period": "Q4"}
-        assert config.planning is True
         assert config.model == "gpt-4"
 
     def test_crew_config_optional_fields_with_defaults(self):
@@ -499,7 +529,6 @@ class TestCrewConfig:
         assert config.agents_yaml == {}
         assert config.tasks_yaml == {}
         assert config.inputs == {}
-        assert config.planning is False
 
     def test_crew_config_empty_yaml_fields(self):
         """Test CrewConfig with empty YAML dictionaries."""
@@ -512,13 +541,12 @@ class TestCrewConfig:
         assert config.tasks_yaml == {}
 
     def test_crew_config_boolean_and_string_defaults(self):
-        """Test CrewConfig default values for boolean and string fields."""
+        """Test CrewConfig default values for string and dict fields."""
         data = {
             "agents_yaml": {"agent": {"role": "default_test"}},
             "tasks_yaml": {"task": {"description": "default test task"}}
         }
         config = CrewConfig(**data)
-        assert config.planning is False
         assert config.model == "gpt-4o-mini"
         assert isinstance(config.inputs, dict)
         assert len(config.inputs) == 0
@@ -542,7 +570,6 @@ class TestSchemaIntegration:
                 "writing": {"description": "write article based on research", "agent": "writer"}
             },
             "inputs": {"topic": "AI trends", "length": "2000 words"},
-            "planning": True,
             "model": "gpt-4"
         }
         create_schedule = ScheduleCreate(**create_data)
@@ -570,7 +597,6 @@ class TestSchemaIntegration:
             "tasks_yaml": create_schedule.tasks_yaml,
             "inputs": create_schedule.inputs,
             "is_active": update_data["is_active"],
-            "planning": create_schedule.planning,
             "model": update_data["model"],
             "next_run_at": next_run,
             "created_at": now,
@@ -583,7 +609,7 @@ class TestSchemaIntegration:
         
         # Verify the complete workflow
         assert create_schedule.name == "workflow-schedule"
-        assert create_schedule.planning is True
+        assert create_schedule.model == "gpt-4"
         assert update_schedule.name == "updated-workflow-schedule"
         assert update_schedule.is_active is False
         assert schedule_response.id == 1
@@ -654,7 +680,6 @@ class TestSchemaIntegration:
                 }
             },
             inputs={"data_source": "quarterly_sales", "format": "executive_summary"},
-            planning=True,
             model="gpt-4"
         )
         
@@ -665,7 +690,6 @@ class TestSchemaIntegration:
             "agents_yaml": crew_config.agents_yaml,
             "tasks_yaml": crew_config.tasks_yaml,
             "inputs": crew_config.inputs,
-            "planning": crew_config.planning,
             "model": crew_config.model
         }
         schedule = ScheduleCreate(**schedule_data)
@@ -674,7 +698,6 @@ class TestSchemaIntegration:
         assert len(schedule.agents_yaml) == 2
         assert len(schedule.tasks_yaml) == 2
         assert schedule.inputs["data_source"] == "quarterly_sales"
-        assert schedule.planning is True
         assert schedule.model == "gpt-4"
         assert "data_analyst" in schedule.agents_yaml
         assert "report_writer" in schedule.agents_yaml
@@ -935,19 +958,23 @@ class TestCrewConfigFlowSupport:
         assert config.edges is None
         assert config.flow_config is None
 
-    def test_crew_config_with_inputs_and_planning(self):
-        """Test CrewConfig with inputs and planning for flow execution."""
+    def test_crew_config_with_inputs_for_flow(self):
+        """Test CrewConfig carries inputs + model for flow execution.
+
+        Formerly ``test_crew_config_with_inputs_and_planning``; the planner was
+        removed, so this also guards that ``planning`` is not resurrected on the
+        flow-scheduling path.
+        """
         config = CrewConfig(
             execution_type="flow",
             flow_id=uuid4(),
             inputs={"topic": "AI", "depth": "detailed"},
-            planning=True,
             model="gpt-4"
         )
 
         assert config.inputs["topic"] == "AI"
-        assert config.planning is True
         assert config.model == "gpt-4"
+        assert not hasattr(config, "planning")
 
     def test_crew_config_uuid_flow_id(self):
         """Test CrewConfig accepts UUID for flow_id."""

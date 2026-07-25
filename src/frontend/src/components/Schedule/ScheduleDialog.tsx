@@ -107,7 +107,6 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
   onClose, 
   nodes: _nodes, 
   edges: _edges,
-  planningEnabled: _planningEnabled,
   selectedModel: _selectedModel
 }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -265,7 +264,6 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           tasks_yaml: existingSchedule.tasks_yaml,
           inputs: existingSchedule.inputs,
           is_active: existingSchedule.is_active,
-          planning: existingSchedule.planning,
           model: existingSchedule.model
         };
         

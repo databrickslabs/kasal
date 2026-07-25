@@ -194,14 +194,16 @@ class TestDatabricksAppExporter:
     async def test_execution_settings_default_sequential(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
         assert 'PROCESS = "sequential"' in agent
-        assert "PLANNING = False" in agent
+        # The planner is gone: no PLANNING constant and no planning kwarg on Crew.
+        assert not re.search(r"^PLANNING(_LLM)? = ", agent, re.M)
+        assert not re.search(r"^\s*planning=", agent, re.M)
         assert "REASONING = False" in agent
         # Memory stays off until a Databricks-backed backend is wired (avoids
         # CrewAI's default OpenAI embedder/extraction).
         assert "MEMORY = False" in agent
 
     @pytest.mark.asyncio
-    async def test_hierarchical_planning_reasoning_honored(self, exporter, crew_data):
+    async def test_hierarchical_reasoning_honored_planning_ignored(self, exporter, crew_data):
         crew = dict(
             crew_data,
             process="hierarchical",
@@ -213,24 +215,23 @@ class TestDatabricksAppExporter:
         )
         agent = _files(await exporter.export(crew, {}))["agent_server/agent.py"]
         assert 'PROCESS = "hierarchical"' in agent
-        assert "PLANNING = True" in agent
-        assert "PLANNING_LLM = 'databricks-claude-sonnet-4-5'" in agent
+        # Kasal no longer models planning, so legacy planning/planning_llm keys on
+        # the crew dict are ignored — the exported app has no planner at all.
+        assert not re.search(r"^PLANNING(_LLM)? = ", agent, re.M)
+        assert not re.search(r"^\s*planning=", agent, re.M)
         assert "REASONING = True" in agent
         assert "MANAGER_LLM = 'databricks-llama-4-maverick'" in agent
         assert "MEMORY = False" in agent
-        # build_crew wires hierarchical manager + planning.
+        # build_crew wires the hierarchical manager.
         assert "Process.hierarchical" in agent
         assert "manager_llm" in agent
         # Reasoning is driven by the answer mode (research/deep), not a static flag.
         assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
-        # Planning runs when configured OR in deep mode, and always gets an explicit
-        # planner LLM (never CrewAI's OpenAI default).
-        assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
-        assert "planning=planning_on" in agent
-        assert (
-            'kwargs["planning_llm"] = _make_llm(PLANNING_LLM or _conversation_model())'
-            in agent
-        )
+        # No planner in ANY mode: deep mode used to re-enable it in build_crew even
+        # though the exporter wrote a disabled flag, so exported apps planned when
+        # Kasal did not. Assert the kwarg is gone and deep mode cannot revive it.
+        assert not re.search(r"^\s*planning=", agent, re.M)
+        assert "planning_on" not in agent
 
     @pytest.mark.asyncio
     async def test_kickoff_offloaded_to_thread(self, exporter, crew_data):
@@ -1297,11 +1298,12 @@ class TestDatabricksAppModes:
         assert 'ci.get("mode") in VALID_MODES' in agent
 
     @pytest.mark.asyncio
-    async def test_mode_drives_reasoning_and_planning(self, exporter, crew_data):
+    async def test_mode_drives_reasoning_and_never_planning(self, exporter, crew_data):
         agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
-        # Reasoning on in research + deep; planning only in deep.
+        # Reasoning on in research + deep; there is no planner in any mode.
         assert 'reasoning=REASONING_ENABLED and mode in ("research", "deep")' in agent
-        assert 'planning_on = PLANNING or _current_mode() == "deep"' in agent
+        assert not re.search(r"^PLANNING(_LLM)? = ", agent, re.M)
+        assert not re.search(r"^\s*planning=", agent, re.M)
         # Research mode caps tool-call loops for speed.
         assert 'min(cfg.get("max_iter", 25), FAST_MAX_ITER)' in agent
 

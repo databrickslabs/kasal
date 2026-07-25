@@ -6,7 +6,8 @@ Focus areas:
 - get_model_context_limits: various LLM types, found model config with non-None values
 - FlowMethodFactory.create_skipped_crew_method: get_cached_output all branches
 - FlowMethodFactory.create_hitl_gate_method: method structure
-- FlowMethodFactory.create_starting_point_crew_method: memory/planning/reasoning branches
+- FlowMethodFactory.create_starting_point_crew_method: memory branches (planning and
+  crew-level reasoning were removed; legacy crew rows carrying them are inert)
 - FlowMethodFactory.create_listener_method: no-results path, state injection
 """
 import asyncio
@@ -518,7 +519,8 @@ class TestCreateHitlGateMethod:
 
 
 # ============================================================================
-# create_starting_point_crew_method - memory/planning/reasoning branches
+# create_starting_point_crew_method - memory branches (+ legacy planning/reasoning
+# crew-data shapes, which are now inert and must simply not break the factory)
 # ============================================================================
 
 class TestStartingPointMethodBranches:
@@ -587,19 +589,23 @@ class TestStartingPointMethodBranches:
         )
         assert callable(method)
 
-    def test_method_with_planning_enabled(self):
-        """create_starting_point_crew_method with planning=True."""
+    def test_method_created_with_legacy_planning_crew_data(self):
+        """A legacy crew row still carrying planning=True/planning_llm builds fine.
+
+        Formerly ``test_method_with_planning_enabled``. The planner was removed, so
+        these fields are inert -- but old saved crews must not break the factory.
+        """
         from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
 
         crew_data = self._make_crew_data(planning=True)
-        crew_data.planning_llm = None  # Force fallback to agent LLM
+        crew_data.planning_llm = None
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
             method_name='starting_point_0',
             task_list=[self._make_task()],
-            crew_name='Planning Crew',
+            crew_name='Legacy Planning Crew',
             callbacks={'job_id': 'j1'},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,

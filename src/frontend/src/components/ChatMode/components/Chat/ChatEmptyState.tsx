@@ -70,7 +70,7 @@ const MODE_CHIPS: ModeChip[] = [
   {
     id: 'deep',
     label: 'Deep Research',
-    hint: 'Planning + deep tools',
+    hint: 'Deep tools + maximum reasoning',
     prompt:
       'Do a deep-dive analysis of [topic], comparing multiple sources and reasoning through the trade-offs.',
     icon: (

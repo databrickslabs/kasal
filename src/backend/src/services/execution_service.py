@@ -462,14 +462,14 @@ class ExecutionService:
                         exec_logger.warning(f"[run_crew_execution] Error calling model_dump() on config: {dump_error}")
                         # Create minimal config manually if model_dump() fails
                         # Include checkpoint resume parameters
-                        for attr in ['nodes', 'edges', 'flow_config', 'model', 'planning', 'inputs',
+                        for attr in ['nodes', 'edges', 'flow_config', 'model', 'inputs',
                                      'resume_from_flow_uuid', 'resume_from_execution_id', 'resume_from_crew_sequence']:
                             if hasattr(config, attr):
                                 execution_config[attr] = getattr(config, attr)
                 else:
                     # Create config dictionary manually
                     # Include checkpoint resume parameters
-                    for attr in ['nodes', 'edges', 'flow_config', 'model', 'planning', 'inputs',
+                    for attr in ['nodes', 'edges', 'flow_config', 'model', 'inputs',
                                  'resume_from_flow_uuid', 'resume_from_execution_id', 'resume_from_crew_sequence']:
                         if hasattr(config, attr):
                             execution_config[attr] = getattr(config, attr)
@@ -1088,7 +1088,6 @@ class ExecutionService:
                 "agents_yaml": config.agents_yaml,
                 "tasks_yaml": config.tasks_yaml,
                 "inputs": config.inputs,
-                "planning": config.planning,
                 "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
                 "model": config.model,
                 "execution_type": execution_type,
@@ -1138,7 +1137,9 @@ class ExecutionService:
                 "job_id": execution_id,
                 "status": ExecutionStatus.RUNNING.value, # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
-                "planning": bool(config.planning),  # Ensure boolean type
+                # ExecutionHistory.planning stays as a historical-record column but is
+                # no longer populated from the request — Kasal has no planner, so the
+                # column default (False) applies to every new row.
                 "run_name": run_name,
                 "created_at": datetime.now(),  # Remove timezone to match database column type
                 "execution_type": execution_type.lower() if execution_type else "crew"  # Track execution type
@@ -1355,7 +1356,8 @@ class ExecutionService:
             agents_yaml=stored_inputs.get("agents_yaml") or {},
             tasks_yaml=stored_inputs.get("tasks_yaml") or {},
             inputs=stored_inputs.get("inputs") or {},
-            planning=bool(stored_inputs.get("planning")),
+            # Legacy executions may still carry a stored "planning" key; it is
+            # ignored on resume because CrewConfig no longer models planning.
             reasoning=bool(stored_inputs.get("reasoning", False)),
             model=stored_inputs.get("model"),
             execution_type="crew",

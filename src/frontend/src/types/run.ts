@@ -28,7 +28,6 @@ export interface Run {
     agents_yaml?: Record<string, any>;
     tasks_yaml?: Record<string, any>;
     inputs?: Record<string, any>;
-    planning?: boolean;
     model?: string;
     execution_type?: string;
     schema_detection_enabled?: boolean;

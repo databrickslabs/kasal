@@ -163,10 +163,6 @@
       "label": "Choisir le modèle",
       "provider": "Fournisseur"
     },
-    "planning": {
-      "label": "Planification",
-      "tooltip": "Lorsqu'elle est activée, un planificateur IA créera un plan étape par étape pour votre équipe avant l'exécution, améliorant la coordination et la performance des tâches"
-    },
     "buttons": {
       "schedule": "Planifier",
       "addAgent": "Ajouter un agent",

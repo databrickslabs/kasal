@@ -84,10 +84,6 @@ const CrewDetailCard: React.FC<CrewDetailCardProps> = ({
           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Tasks:</span>{' '}
           {taskCount}
         </div>
-        <div>
-          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Planning:</span>{' '}
-          {plan.planning ? 'Yes' : 'No'}
-        </div>
         {plan.memory !== undefined && (
           <div>
             <span className="font-medium" style={{ color: 'var(--text-primary)' }}>Memory:</span>{' '}

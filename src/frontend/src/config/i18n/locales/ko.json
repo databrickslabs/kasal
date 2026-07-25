@@ -157,10 +157,6 @@
       "label": "모델 선택",
       "provider": "제공자"
     },
-    "planning": {
-      "label": "계획",
-      "tooltip": "활성화하면 AI 플래너가 실행 전에 작업 조정과 성능을 향상시키기 위한 단계별 계획을 생성합니다"
-    },
     "buttons": {
       "schedule": "스케줄",
       "addAgent": "에이전트 추가",

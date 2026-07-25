@@ -365,7 +365,6 @@ export class RunService {
       agents_yaml: Record<string, unknown>;
       tasks_yaml: Record<string, unknown>;
       inputs?: Record<string, unknown>;
-      planning?: boolean;
       model?: string;
       execution_type?: string;
       schema_detection_enabled?: boolean;

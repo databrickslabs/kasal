@@ -403,7 +403,6 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
     };
 
     processedTraces.agents.forEach((agent) => {
-      agent.agentEvents?.forEach((e) => countEvent(e.type));
       agent.tasks.forEach((task) => {
         if (!task.unassigned) taskCount++;
         task.events.forEach((e) => countEvent(e.type));
@@ -615,95 +614,6 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
               </Box>
             ))}
 
-            {/* Crew-level Planning Section */}
-            {processedTraces.crewPlanningEvents && processedTraces.crewPlanningEvents.length > 0 && (
-              <Paper sx={{ mb: 2, overflow: 'hidden', borderLeft: '4px solid', borderLeftColor: 'secondary.main' }}>
-                <Box
-                  sx={{
-                    p: 2,
-                    bgcolor: 'secondary.50',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <AssignmentIcon sx={{ color: 'secondary.main' }} />
-                    <Typography variant="subtitle1" fontWeight="bold" color="secondary.main">
-                      Crew Planning
-                    </Typography>
-                    <Chip
-                      size="small"
-                      label={formatDuration(
-                        processedTraces.crewPlanningEvents.reduce((total, e) => total + (e.duration || 0), 0) ||
-                        (processedTraces.crewPlanningEvents.length > 0
-                          ? new Date(processedTraces.crewPlanningEvents[processedTraces.crewPlanningEvents.length - 1].timestamp).getTime() -
-                            new Date(processedTraces.crewPlanningEvents[0].timestamp).getTime()
-                          : 0)
-                      )}
-                      color="secondary"
-                    />
-                  </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Task Execution Planner
-                  </Typography>
-                </Box>
-
-                <Box sx={{ pl: 6, pr: 2, py: 1 }}>
-                  {processedTraces.crewPlanningEvents.map((event, eventIdx) => {
-                    const hasOutput = !!event.output;
-                    const isClickable = hasOutput;
-
-                    return (
-                      <Box
-                        key={eventIdx}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          py: 0.5,
-                          borderLeft: '2px solid',
-                          borderColor: 'secondary.200',
-                          pl: 2,
-                          ml: 1,
-                          position: 'relative',
-                          cursor: isClickable ? 'pointer' : 'default',
-                          '&:hover': {
-                            bgcolor: isClickable ? 'action.hover' : 'transparent',
-                            '& .row-open-icon': { opacity: 0.6 }
-                          }
-                        }}
-                        onClick={() => isClickable && handleEventClick(event)}
-                      >
-                        <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
-                          <AssignmentIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
-                        </Box>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            flex: 1,
-                            color: isClickable ? 'secondary.main' : 'text.primary',
-                            textDecoration: isClickable ? 'underline dotted' : 'none',
-                            textUnderlineOffset: '3px'
-                          }}
-                        >
-                          {event.description}
-                        </Typography>
-                        <Typography variant="caption" sx={DURATION_COLUMN_SX}>
-                          {event.duration != null && event.duration >= MIN_ROW_DURATION_MS
-                            ? formatDuration(event.duration)
-                            : ''}
-                        </Typography>
-                        {isClickable && (
-                          <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
-                        )}
-                      </Box>
-                    );
-                  })}
-                </Box>
-              </Paper>
-            )}
-
             {/* Agents and Tasks */}
             {processedTraces.agents.map((agent, agentIdx) => (
               <Paper key={agentIdx} sx={{ mb: 2, overflow: 'hidden' }}>
@@ -743,87 +653,6 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
 
                 <Collapse in={expandedAgents.has(agentIdx)}>
                   <Box sx={{ pl: 6, pr: 2, py: 1 }}>
-                    {/* Agent-level events (reasoning/planning) */}
-                    {agent.agentEvents && agent.agentEvents.length > 0 && (
-                      <Box sx={{ mb: 2 }}>
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
-                            p: 1,
-                            bgcolor: 'primary.50',
-                            borderRadius: 1,
-                            borderLeft: '3px solid',
-                            borderLeftColor: 'primary.main',
-                          }}
-                        >
-                          <TargetIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                          <Typography variant="body2" fontWeight="medium" sx={{ color: 'primary.main' }}>
-                            Agent Planning & Reasoning
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={`${agent.agentEvents.length} event${agent.agentEvents.length !== 1 ? 's' : ''}`}
-                            variant="outlined"
-                            sx={{ borderColor: 'primary.main', color: 'primary.main' }}
-                          />
-                        </Box>
-                        <Box sx={{ pl: 4, mt: 1 }}>
-                          {agent.agentEvents.map((event, eventIdx) => {
-                            const hasOutput = !!event.output;
-                            const isClickable = isEventClickable(event.type, hasOutput);
-
-                            return (
-                              <Box
-                                key={eventIdx}
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 1,
-                                  py: 0.5,
-                                  borderLeft: '2px solid',
-                                  borderColor: 'primary.200',
-                                  pl: 2,
-                                  ml: 1,
-                                  position: 'relative',
-                                  cursor: isClickable ? 'pointer' : 'default',
-                                  '&:hover': {
-                                    bgcolor: isClickable ? 'action.hover' : 'transparent',
-                                    '& .row-open-icon': { opacity: 0.6 }
-                                  }
-                                }}
-                                onClick={() => isClickable && handleEventClick(event)}
-                              >
-                                <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
-                                  {getEventIcon(event.type)}
-                                </Box>
-                                <Typography
-                                  variant="body2"
-                                  sx={{
-                                    flex: 1,
-                                    color: isClickable ? 'primary.main' : 'text.primary',
-                                    textDecoration: isClickable ? 'underline dotted' : 'none',
-                                    textUnderlineOffset: '3px'
-                                  }}
-                                >
-                                  {event.description}
-                                </Typography>
-                                <Typography variant="caption" sx={DURATION_COLUMN_SX}>
-                                  {event.duration != null && event.duration >= MIN_ROW_DURATION_MS
-                                    ? formatDuration(event.duration)
-                                    : ''}
-                                </Typography>
-                                {isClickable && (
-                                  <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
-                                )}
-                              </Box>
-                            );
-                          })}
-                        </Box>
-                      </Box>
-                    )}
-
                     {agent.tasks.map((task, taskIdx) => {
                       const taskKey = `${agentIdx}-${taskIdx}`;
                       return (

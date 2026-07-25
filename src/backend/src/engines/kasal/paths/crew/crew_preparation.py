@@ -410,27 +410,18 @@ class CrewPreparation:
                         "servers": agent_mcp_servers
                     }
 
-                # Propagate crew-level reasoning config to each agent
-                # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT a Crew-level parameter
+                # Propagate the crew-level reasoning budget to each agent. Reasoning is
+                # the MODEL's native reasoning budget (there is no plan/replan loop), and
+                # it is applied per agent to the agent's own LLM by the shared agent
+                # builder (kernel/agent_builder._apply_reasoning_effort).
                 crew_config = self.config.get("crew", {})
                 if crew_config.get("reasoning") and "reasoning" not in agent_config:
                     agent_config["reasoning"] = True
                     logger.info(
                         f"Agent {agent_name}: Enabling reasoning from crew-level config"
                     )
-                if (
-                    crew_config.get("max_reasoning_attempts")
-                    and "max_reasoning_attempts" not in agent_config
-                ):
-                    agent_config["max_reasoning_attempts"] = crew_config[
-                        "max_reasoning_attempts"
-                    ]
-                    logger.info(
-                        f"Agent {agent_name}: Setting max_reasoning_attempts={crew_config['max_reasoning_attempts']} from crew-level config"
-                    )
-                # PlanningConfig overrides (effort + step/replan caps) set in the sidebar
-                # Reasoning section. The shared agent builder turns this into a bounded
-                # crewai PlanningConfig; without it the agent gets CrewAI's expansive defaults.
+                # Effort level ({"reasoning_effort": "low"|"medium"|"high"}) set in the
+                # sidebar Reasoning section.
                 if (
                     crew_config.get("reasoning_config")
                     and "reasoning_config" not in agent_config
@@ -438,21 +429,6 @@ class CrewPreparation:
                     agent_config["reasoning_config"] = crew_config["reasoning_config"]
                     logger.info(
                         f"Agent {agent_name}: Applying crew-level reasoning_config {crew_config['reasoning_config']}"
-                    )
-
-                # SAFETY: CrewAI's reasoning refine loop is
-                #   while not ready and (max_attempts is None or attempt < max_attempts)
-                # so an unset cap (None) loops FOREVER whenever the model never returns
-                # ready=True — which smaller local models routinely don't (they omit the
-                # structured `ready` field). With litellm response caching on, each refine
-                # call is an instant cache hit, so it spins at hundreds/sec and never
-                # finishes. Bound it whenever reasoning is enabled without an explicit cap.
-                if agent_config.get("reasoning") and not agent_config.get(
-                    "max_reasoning_attempts"
-                ):
-                    agent_config["max_reasoning_attempts"] = 3
-                    logger.info(
-                        f"Agent {agent_name}: reasoning enabled without a cap — defaulting max_reasoning_attempts=3 to prevent an unbounded refine loop"
                     )
 
                 agent = await create_agent(
@@ -1093,7 +1069,6 @@ class CrewPreparation:
                         "tracing",
                         "embedder",
                         "reasoning_llm",
-                        "planning_llm",
                     ]
 
                     # Try removing each problematic key one at a time

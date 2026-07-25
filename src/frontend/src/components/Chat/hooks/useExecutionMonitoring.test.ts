@@ -41,10 +41,8 @@ vi.mock('../../../store/taskExecutionStore', () => ({
     {
       getState: () => ({
         clearTaskStates: vi.fn(),
-        setIsPlanningPhase: vi.fn(),
         transitionAll: vi.fn(),
         transition: vi.fn().mockReturnValue(true),
-        isPlanningPhase: false,
       }),
     }
   ),

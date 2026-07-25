@@ -157,10 +157,6 @@
       "label": "Model Seç",
       "provider": "Sağlayıcı"
     },
-    "planning": {
-      "label": "Planlama",
-      "tooltip": "Etkinleştirildiğinde, bir AI planlayıcı yürütmeden önce ekibiniz için görev koordinasyonunu ve performansını iyileştiren adım adım bir plan oluşturacaktır"
-    },
     "buttons": {
       "schedule": "Zamanlama",
       "addAgent": "Ajan Ekle",

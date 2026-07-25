@@ -340,8 +340,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Files attached in THIS turn — scopes the knowledge search tool to the
           // just-uploaded document (otherwise group-wide search picks a wrong file).
           knowledge_file_paths: knowledgeFilePaths,
-          // Answer mode → backend sets reasoning/planning/execution_type:
-          // chat = single light agent, research = crew+reasoning, deep = +planning.
+          // Answer mode → backend sets reasoning/reasoning effort/execution_type:
+          // chat = single light agent, research = crew + medium effort,
+          // deep = crew + high effort.
           chat_mode_type: execState.chatModeType,
         }, message);
 

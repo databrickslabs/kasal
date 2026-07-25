@@ -14,9 +14,7 @@ import {
   MenuItem,
   CircularProgress,
   SelectChangeEvent,
-  Badge,
-  TextField,
-  Collapse
+  Badge
 } from '@mui/material';
 import {
   CleaningServices as ClearIcon,
@@ -29,8 +27,6 @@ import {
   Settings as SettingsIcon,
   InfoOutlined as InfoOutlinedIcon,
   HelpOutline as HelpOutlineIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { Models } from '../../types/models';
 import { ModelService } from '../../api/ModelService';
@@ -58,8 +54,6 @@ interface LeftSidebarProps {
   onFitView: () => void;
   onToggleInteractivity: () => void;
   // Runtime features props
-  planningEnabled: boolean;
-  setPlanningEnabled: (enabled: boolean) => void;
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
@@ -86,8 +80,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onZoomOut,
   onFitView,
   onToggleInteractivity,
-  planningEnabled,
-  setPlanningEnabled,
   reasoningEnabled,
   setReasoningEnabled,
   schemaDetectionEnabled,
@@ -105,8 +97,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
-  const [reasoningAdvancedOpen, setReasoningAdvancedOpen] = useState(false);
-  const [planningModel, setPlanningModel] = useState<string>('');
   const [reasoningModel, setReasoningModel] = useState<string>('');
   const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
 
@@ -129,13 +119,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
 
   const {
-    setPlanningLLM,
     setReasoningLLM,
     setProcessType: setStoreProcessType,
     setManagerLLM,
     processType: storeProcessType,
     managerLLM: storeManagerLLM,
-    planningLLM: storePlanningLLM,
     reasoningLLM: storeReasoningLLM,
     reasoningConfig,
     setReasoningConfig,
@@ -156,13 +144,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         const modelService = ModelService.getInstance();
         const response = await modelService.getEnabledModels();
         setModels(response);
-
-        // Initialize planning model when models are loaded
-        if (response && Object.keys(response).length > 0 && !planningModel) {
-          const firstModel = Object.keys(response)[0];
-          setPlanningModel(firstModel);
-          setPlanningLLM(firstModel);
-        }
 
         // Initialize reasoning model when models are loaded
         if (response && Object.keys(response).length > 0 && !reasoningModel) {
@@ -188,7 +169,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     };
 
     fetchModels();
-  }, [planningModel, setPlanningLLM, reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
+  }, [reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
 
   // Sync local state with store values when they change (e.g., when loading a crew)
   useEffect(() => {
@@ -199,24 +180,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   }, [storeManagerLLM, managerModel]);
 
   useEffect(() => {
-    if (storePlanningLLM && storePlanningLLM !== planningModel) {
-      console.log('LeftSidebar: Syncing planning model from store:', storePlanningLLM);
-      setPlanningModel(storePlanningLLM);
-    }
-  }, [storePlanningLLM, planningModel]);
-
-  useEffect(() => {
     if (storeReasoningLLM && storeReasoningLLM !== reasoningModel) {
       console.log('LeftSidebar: Syncing reasoning model from store:', storeReasoningLLM);
       setReasoningModel(storeReasoningLLM);
     }
   }, [storeReasoningLLM, reasoningModel]);
-
-  const handlePlanningModelChange = useCallback((event: SelectChangeEvent) => {
-    const value = event.target.value;
-    setPlanningModel(value);
-    setPlanningLLM(value);
-  }, [setPlanningLLM]);
 
   const handleReasoningModelChange = useCallback((event: SelectChangeEvent) => {
     const value = event.target.value;
@@ -360,82 +328,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           {/* Runtime Filters - Hidden when on flow canvas */}
           {!hideRuntimeFilters && (
             <>
-              {/* Planning Section */}
-              <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <Typography
-                variant="subtitle2"
-                sx={{
-                  color: theme.palette.primary.main,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  fontSize: '0.7rem'
-                }}
-              >
-                Planning
-              </Typography>
-              <Tooltip title="Crew-level strategic planning before task execution. ENABLE for: complex multi-step workflows, task dependencies requiring orchestration, projects needing autonomous task decomposition. DISABLE for: simple well-defined tasks, speed-critical operations, deterministic workflows with fixed sequences. Adds 5-10min overhead but improves task coordination." placement="right">
-                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
-              </Tooltip>
-            </Box>
-            <Divider sx={{ mb: 1 }} />
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                py: 0.5,
-                px: 0.5,
-                borderRadius: 1,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="caption" sx={{ color: 'text.primary', fontSize: '0.75rem' }}>
-                  Crew Level Planning
-                </Typography>
-                <Switch
-                  checked={planningEnabled}
-                  onChange={(e) => setPlanningEnabled(e.target.checked)}
-                  size="small"
-                />
-              </Box>
-
-              {planningEnabled && (
-                <FormControl size="small" fullWidth sx={{ mt: 1 }}>
-                  <InputLabel sx={{ fontSize: '0.75rem' }}>Planning LLM</InputLabel>
-                  <Select
-                    value={planningModel}
-                    onChange={handlePlanningModelChange}
-                    label="Planning LLM"
-                    disabled={isLoadingModels}
-                    sx={{ fontSize: '0.75rem' }}
-                    renderValue={(selected: string) => {
-                      const model = models[selected];
-                      return model ? model.name : selected;
-                    }}
-                  >
-                    {isLoadingModels ? (
-                      <MenuItem value="">
-                        <CircularProgress size={16} />
-                      </MenuItem>
-                    ) : Object.keys(models).length === 0 ? (
-                      <MenuItem value="">No models available</MenuItem>
-                    ) : (
-                      Object.entries(models).map(([key, model]) => (
-                        <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
-                          <span>{model.name}</span>
-                        </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                </FormControl>
-              )}
-            </Box>
-          </Box>
-
-          {/* Reasoning Section */}
+              {/* Reasoning Section */}
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
               <Typography
@@ -450,7 +343,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               >
                 Reasoning
               </Typography>
-              <Tooltip title="Agent-level reflection and planning before each task. ENABLE for: complex tasks needing breakdown, problems requiring methodical analysis, identifying challenges upfront, quality over speed. DISABLE for: simple straightforward tasks, time-critical operations, well-defined procedures, repetitive tasks. Each reasoning iteration adds overhead and potential error risk. Max attempts limits refinement cycles." placement="right">
+              <Tooltip title="Sets the model's native reasoning (thinking) budget for this crew's agents. Higher effort lets the model think longer before answering — better on hard, multi-step problems, slower and more expensive on simple ones. Applied only to models that support a reasoning budget; models without it ignore the setting silently." placement="right">
                 <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
               </Tooltip>
             </Box>
@@ -508,59 +401,21 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     </Select>
                   </FormControl>
 
-                  {/* Reasoning effort — biggest lever: low skips replanning entirely */}
+                  {/* Thinking budget — maps to the model's native reasoning effort.
+                      Ignored by models that do not expose a reasoning budget. */}
                   <FormControl size="small" fullWidth sx={{ mt: 1 }}>
                     <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning Effort</InputLabel>
                     <Select
-                      value={reasoningConfig.reasoning_effort}
+                      value={reasoningConfig.reasoning_effort ?? 'low'}
                       label="Reasoning Effort"
                       onChange={(e) => setReasoningConfig({ reasoning_effort: e.target.value as ReasoningConfig['reasoning_effort'] })}
                       sx={{ fontSize: '0.75rem' }}
                     >
-                      <MenuItem value="low" sx={{ fontSize: '0.75rem' }}>Low — no replanning (fastest)</MenuItem>
-                      <MenuItem value="medium" sx={{ fontSize: '0.75rem' }}>Medium — replan on failure</MenuItem>
-                      <MenuItem value="high" sx={{ fontSize: '0.75rem' }}>High — full adaptive (slowest)</MenuItem>
+                      <MenuItem value="low" sx={{ fontSize: '0.75rem' }}>Low — minimal thinking (fastest)</MenuItem>
+                      <MenuItem value="medium" sx={{ fontSize: '0.75rem' }}>Medium — balanced thinking</MenuItem>
+                      <MenuItem value="high" sx={{ fontSize: '0.75rem' }}>High — maximum thinking (slowest)</MenuItem>
                     </Select>
                   </FormControl>
-
-                  {/* Advanced — bounded step/replan budget; hidden by default since
-                      the Effort selector covers the common case. */}
-                  <Box
-                    onClick={() => setReasoningAdvancedOpen((o) => !o)}
-                    sx={{ display: 'flex', alignItems: 'center', cursor: 'pointer', mt: 1, userSelect: 'none' }}
-                  >
-                    {reasoningAdvancedOpen
-                      ? <ExpandLessIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                      : <ExpandMoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />}
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', ml: 0.25 }}>
-                      Advanced
-                    </Typography>
-                  </Box>
-                  <Collapse in={reasoningAdvancedOpen} timeout="auto" unmountOnExit>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                      {([
-                        ['Max steps', 'max_steps', 1],
-                        ['Step iters', 'max_step_iterations', 1],
-                        ['Step timeout (s)', 'step_timeout', 1],
-                        ['Max replans', 'max_replans', 0],
-                        ['Plan attempts', 'max_attempts', 1],
-                      ] as Array<[string, keyof ReasoningConfig, number]>).map(([label, key, min]) => (
-                        <TextField
-                          key={key}
-                          type="number"
-                          size="small"
-                          label={label}
-                          value={reasoningConfig[key]}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10);
-                            setReasoningConfig({ [key]: Number.isNaN(n) ? min : Math.max(min, n) } as Partial<ReasoningConfig>);
-                          }}
-                          inputProps={{ min }}
-                          sx={{ flex: '1 1 45%', '& .MuiInputBase-input': { fontSize: '0.7rem' }, '& .MuiInputLabel-root': { fontSize: '0.7rem' } }}
-                        />
-                      ))}
-                    </Box>
-                  </Collapse>
                 </>
               )}
             </Box>

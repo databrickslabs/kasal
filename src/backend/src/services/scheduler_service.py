@@ -118,7 +118,6 @@ class SchedulerService:
             # Parse the inputs from execution
             inputs = execution.inputs if execution.inputs else {}
             execution_inputs = inputs.get("inputs", {})
-            planning = inputs.get("planning", False)
 
             # Determine execution type from the execution record
             execution_type = getattr(execution, 'execution_type', None) or inputs.get("execution_type", "crew")
@@ -133,7 +132,6 @@ class SchedulerService:
                 "execution_type": execution_type,
                 "inputs": execution_inputs,
                 "is_active": schedule_data.is_active,
-                "planning": planning,
                 "next_run_at": calculate_next_run_from_last(schedule_data.cron_expression)
             }
 
@@ -531,7 +529,9 @@ class SchedulerService:
                     inputs=config_dict,
                     created_at=execution_time_naive,
                     trigger_type="scheduled",
-                    planning=config.planning,
+                    # ExecutionHistory.planning is a historical-record column kept for
+                    # old rows; Kasal no longer models planning, so leave it to its
+                    # column default (False) instead of copying a request field.
                     run_name=run_name,
                     group_id=schedule.group_id,
                     group_email=schedule.created_by_email,
@@ -658,7 +658,6 @@ class SchedulerService:
                             f" next_run={next_run_local} (local) / {next_run} (UTC),"
                             f" last_run={last_run_local} (local) / {last_run} (UTC),"
                             f" cron={schedule.cron_expression},"
-                            f" planning={schedule.planning},"
                             f" model={schedule.model},"
                             f" is_due={is_due}"
                             f" (now={now_local} local / {now_utc} UTC)"
@@ -673,14 +672,13 @@ class SchedulerService:
                     for schedule in due_schedules:
                         execution_type = getattr(schedule, 'execution_type', 'crew') or 'crew'
                         logger_manager.scheduler.info(f"Starting task for schedule {schedule.id} - {schedule.name} (type: {execution_type})")
-                        logger_manager.scheduler.info(f"Schedule configuration: execution_type={execution_type}, agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, planning={schedule.planning}, model={schedule.model}")
+                        logger_manager.scheduler.info(f"Schedule configuration: execution_type={execution_type}, agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, model={schedule.model}")
 
                         # Build CrewConfig with proper defaults for None values (important for flow schedules)
                         config = CrewConfig(
                             agents_yaml=schedule.agents_yaml or {},
                             tasks_yaml=schedule.tasks_yaml or {},
                             inputs=schedule.inputs or {},
-                            planning=schedule.planning or False,
                             model=schedule.model,
                             reasoning=False,  # Default value for scheduled jobs
                             execution_type=execution_type,
@@ -778,7 +776,6 @@ class SchedulerService:
                     "agents": schedule.agents_yaml,
                     "tasks": schedule.tasks_yaml,
                     "inputs": schedule.inputs,
-                    "planning": schedule.planning,
                     "model": schedule.model
                 },
                 created_at=schedule.created_at,
@@ -819,7 +816,6 @@ class SchedulerService:
                     "agents": schedule.agents_yaml,
                     "tasks": schedule.tasks_yaml,
                     "inputs": schedule.inputs,
-                    "planning": schedule.planning,
                     "model": schedule.model
                 },
                 created_at=schedule.created_at,
@@ -863,7 +859,6 @@ class SchedulerService:
             tasks_yaml=job_create.job_data.get("tasks", {}),
             inputs=job_create.job_data.get("inputs", {}),
             is_active=job_create.enabled,
-            planning=job_create.job_data.get("planning", False),
             model=model
         )
         
@@ -881,7 +876,6 @@ class SchedulerService:
                 "agents": schedule.agents_yaml,
                 "tasks": schedule.tasks_yaml,
                 "inputs": schedule.inputs,
-                "planning": schedule.planning,
                 "model": schedule.model
             },
             created_at=schedule.created_at,
@@ -923,7 +917,6 @@ class SchedulerService:
             "tasks_yaml": job_create.job_data.get("tasks", {}),
             "inputs": job_create.job_data.get("inputs", {}),
             "is_active": job_create.enabled,
-            "planning": job_create.job_data.get("planning", False),
             "model": model,
             "next_run_at": calculate_next_run_from_last(job_create.schedule)
         }
@@ -947,7 +940,6 @@ class SchedulerService:
                 "agents": schedule.agents_yaml,
                 "tasks": schedule.tasks_yaml,
                 "inputs": schedule.inputs,
-                "planning": schedule.planning,
                 "model": schedule.model
             },
             created_at=schedule.created_at,
@@ -989,8 +981,6 @@ class SchedulerService:
                 update_data["tasks_yaml"] = job_update.job_data["tasks"]
             if "inputs" in job_update.job_data:
                 update_data["inputs"] = job_update.job_data["inputs"]
-            if "planning" in job_update.job_data:
-                update_data["planning"] = job_update.job_data["planning"]
             if "model" in job_update.job_data:
                 update_data["model"] = job_update.job_data["model"]
 
@@ -1008,7 +998,6 @@ class SchedulerService:
                 "agents": updated_schedule.agents_yaml,
                 "tasks": updated_schedule.tasks_yaml,
                 "inputs": updated_schedule.inputs,
-                "planning": updated_schedule.planning,
                 "model": updated_schedule.model
             },
             created_at=updated_schedule.created_at,
@@ -1059,8 +1048,6 @@ class SchedulerService:
                 update_data["tasks_yaml"] = job_update.job_data["tasks"]
             if "inputs" in job_update.job_data:
                 update_data["inputs"] = job_update.job_data["inputs"]
-            if "planning" in job_update.job_data:
-                update_data["planning"] = job_update.job_data["planning"]
             if "model" in job_update.job_data:
                 update_data["model"] = job_update.job_data["model"]
         
@@ -1078,7 +1065,6 @@ class SchedulerService:
                 "agents": updated_schedule.agents_yaml,
                 "tasks": updated_schedule.tasks_yaml,
                 "inputs": updated_schedule.inputs,
-                "planning": updated_schedule.planning,
                 "model": updated_schedule.model
             },
             created_at=updated_schedule.created_at,

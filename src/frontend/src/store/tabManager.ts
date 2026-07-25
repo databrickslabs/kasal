@@ -8,11 +8,9 @@ import { useUILayoutStore } from './uiLayout';
 // Execution configuration per tab
 export interface TabExecutionConfig {
   processType?: 'sequential' | 'hierarchical';
-  planningEnabled?: boolean;
-  planningLLM?: string;
   reasoningEnabled?: boolean;
   reasoningLLM?: string;
-  reasoningConfig?: ReasoningConfig;  // PlanningConfig overrides (effort, step/replan caps)
+  reasoningConfig?: ReasoningConfig;  // Model reasoning/thinking budget
   managerLLM?: string;
 }
 

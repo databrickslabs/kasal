@@ -60,8 +60,9 @@ class ManagerConfigBuilder:
         try:
             if process_type == Process.hierarchical:
                 crew_kwargs = await self._configure_hierarchical_manager(crew_kwargs, crew_config, requested_model)
-            elif process_type != Process.hierarchical:
-                crew_kwargs = await self._configure_sequential_planning(crew_kwargs, crew_config, requested_model)
+            # A sequential crew has no manager. The old sequential branch only set
+            # manager_llm when crew planning was on (to keep the prose planner off
+            # OpenAI); the planner is gone, so there is nothing left to configure.
 
         except ImportError:
             logger.warning("Enhanced Databricks auth not available for crew preparation")
@@ -149,44 +150,6 @@ class ManagerConfigBuilder:
                 # Already an LLM object
                 crew_kwargs['manager_llm'] = provided_manager_llm
                 logger.info("Using provided manager_llm object for hierarchical process")
-
-        return crew_kwargs
-
-    async def _configure_sequential_planning(
-        self,
-        crew_kwargs: Dict[str, Any],
-        crew_config: Dict[str, Any],
-        requested_model: Optional[str]
-    ) -> Dict[str, Any]:
-        """Configure planning LLM for sequential process"""
-        if 'manager_llm' in crew_config:
-            return crew_kwargs
-
-        group_id = self.config.get('group_id')
-        if not group_id:
-            logger.warning("No group_id in config, cannot set planning LLM")
-            return crew_kwargs
-
-        if requested_model:
-            logger.info(f"Using submitted model for planning: {requested_model}")
-            try:
-                planning_llm = await LLMManager.configure_kasal_llm(requested_model, group_id)
-                if crew_config.get('planning', False):
-                    crew_kwargs['manager_llm'] = planning_llm
-                    logger.info(f"Set planning LLM to: {requested_model}")
-            except Exception as llm_error:
-                logger.warning(f"Could not create LLM for model {requested_model}: {llm_error}")
-                # Fallback
-                if crew_config.get('planning', False):
-                    crew_kwargs = await self._set_fallback_manager_llm(crew_kwargs)
-        else:
-            logger.info("No model specified - trying Databricks default")
-            try:
-                default_llm = await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", group_id)
-                if crew_config.get('planning', False):
-                    crew_kwargs['manager_llm'] = default_llm
-            except Exception:
-                logger.info("Could not set default model - will use CrewAI defaults")
 
         return crew_kwargs
 

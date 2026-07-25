@@ -10,7 +10,6 @@ import { useTaskExecutionStore } from './taskExecutionStore';
 // Reset store state before each test
 beforeEach(() => {
   useTaskExecutionStore.getState().clearTaskStates();
-  useTaskExecutionStore.getState().setIsPlanningPhase(false);
 });
 
 describe('taskExecutionStore - transition()', () => {
@@ -194,15 +193,13 @@ describe('taskExecutionStore - transitionAll()', () => {
 });
 
 describe('taskExecutionStore - clearTaskStates', () => {
-  it('should clear task states but preserve isPlanningPhase', () => {
+  it('should clear task states', () => {
     const store = useTaskExecutionStore.getState();
     store.transition('task-1', 'running', { task_name: 'Test' });
-    store.setIsPlanningPhase(true);
 
     store.clearTaskStates();
 
     expect(store.taskStates.size).toBe(0);
-    expect(useTaskExecutionStore.getState().isPlanningPhase).toBe(true);
   });
 
   it('should allow new transitions after clearing', () => {
@@ -215,24 +212,6 @@ describe('taskExecutionStore - clearTaskStates', () => {
     const result = store.transition('task-1', 'running', { task_name: 'Test' });
     expect(result).toBe(true);
     expect(store.getTaskStatus('task-1')?.status).toBe('running');
-  });
-});
-
-describe('taskExecutionStore - isPlanningPhase', () => {
-  it('should default to false', () => {
-    expect(useTaskExecutionStore.getState().isPlanningPhase).toBe(false);
-  });
-
-  it('should be settable to true', () => {
-    useTaskExecutionStore.getState().setIsPlanningPhase(true);
-    expect(useTaskExecutionStore.getState().isPlanningPhase).toBe(true);
-  });
-
-  it('should be settable back to false', () => {
-    const store = useTaskExecutionStore.getState();
-    store.setIsPlanningPhase(true);
-    store.setIsPlanningPhase(false);
-    expect(useTaskExecutionStore.getState().isPlanningPhase).toBe(false);
   });
 });
 

@@ -15,7 +15,6 @@ interface JobManagementState {
   jobId: string | null;
   isRunning: boolean;
   selectedModel: string;
-  planningEnabled: boolean;
   schemaDetectionEnabled: boolean;
   tools: SimplifiedTool[];
   selectedTools: string[];
@@ -24,7 +23,6 @@ interface JobManagementState {
   setJobId: (id: string | null) => void;
   setIsRunning: (running: boolean) => void;
   setSelectedModel: (model: string) => void;
-  setPlanningEnabled: (enabled: boolean) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
   setTools: (tools: Tool[]) => void;
   setSelectedTools: (tools: string[]) => void;
@@ -45,7 +43,6 @@ const initialState = {
   jobId: null,
   isRunning: false,
   selectedModel: '',
-  planningEnabled: false,
   schemaDetectionEnabled: true,
   tools: [],
   selectedTools: [],
@@ -62,9 +59,6 @@ export const useJobManagementStore = create<JobManagementState>((set) => ({
 
   setSelectedModel: (model: string) => 
     set(() => ({ selectedModel: model })),
-
-  setPlanningEnabled: (enabled: boolean) => 
-    set(() => ({ planningEnabled: enabled })),
 
   setSchemaDetectionEnabled: (enabled: boolean) => 
     set(() => ({ schemaDetectionEnabled: enabled })),

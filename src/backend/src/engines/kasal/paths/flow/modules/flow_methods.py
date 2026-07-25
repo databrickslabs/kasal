@@ -541,51 +541,16 @@ class FlowMethodFactory:
                 "memory": crew_memory,
             }
 
-            # Add planning configuration if enabled
-            if crew_data and hasattr(crew_data, "planning") and crew_data.planning:
-                crew_kwargs["planning"] = True
-                # Set planning_llm to avoid CrewAI defaulting to OpenAI
-                planning_llm_model = getattr(crew_data, "planning_llm", None)
-                if planning_llm_model:
-                    # Use the explicit planning_llm from crew configuration
-                    try:
-                        from src.core.llm_manager import LLMManager
+            # NOTE: no planning / planning_llm. The CrewAI-style prose planner was
+            # removed (the engine has no planner), so a legacy crew row carrying
+            # planning=True must NOT resolve a planner LLM — that was a wasted
+            # model lookup on every flow crew build.
 
-                        planning_llm = await LLMManager.get_llm(planning_llm_model)
-                        crew_kwargs["planning_llm"] = planning_llm
-                        logger.info(
-                            f"Planning enabled - using crew planning_llm: {planning_llm_model}"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not create planning LLM for {planning_llm_model}: {e}"
-                        )
-                elif agents and hasattr(agents[0], "llm") and agents[0].llm:
-                    # Fallback: use the first agent's LLM so we don't default to OpenAI
-                    crew_kwargs["planning_llm"] = agents[0].llm
-                    logger.info(
-                        f"Planning enabled - using first agent's LLM as planning_llm"
-                    )
-                else:
-                    logger.warning(
-                        f"Planning enabled but no planning_llm configured and no agent LLM available"
-                    )
-
-            # Add reasoning configuration if enabled
-            # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
-            # We must propagate reasoning to each agent for it to actually work
-            if crew_data and hasattr(crew_data, "reasoning") and crew_data.reasoning:
-                crew_kwargs["reasoning"] = True
-                logger.info(f"Reasoning enabled for crew from configuration")
-
-                # Propagate reasoning to each agent (required for CrewAI reasoning to work)
-                for agent in agents:
-                    if not hasattr(agent, "reasoning") or not agent.reasoning:
-                        agent.reasoning = True
-                        agent_role = agent.role if hasattr(agent, "role") else "Unknown"
-                        logger.info(
-                            f"  → Propagated reasoning=True to agent '{agent_role}'"
-                        )
+            # NOTE: reasoning is NOT a Crew parameter and cannot be applied after the
+            # agents exist. It is the MODEL's native reasoning budget, stamped onto
+            # each agent's LLM while that LLM is built (see
+            # kernel/agent_builder._apply_reasoning_effort) from the agent node's own
+            # `reasoning` / `reasoning_config` fields.
 
             # Configure the unified memory backend (Databricks/Lakebase) for the
             # flow crew — same wiring as the regular crew path. Without this the
@@ -598,7 +563,7 @@ class FlowMethodFactory:
 
             # Log crew configuration for debugging
             logger.info(
-                f"📋 Crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}"
+                f"📋 Crew configuration: memory={crew_memory}, process={process_type}"
             )
 
             crew = Crew(**crew_kwargs)
@@ -1104,49 +1069,10 @@ class FlowMethodFactory:
                 "memory": crew_memory,
             }
 
-            # Add planning configuration if enabled
-            if crew_data and hasattr(crew_data, "planning") and crew_data.planning:
-                crew_kwargs["planning"] = True
-                # Set planning_llm to avoid CrewAI defaulting to OpenAI
-                planning_llm_model = getattr(crew_data, "planning_llm", None)
-                if planning_llm_model:
-                    try:
-                        from src.core.llm_manager import LLMManager
-
-                        planning_llm = await LLMManager.get_llm(planning_llm_model)
-                        crew_kwargs["planning_llm"] = planning_llm
-                        logger.info(
-                            f"Planning enabled for listener crew - using crew planning_llm: {planning_llm_model}"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not create planning LLM for listener crew {planning_llm_model}: {e}"
-                        )
-                elif agents and hasattr(agents[0], "llm") and agents[0].llm:
-                    crew_kwargs["planning_llm"] = agents[0].llm
-                    logger.info(
-                        f"Planning enabled for listener crew - using first agent's LLM as planning_llm"
-                    )
-                else:
-                    logger.warning(
-                        f"Planning enabled for listener crew but no planning_llm configured and no agent LLM available"
-                    )
-
-            # Add reasoning configuration if enabled
-            # NOTE: In CrewAI, reasoning is an Agent-level parameter, NOT just a Crew-level parameter
-            # We must propagate reasoning to each agent for it to actually work
-            if crew_data and hasattr(crew_data, "reasoning") and crew_data.reasoning:
-                crew_kwargs["reasoning"] = True
-                logger.info(f"Reasoning enabled for listener crew from configuration")
-
-                # Propagate reasoning to each agent (required for CrewAI reasoning to work)
-                for agent in agents:
-                    if not hasattr(agent, "reasoning") or not agent.reasoning:
-                        agent.reasoning = True
-                        agent_role = agent.role if hasattr(agent, "role") else "Unknown"
-                        logger.info(
-                            f"  → Propagated reasoning=True to agent '{agent_role}'"
-                        )
+            # NOTE: no planning / planning_llm and no crew-level reasoning — same
+            # reasons as the crew builder above: the prose planner is gone, and the
+            # reasoning budget is applied to each agent's LLM at build time from the
+            # agent node's own reasoning / reasoning_config fields.
 
             # Configure the unified memory backend (Databricks/Lakebase) for the
             # listener crew — same wiring as the regular crew path (avoids the
@@ -1163,7 +1089,7 @@ class FlowMethodFactory:
 
             # Log crew configuration for debugging
             logger.info(
-                f"Listener crew configuration: memory={crew_memory}, process={process_type}, planning={crew_kwargs.get('planning', False)}, reasoning={crew_kwargs.get('reasoning', False)}"
+                f"Listener crew configuration: memory={crew_memory}, process={process_type}"
             )
 
             crew = Crew(**crew_kwargs)

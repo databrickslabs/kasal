@@ -25,7 +25,6 @@ class ScheduleBase(BaseModel):
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     is_active: bool = Field(default=True, description="Whether the schedule is active")
-    planning: bool = Field(default=False, description="Whether to use planning mode")
     model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
 
     @model_validator(mode='after')
@@ -81,7 +80,6 @@ class ScheduleResponse(BaseModel):
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     is_active: bool = Field(default=True, description="Whether the schedule is active")
-    planning: bool = Field(default=False, description="Whether to use planning mode")
     model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
 
     # Timestamps
@@ -121,5 +119,4 @@ class CrewConfig(BaseModel):
 
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
-    planning: bool = Field(default=False, description="Whether to use planning mode")
     model: str = Field(default="gpt-4o-mini", description="Model to use for the job") 

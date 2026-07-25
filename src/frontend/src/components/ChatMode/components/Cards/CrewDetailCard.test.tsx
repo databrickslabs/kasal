@@ -43,7 +43,6 @@ describe('CrewDetailCard', () => {
       ],
       edges: [],
       process: 'hierarchical',
-      planning: true,
       memory: true,
       max_rpm: 10,
     };
@@ -55,15 +54,16 @@ describe('CrewDetailCard', () => {
     // Agents (agentNode + agent = 2) and Tasks (taskNode + task = 2) each show "2"
     const twos = screen.getAllByText('2');
     expect(twos.length).toBe(2);
-    // Planning Yes, Memory Yes
+    // Memory Yes (the removed crew-level planner has no row any more)
     const yesNodes = screen.getAllByText('Yes');
-    expect(yesNodes.length).toBe(2);
+    expect(yesNodes.length).toBe(1);
+    expect(screen.queryByText('Planning:')).not.toBeInTheDocument();
     expect(screen.getByText('Memory:')).toBeInTheDocument();
     expect(screen.getByText('Max RPM:')).toBeInTheDocument();
     expect(screen.getByText('10')).toBeInTheDocument();
   });
 
-  it('uses default process and No flags, and hides optional fields when undefined', () => {
+  it('uses the default process and hides optional fields when undefined', () => {
     const plan: CatalogLoadResult['plan'] = {
       id: 'p2',
       name: 'Bare Crew',
@@ -71,7 +71,6 @@ describe('CrewDetailCard', () => {
       nodes: undefined as unknown as unknown[],
       edges: [],
       // process omitted -> 'sequential'
-      // planning omitted/falsey -> 'No'
       // memory + max_rpm undefined -> hidden
     };
 
@@ -81,7 +80,7 @@ describe('CrewDetailCard', () => {
     expect(screen.getByText('sequential')).toBeInTheDocument();
     // Two "0" values for agents and tasks
     expect(screen.getAllByText('0').length).toBe(2);
-    expect(screen.getByText('No')).toBeInTheDocument();
+    expect(screen.queryByText('Planning:')).not.toBeInTheDocument();
     expect(screen.queryByText('Memory:')).not.toBeInTheDocument();
     expect(screen.queryByText('Max RPM:')).not.toBeInTheDocument();
   });
@@ -99,8 +98,8 @@ describe('CrewDetailCard', () => {
     render(<CrewDetailCard data={makeData(plan)} />);
     expect(screen.getByText('Memory:')).toBeInTheDocument();
     expect(screen.getByText('Max RPM:')).toBeInTheDocument();
-    // memory false -> "No", planning false -> "No" : two "No"
-    expect(screen.getAllByText('No').length).toBe(2);
+    // memory false -> a single "No" (no planning row any more)
+    expect(screen.getAllByText('No').length).toBe(1);
   });
 
   it('does not render the Execute button when onExecute is not provided', () => {

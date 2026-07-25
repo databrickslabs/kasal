@@ -2,7 +2,8 @@
 Unit tests for specific flow changes.
 
 Tests the three specific changes made to the flow execution system:
-1. flow_methods.py - planning_llm fallback logic
+1. flow_methods.py - no planner is configured (the CrewAI-style planner and its
+   planning_llm fallback ladder were removed; these are now regression guards)
 2. flow_execution_runner.py - result parameter propagation
 3. flow_runner_service.py - fresh session usage for post-execution updates
 """
@@ -44,12 +45,23 @@ def make_async_session_factory(*sessions):
     return mock
 
 
-class TestFlowMethodsPlanningLLM:
-    """Test planning_llm fallback logic in FlowMethodFactory."""
+class TestFlowMethodsNoPlanner:
+    """Regression guards: FlowMethodFactory configures NO planner.
+
+    The CrewAI-style prose planner was removed end to end (the vendored
+    kasal_engine has no planner at all), so the three legacy crew-row shapes that
+    used to select a branch of the planning_llm fallback ladder must now all
+    produce a Crew with no ``planning``/``planning_llm`` kwargs and must resolve
+    no planner LLM.
+    """
 
     @pytest.mark.asyncio
-    async def test_planning_llm_explicit_configuration(self):
-        """Test planning_llm uses explicit crew configuration when available."""
+    async def test_explicit_planning_llm_is_not_resolved(self):
+        """A legacy crew row with an explicit planning_llm must not resolve it.
+
+        Formerly ``test_planning_llm_explicit_configuration``, which asserted the
+        planner LLM was looked up via LLMManager and passed to Crew.
+        """
         from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data with explicit planning_llm
@@ -108,17 +120,22 @@ class TestFlowMethodsPlanningLLM:
             # Execute the method (._meth is the inner function before @start wrapping)
             await method._meth(mock_flow)
 
-            # Verify LLMManager was called with the explicit planning_llm
-            mock_llm_manager.get_llm.assert_called_once_with("databricks-dbrx-instruct")
+            # No planner LLM lookup happens any more.
+            mock_llm_manager.get_llm.assert_not_called()
 
-            # Verify Crew was created with planning_llm from LLMManager
+            # Crew gets no planner kwargs, but is otherwise built normally.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert crew_call_kwargs['planning'] is True
-            assert crew_call_kwargs['planning_llm'] == mock_planning_llm
+            assert 'planning' not in crew_call_kwargs
+            assert 'planning_llm' not in crew_call_kwargs
+            assert crew_call_kwargs['tasks'] == [mock_task]
 
     @pytest.mark.asyncio
-    async def test_planning_llm_fallback_to_agent(self):
-        """Test planning_llm falls back to first agent's LLM when not configured."""
+    async def test_missing_planning_llm_does_not_borrow_agent_llm(self):
+        """A legacy crew row with planning=True and no planning_llm must not
+        silently reuse the first agent's LLM as a planner LLM.
+
+        Formerly ``test_planning_llm_fallback_to_agent``.
+        """
         from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data WITHOUT planning_llm
@@ -167,14 +184,19 @@ class TestFlowMethodsPlanningLLM:
 
             await method._meth(mock_flow)
 
-            # Verify Crew was created with agent's LLM as planning_llm
+            # The agent's LLM stays the agent's; it is never promoted to a planner.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert crew_call_kwargs['planning'] is True
-            assert crew_call_kwargs['planning_llm'] == mock_agent_llm
+            assert 'planning' not in crew_call_kwargs
+            assert 'planning_llm' not in crew_call_kwargs
+            assert mock_agent.llm is mock_agent_llm
 
     @pytest.mark.asyncio
-    async def test_planning_llm_no_fallback_available(self):
-        """Test planning_llm handles case when no LLM is available."""
+    async def test_no_planner_when_agent_has_no_llm(self):
+        """A legacy planning=True crew row whose agent has no LLM at all builds a
+        Crew with no planner kwargs (and logs no planner warning path).
+
+        Formerly ``test_planning_llm_no_fallback_available``.
+        """
         from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data WITHOUT planning_llm
@@ -220,11 +242,10 @@ class TestFlowMethodsPlanningLLM:
 
             await method._meth(mock_flow)
 
-            # Verify Crew was created with planning=True but no planning_llm
+            # No planner kwargs at all -- neither the flag nor an LLM.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert crew_call_kwargs['planning'] is True
-            # planning_llm should not be in kwargs when no LLM available
-            assert 'planning_llm' not in crew_call_kwargs or crew_call_kwargs['planning_llm'] is None
+            assert 'planning' not in crew_call_kwargs
+            assert 'planning_llm' not in crew_call_kwargs
 
 
 class TestFlowExecutionRunnerResultPropagation:

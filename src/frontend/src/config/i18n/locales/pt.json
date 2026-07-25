@@ -157,10 +157,6 @@
       "label": "Escolher Modelo",
       "provider": "Provedor"
     },
-    "planning": {
-      "label": "Planejamento",
-      "tooltip": "Quando ativado, um planejador de IA criará um plano passo a passo para sua equipe antes da execução, melhorando a coordenação e o desempenho das tarefas"
-    },
     "buttons": {
       "schedule": "Agendar",
       "addAgent": "Adicionar Agente",

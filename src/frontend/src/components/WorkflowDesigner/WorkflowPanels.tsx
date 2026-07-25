@@ -35,8 +35,6 @@ interface WorkflowPanelsProps {
   // FitView handler
   handleUIAwareFitView: () => void;
   // Runtime features props
-  planningEnabled: boolean;
-  setPlanningEnabled: (enabled: boolean) => void;
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
@@ -86,8 +84,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onFlowFlowInit,
   onPanelDragStart,
   handleUIAwareFitView,
-  planningEnabled,
-  setPlanningEnabled,
   reasoningEnabled,
   setReasoningEnabled,
   schemaDetectionEnabled,
@@ -182,8 +178,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           onPaneContextMenu={onPaneContextMenu}
           onInit={onCrewFlowInit}
           handleUIAwareFitView={handleUIAwareFitView}
-          planningEnabled={planningEnabled}
-          setPlanningEnabled={setPlanningEnabled}
           reasoningEnabled={reasoningEnabled}
           setReasoningEnabled={setReasoningEnabled}
           schemaDetectionEnabled={schemaDetectionEnabled}

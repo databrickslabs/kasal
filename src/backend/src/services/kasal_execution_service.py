@@ -309,7 +309,9 @@ class KasalExecutionService:
                 "name": run_name or "Default Crew",
                 "model": config.model,
                 "process": process_type,  # Add process type to crew config
-                "planning": config.planning,
+                # NOTE: `planning` / `planning_llm` are deliberately NOT forwarded. The
+                # CrewAI-style prose planner was removed; the engine has no planner, so
+                # those request/DB fields are legacy compatibility only and are ignored.
                 "reasoning": config.reasoning if hasattr(config, 'reasoning') else False
             }
 
@@ -318,17 +320,14 @@ class KasalExecutionService:
                 crew_config_dict["manager_llm"] = manager_llm
                 crew_logger.info(f"Configuring hierarchical process with manager_llm: {manager_llm}")
 
-            # Add planning_llm if specified
-            if inputs_with_run_name.get("planning_llm"):
-                crew_config_dict["planning_llm"] = inputs_with_run_name["planning_llm"]
-
             # Add reasoning_llm if specified
             if inputs_with_run_name.get("reasoning_llm"):
                 crew_config_dict["reasoning_llm"] = inputs_with_run_name["reasoning_llm"]
 
-            # Reasoning PlanningConfig overrides (effort + step/replan caps) from the
-            # sidebar Reasoning section. Carried to each agent in CrewPreparation and
-            # turned into a bounded crewai PlanningConfig by the shared agent builder.
+            # Reasoning budget from the sidebar Reasoning section
+            # ({"reasoning_effort": "low"|"medium"|"high"}). Carried to each agent in
+            # CrewPreparation and applied to the agent's own LLM as the model's native
+            # reasoning budget by the shared agent builder.
             if inputs_with_run_name.get("reasoning_config"):
                 crew_config_dict["reasoning_config"] = inputs_with_run_name["reasoning_config"]
 
@@ -336,7 +335,6 @@ class KasalExecutionService:
                 "agents": agents_list,
                 "tasks": tasks_list,
                 "inputs": inputs_with_run_name,
-                "planning": config.planning,
                 "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
                 "model": config.model,
                 "run_name": run_name,

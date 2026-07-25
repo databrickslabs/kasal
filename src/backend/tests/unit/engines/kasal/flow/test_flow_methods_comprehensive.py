@@ -301,7 +301,6 @@ class TestFlowMethodFactory:
         mock_crew_data.memory = False
         mock_crew_data.process = 'hierarchical'
         mock_crew_data.verbose = True
-        mock_crew_data.planning = True
         mock_crew_data.reasoning = True
 
         method = FlowMethodFactory.create_starting_point_crew_method(
@@ -348,7 +347,6 @@ class TestFlowMethodFactory:
         mock_crew_data.memory = True
         mock_crew_data.process = 'sequential'
         mock_crew_data.verbose = False
-        mock_crew_data.planning = False
         mock_crew_data.reasoning = False
 
         method = FlowMethodFactory.create_listener_method(

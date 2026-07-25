@@ -146,7 +146,11 @@ async def run_crew_in_process(
         if config and 'inputs' in config:
             all_inputs = config.get('inputs', {})
             logger.info(f"All inputs received for process execution: {all_inputs}")
-            # System inputs that should not be passed to crew.kickoff
+            # System inputs that should not be passed to crew.kickoff.
+            # 'planning' / 'planning_llm' are LEGACY-ONLY: Kasal no longer models
+            # planning, but saved/scheduled payloads from before its removal can
+            # still carry the keys — they must stay filtered so they never leak
+            # into kickoff inputs and become template variables.
             system_inputs = {'tools', 'planning_llm', 'reasoning_llm', 'reasoning_config', 'process', 'max_rpm', 'planning', 'reasoning'}
             # Filter out system inputs to get only user-provided inputs
             user_inputs = {k: v for k, v in all_inputs.items() if k not in system_inputs}

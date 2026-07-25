@@ -3,7 +3,7 @@ import { useTabManagerStore, TabExecutionConfig } from '../../store/tabManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 
 /**
- * Hook to sync execution configuration (process type, planning, reasoning, etc.)
+ * Hook to sync execution configuration (process type, reasoning, etc.)
  * between the global execution store and per-tab storage.
  *
  * This ensures each tab can have its own runtime configuration that persists
@@ -18,15 +18,11 @@ export const useTabExecutionSync = () => {
 
   const {
     processType,
-    planningEnabled,
-    planningLLM,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
     managerLLM,
     setProcessType,
-    setPlanningEnabled,
-    setPlanningLLM,
     setReasoningEnabled,
     setReasoningLLM,
     setReasoningConfig,
@@ -51,8 +47,6 @@ export const useTabExecutionSync = () => {
 
     const config: TabExecutionConfig = {
       processType,
-      planningEnabled,
-      planningLLM,
       reasoningEnabled,
       reasoningLLM,
       reasoningConfig,
@@ -64,8 +58,6 @@ export const useTabExecutionSync = () => {
   }, [
     activeTabId,
     processType,
-    planningEnabled,
-    planningLLM,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
@@ -93,12 +85,6 @@ export const useTabExecutionSync = () => {
     if (config.processType !== undefined) {
       setProcessType(config.processType);
     }
-    if (config.planningEnabled !== undefined) {
-      setPlanningEnabled(config.planningEnabled);
-    }
-    if (config.planningLLM !== undefined) {
-      setPlanningLLM(config.planningLLM);
-    }
     if (config.reasoningEnabled !== undefined) {
       setReasoningEnabled(config.reasoningEnabled);
     }
@@ -119,8 +105,6 @@ export const useTabExecutionSync = () => {
   }, [
     getTabExecutionConfig,
     setProcessType,
-    setPlanningEnabled,
-    setPlanningLLM,
     setReasoningEnabled,
     setReasoningLLM,
     setReasoningConfig,
@@ -146,8 +130,6 @@ export const useTabExecutionSync = () => {
       if (lastActiveTabIdRef.current && !isInitialMountRef.current) {
         const oldConfig: TabExecutionConfig = {
           processType,
-          planningEnabled,
-          planningLLM,
           reasoningEnabled,
           reasoningLLM,
           reasoningConfig,
@@ -169,8 +151,6 @@ export const useTabExecutionSync = () => {
   }, [
     activeTabId,
     processType,
-    planningEnabled,
-    planningLLM,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
@@ -194,8 +174,6 @@ export const useTabExecutionSync = () => {
     return () => clearTimeout(timeoutId);
   }, [
     processType,
-    planningEnabled,
-    planningLLM,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,

@@ -618,7 +618,7 @@ describe('executionStore - completeExecution', () => {
   });
 
   it('composed surface + previewable text: renders the a2ui surface INLINE (empty body), not the opt-in pane', () => {
-    // Regression: deep/planning runs return a structured deck whose `text` trips
+    // Regression: deep-mode runs return a structured deck whose `text` trips
     // parsePreviewContent. The composed A2UI surface must still ride inline on the
     // message; it must NOT be diverted to the (hidden) preview pane, which dropped
     // it entirely (no presentation showed for deep while research worked).

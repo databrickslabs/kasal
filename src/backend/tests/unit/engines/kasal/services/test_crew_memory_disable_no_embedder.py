@@ -194,7 +194,7 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
             'tasks': ['task1'],
             'process': 'sequential',
             'verbose': True,
-            'planning': False,
+            'max_rpm': 10,
         }
 
         result = service.configure_crew_memory_components(
@@ -210,4 +210,4 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         assert result['tasks'] == ['task1']
         assert result['process'] == 'sequential'
         assert result['verbose'] is True
-        assert result['planning'] is False
+        assert result['max_rpm'] == 10

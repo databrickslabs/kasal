@@ -235,36 +235,6 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     return { type: 'llm_response', description };
   },
 
-  // Agent Reasoning
-  agent_reasoning: (trace: Trace): ProcessedEvent | null => {
-    const metadata = parseTraceMetadata(trace);
-    const extra = extractExtraData(trace);
-    const operation = metadata?.operation || extra?.operation;
-
-    // Skip "reasoning_started" events
-    if (operation === 'reasoning_started') {
-      return null;
-    }
-
-    // Get the actual content to determine description
-    const outputStr = extractOutputStr(trace);
-
-    let description = 'Agent Reasoning';
-    // Check if it's a planning event
-    if (outputStr && outputStr.toLowerCase().includes('plan')) {
-      description = 'Agent Planning';
-    } else if (outputStr && outputStr.length > 100) {
-      description = 'Agent Reasoning';
-    }
-
-    return { type: 'agent_reasoning', description };
-  },
-
-  // Agent Reasoning Error
-  agent_reasoning_error: (trace: Trace): ProcessedEvent => {
-    return { type: 'agent_reasoning', description: 'Reasoning Failed' };
-  },
-
   // Agent Execution — all are instrumentor container spans; real events use specific types
   agent_execution: (): ProcessedEvent | null => null,
 
@@ -482,9 +452,6 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
 
     return { type: 'llm_request', description: `LLM Request (${promptLength.toLocaleString()} chars)` };
   },
-
-  // Reasoning Started - skip
-  reasoning_started: (): ProcessedEvent | null => null,
 
   // Knowledge Retrieval Started - skip
   knowledge_retrieval_started: (): ProcessedEvent | null => null,
@@ -704,10 +671,8 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   task_failed: { Component: ErrorOutlineIcon, color: 'error' },
   flow_execution_failed: { Component: ErrorOutlineIcon, color: 'error' },
   error: { Component: ErrorOutlineIcon, color: 'error' },
-  agent_reasoning: { Component: PreviewIcon, color: 'info' },
   guardrail: { Component: CheckCircleIcon, color: 'warning' },
   llm_request: { Component: PlayCircleIcon, color: 'primary' },
-  crew_planning: { Component: PlayCircleIcon, color: 'info' },
   // Compaction is LOSSY — warning-coloured on purpose. A run that
   // compacts repeatedly is losing tool results it may still need.
   context_compaction: { Component: CompressIcon, color: 'warning' },
@@ -743,7 +708,6 @@ export const CLICKABLE_TYPES = new Set([
   'knowledge_operation',
   'agent_execution',
   'guardrail',
-  'agent_reasoning',
   'mcp_tool',
   'mcp_tool_result',
   'hitl_request',
@@ -753,7 +717,6 @@ export const CLICKABLE_TYPES = new Set([
   'flow_execution_failed',
   'memory_context',
   'memory_backend_error',
-  'crew_planning',
   'context_compaction',
 ]);
 
@@ -769,7 +732,6 @@ export function isEventClickable(eventType: string, hasOutput: boolean): boolean
     eventType.includes('memory') ||
     eventType.includes('tool') ||
     eventType.includes('knowledge') ||
-    eventType.includes('guardrail') ||
-    eventType.includes('reasoning')
+    eventType.includes('guardrail')
   );
 }

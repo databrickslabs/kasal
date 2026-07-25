@@ -1015,31 +1015,31 @@ class CrewGenerationService:
                 entry.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
             tasks_yaml[key] = entry
 
-        # ── ChatMode answer mode → reasoning / planning / execution_type ──────
-        # chat     = single light agent (Agent.kickoff_async), no crew/planning/reasoning
-        # research = crew with per-agent reasoning
-        # deep     = crew with planning (+ explicit planning_llm) AND reasoning
+        # ── ChatMode answer mode → reasoning budget / execution_type ──────────
+        # The mode now selects the MODEL's native reasoning budget (thinking effort)
+        # rather than a prompted planner — the engine has no planner/replan loop, so
+        # the old `planning` / `planning_llm` flags were a silent no-op and are gone.
+        # chat     = single light agent (Agent.kickoff_async), no crew, no extra thinking
+        # research = crew with a medium reasoning budget
+        # deep     = crew with a high reasoning budget
+        # The effort rides in inputs.reasoning_config and is applied per agent to the
+        # agent's own LLM by the shared agent builder, capability-gated per model
+        # (unsupported models drop it silently — see utils/model_config).
         _mode = (getattr(request, "chat_mode_type", "chat") or "chat")
-        _reasoning = _mode in ("research", "deep")
-        # CrewAI structured reasoning (StepObservation) breaks on local / OpenAI-
-        # compatible endpoints — disable it when a local model is configured.
-        if os.getenv("LOCAL_LLM_BASE_URL"):
-            _reasoning = False
-        _planning = _mode == "deep"
+        _reasoning_effort = {"research": "medium", "deep": "high"}.get(_mode)
+        _reasoning = _reasoning_effort is not None
         _execution_type = "agent" if _mode == "chat" else "crew"
-        # Planning ON without an explicit planning_llm makes CrewAI default to
-        # OpenAI (401 on a Databricks-only app); pin it to the request/crew model.
-        _planning_llm = (
-            request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
-        ) if _planning else None
 
         return {
             "agents_yaml": agents_yaml,
             "tasks_yaml": tasks_yaml,
-            # planning_llm rides in inputs — prepare_and_run_crew reads it from
-            # inputs_with_run_name.get("planning_llm"), not a top-level CrewConfig key.
-            "inputs": ({"planning_llm": _planning_llm} if _planning_llm else {}),
-            "planning": _planning,
+            # reasoning_config rides in inputs — prepare_and_run_crew reads it from
+            # inputs_with_run_name.get("reasoning_config"), not a top-level key.
+            "inputs": (
+                {"reasoning_config": {"reasoning_effort": _reasoning_effort}}
+                if _reasoning_effort
+                else {}
+            ),
             "reasoning": _reasoning,
             "model": request.model or None,
             "execution_type": _execution_type,

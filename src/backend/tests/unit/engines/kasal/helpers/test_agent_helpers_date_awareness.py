@@ -606,11 +606,11 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 # Date awareness params
                 assert call_kwargs["inject_date"] is True
                 assert call_kwargs["date_format"] == "%Y-%m-%d"
-                # reasoning migrates to a bounded PlanningConfig; the raw reasoning /
-                # max_reasoning_attempts flags are NOT passed to Agent (CrewAI 1.14.x).
+                # Reasoning is the model's native reasoning budget on the agent's
+                # LLM — no Agent kwargs at all (the CrewAI planner is gone).
                 assert "reasoning" not in call_kwargs
                 assert "max_reasoning_attempts" not in call_kwargs
-                assert call_kwargs["planning_config"].max_attempts == 5
+                assert "planning_config" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_date_params_with_iteration_params(
@@ -719,10 +719,10 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 assert call_kwargs["code_execution_mode"] == "safe"
                 assert call_kwargs["max_context_window_size"] == 4096
                 assert call_kwargs["max_tokens"] == 2048
-                # reasoning migrates to a bounded PlanningConfig; the raw reasoning /
-                # max_reasoning_attempts flags are NOT passed to Agent (CrewAI 1.14.x).
+                # Reasoning is the model's native reasoning budget on the agent's
+                # LLM — no Agent kwargs at all (the CrewAI planner is gone).
                 assert "reasoning" not in call_kwargs
                 assert "max_reasoning_attempts" not in call_kwargs
-                assert call_kwargs["planning_config"].max_attempts == 3
+                assert "planning_config" not in call_kwargs
                 assert call_kwargs["inject_date"] is True
                 assert call_kwargs["date_format"] == "%Y-%m-%d %H:%M"

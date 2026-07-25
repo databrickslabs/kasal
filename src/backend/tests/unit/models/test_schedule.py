@@ -51,11 +51,10 @@ class TestSchedule:
         # Check defaults
         assert schedule.inputs == {}
         assert schedule.is_active is True
-        assert schedule.planning is False
         assert schedule.model == "gpt-4o-mini"
         assert schedule.last_run_at is None
         assert schedule.next_run_at is None
-    
+
     def test_schedule_with_all_fields(self):
         """Test Schedule creation with all fields."""
         agents_config = [{"name": "agent1", "role": "analyst", "tools": ["sql", "python"]}]
@@ -71,7 +70,6 @@ class TestSchedule:
             tasks_yaml=tasks_config,
             inputs=inputs_data,
             is_active=True,
-            planning=True,
             model="gpt-4",
             last_run_at=last_run,
             next_run_at=next_run
@@ -81,7 +79,6 @@ class TestSchedule:
         assert schedule.cron_expression == "0 9 * * MON-FRI"
         assert schedule.inputs == inputs_data
         assert schedule.is_active is True
-        assert schedule.planning is True
         assert schedule.model == "gpt-4"
         assert schedule.last_run_at == last_run
         assert schedule.next_run_at == next_run
@@ -97,11 +94,10 @@ class TestSchedule:
         
         assert schedule.inputs == {}
         assert schedule.is_active is True
-        assert schedule.planning is False
         assert schedule.model == "gpt-4o-mini"
         assert schedule.last_run_at is None
         assert schedule.next_run_at is None
-    
+
     def test_schedule_timestamps(self):
         """Test Schedule timestamp fields."""
         with patch('src.models.schedule.datetime') as mock_datetime:
@@ -156,19 +152,35 @@ class TestSchedule:
         
         assert schedule.is_active is False
     
-    def test_schedule_planning_enabled(self):
-        """Test Schedule with planning enabled."""
+    def test_schedule_rejects_removed_planning_column(self):
+        """Regression: the ``schedule.planning`` column was dropped along with
+        the CrewAI-style planner, so the ORM rejects it outright.
+
+        Formerly ``test_schedule_planning_enabled``. ``model`` survives and is
+        still settable -- it is the model the scheduled RUN uses, never a
+        planner model.
+        """
+        assert 'planning' not in Schedule.__table__.columns
+
+        with pytest.raises(TypeError, match="planning"):
+            Schedule(
+                name="Legacy Planning Schedule",
+                cron_expression="0 8 * * *",
+                agents_yaml=[],
+                tasks_yaml=[],
+                planning=True,
+            )
+
         schedule = Schedule(
-            name="Planning Schedule",
+            name="Run Model Schedule",
             cron_expression="0 8 * * *",
             agents_yaml=[],
             tasks_yaml=[],
-            planning=True,
             model="gpt-4-turbo"
         )
-        
-        assert schedule.planning is True
+
         assert schedule.model == "gpt-4-turbo"
+        assert not hasattr(schedule, 'planning')
 
 
 class TestScheduleCronExpressions:
@@ -403,37 +415,39 @@ class TestScheduleInputsAndConfiguration:
                 cron_expression="0 12 * * *",
                 agents_yaml=[],
                 tasks_yaml=[],
-                model=model,
-                planning=True
+                model=model
             )
-            
+
             assert schedule.model == model
-            assert schedule.planning is True
-    
-    def test_schedule_planning_configurations(self):
-        """Test Schedule planning configurations."""
-        # Planning disabled
-        no_planning = Schedule(
-            name="No Planning Schedule",
+
+    def test_schedule_run_model_is_not_a_planner_model(self):
+        """Regression: ``model`` configures the scheduled RUN, and is the only
+        model knob left now that the planner (and ``planning`` column) is gone.
+
+        Formerly ``test_schedule_planning_configurations``, which asserted the
+        planning flag round-tripped in both states.
+        """
+        assert 'planning' not in Schedule.__table__.columns
+
+        default_model = Schedule(
+            name="Default Model Schedule",
             cron_expression="0 13 * * *",
             agents_yaml=[],
-            tasks_yaml=[],
-            planning=False
+            tasks_yaml=[]
         )
-        
-        # Planning enabled
-        with_planning = Schedule(
-            name="With Planning Schedule",
+
+        explicit_model = Schedule(
+            name="Explicit Model Schedule",
             cron_expression="0 14 * * *",
             agents_yaml=[],
             tasks_yaml=[],
-            planning=True,
             model="gpt-4"
         )
-        
-        assert no_planning.planning is False
-        assert with_planning.planning is True
-        assert with_planning.model == "gpt-4"
+
+        assert default_model.model == "gpt-4o-mini"
+        assert explicit_model.model == "gpt-4"
+        assert not hasattr(default_model, 'planning')
+        assert not hasattr(explicit_model, 'planning')
 
 
 class TestScheduleFieldTypes:
@@ -456,7 +470,6 @@ class TestScheduleFieldTypes:
         assert hasattr(schedule, 'tasks_yaml')
         assert hasattr(schedule, 'inputs')
         assert hasattr(schedule, 'is_active')
-        assert hasattr(schedule, 'planning')
         assert hasattr(schedule, 'model')
         assert hasattr(schedule, 'last_run_at')
         assert hasattr(schedule, 'next_run_at')
@@ -464,7 +477,11 @@ class TestScheduleFieldTypes:
         assert hasattr(schedule, 'updated_at')
         assert hasattr(schedule, 'group_id')
         assert hasattr(schedule, 'created_by_email')
-    
+
+        # The planner was removed: `planning` must not come back as a column.
+        assert not hasattr(schedule, 'planning')
+        assert 'planning' not in Schedule.__table__.columns
+
     def test_schedule_string_fields(self):
         """Test string field types."""
         schedule = Schedule(
@@ -502,20 +519,22 @@ class TestScheduleFieldTypes:
         assert isinstance(schedule.inputs, dict)
     
     def test_schedule_boolean_fields(self):
-        """Test boolean field types."""
+        """Test boolean field types.
+
+        ``is_active`` is the only boolean column left; ``planning`` was dropped
+        with the CrewAI-style planner.
+        """
         schedule = Schedule(
             name="Boolean Fields Schedule",
             cron_expression="0 18 * * *",
             agents_yaml=[],
             tasks_yaml=[],
-            is_active=True,
-            planning=False
+            is_active=True
         )
-        
+
         assert isinstance(schedule.is_active, bool)
-        assert isinstance(schedule.planning, bool)
         assert schedule.is_active is True
-        assert schedule.planning is False
+        assert not hasattr(schedule, 'planning')
     
     def test_schedule_datetime_fields(self):
         """Test datetime field types."""
@@ -613,8 +632,7 @@ class TestScheduleUsagePatterns:
                 }
             ],
             inputs={"source_db": "production", "target_db": "warehouse"},
-            is_active=True,
-            planning=False
+            is_active=True
         )
         
         assert workflow_schedule.name == "Daily ETL Workflow"
@@ -732,10 +750,16 @@ class TestScheduleUsagePatterns:
         
         assert group_schedule.group_id == "group_456"
     
-    def test_schedule_planning_workflow(self):
-        """Test Schedule with planning workflow."""
+    def test_schedule_agent_driven_planning_workflow(self):
+        """A crew whose own AGENTS do the planning still schedules fine.
+
+        Formerly ``test_schedule_planning_workflow``, which set the removed
+        ``planning`` column. Planning as a *domain concern* now lives entirely
+        in the crew's agents/tasks/inputs -- there is no engine-level planner
+        flag on the schedule row.
+        """
         planning_schedule = Schedule(
-            name="Planning Enabled Workflow",
+            name="Planner Agent Workflow",
             cron_expression="0 7 * * *",
             agents_yaml=[
                 {
@@ -750,15 +774,15 @@ class TestScheduleUsagePatterns:
                     "description": "Create execution plan for workflow"
                 }
             ],
-            planning=True,
             model="gpt-4-turbo",
             inputs={"planning_horizon": "1_week", "constraints": ["budget", "resources"]}
         )
-        
-        assert planning_schedule.planning is True
+
+        assert planning_schedule.agents_yaml[0]["role"] == "Workflow Planner"
         assert planning_schedule.model == "gpt-4-turbo"
         assert planning_schedule.inputs["planning_horizon"] == "1_week"
         assert "budget" in planning_schedule.inputs["constraints"]
+        assert not hasattr(planning_schedule, 'planning')
 
 
 class TestScheduleFlowExecution:
@@ -933,21 +957,36 @@ class TestScheduleFlowExecution:
         assert schedule.inputs["topic"] == "AI trends"
         assert schedule.inputs["depth"] == "detailed"
 
-    def test_schedule_flow_with_planning(self):
-        """Test Schedule flow execution with planning enabled."""
+    def test_schedule_flow_rejects_removed_planning_column(self):
+        """Regression: a scheduled FLOW carries no planner flag either.
+
+        Formerly ``test_schedule_flow_with_planning``. The flow engine no longer
+        reads a ``planning`` flag, and the column is gone, so the legacy kwarg
+        must fail loudly rather than be silently ignored.
+        """
+        with pytest.raises(TypeError, match="planning"):
+            Schedule(
+                name="Legacy Flow With Planning",
+                cron_expression="0 19 * * *",
+                execution_type="flow",
+                nodes=[{"id": "node1"}],
+                edges=[],
+                planning=True,
+                model="gpt-4"
+            )
+
         schedule = Schedule(
-            name="Flow With Planning",
+            name="Flow Schedule",
             cron_expression="0 19 * * *",
             execution_type="flow",
             nodes=[{"id": "node1"}],
             edges=[],
-            planning=True,
             model="gpt-4"
         )
 
         assert schedule.execution_type == "flow"
-        assert schedule.planning is True
         assert schedule.model == "gpt-4"
+        assert not hasattr(schedule, 'planning')
 
 
 class TestScheduleFlowIndexes:

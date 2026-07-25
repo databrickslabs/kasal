@@ -395,7 +395,8 @@ class TestGetRequiredProviders:
             MockSvc.return_value = instance
             config = {
                 "crew": {
-                    "planning_llm": "claude-3",
+                    # planning_llm is deliberately absent: the planner was removed and
+                    # its model is no longer collected as a required provider.
                     "reasoning_llm": "claude-2",
                     "manager_llm": "claude-1",
                 }
@@ -411,7 +412,7 @@ class TestGetRequiredProviders:
             instance.get_model_config = AsyncMock(return_value={"provider": "perplexity"})
             MockSvc.return_value = instance
             config = {
-                "planning_llm": "pplx-1",
+                # planning_llm is deliberately absent (planner removed).
                 "reasoning_llm": "pplx-2",
                 "manager_llm": "pplx-3",
             }

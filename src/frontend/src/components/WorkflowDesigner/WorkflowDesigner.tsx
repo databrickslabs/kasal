@@ -271,7 +271,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // View-mode reconciliation lives below, right after the uiLayout store hook,
   // so that areFlowsVisible is in scope for the effect dependency arrays.
 
-  // Use tab execution sync to keep execution config (process type, planning, etc.) in sync per tab
+  // Use tab execution sync to keep execution config (process type, reasoning, etc.) in sync per tab
   useTabExecutionSync();
 
   // Use agent and task managers with original flow manager
@@ -555,13 +555,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const {
     isExecuting,
     selectedModel,
-    planningEnabled,
     reasoningEnabled,
     schemaDetectionEnabled,
     tools,
     selectedTools,
     setSelectedModel,
-    setPlanningEnabled,
     setReasoningEnabled,
     setSchemaDetectionEnabled,
     setSelectedTools,
@@ -1378,8 +1376,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               onCrewFlowInit={handleCrewFlowInit}
               onFlowFlowInit={handleFlowFlowInit}
               handleUIAwareFitView={handleUIAwareFitView}
-              planningEnabled={planningEnabled}
-              setPlanningEnabled={setPlanningEnabled}
               reasoningEnabled={reasoningEnabled}
               setReasoningEnabled={setReasoningEnabled}
               schemaDetectionEnabled={schemaDetectionEnabled}
@@ -1686,7 +1682,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onClose={() => dialogManager.setScheduleDialogOpen(false)}
           nodes={nodes}
           edges={edges}
-          planningEnabled={planningEnabled}
           selectedModel={selectedModel}
         />
 
@@ -1960,8 +1955,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               // Toggle interactivity if needed
               console.log('Toggle interactivity');
             }}
-            planningEnabled={planningEnabled}
-            setPlanningEnabled={setPlanningEnabled}
             reasoningEnabled={reasoningEnabled}
             setReasoningEnabled={setReasoningEnabled}
             schemaDetectionEnabled={schemaDetectionEnabled}

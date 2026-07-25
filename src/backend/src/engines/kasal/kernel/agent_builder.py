@@ -38,9 +38,10 @@ def redact_llm_repr(llm: Any) -> str:
 
 # Optional Agent params copied from the spec verbatim when present and not None.
 # Mirrors agent_adapter.create_agent / flow agent_adapter exactly.
-# NOTE: 'reasoning' / 'max_reasoning_attempts' are deliberately NOT here — they are
-# deprecated in CrewAI 1.14.x. Reasoning is configured via an explicit, bounded
-# PlanningConfig (see _apply_reasoning_planning_config below).
+# NOTE: 'reasoning' / 'max_reasoning_attempts' are deliberately NOT here. Kasal's
+# reasoning control is no longer a prompted plan/replan loop — it maps onto the
+# MODEL's native reasoning budget on the agent's own LLM (see
+# _apply_reasoning_effort below), so there is nothing agent-shaped to pass through.
 _ADDITIONAL_AGENT_PARAMS = [
     'max_iter', 'max_rpm', 'max_execution_time', 'code_execution_mode',
     'max_context_window_size', 'max_tokens',
@@ -48,62 +49,67 @@ _ADDITIONAL_AGENT_PARAMS = [
     'inject_date', 'date_format',
 ]
 
-# Bounded defaults for the agent-reasoning loop (CrewAI 1.14.5 PlanningConfig).
-# CrewAI's OWN defaults are unbounded/expansive — max_attempts=None (refine forever),
-# max_steps=20, max_step_iterations=15, step_timeout=None, max_replans=3, i.e. up to
-# ~300 LLM turns with NO wall-clock cap — which lets a mistooled agent run effectively
-# forever. These are Kasal's shipping defaults; each is overridable per crew/agent via
-# the spec's 'reasoning_config' dict (wired from the sidebar Reasoning section).
-# Validated against the real databricks-claude-haiku-4-5: this low/small profile
-# made a non-converging agent (tool returning no usable data) STOP ON ITS OWN in
-# ~15s with a synthesized final answer (1 reasoning pass, 5 LLM calls, 0 replans).
-# The previous medium/large profile (effort=medium, steps=10, iter=10, replans=2)
-# fanned out enough calls to trip the workspace FMAPI rate limit and retry-loop for
-# minutes — the "runs forever" symptom. Keep this small so reasoning self-terminates
-# and stays under the rate limit; users can raise it per crew in the sidebar.
-DEFAULT_REASONING_CONFIG = {
-    'reasoning_effort': 'low',      # linear execution, NO replanning re-runs (fastest)
-    'max_attempts': 1,              # plan-refinement cap (None = forever)
-    'max_steps': 3,                 # steps in the generated plan
-    'max_step_iterations': 3,       # LLM turns per step
-    'step_timeout': 20,             # per-step wall-clock seconds (None = no cap)
-    'max_replans': 0,               # no full replanning attempts
-}
+# Effort used when the reasoning toggle is on but no explicit level was chosen.
+DEFAULT_REASONING_EFFORT = 'low'
 
 
-def _build_planning_config(spec: Dict[str, Any]) -> Any:
-    """Build a bounded CrewAI ``PlanningConfig`` for agent reasoning from the spec.
+def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
+    """Put the resolved reasoning budget on the agent's own LLM, when supported.
 
-    Kasal's reasoning toggle (``spec['reasoning']``) plus an optional
-    ``spec['reasoning_config']`` override dict (effort + step/replan caps) map onto
-    CrewAI's PlanningConfig. We pass this explicitly instead of the deprecated
-    ``reasoning=True`` flag, which would auto-migrate to a PlanningConfig with the
-    expansive defaults above. Falls back to ``max_reasoning_attempts`` (legacy/flow
-    field) for the refine cap when present.
+    Kasal's reasoning control (sidebar "Reasoning" → effort) is a THINKING BUDGET,
+    not a planner: the engine has no plan/replan loop. ``reasoning_effort`` is
+    emitted by ``kasal_engine.llm.completion`` as ``reasoning_effort`` on Chat
+    Completions and as ``reasoning: {"effort": ...}`` on the Responses API.
+
+    Capability-gated: models that do not accept the parameter would 400 on strict
+    gateways, so for them the effort is dropped with a debug log and the run
+    behaves exactly as before. Never raises — a reasoning preference must not be
+    able to fail an execution.
     """
-    from kasal_engine.core import PlanningConfig
+    if llm is None or isinstance(llm, str):
+        return
+    if not spec.get('reasoning'):
+        return
+    try:
+        _apply_reasoning_effort_unsafe(llm, spec, label)
+    except Exception as e:  # noqa: BLE001 — a reasoning preference must never fail a run
+        logger.debug(f"Could not apply reasoning effort for agent {label}: {e}")
+
+
+def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -> None:
+    """Body of :func:`_apply_reasoning_effort`; see it for the contract."""
+    from src.utils.model_config import (
+        VALID_REASONING_EFFORTS,
+        model_supports_reasoning_effort,
+    )
 
     rc = spec.get('reasoning_config') or {}
-    d = DEFAULT_REASONING_CONFIG
+    effort = (rc.get('reasoning_effort') or DEFAULT_REASONING_EFFORT)
+    effort = str(effort).strip().lower()
+    if effort not in VALID_REASONING_EFFORTS:
+        logger.debug(
+            f"Ignoring unknown reasoning effort {effort!r} for agent {label}; "
+            f"expected one of {VALID_REASONING_EFFORTS}"
+        )
+        return
 
-    # max_attempts: reasoning_config wins, then legacy max_reasoning_attempts, then default.
-    max_attempts = rc.get('max_attempts')
-    if max_attempts is None:
-        max_attempts = spec.get('max_reasoning_attempts')
-    if max_attempts is None:
-        max_attempts = d['max_attempts']
+    # Prefer the RESOLVED provider model on the built LLM (e.g. 'databricks/gpt-5-2',
+    # 'openai/gpt-5.2') and fall back to the spec's model key.
+    model_name = getattr(llm, 'model', None)
+    if not isinstance(model_name, str) or not model_name:
+        spec_llm = spec.get('llm')
+        model_name = spec_llm.get('model') if isinstance(spec_llm, dict) else spec_llm
 
-    # max_replans / step_timeout accept 0 / None as meaningful, so check membership.
-    max_replans = rc['max_replans'] if rc.get('max_replans') is not None else d['max_replans']
-    step_timeout = rc['step_timeout'] if 'step_timeout' in rc else d['step_timeout']
+    if not model_supports_reasoning_effort(model_name):
+        logger.debug(
+            f"Model {model_name!r} has no native reasoning budget — dropping "
+            f"reasoning_effort={effort!r} for agent {label}"
+        )
+        return
 
-    return PlanningConfig(
-        reasoning_effort=rc.get('reasoning_effort') or d['reasoning_effort'],
-        max_attempts=max_attempts,
-        max_steps=rc.get('max_steps') or d['max_steps'],
-        max_step_iterations=rc.get('max_step_iterations') or d['max_step_iterations'],
-        step_timeout=step_timeout,
-        max_replans=max_replans,
+    llm.reasoning_effort = effort
+    logger.info(
+        f"Reasoning budget for agent {label}: reasoning_effort={effort!r} on model {model_name}"
     )
 
 
@@ -123,6 +129,10 @@ async def build_agent_llm(
     ``default_model`` is the per-path default (crew: gpt-4o; flow:
     databricks-llama-4-maverick). Returns the configured LLM, or a model-name
     fallback if configuration fails (never silently drops the isolation error).
+
+    When ``spec['reasoning']`` is set, the resolved reasoning budget
+    (``spec['reasoning_config']['reasoning_effort']``) is stamped onto the built
+    LLM for models that natively support it — see ``_apply_reasoning_effort``.
     """
     from src.core.llm_manager import LLMManager
 
@@ -192,6 +202,9 @@ async def build_agent_llm(
         except Exception as stream_err:  # noqa: BLE001
             logger.debug(f"Token streaming not enabled for agent {label}: {stream_err}")
 
+    # Reasoning = the model's native thinking budget, applied to the agent's own LLM.
+    _apply_reasoning_effort(llm, spec, label=label)
+
     return llm
 
 
@@ -236,16 +249,10 @@ def build_agent_kwargs(
             agent_kwargs[param] = spec[param]
             logger.info(f"Setting agent parameter '{param}' to {spec[param]} for agent {label}")
 
-    # Agent reasoning (CrewAI 1.14.x). The deprecated reasoning=True flag auto-migrates
-    # to a PlanningConfig with expansive defaults (unbounded refine loop, up to ~300 step
-    # iterations, no wall-clock cap). We pass an explicit, bounded PlanningConfig instead
-    # — and do NOT set reasoning/max_reasoning_attempts (passing both makes CrewAI drop the
-    # cap). Shared builder => crew and flow get identical, bounded reasoning behavior.
-    if spec.get('reasoning'):
-        agent_kwargs['planning_config'] = _build_planning_config(spec)
-        logger.info(
-            f"Reasoning enabled for agent {label}: planning_config={agent_kwargs['planning_config']!r}"
-        )
+    # NOTE: reasoning is NOT an Agent kwarg. Kasal's reasoning control is the model's
+    # native thinking budget and is applied to the agent's LLM in build_agent_llm
+    # (_apply_reasoning_effort). The engine has no plan/replan loop, so Agent's inert
+    # planning / planning_config / reasoning fields are deliberately never set.
 
     # Handle prompt templates. CrewAI's Agent field names are system_template /
     # prompt_template / response_template — the old system_prompt / task_prompt /

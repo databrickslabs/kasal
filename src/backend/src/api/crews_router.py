@@ -38,7 +38,7 @@ def _crew_to_response(crew) -> CrewResponse:
     """Serialize a Crew model to CrewResponse including ALL execution-config fields.
 
     Building CrewResponse field-by-field previously listed only id/name/ids/nodes/
-    edges/timestamps, silently dropping process/planning/reasoning/llms (and now
+    edges/timestamps, silently dropping process/reasoning/llms (and now
     reasoning_config) on every GET/POST/PUT — so a crew saved to the catalog
     reloaded with empty/default execution config. Centralized here so the response
     can never diverge from the model again.
@@ -55,8 +55,6 @@ def _crew_to_response(crew) -> CrewResponse:
         # getattr defaults: real Crew models always have these columns; defensive
         # against partial stubs (and forward-compatible if a column is missing).
         process=getattr(crew, "process", None) or "sequential",
-        planning=getattr(crew, "planning", False),
-        planning_llm=getattr(crew, "planning_llm", None),
         reasoning=getattr(crew, "reasoning", False),
         reasoning_llm=getattr(crew, "reasoning_llm", None),
         reasoning_config=getattr(crew, "reasoning_config", None),

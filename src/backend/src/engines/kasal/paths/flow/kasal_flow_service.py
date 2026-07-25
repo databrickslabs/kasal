@@ -168,7 +168,6 @@ class KasalFlowService:
                 'flow_config': config.get('flow_config', {}) if config else {},
                 'inputs': config.get('inputs', {}) if config else {},
                 'model': config.get('model') if config else None,
-                'planning': config.get('planning') if config else None,
                 # Checkpoint resume parameters
                 'resume_from_flow_uuid': resume_from_flow_uuid,
                 'resume_from_execution_id': resume_from_execution_id,

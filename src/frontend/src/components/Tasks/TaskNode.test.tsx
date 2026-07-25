@@ -47,7 +47,6 @@ vi.mock('../../store/taskExecutionStore', () => ({
     const state = {
       taskStates: new Map(),
       getTaskStatus: vi.fn(() => null),
-      isPlanningPhase: false,
     };
     return selector(state);
   }),
@@ -551,16 +550,12 @@ describe('TaskNode - onTaskSaved node update logic', () => {
 });
 
 /**
- * Tests for the planning phase indicator logic (pure function tests).
+ * Tests for the task status indicator logic (pure function tests).
  * These verify the status icon and style selection logic.
  */
-describe('TaskNode - Planning indicator logic', () => {
+describe('TaskNode - status indicator logic', () => {
   // Replicates the getStatusIcon selection logic
-  const selectIndicator = (
-    isPlanningPhase: boolean,
-    taskStatus: { status: string } | null
-  ): string => {
-    if (isPlanningPhase && !taskStatus) return 'planning';
+  const selectIndicator = (taskStatus: { status: string } | null): string => {
     if (!taskStatus) return 'none';
     switch (taskStatus.status) {
       case 'planning': return 'planning';
@@ -572,11 +567,7 @@ describe('TaskNode - Planning indicator logic', () => {
   };
 
   // Replicates the style selection logic
-  const selectColor = (
-    isPlanningPhase: boolean,
-    taskStatus: { status: string } | null
-  ): string => {
-    if (isPlanningPhase && !taskStatus) return 'warning';
+  const selectColor = (taskStatus: { status: string } | null): string => {
     if (taskStatus?.status === 'planning') return 'warning';
     if (taskStatus?.status === 'running') return 'info';
     if (taskStatus?.status === 'completed') return 'success';
@@ -584,113 +575,44 @@ describe('TaskNode - Planning indicator logic', () => {
     return 'primary';
   };
 
-  it('should select planning indicator when isPlanningPhase and no task status', () => {
-    expect(selectIndicator(true, null)).toBe('planning');
-  });
-
-  it('should select no indicator when not planning and no task status', () => {
-    expect(selectIndicator(false, null)).toBe('none');
+  it('should select no indicator when there is no task status', () => {
+    expect(selectIndicator(null)).toBe('none');
   });
 
   it('should select running indicator when task is running', () => {
-    expect(selectIndicator(false, { status: 'running' })).toBe('running');
-  });
-
-  it('should select running indicator when task is running even during planning', () => {
-    expect(selectIndicator(true, { status: 'running' })).toBe('running');
+    expect(selectIndicator({ status: 'running' })).toBe('running');
   });
 
   it('should select planning indicator for explicit planning status', () => {
-    expect(selectIndicator(false, { status: 'planning' })).toBe('planning');
+    expect(selectIndicator({ status: 'planning' })).toBe('planning');
   });
 
   it('should select completed indicator when task completed', () => {
-    expect(selectIndicator(false, { status: 'completed' })).toBe('completed');
+    expect(selectIndicator({ status: 'completed' })).toBe('completed');
   });
 
   it('should select failed indicator when task failed', () => {
-    expect(selectIndicator(false, { status: 'failed' })).toBe('failed');
-  });
-
-  it('should use warning color for planning phase', () => {
-    expect(selectColor(true, null)).toBe('warning');
+    expect(selectIndicator({ status: 'failed' })).toBe('failed');
   });
 
   it('should use warning color for explicit planning status', () => {
-    expect(selectColor(false, { status: 'planning' })).toBe('warning');
+    expect(selectColor({ status: 'planning' })).toBe('warning');
   });
 
   it('should use info color for running', () => {
-    expect(selectColor(false, { status: 'running' })).toBe('info');
+    expect(selectColor({ status: 'running' })).toBe('info');
   });
 
   it('should use success color for completed', () => {
-    expect(selectColor(false, { status: 'completed' })).toBe('success');
+    expect(selectColor({ status: 'completed' })).toBe('success');
   });
 
   it('should use error color for failed', () => {
-    expect(selectColor(false, { status: 'failed' })).toBe('error');
+    expect(selectColor({ status: 'failed' })).toBe('error');
   });
 
-  it('should use primary color when no status and not planning', () => {
-    expect(selectColor(false, null)).toBe('primary');
-  });
-});
-
-/**
- * Tests for the taskExecutionStore isPlanningPhase state management.
- */
-describe('TaskExecutionStore - isPlanningPhase', () => {
-  // Replicate the store's planning phase logic
-  const createMockStore = () => {
-    let isPlanningPhase = false;
-    const taskStates = new Map<string, { status: string; task_name: string }>();
-
-    return {
-      get isPlanningPhase() { return isPlanningPhase; },
-      setIsPlanningPhase: (value: boolean) => { isPlanningPhase = value; },
-      clearTaskStates: () => {
-        taskStates.clear();
-      },
-      transition: (id: string, status: string, metadata?: { task_name?: string }) => {
-        taskStates.set(id, { status, task_name: metadata?.task_name || '' });
-        return true;
-      },
-      getTaskStatus: (id: string) => taskStates.get(id) || null,
-    };
-  };
-
-  it('should start with isPlanningPhase = false', () => {
-    const store = createMockStore();
-    expect(store.isPlanningPhase).toBe(false);
-  });
-
-  it('should set isPlanningPhase to true', () => {
-    const store = createMockStore();
-    store.setIsPlanningPhase(true);
-    expect(store.isPlanningPhase).toBe(true);
-  });
-
-  it('should set isPlanningPhase back to false', () => {
-    const store = createMockStore();
-    store.setIsPlanningPhase(true);
-    store.setIsPlanningPhase(false);
-    expect(store.isPlanningPhase).toBe(false);
-  });
-
-  it('should preserve isPlanningPhase when clearTaskStates is called', () => {
-    const store = createMockStore();
-    store.setIsPlanningPhase(true);
-    store.clearTaskStates();
-    expect(store.isPlanningPhase).toBe(true); // clearTaskStates only clears task states, not planning flag
-  });
-
-  it('should allow transition while in planning phase', () => {
-    const store = createMockStore();
-    store.setIsPlanningPhase(true);
-    store.transition('task-1', 'running', { task_name: 'Test Task' });
-    expect(store.getTaskStatus('task-1')).toEqual(expect.objectContaining({ status: 'running', task_name: 'Test Task' }));
-    expect(store.isPlanningPhase).toBe(true); // Planning phase persists until explicitly cleared
+  it('should use primary color when there is no status', () => {
+    expect(selectColor(null)).toBe('primary');
   });
 });
 

@@ -8,8 +8,70 @@ from sqlalchemy.orm import Session
 
 from src.utils.model_config import (
     get_model_config,
-    get_max_rpm_for_model
+    get_max_rpm_for_model,
+    model_supports_reasoning_effort,
 )
+
+
+class TestModelSupportsReasoningEffort:
+    """The capability gate for the model's NATIVE reasoning budget.
+
+    Kasal's reasoning control sets ``reasoning_effort`` (chat completions) /
+    ``reasoning.effort`` (Responses API). Sending it to an endpoint that does not
+    know the parameter is a 400 on strict gateways, so the gate must be a
+    conservative allow-list: anything unproven is dropped silently.
+    """
+
+    @pytest.mark.parametrize("model", [
+        "databricks-gpt-5",
+        "databricks-gpt-5-2",
+        "databricks-gpt-5-4-mini",
+        "databricks-gpt-5-3-codex",
+        "gpt-5",
+        "openai/gpt-5.2",
+        "databricks/gpt-5-2",       # provider-prefixed, as built on the LLM
+        "databricks-gpt-oss-120b",
+        "o3", "o3-mini", "o4-mini",
+    ])
+    def test_supported_models(self, model):
+        assert model_supports_reasoning_effort(model) is True
+
+    @pytest.mark.parametrize("model", [
+        None, "",
+        # Anthropic uses `thinking: {budget_tokens}`, not reasoning_effort.
+        "databricks-claude-sonnet-4-5",
+        "databricks-claude-opus-4-8",
+        "claude-opus-4-20250514",
+        # No reasoning_effort parameter on these request surfaces.
+        "databricks-gemini-3-5-flash",
+        "kimi-k2.7-code",
+        "deepseek-reasoner",
+        "Qwen3-Coder-30B-A3B-Instruct",
+        "databricks-meta-llama-3-3-70b-instruct",
+        "gpt-4o",
+        # o1 predates reasoning_effort.
+        "o1", "o1-preview", "o1-mini",
+        # Deep-research models have a fixed internal budget.
+        "o3-deep-research-2025-06-26",
+        "o4-mini-deep-research-2025-06-26",
+    ])
+    def test_unsupported_models(self, model):
+        assert model_supports_reasoning_effort(model) is False
+
+    def test_kill_switch_env_disables_everything(self, monkeypatch):
+        monkeypatch.setenv("KASAL_REASONING_EFFORT_DISABLED", "true")
+        assert model_supports_reasoning_effort("databricks-gpt-5-2") is False
+
+    def test_env_allow_list_extends_the_gate(self, monkeypatch):
+        monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "my-endpoint, other")
+        assert model_supports_reasoning_effort("prod-my-endpoint-v2") is True
+        assert model_supports_reasoning_effort("other") is True
+        assert model_supports_reasoning_effort("unrelated") is False
+
+    def test_env_allow_list_beats_the_deep_research_exclusion(self, monkeypatch):
+        """An explicit operator override is honored over the built-in exclusions."""
+        monkeypatch.setenv("KASAL_REASONING_EFFORT_MODELS", "deep-research")
+        assert model_supports_reasoning_effort("o3-deep-research-2025-06-26") is True
 
 
 class TestGetModelConfig:

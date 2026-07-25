@@ -204,8 +204,9 @@ class DatabricksAppExporter(BaseExporter):
             "{{ENV_TOOL_KEYS}}": self._env_keys(tools, mcp_servers),
             # Crew execution settings (mirror Kasal's runtime).
             "{{PROCESS}}": crew_data.get("process") or "sequential",
-            "{{PLANNING}}": "True" if crew_data.get("planning") else "False",
-            "{{PLANNING_LLM}}": repr(crew_data.get("planning_llm") or None),
+            # No PLANNING / PLANNING_LLM substitution: Kasal removed the prose
+            # planner, and the app template no longer references either placeholder
+            # (it never passes `planning=` to Crew at all).
             "{{REASONING}}": "True" if crew_data.get("reasoning") else "False",
             "{{MANAGER_LLM}}": repr(crew_data.get("manager_llm") or None),
             # CrewAI's built-in memory embeds + extracts via OpenAI by default,

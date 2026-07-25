@@ -216,6 +216,8 @@ async def test_broadcast_execution_created_builds_correct_event(monkeypatch):
         "execution_type": "crew",
         "created_at": "2025-01-15T10:00:00",
         "group_id": "grp-1",
+        # Legacy key: a pre-removal caller could still pass this. It must not be
+        # echoed into the SSE payload — Kasal no longer models planning.
         "planning": True,
     }
 
@@ -231,7 +233,7 @@ async def test_broadcast_execution_created_builds_correct_event(monkeypatch):
     assert event.data["execution_type"] == "crew"
     assert event.data["created_at"] == "2025-01-15T10:00:00"
     assert event.data["group_id"] == "grp-1"
-    assert event.data["planning"] is True
+    assert "planning" not in event.data
     assert "updated_at" in event.data
 
 

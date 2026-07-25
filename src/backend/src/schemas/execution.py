@@ -40,8 +40,7 @@ class CrewConfig(BaseModel):
         tasks_yaml: Dictionary of task configurations in YAML format.
             Each task defines description, expected output, and agent assignment.
         inputs: Input values to be passed to the crew execution.
-        planning: Enable planning mode for strategic task orchestration.
-        reasoning: Enable reasoning mode for enhanced decision-making.
+        reasoning: Enable the model's native reasoning budget for the crew's agents.
         model: LLM model identifier (e.g., "gpt-4", "claude-3").
         llm_provider: Provider name (openai, anthropic, etc.).
         execution_type: Type of execution ("crew" or "flow").
@@ -66,8 +65,7 @@ class CrewConfig(BaseModel):
     agents_yaml: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Agent configuration in YAML format (optional for flows)")
     tasks_yaml: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Task configuration in YAML format (optional for flows)")
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the execution")
-    planning: bool = Field(False, description="Whether to enable planning")
-    reasoning: bool = Field(False, description="Whether to enable reasoning")
+    reasoning: bool = Field(False, description="Whether to enable the model's native reasoning budget")
     model: Optional[str] = Field(None, description="LLM model to use")
     llm_provider: Optional[str] = Field(None, description="LLM provider to use (openai, anthropic, etc)")
     execution_type: Optional[str] = Field("crew", description="Type of execution (crew or flow)")
@@ -203,8 +201,6 @@ class FlowConfig(BaseModel):
         tools: List of tools available to all crews in the flow.
         max_rpm: Rate limiting for API calls (requests per minute).
         output_dir: Directory for storing flow outputs and artifacts.
-        planning: Enable strategic planning across the flow.
-        planning_llm: Specific LLM for planning operations.
         reasoning: Enable reasoning for decision-making.
         reasoning_llm: Specific LLM for reasoning operations.
     
@@ -233,8 +229,6 @@ class FlowConfig(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="List of tools to make available")
     max_rpm: Optional[int] = Field(10, description="Maximum requests per minute")
     output_dir: Optional[str] = Field(None, description="Directory for flow execution outputs")
-    planning: Optional[bool] = Field(False, description="Whether to enable planning")
-    planning_llm: Optional[str] = Field(None, description="LLM to use for planning if different from main model")
     reasoning: Optional[bool] = Field(False, description="Whether to enable reasoning")
     reasoning_llm: Optional[str] = Field(None, description="LLM to use for reasoning if different from main model")
 
@@ -261,8 +255,6 @@ class FlowConfig(BaseModel):
             "tools": self.tools,
             "max_rpm": self.max_rpm,
             "output_dir": self.output_dir,
-            "planning": self.planning,
-            "planning_llm": self.planning_llm,
             "reasoning": self.reasoning,
             "reasoning_llm": self.reasoning_llm
         }

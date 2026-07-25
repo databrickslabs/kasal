@@ -1,25 +1,18 @@
 import { Node, Edge } from 'reactflow';
 import { TaskNode, AgentNode } from './crew';
 
-// Agent-reasoning controls (CrewAI PlanningConfig). Defined here (a leaf types
-// module) so both the crew wire types and the execution store can share it
-// without an import cycle.
+// Reasoning controls. Defined here (a leaf types module) so both the crew wire
+// types and the execution store can share it without an import cycle. The backend
+// maps `reasoning_effort` onto the model's native reasoning/thinking budget.
 export interface ReasoningConfig {
-  reasoning_effort: 'low' | 'medium' | 'high';
-  max_attempts: number;
-  max_steps: number;
-  max_step_iterations: number;
-  step_timeout: number;
-  max_replans: number;
+  reasoning_effort?: 'low' | 'medium' | 'high';
 }
 
 export interface CrewExecutionConfig {
   process?: 'sequential' | 'hierarchical';
-  planning?: boolean;
-  planning_llm?: string;
   reasoning?: boolean;
   reasoning_llm?: string;
-  reasoning_config?: ReasoningConfig;  // PlanningConfig overrides (effort, step/replan caps)
+  reasoning_config?: ReasoningConfig;  // Model reasoning/thinking budget
   manager_llm?: string;
   tool_configs?: Record<string, any>;
   memory?: boolean;

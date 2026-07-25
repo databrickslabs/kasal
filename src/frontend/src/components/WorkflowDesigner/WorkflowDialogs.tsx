@@ -57,7 +57,6 @@ interface WorkflowDialogsProps {
   tools: any[];
   selectedTools: any[];
   onToolsChange: (tools: any[]) => void;
-  planningEnabled: boolean;
   saveCrewRef: React.RefObject<HTMLButtonElement>;
 
   // Form handlers
@@ -110,7 +109,6 @@ const WorkflowDialogs: React.FC<WorkflowDialogsProps> = ({
   tools,
   selectedTools,
   onToolsChange,
-  planningEnabled,
   saveCrewRef,
 
   // Form handlers
@@ -165,7 +163,6 @@ const WorkflowDialogs: React.FC<WorkflowDialogsProps> = ({
         onClose={() => setIsScheduleDialogOpen(false)}
         nodes={nodes}
         edges={edges}
-        planningEnabled={planningEnabled}
         selectedModel={selectedModel}
       />
 

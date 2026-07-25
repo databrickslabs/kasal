@@ -690,16 +690,12 @@ class FlowRunnerService:
 
         # Check for crew config models
         crew_config = config.get('crew', {})
-        if 'planning_llm' in crew_config:
-            model_names.append(crew_config['planning_llm'])
         if 'reasoning_llm' in crew_config:
             model_names.append(crew_config['reasoning_llm'])
         if 'manager_llm' in crew_config:
             model_names.append(crew_config['manager_llm'])
 
         # Check for models in top-level config (alternative location)
-        if 'planning_llm' in config:
-            model_names.append(config['planning_llm'])
         if 'reasoning_llm' in config:
             model_names.append(config['reasoning_llm'])
         if 'manager_llm' in config:

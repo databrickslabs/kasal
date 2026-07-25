@@ -199,12 +199,21 @@ class AgentConfig:
             'verbose', 'cache', 'max_retry_limit',
             'max_iter', 'max_rpm', 'code_execution_mode',
             'max_context_window_size', 'max_tokens',
-            'reasoning', 'max_reasoning_attempts',
+            # reasoning + reasoning_config = the model's native reasoning budget,
+            # applied to this agent's LLM by the shared builder. (The legacy
+            # max_reasoning_attempts cap belonged to the removed replan loop.)
+            'reasoning', 'reasoning_config',
             'inject_date', 'date_format',
         ):
             val = getattr(agent_data, key, None)
             if val is not None:
                 spec[key] = val
+        # A flow agent node carries reasoning_config but no separate `reasoning`
+        # flag (unlike the crew path, where CrewPreparation fans out both from the
+        # crew). Treat a supplied budget as the enable signal, otherwise the config
+        # would be plumbed all the way to the builder and then ignored.
+        if spec.get('reasoning_config') and 'reasoning' not in spec:
+            spec['reasoning'] = True
         for key in ('system_template', 'prompt_template', 'response_template'):
             val = getattr(agent_data, key, None)
             if val:

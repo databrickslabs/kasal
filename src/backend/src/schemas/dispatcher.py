@@ -97,8 +97,9 @@ class DispatcherRequest(BaseModel):
     chat_mode_type: Optional[Literal["chat", "research", "deep"]] = Field(
         "chat",
         description="ChatMode answer mode: 'chat' = single light agent (Agent.kickoff_async, "
-        "no crew/planning/reasoning); 'research' = crew with reasoning; 'deep' = crew with "
-        "planning + reasoning. Defaults to 'chat' (the fast single-agent path).",
+        "no crew, no extra thinking); 'research' = crew with a medium reasoning budget; "
+        "'deep' = crew with a high reasoning budget. Defaults to 'chat' (the fast "
+        "single-agent path).",
     )
 
     model_config = ConfigDict(

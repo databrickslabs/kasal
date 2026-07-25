@@ -490,12 +490,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         }
         store.setProcessType(finalProcessType);
 
-        if (selectedCrew.planning !== undefined) {
-          store.setPlanningEnabled(selectedCrew.planning);
-        }
-        if (selectedCrew.planning_llm) {
-          store.setPlanningLLM(selectedCrew.planning_llm);
-        }
         if (selectedCrew.reasoning !== undefined) {
           store.setReasoningEnabled(selectedCrew.reasoning);
         }
@@ -526,8 +520,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         if (activeTabId) {
           const tabConfig: TabExecutionConfig = {
             processType: finalProcessType,
-            planningEnabled: selectedCrew.planning,
-            planningLLM: selectedCrew.planning_llm,
             reasoningEnabled: selectedCrew.reasoning,
             reasoningLLM: selectedCrew.reasoning_llm,
             reasoningConfig: selectedCrew.reasoning_config,

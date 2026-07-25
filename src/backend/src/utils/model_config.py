@@ -6,12 +6,75 @@ validating models, and retrieving default settings.
 """
 
 import logging
+import os
+import re
 from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+# Models whose request surface accepts a native reasoning budget:
+#   - Chat Completions: `reasoning_effort: "low"|"medium"|"high"`
+#   - Responses API:    `reasoning: {"effort": ...}`
+# (see kasal_engine/llm/completion.py — the param is only emitted when set).
+# This is a deliberately CONSERVATIVE allow-list of substrings matched against the
+# resolved provider model name: sending the param to an endpoint that does not know
+# it is a 400 on strict gateways, so anything not proven here is dropped silently.
+# Excluded on purpose:
+#   - Anthropic Claude (Databricks or direct): uses `thinking: {budget_tokens}`,
+#     not `reasoning_effort`.
+#   - Gemini / Kimi / DeepSeek / self-hosted vLLM: no `reasoning_effort` param
+#     (Kimi K2.7 cannot even disable thinking).
+#   - o1 / o1-preview / o1-mini: predate `reasoning_effort`.
+#   - *deep-research*: fixed internal budget, rejects an explicit effort.
+_REASONING_EFFORT_SUBSTRINGS = ("gpt-5", "gpt5", "gpt-oss")
+# o3 / o4 families (o3, o3-mini, o4-mini, ...) do accept `reasoning_effort`.
+_REASONING_EFFORT_PREFIX_RE = re.compile(r"^o[34](\b|[-_.]|$)")
+
+VALID_REASONING_EFFORTS = ("low", "medium", "high")
+
+
+def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
+    """Return True when the model accepts a native reasoning-budget parameter.
+
+    ``model_name`` may carry a provider prefix (``databricks/gpt-5-2``,
+    ``openai/gpt-5.2``) — the prefix is stripped before matching.
+
+    Overrides (both read at call time so they work in execution subprocesses):
+      - ``KASAL_REASONING_EFFORT_DISABLED=true`` — kill switch, always False.
+      - ``KASAL_REASONING_EFFORT_MODELS`` — comma-separated extra substrings to
+        treat as supported (e.g. a workspace endpoint we cannot name here).
+    """
+    # Defensive isinstance check: callers pass whatever the built LLM reports as
+    # its model, which is not guaranteed to be a str.
+    if not model_name or not isinstance(model_name, str):
+        return False
+    if os.getenv("KASAL_REASONING_EFFORT_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+        return False
+
+    m = model_name.lower()
+    # Strip a provider prefix ("databricks/", "openai/", ...) if present.
+    if "/" in m:
+        m = m.rpartition("/")[2]
+
+    extra = [
+        s.strip().lower()
+        for s in os.getenv("KASAL_REASONING_EFFORT_MODELS", "").split(",")
+        if s.strip()
+    ]
+    if any(s in m for s in extra):
+        return True
+
+    if "deep-research" in m:
+        return False
+    if any(s in m for s in _REASONING_EFFORT_SUBSTRINGS):
+        return True
+    if _REASONING_EFFORT_PREFIX_RE.match(m):
+        return True
+    return False
 
 
 def model_rejects_temperature(model_name: Optional[str]) -> bool:

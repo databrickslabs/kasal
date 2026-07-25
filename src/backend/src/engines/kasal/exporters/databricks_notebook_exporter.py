@@ -65,14 +65,13 @@ class DatabricksNotebookExporter(BaseExporter):
         deploy_catalog = crew_data.get('databricks_catalog') or 'main'
         deploy_schema = crew_data.get('databricks_schema') or 'agents'
 
-        # Crew-level execution settings (process, planning, reasoning, manager,
-        # memory) so exports match Kasal's runtime instead of forcing sequential.
+        # Crew-level execution settings (process, manager, memory) so exports match
+        # Kasal's runtime instead of forcing sequential. NOTE: planning /
+        # planning_llm / reasoning are deliberately absent — the prose planner was
+        # removed and reasoning is now the model's own native reasoning budget, so
+        # there is no crew-level scaffold to export.
         crew_config = {
             'process': crew_data.get('process') or 'sequential',
-            'planning': bool(crew_data.get('planning')),
-            'planning_llm': crew_data.get('planning_llm'),
-            'reasoning': bool(crew_data.get('reasoning')),
-            'reasoning_llm': crew_data.get('reasoning_llm'),
             'manager_llm': crew_data.get('manager_llm'),
             'memory': crew_data.get('memory', True),
         }
@@ -1052,28 +1051,13 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
         _proc = crew_config.get('process') or 'sequential'
         deploy_process = 'Process.hierarchical' if _proc == 'hierarchical' else 'Process.sequential'
 
-        # Reasoning → a bounded PlanningConfig (built once, shared by agents).
-        # reasoning_llm drives the reasoning loop; otherwise the agent's own LLM.
-        reasoning_setup = ''
-        reasoning_arg = ''
-        if crew_config.get('reasoning'):
-            _rl = crew_config.get('reasoning_llm')
-            _rl_kw = ("llm=self._build_llm('" + str(_rl) + "')") if _rl else ''
-            reasoning_setup = (
-                "        from crewai.agent.planning_config import PlanningConfig\n"
-                "        _planning_cfg = PlanningConfig(reasoning_effort='low', max_attempts=1, "
-                "max_steps=3, max_step_iterations=3, step_timeout=20, max_replans=0"
-                + ((", " + _rl_kw) if _rl_kw else "") + ")\n"
-            )
-            reasoning_arg = ',\n                planning_config=_planning_cfg'
+        # NOTE: no PlanningConfig / planning scaffold is emitted. Kasal removed the
+        # prose planner (inert in the engine) and reasoning is now the model's own
+        # native reasoning budget, so the served crew needs no extra setup.
 
         crew_extra_lines = []
         if _proc == 'hierarchical' and crew_config.get('manager_llm'):
             crew_extra_lines.append("            manager_llm=self._build_llm('" + str(crew_config['manager_llm']) + "'),")
-        if crew_config.get('planning'):
-            crew_extra_lines.append("            planning=True,")
-            if crew_config.get('planning_llm'):
-                crew_extra_lines.append("            planning_llm=self._build_llm('" + str(crew_config['planning_llm']) + "'),")
         crew_extra_lines.append("            memory=" + ("True" if crew_config.get('memory', True) else "False") + ",")
         crew_extra_args = ("\n" + "\n".join(crew_extra_lines)) if crew_extra_lines else ""
 
@@ -1162,7 +1146,7 @@ class CrewAgentWrapper(ResponsesAgent):
 
     def _build_llm(self, llm_model, temperature=0.7):
         # Codex-aware LLM builder (Responses API for gpt-5-3-codex), reused for
-        # agents, manager_llm, planning_llm and LLM guardrails.
+        # agents, manager_llm and LLM guardrails.
         if not llm_model.startswith('databricks/'):
             llm_model = 'databricks/' + llm_model
         bare_model = llm_model.replace('databricks/', '')
@@ -1187,7 +1171,7 @@ class CrewAgentWrapper(ResponsesAgent):
         agents_config = yaml.safe_load(AGENTS_YAML)
         tasks_config = yaml.safe_load(TASKS_YAML)
         agents_list = []
-{reasoning_setup}{mcp_setup_code}        for name, data in agents_config.items():
+{mcp_setup_code}        for name, data in agents_config.items():
             llm = self._build_llm(data.get('llm', 'databricks/databricks-llama-4-maverick'), data.get('temperature', 0.7))
             agent = Agent(
                 role=data['role'],
@@ -1195,7 +1179,7 @@ class CrewAgentWrapper(ResponsesAgent):
                 backstory=data['backstory'],
                 llm=llm,
                 verbose=data.get('verbose', True),
-                allow_delegation=data.get('allow_delegation', False){reasoning_arg}{mcp_tools_arg}
+                allow_delegation=data.get('allow_delegation', False){mcp_tools_arg}
             )
             agents_list.append(agent)
         tasks_list = []

@@ -46,8 +46,10 @@ if _AVAILABLE:
                 name = (event.task_name or "").strip() or " ".join(
                     str(getattr(getattr(event, "task", None), "description", "") or "").split()
                 )
-                # The planner (PLANNING=True) emits a task whose name/description is
-                # its internal prompt — label it rather than dumping it.
+                # Defensive: exported apps no longer enable CrewAI planning, but if a
+                # hand-edited copy turns it back on, the planner emits a task whose
+                # name/description is its internal prompt — label it rather than
+                # dumping the prompt into the progress feed.
                 if name[:19].lower().startswith("based on these task"):
                     progress.report("Planning the work…")
                     return
