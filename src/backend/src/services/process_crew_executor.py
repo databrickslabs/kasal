@@ -1097,6 +1097,25 @@ def run_crew_in_process(
                             f"[SUBPROCESS] Event pipe registration failed (non-fatal): {pipe_err}"
                         )
 
+                    # Crash-resume checkpointing: persist every completed task's
+                    # output so a killed/crashed run can resume without redoing
+                    # finished tasks (POST /executions/{id}/resume). Fail-open.
+                    try:
+                        from src.engines.kasal.callbacks.crew_checkpoint import (
+                            CrewTaskCheckpointRecorder,
+                        )
+
+                        CrewTaskCheckpointRecorder(execution_id, crew).register(
+                            crewai_event_bus
+                        )
+                        async_logger.info(
+                            f"[SUBPROCESS] Crew task checkpoint recorder registered for {execution_id}"
+                        )
+                    except Exception as ckpt_err:
+                        async_logger.warning(
+                            f"[SUBPROCESS] Checkpoint recorder not installed (non-fatal): {ckpt_err}"
+                        )
+
                     # Tool-approval gates: approval-flagged tools pause and wait
                     # for the human (approval row + hitl_request over the pipe).
                     try:
@@ -1406,10 +1425,27 @@ def run_crew_in_process(
                 # running event loop is detected (the agent executor returns a
                 # coroutine and raises). We are already inside this subprocess's
                 # asyncio loop (prepare_and_run), so use the async kickoff.
+                # Resume path: completed-task outputs from a previous crashed
+                # attempt, threaded from crew_config by the resume service. The
+                # engine validates them against the task list and restores the
+                # completed prefix (or runs from scratch on any mismatch).
+                resume_checkpoint = (
+                    crew_config.get("resume_checkpoint")
+                    if isinstance(crew_config, dict)
+                    else None
+                )
+                if resume_checkpoint:
+                    async_logger.info(
+                        f"[SUBPROCESS] Resume checkpoint provided for {execution_id} "
+                        f"({len((resume_checkpoint.get('completed') or []))} completed task(s))"
+                    )
+
                 async def kickoff_fn():
                     if inputs:
-                        return await crew.kickoff_async(inputs=inputs)
-                    return await crew.kickoff_async()
+                        return await crew.kickoff_async(
+                            inputs=inputs, from_checkpoint=resume_checkpoint
+                        )
+                    return await crew.kickoff_async(from_checkpoint=resume_checkpoint)
 
                 try:
                     result = await execute_with_mlflow_trace_async(

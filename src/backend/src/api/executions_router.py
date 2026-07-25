@@ -402,6 +402,50 @@ async def stop_execution(
     return StopExecutionResponse(**stop_result)
 
 
+@router.post("/{execution_id}/resume", response_model=ExecutionCreateResponse)
+async def resume_execution(
+    execution_id: str,
+    service: Annotated[ExecutionService, Depends(get_execution_service)],
+    group_context: GroupContextDep,
+):
+    """
+    Resume a crashed or stopped crew execution from its task checkpoint.
+
+    Only Admins and Editors can resume executions. The execution must be a
+    crew execution in a terminal-failed state (FAILED/STOPPED/CANCELLED).
+    Completed task outputs recorded during the original run are restored and
+    the crew continues from the first incomplete task; if no checkpoint was
+    recorded, the crew re-runs from scratch under the same execution id.
+
+    Args:
+        execution_id: The job_id of the execution to resume
+        service: Execution service (injected)
+        group_context: Group context for access control
+
+    Returns:
+        ExecutionCreateResponse with execution_id, status and run_name
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can resume executions")
+
+    try:
+        result = await service.resume_execution(
+            execution_id=execution_id,
+            group_context=group_context,
+        )
+    except ValueError as e:
+        message = str(e)
+        if "not found" in message:
+            raise NotFoundError(message)
+        raise HTTPException(status_code=409, detail=message)
+
+    return ExecutionCreateResponse(
+        execution_id=result["execution_id"],
+        status=result["status"],
+        run_name=result["run_name"],
+    )
+
+
 @router.post("/{execution_id}/force-stop", response_model=StopExecutionResponse)
 async def force_stop_execution(
     execution_id: str, group_context: GroupContextDep, db: SessionDep

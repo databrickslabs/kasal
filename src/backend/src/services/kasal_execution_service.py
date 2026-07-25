@@ -356,6 +356,16 @@ class KasalExecutionService:
             if workspace_scope is not None:
                 execution_config["memory_workspace_scope"] = workspace_scope
 
+            # Crash-resume: thread the completed-task checkpoint through to the
+            # subprocess (crew_config → Crew.kickoff(from_checkpoint=...)).
+            resume_checkpoint = getattr(config, "resume_checkpoint", None)
+            if resume_checkpoint:
+                execution_config["resume_checkpoint"] = resume_checkpoint
+                crew_logger.info(
+                    f"Execution {execution_id} resuming from checkpoint with "
+                    f"{len(resume_checkpoint.get('completed') or [])} completed task(s)"
+                )
+
             # Add group_id to config if group_context is provided
             if group_context and group_context.group_ids and len(group_context.group_ids) > 0:
                 execution_config["group_id"] = group_context.group_ids[0]

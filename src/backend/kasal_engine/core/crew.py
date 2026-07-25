@@ -47,6 +47,7 @@ class Crew(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     _inputs: dict[str, Any] | None = PrivateAttr(default=None)
+    _seeded_outputs: dict[int, TaskOutput] | None = PrivateAttr(default=None)
 
     id: UUID4 = Field(default_factory=uuid.uuid4, frozen=True)
     name: str | None = "crew"
@@ -120,6 +121,11 @@ class Crew(BaseModel):
         for agent in self.agents:
             agent.crew = self
 
+        # Checkpoint load happens AFTER input interpolation so restored task
+        # keys (hashed from interpolated description|expected_output) only
+        # match when the resume run uses the same inputs as the original.
+        self._seeded_outputs = self._load_checkpoint(from_checkpoint)
+
         crewai_event_bus.emit(
             self, CrewKickoffStartedEvent(crew_name=self.name, inputs=inputs)
         )
@@ -131,6 +137,8 @@ class Crew(BaseModel):
         except Exception:
             logger.exception("crew %r kickoff failed", self.name)
             raise
+        finally:
+            self._seeded_outputs = None
 
         usage = self._aggregate_token_usage()
         self.token_usage = usage
@@ -269,11 +277,128 @@ class Crew(BaseModel):
             except Exception:  # noqa: BLE001 — sinks must never break a run
                 logger.exception("output sink %r failed; skipping", sink)
 
+    def _load_checkpoint(self, from_checkpoint: Any) -> dict[int, TaskOutput] | None:
+        """Validate checkpoint data and rebuild TaskOutputs for completed tasks.
+
+        Expected shape: ``{"completed": [{"index": int, "task_key": str,
+        "output_raw": str, ...}, ...], "task_count": int}`` (``completed`` may
+        also be a dict keyed by stringified index). Only the contiguous prefix
+        of completed tasks is restored so context chaining ("all prior
+        outputs") is byte-identical to an uninterrupted run. Any validation
+        failure logs and returns None — the crew then runs from scratch.
+        """
+        if not from_checkpoint:
+            return None
+        if self.process != Process.sequential:
+            logger.warning(
+                "crew %r: checkpoint resume only supports the sequential "
+                "process (got %s); running from scratch",
+                self.name,
+                self.process,
+            )
+            return None
+        if not isinstance(from_checkpoint, dict):
+            logger.warning(
+                "crew %r: checkpoint is %s, expected dict; running from scratch",
+                self.name,
+                type(from_checkpoint).__name__,
+            )
+            return None
+
+        completed = from_checkpoint.get("completed")
+        if isinstance(completed, dict):
+            entries = list(completed.values())
+        elif isinstance(completed, list):
+            entries = completed
+        else:
+            logger.warning(
+                "crew %r: checkpoint has no completed entries; running from scratch",
+                self.name,
+            )
+            return None
+
+        task_count = from_checkpoint.get("task_count")
+        if task_count is not None and int(task_count) != len(self.tasks):
+            logger.warning(
+                "crew %r: checkpoint task_count %s != current %d; running from scratch",
+                self.name,
+                task_count,
+                len(self.tasks),
+            )
+            return None
+
+        by_index: dict[int, dict[str, Any]] = {}
+        for entry in entries:
+            try:
+                index = int(entry["index"])
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "crew %r: malformed checkpoint entry %r; running from scratch",
+                    self.name,
+                    entry,
+                )
+                return None
+            if not 0 <= index < len(self.tasks):
+                logger.warning(
+                    "crew %r: checkpoint index %d out of range; running from scratch",
+                    self.name,
+                    index,
+                )
+                return None
+            entry_key = entry.get("task_key")
+            if entry_key and entry_key != self.tasks[index].key:
+                logger.warning(
+                    "crew %r: checkpoint task_key mismatch at index %d "
+                    "(task list or inputs changed); running from scratch",
+                    self.name,
+                    index,
+                )
+                return None
+            by_index[index] = entry
+
+        seeded: dict[int, TaskOutput] = {}
+        for index in range(len(self.tasks)):
+            entry = by_index.get(index)
+            if entry is None:
+                break
+            seeded[index] = self._restore_output(self.tasks[index], entry)
+        if not seeded:
+            return None
+        logger.info(
+            "crew %r: resuming from checkpoint — %d/%d task(s) restored",
+            self.name,
+            len(seeded),
+            len(self.tasks),
+        )
+        return seeded
+
+    @staticmethod
+    def _restore_output(task: Task, entry: dict[str, Any]) -> TaskOutput:
+        json_dict = entry.get("output_json")
+        return TaskOutput(
+            description=task.description,
+            name=entry.get("name") or task.name,
+            expected_output=task.expected_output,
+            summary=entry.get("summary"),
+            raw=entry.get("output_raw") or "",
+            json_dict=json_dict if isinstance(json_dict, dict) else None,
+            agent=entry.get("agent")
+            or (task.agent.role if task.agent is not None else ""),
+        )
+
     def _run_sequential(self) -> list[TaskOutput]:
         completed: list[tuple[Task, TaskOutput]] = []
         futures: dict[int, tuple[Task, concurrent.futures.Future]] = {}
+        seeded = self._seeded_outputs or {}
 
-        for task in self.tasks:
+        for index, task in enumerate(self.tasks):
+            restored = seeded.get(index)
+            if restored is not None:
+                # Restored from checkpoint: no execution, no events, no
+                # callbacks/sinks (they already ran in the original attempt).
+                task.output = restored
+                completed.append((task, restored))
+                continue
             agent = task.agent
             if agent is None:
                 raise ValueError(

@@ -78,6 +78,7 @@ class CrewConfig(BaseModel):
     edges: Optional[List[Dict[str, Any]]] = Field(None, description="Flow edges configuration")
     flow_config: Optional[Dict[str, Any]] = Field(None, description="Flow-specific configuration")
     # Checkpoint resume parameters
+    resume_checkpoint: Optional[Dict[str, Any]] = Field(None, description="Crew task checkpoint (completed task outputs) to resume a crashed crew execution from")
     resume_from_flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume flow from checkpoint")
     resume_from_execution_id: Optional[int] = Field(None, description="Execution ID of checkpoint to resume from")
     resume_from_crew_sequence: Optional[int] = Field(None, description="Crew sequence to resume from (skip crews up to this sequence)")

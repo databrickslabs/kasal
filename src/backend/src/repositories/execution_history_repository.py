@@ -727,6 +727,142 @@ class ExecutionHistoryRepository:
             logger.error(f"Error adding crew checkpoint for job {job_id}: {str(e)}", exc_info=True)
             return False
 
+    async def upsert_crew_task_checkpoint(
+        self,
+        job_id: str,
+        entry: Dict[str, Any],
+        task_count: int,
+        process: Optional[str] = None,
+    ) -> bool:
+        """
+        Merge one completed-task entry into the crew task checkpoint.
+
+        Stores under checkpoint_data["crew_task_checkpoint"] keyed by task
+        index, so retried writes and resume runs are idempotent. Written from
+        the crew subprocess after every TaskCompletedEvent; fail-open (a
+        checkpoint write failure must never fail the run).
+
+        Args:
+            job_id: Job ID of the execution
+            entry: Completed-task entry (must contain "index")
+            task_count: Total number of tasks in the crew (resume validation)
+            process: Crew process type ("sequential"/"hierarchical")
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            result = await self.session.execute(
+                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"Execution not found for job_id: {job_id}")
+                return False
+
+            # Rebuild the dict from scratch — reassigning the same (mutated)
+            # object would not register as a change on a JSON column.
+            checkpoint_data = dict(execution.checkpoint_data or {})
+            task_checkpoint = dict(checkpoint_data.get("crew_task_checkpoint") or {})
+            completed = dict(task_checkpoint.get("completed") or {})
+            completed[str(entry["index"])] = entry
+
+            task_checkpoint.update(
+                version=1,
+                task_count=task_count,
+                process=process,
+                completed=completed,
+                updated_at=datetime.utcnow().isoformat(),
+            )
+            checkpoint_data["crew_task_checkpoint"] = task_checkpoint
+            execution.checkpoint_data = checkpoint_data
+
+            await self.session.flush()
+            logger.info(
+                f"Crew task checkpoint for job {job_id}: task index "
+                f"{entry.get('index')} recorded ({len(completed)}/{task_count} complete)"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error upserting crew task checkpoint for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return False
+
+    async def clear_crew_task_checkpoint(self, job_id: str) -> bool:
+        """
+        Remove the crew task checkpoint after a successful run.
+
+        Args:
+            job_id: Job ID of the execution
+
+        Returns:
+            True if successful (including no-op), False on error
+        """
+        try:
+            result = await self.session.execute(
+                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"Execution not found for job_id: {job_id}")
+                return False
+
+            if not execution.checkpoint_data or "crew_task_checkpoint" not in execution.checkpoint_data:
+                return True
+
+            checkpoint_data = dict(execution.checkpoint_data)
+            checkpoint_data.pop("crew_task_checkpoint", None)
+            execution.checkpoint_data = checkpoint_data or None
+
+            await self.session.flush()
+            logger.info(f"Cleared crew task checkpoint for job {job_id}")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error clearing crew task checkpoint for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return False
+
+    async def get_crew_task_checkpoint(
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the crew task checkpoint for an execution (group-scoped).
+
+        Args:
+            job_id: Job ID of the execution
+            group_ids: Group IDs for tenant isolation
+
+        Returns:
+            The crew_task_checkpoint dict, or None if absent
+        """
+        try:
+            filters = [ExecutionHistory.job_id == job_id]
+            if group_ids:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
+            result = await self.session.execute(
+                select(ExecutionHistory).where(*filters)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution or not execution.checkpoint_data:
+                return None
+            return execution.checkpoint_data.get("crew_task_checkpoint")
+
+        except Exception as e:
+            logger.error(
+                f"Error getting crew task checkpoint for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return None
+
     async def get_crew_checkpoints(self, job_id: str) -> list:
         """
         Get crew checkpoints for an execution.

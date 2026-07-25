@@ -1286,6 +1286,132 @@ class ExecutionService:
             # and updates status before raising, or the session rollback handles cleanup.
         task_logger.info(f"[_run_in_background] Asyncio background task finished for execution_id: {execution_id}")
     
+    # Terminal states a crashed/killed crew run can land in; only these are
+    # resumable (a kill -9 of the subprocess surfaces as STOPPED).
+    RESUMABLE_STATUSES = {"FAILED", "STOPPED", "CANCELLED"}
+
+    async def resume_execution(
+        self,
+        execution_id: str,
+        group_context: GroupContext = None,
+    ) -> Dict[str, Any]:
+        """
+        Resume a crashed/terminated crew execution from its task checkpoint.
+
+        Re-runs the SAME execution record (same job_id): completed task outputs
+        recorded in checkpoint_data["crew_task_checkpoint"] are restored inside
+        the engine, and execution continues from the first incomplete task. If
+        no checkpoint exists, the crew simply re-runs from scratch.
+
+        Args:
+            execution_id: job_id of the execution to resume
+            group_context: Group context for tenant isolation
+
+        Returns:
+            Dict with execution_id, status, run_name and restored task count
+
+        Raises:
+            ValueError: If the execution is missing, not a crew execution, or
+                not in a resumable (terminal-failed) state
+        """
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.engines.kasal.callbacks.crew_checkpoint import build_resume_checkpoint
+
+        if not self.session:
+            raise ValueError("resume_execution requires a database session")
+
+        group_ids = group_context.group_ids if group_context else None
+        repo = ExecutionHistoryRepository(self.session)
+        execution = await repo.get_execution_by_job_id(execution_id, group_ids=group_ids)
+        if not execution:
+            raise ValueError(f"Execution {execution_id} not found")
+
+        execution_type = (execution.execution_type or "crew").lower()
+        if execution_type != "crew":
+            raise ValueError(
+                f"Only crew executions can be resumed from a task checkpoint "
+                f"(execution {execution_id} is type '{execution_type}')"
+            )
+
+        status = (execution.status or "").upper()
+        if status not in ExecutionService.RESUMABLE_STATUSES:
+            raise ValueError(
+                f"Execution {execution_id} is in state '{execution.status}' — "
+                f"only failed/stopped executions can be resumed"
+            )
+
+        stored_inputs = execution.inputs or {}
+        if not stored_inputs.get("agents_yaml") or not stored_inputs.get("tasks_yaml"):
+            raise ValueError(
+                f"Execution {execution_id} has no stored crew configuration to resume from"
+            )
+
+        checkpoint = build_resume_checkpoint(
+            (execution.checkpoint_data or {}).get("crew_task_checkpoint")
+        )
+        restored_tasks = len(checkpoint.get("completed") or []) if checkpoint else 0
+
+        config = CrewConfig(
+            agents_yaml=stored_inputs.get("agents_yaml") or {},
+            tasks_yaml=stored_inputs.get("tasks_yaml") or {},
+            inputs=stored_inputs.get("inputs") or {},
+            planning=bool(stored_inputs.get("planning")),
+            reasoning=bool(stored_inputs.get("reasoning", False)),
+            model=stored_inputs.get("model"),
+            execution_type="crew",
+            schema_detection_enabled=stored_inputs.get("schema_detection_enabled", True),
+            resume_checkpoint=checkpoint,
+        )
+
+        run_name = execution.run_name
+
+        crew_logger.info(
+            f"[resume_execution] Resuming crew execution {execution_id} "
+            f"(previous status: {execution.status}, restored tasks: {restored_tasks})"
+        )
+
+        # Flip the record back to RUNNING before relaunching so the UI reflects
+        # the resume immediately and the subprocess only re-asserts it.
+        updated = await ExecutionStatusService.update_status(
+            job_id=execution_id,
+            status=ExecutionStatus.RUNNING.value,
+            message=(
+                f"Resuming from checkpoint ({restored_tasks} completed task(s) restored)"
+                if restored_tasks
+                else "Resuming execution (no checkpoint found — running from scratch)"
+            ),
+        )
+        if not updated:
+            raise ValueError(f"Failed to reset status for execution {execution_id}")
+
+        # In-memory entry: prepare_and_run_crew reads run_name from here, and
+        # status fallbacks enforce group scoping on it.
+        ExecutionService.add_execution_to_memory(
+            execution_id=execution_id,
+            status=ExecutionStatus.RUNNING.value,
+            run_name=run_name,
+            created_at=datetime.now(),
+            group_id=group_context.primary_group_id if group_context else None,
+            group_email=group_context.group_email if group_context else None,
+        )
+
+        task = asyncio.create_task(ExecutionService._run_in_background(
+            execution_id=execution_id,
+            config=config,
+            execution_type="crew",
+            group_context=group_context,
+            session=self.session,
+        ))
+        if execution_id in ExecutionService.executions:
+            ExecutionService.executions[execution_id]["task"] = task
+
+        return {
+            "execution_id": execution_id,
+            "status": ExecutionStatus.RUNNING.value,
+            "run_name": run_name,
+            "restored_tasks": restored_tasks,
+        }
+
     async def _check_for_running_jobs(self, group_context: GroupContext = None) -> None:
         """
         Check for running jobs to enforce single job execution constraint.
