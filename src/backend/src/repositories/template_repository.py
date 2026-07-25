@@ -71,14 +71,6 @@ class TemplateRepository:
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_all_by_name(self, name: str) -> List[PromptTemplate]:
-        """
-        Find all prompt templates with a given name across groups.
-        """
-        query = select(self.model).where(self.model.name == name)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-    
     async def find_active_templates(self) -> List[PromptTemplate]:
         """
         Find all active prompt templates.

@@ -175,9 +175,6 @@ class MetricViewPipeline:
         )
 
     # ── Calculation group expansion (Agent 8) — delegates to table_processor
-    def _expand_calculation_groups(self, base_measures: list[TranslationResult]) -> list[TranslationResult]:
-        return expand_calculation_groups(base_measures, self._calc_groups, self._limitations)
-
     # ── run() — full pipeline ─────────────────────────────────────────────
 
     def run(self) -> dict[str, MetricViewSpec]:

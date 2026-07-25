@@ -230,53 +230,6 @@ class BillingRepository(BaseRepository[LLMUsageBilling]):
         
         return float(result or 0)
     
-    async def get_recent_expensive_executions(
-        self,
-        limit: int = 10,
-        group_id: Optional[str] = None,
-        days: int = 7
-    ) -> List[Dict[str, Any]]:
-        """Get most expensive recent executions"""
-        start_date = datetime.utcnow() - timedelta(days=days)
-        
-        # Subquery to get cost per execution
-        subquery = self.session.query(
-            LLMUsageBilling.execution_id,
-            LLMUsageBilling.execution_name,
-            LLMUsageBilling.execution_type,
-            func.sum(LLMUsageBilling.cost_usd).label('total_cost'),
-            func.sum(LLMUsageBilling.total_tokens).label('total_tokens'),
-            func.max(LLMUsageBilling.usage_date).label('latest_usage')
-        ).filter(
-            LLMUsageBilling.usage_date >= start_date
-        )
-        
-        if group_id:
-            subquery = subquery.filter(LLMUsageBilling.group_id == group_id)
-        
-        subquery = subquery.group_by(
-            LLMUsageBilling.execution_id,
-            LLMUsageBilling.execution_name,
-            LLMUsageBilling.execution_type
-        ).subquery()
-        
-        results = self.session.query(subquery).order_by(
-            desc(subquery.c.total_cost)
-        ).limit(limit).all()
-        
-        return [
-            {
-                "execution_id": result.execution_id,
-                "execution_name": result.execution_name,
-                "execution_type": result.execution_type,
-                "total_cost": float(result.total_cost or 0),
-                "total_tokens": result.total_tokens or 0,
-                "latest_usage": result.latest_usage
-            }
-            for result in results
-        ]
-
-
 class BillingPeriodRepository(BaseRepository[BillingPeriod]):
     """Repository for billing period operations"""
     

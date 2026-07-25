@@ -74,13 +74,6 @@ class WorkflowRecipeRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_by_group(self, group_ids: List[str]) -> int:
-        if not group_ids:
-            return 0
-        stmt = select(WorkflowRecipe.id).where(WorkflowRecipe.group_id.in_(group_ids))
-        result = await self.session.execute(stmt)
-        return len(list(result.scalars().all()))
-
     async def list_missing_embeddings(self, limit: int = 100) -> List[WorkflowRecipe]:
         """Recipes with no vector yet. Not group-scoped: this is the writer's
         backfill queue, not a tenant-visible read."""

@@ -211,17 +211,6 @@ class HierarchyLevel:
     column_name: str  # The column this level is based on
     description: Optional[str] = None
 
-    @classmethod
-    def from_info_levels_row(cls, row: Dict[str, Any]) -> "HierarchyLevel":
-        """Create HierarchyLevel from INFO.LEVELS() row"""
-        return cls(
-            name=row.get("[Name]", ""),
-            ordinal=row.get("[Ordinal]", 0),
-            column_name=row.get("[Column]", "") or row.get("[ColumnName]", ""),
-            description=row.get("[Description]")
-        )
-
-
 @dataclass
 class Hierarchy:
     """Represents a Power BI hierarchy with its levels"""
@@ -230,21 +219,6 @@ class Hierarchy:
     levels: List[HierarchyLevel]
     description: Optional[str] = None
     is_hidden: bool = False
-
-    @classmethod
-    def from_info_hierarchies_row(
-        cls,
-        row: Dict[str, Any],
-        levels: Optional[List[HierarchyLevel]] = None
-    ) -> "Hierarchy":
-        """Create Hierarchy from INFO.HIERARCHIES() row"""
-        return cls(
-            name=row.get("[Name]", ""),
-            table_name=row.get("[TableName]", "") or row.get("[Table]", ""),
-            levels=levels or [],
-            description=row.get("[Description]"),
-            is_hidden=row.get("[IsHidden]", False)
-        )
 
     def get_columns_ordered(self) -> List[str]:
         """Get column names ordered by hierarchy level (top to bottom)"""

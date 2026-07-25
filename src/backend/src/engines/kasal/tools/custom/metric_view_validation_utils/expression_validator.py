@@ -430,16 +430,6 @@ class ExpressionValidator:
         # SQL uses source.col or alias.col. This is always a valid translation.
         return True
 
-    def _is_expected_filter_mapping(self, diff) -> bool:
-        """Check if filter difference is syntax-only (same values, different format).
-
-        Filter syntax ALWAYS differs between DAX and SQL:
-        - DAX: CALCULATE(SUM(...), Table[col] = "val")
-        - SQL: SUM(...) FILTER (WHERE alias.col = 'val')
-        This is always an expected transformation.
-        """
-        return True
-
     def _is_review_candidate(self, result: dict) -> bool:
         """Check if there is enough similarity to warrant human review instead of INVALID."""
         sims = result.get('similarities', [])

@@ -109,48 +109,6 @@ def require_operator_or_above():
     return require_roles(["admin", "editor", "operator"])
 
 
-def check_group_ownership(func: Callable) -> Callable:
-    """
-    Decorator to ensure users can only access resources within their group.
-    This decorator should be used AFTER role checks.
-
-    Example:
-        @router.get("/executions/{execution_id}")
-        @require_operator_or_above()
-        @check_group_ownership
-        async def get_execution(execution_id: str, group_context: GroupContext = Depends(get_group_context)):
-            ...
-    """
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        # Get group_context from kwargs
-        group_context = None
-        for key, value in kwargs.items():
-            if isinstance(value, GroupContext):
-                group_context = value
-                break
-
-        if not group_context:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to verify group ownership - no group context"
-            )
-
-        user_group_id = group_context.primary_group_id
-
-        if not user_group_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No group context found"
-            )
-
-        # The actual resource group validation should happen within the service layer
-        # This decorator ensures group_context is available for validation
-        return await func(*args, **kwargs)
-
-    return wrapper
-
-
 # Role hierarchy helper functions
 def is_admin(role: Optional[str]) -> bool:
     """Check if the role is admin."""

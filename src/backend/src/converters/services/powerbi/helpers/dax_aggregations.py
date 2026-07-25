@@ -378,35 +378,6 @@ class DAXAggregationBuilder:
     [CalculatedValue]
 )'''
 
-    def _apply_constant_selection(self, base_formula: str, source_table: str, kbi_def: Dict) -> str:
-        """
-        Apply SAP BW-style constant selection using REMOVEFILTERS
-        
-        Constant selection ensures that certain dimensions maintain their filter context
-        regardless of user navigation or filtering - similar to SAP BW constant selection
-        
-        Args:
-            base_formula: The base DAX aggregation formula
-            source_table: Source table name  
-            kbi_def: KPI definition containing fields_for_constant_selection
-            
-        Returns:
-            DAX formula with REMOVEFILTERS applied for constant selection fields
-        """
-        constant_selection_fields = kbi_def.get('fields_for_constant_selection', [])
-        
-        if not constant_selection_fields:
-            return base_formula
-        
-        # Build REMOVEFILTERS clauses for each constant selection field
-        removefilters_clauses = []
-        for field in constant_selection_fields:
-            removefilters_clauses.append(f"REMOVEFILTERS({source_table}[{field}])")
-        
-        # Return the base formula unchanged - the constant selection will be handled 
-        # by the main DAX generator in the CALCULATE function where other filters are added
-        return base_formula
-
     def _parse_exception_formula(self, formula: str, source_table: str) -> str:
         """Parse complex formulas and convert them to DAX expressions"""
         import re

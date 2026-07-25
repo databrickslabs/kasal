@@ -148,10 +148,6 @@ class UCMetricsGenerator:
         """Build the measure expression with FILTER clause for specific conditions"""
         return self.aggregation_builder.build_measure_expression_with_filter(kpi, specific_filters)
 
-    def _apply_exceptions_to_formula(self, formula: str, exceptions: List[Dict[str, Any]]) -> str:
-        """Apply exception transformations to the formula"""
-        return self.aggregation_builder.apply_exceptions_to_formula(formula, exceptions)
-
     def _build_exception_aggregation_with_window(self, kpi: KPI, specific_filters: Optional[str]) -> tuple[str, dict]:
         """Build exception aggregation with window configuration"""
         return self.aggregation_builder.build_exception_aggregation_with_window(kpi, specific_filters)

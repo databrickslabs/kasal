@@ -236,49 +236,6 @@ class FlowExecutionService:
 
         return execution
 
-    async def update_execution_status_by_job_id(
-        self,
-        job_id: str,
-        status: str,
-        error: Optional[str] = None,
-        result: Optional[Dict[str, Any]] = None
-    ) -> Optional[ExecutionHistory]:
-        """
-        Update the status of a flow execution by job_id.
-
-        Args:
-            job_id: Job ID of the execution
-            status: New status (pending, running, completed, failed)
-            error: Optional error message
-            result: Optional result data
-
-        Returns:
-            Updated ExecutionHistory instance or None if not found
-        """
-        logger.info(f"Updating execution with job_id {job_id} status to {status}")
-
-        execution = await self.get_execution_by_job_id(job_id)
-        if not execution:
-            logger.warning(f"Execution with job_id {job_id} not found")
-            return None
-
-        execution.status = status
-        if error:
-            execution.error = error
-        if result:
-            execution.result = result
-
-        # Set completed_at for terminal statuses
-        if status in ["completed", "failed"]:
-            execution.completed_at = datetime.utcnow()
-
-        await self.session.commit()
-        await self.session.refresh(execution)
-
-        logger.info(f"Updated execution {execution.id} (job_id={job_id}) to status {status}")
-
-        return execution
-
     async def update_execution_config(
         self,
         execution_id: int,
@@ -331,32 +288,6 @@ class FlowExecutionService:
         logger.info(f"Deleted flow execution {execution_id}")
 
         return True
-
-    async def delete_executions_by_flow(self, flow_id: Union[uuid.UUID, str]) -> int:
-        """
-        Delete all executions for a specific flow.
-
-        Args:
-            flow_id: ID of the flow
-
-        Returns:
-            Number of executions deleted
-        """
-        if isinstance(flow_id, str):
-            flow_id = uuid.UUID(flow_id)
-
-        logger.info(f"Deleting all executions for flow {flow_id}")
-
-        executions = await self.get_executions_by_flow(flow_id)
-        deleted_count = 0
-
-        for execution in executions:
-            if await self.delete_execution(execution.id):
-                deleted_count += 1
-
-        logger.info(f"Deleted {deleted_count} executions for flow {flow_id}")
-
-        return deleted_count
 
     # Backward compatibility methods for FlowRunnerService
     async def get_node_executions(self, execution_id: int) -> List:

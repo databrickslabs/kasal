@@ -510,67 +510,6 @@ from datetime import datetime
 print("All libraries imported successfully")
 print(f"Execution started at: {{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}}")'''
 
-    def _generate_installation_verification(self) -> str:
-        """Generate installation verification code"""
-        return '''"""
-Verify Installation and Check for Conflicts
-"""
-
-import importlib
-import sys
-
-print("\\nVerifying CrewAI Installation...\\n")
-
-# Check CrewAI version
-try:
-    import crewai
-    print(f"CrewAI version: {crewai.__version__}")
-except Exception as e:
-    print(f"CrewAI import failed: {e}")
-
-# Check critical dependencies
-dependencies = {
-    "pydantic": "Pydantic (data validation)",
-    "yaml": "PyYAML (configuration)",
-    "langchain_core": "LangChain Core (LLM integration)",
-}
-
-for module, description in dependencies.items():
-    try:
-        mod = importlib.import_module(module)
-        version = getattr(mod, "__version__", "unknown")
-        print(f"{description}: {version}")
-    except ImportError:
-        print(f"{description}: Not installed (some features may not work)")
-
-# Check for potential conflicts
-print("\\nChecking for Potential Conflicts...\\n")
-
-conflict_checks = {
-    "mlflow": "MLflow (model tracking)",
-    "databricks.sql": "Databricks SQL Connector",
-    "dbt": "dbt (data transformation)",
-}
-
-conflicts_found = False
-for module, description in conflict_checks.items():
-    try:
-        mod = importlib.import_module(module)
-        version = getattr(mod, "__version__", "unknown")
-        print(f"{description}: {version} (available)")
-    except ImportError:
-        print(f"{description}: Not installed (optional)")
-    except Exception as e:
-        print(f"{description}: Error - {e}")
-        conflicts_found = True
-
-if not conflicts_found:
-    print("\\nNo obvious conflicts detected. You can proceed with the notebook.")
-else:
-    print("\\nSome conflicts detected. Basic CrewAI functionality should work, but some Databricks features may have issues.")
-
-print("\\n" + "="*70)'''
-
     def _generate_environment_config(self) -> str:
         """Generate environment configuration code"""
         return '''"""
@@ -633,39 +572,6 @@ print(f"   - PERPLEXITY_API_KEY: {'Set' if os.getenv('PERPLEXITY_API_KEY') else 
         return '''# Enable MLflow autologging for automatic experiment tracking
 mlflow.crewai.autolog()
 print("MLflow autologging enabled - all executions will be tracked")'''
-
-    def _generate_mlflow_experiment_viewing(self) -> str:
-        """Generate code to view MLflow experiment"""
-        return '''"""
-View MLflow Experiment Information
-"""
-
-# Get current experiment
-experiment = mlflow.get_experiment_by_name(mlflow.active_run().info.experiment_id if mlflow.active_run() else None)
-
-if experiment:
-    print("MLflow Experiment Details:")
-    print(f"   Experiment ID: {experiment.experiment_id}")
-    print(f"   Experiment Name: {experiment.name}")
-    print(f"   Artifact Location: {experiment.artifact_location}")
-
-    # Get recent runs
-    runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"], max_results=5)
-
-    if len(runs) > 0:
-        print(f"\\n   Recent Runs: {len(runs)}")
-        for idx, run in runs.iterrows():
-            print(f"      - Run {idx+1}: Status={run['status']}, Duration={run.get('metrics.duration', 'N/A')}s")
-    else:
-        print("\\n   No runs found yet. Execute the crew above to create your first run!")
-else:
-    print("No active experiment found")
-    print("   Run the crew execution cell above to start tracking with MLflow")
-
-# Display link to MLflow UI
-print("\\nTo view detailed metrics and artifacts:")
-print("   Click the 'Experiment' icon in the notebook toolbar")
-print("   Or navigate to the MLflow UI in your workspace")'''
 
     def _generate_agents_yaml_code(self, agents_yaml: str) -> str:
         """Generate agents YAML code"""
@@ -1288,56 +1194,3 @@ except Exception as e:
     print(f"\\nDeployment failed: {{str(e)}}")
 '''
 
-    def _generate_usage_examples(self, crew_name: str) -> str:
-        """Generate usage examples"""
-        return f'''## Usage Examples
-
-### Run with Different Inputs
-```python
-# Example 1: Different topic
-result = run_crew(topic="Quantum Computing applications")
-
-# Example 2: Multiple executions
-topics = [
-    "Machine Learning in Healthcare",
-    "Blockchain Technology",
-    "Sustainable Energy Solutions"
-]
-
-for topic in topics:
-    print(f"\\n{{'='*70}}")
-    print(f"Processing: {{topic}}")
-    print(f"{{'='*70}}\\n")
-    result = run_crew(topic=topic)
-```
-
-### Access Task Outputs
-```python
-# Get individual task outputs
-crew_instance = {crew_name.title().replace('_', '')}Crew()
-executed_crew = crew_instance.crew()
-result = executed_crew.kickoff(inputs={{'topic': 'Your Topic'}})
-
-# Access task outputs
-for task_output in executed_crew.tasks_output:
-    print(f"Task: {{task_output.description[:50]}}")
-    print(f"Output: {{task_output.raw}}\\n")
-```
-
-### Save Output to Databricks Table
-```python
-# Save results to Delta table
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder.getOrCreate()
-
-results_df = spark.createDataFrame([
-    {{"topic": inputs['topic'], "result": str(result), "timestamp": datetime.now()}}
-])
-
-results_df.write.mode("append").saveAsTable("crew_execution_results")
-```
-
----
-
-**Generated by Kasal Platform** | [Documentation](https://github.com/your-org/kasal)'''

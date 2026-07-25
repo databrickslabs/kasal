@@ -713,13 +713,6 @@ class LoggerManager:
         return self._documentation_embedding_logger
 
     @property
-    def knowledge_source(self) -> logging.Logger:
-        """Get the knowledge source logger for debugging knowledge retrieval."""
-        if not self._knowledge_source_logger:
-            self.initialize()
-        return self._knowledge_source_logger
-
-    @property
     def database(self) -> logging.Logger:
         """Get the database logger for SQL and transaction debugging."""
         if not self._database_logger:

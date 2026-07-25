@@ -39,26 +39,6 @@ class UIConfigService:
             return UIConfigResponse(group_id=self.group_id)
         return UIConfigResponse.model_validate(config)
 
-    @classmethod
-    async def is_predefined_ui_enabled(cls, group_id: Optional[str]) -> bool:
-        """Whether this workspace has Predefined UI enabled.
-
-        Opens its own short-lived session so generation services (which may not
-        share a session) can check cheaply. Never raises — a read failure simply
-        means "not enabled", preserving the default HTML/markdown behavior.
-        """
-        if not group_id:
-            return False
-        try:
-            from src.db.session import request_scoped_session
-
-            async with request_scoped_session() as session:
-                config = await cls(session, group_id=group_id).get_config()
-            return bool(config.enabled)
-        except Exception as e:  # noqa: BLE001 — never let a UI check break generation
-            logger.warning("[UIConfig] enabled-check failed for group %s: %s", group_id, e)
-            return False
-
     async def update_config(
         self, config_in: UIConfigUpdate, created_by_email: Optional[str] = None
     ) -> UIConfigResponse:
