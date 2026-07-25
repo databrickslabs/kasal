@@ -22,7 +22,7 @@ from src.engines.kasal.memory.memory_backend_factory import (
     MemoryBackendFactory,
 )
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.utils.memory_paths import local_memory_store_dir
+from src.utils.memory_paths import local_memory_root, local_memory_store_dir
 
 logger = LoggerManager.get_instance().crew
 
@@ -227,13 +227,27 @@ class CrewMemoryService:
         # Save original value
         self._original_storage_dir = os.environ.get("CREWAI_STORAGE_DIR")
 
-        # Set unique directory name
-        if backend_type == "databricks":
-            storage_dirname = f"kasal_databricks_{crew_id}"
-        elif backend_type == "lakebase":
-            storage_dirname = f"kasal_lakebase_{crew_id}"
-        else:
-            storage_dirname = self._default_storage_dirname()
+        # ONE store per GROUP, at an absolute path — for every backend.
+        #
+        # Two independent defects lived in the old databricks/lakebase names
+        # (``kasal_databricks_{crew_id}``):
+        #
+        #   1. crew_id. e4944393 established that crew_id is NEVER part of a
+        #      memory path — it is hashed from the agents/tasks, so it changes
+        #      with every chat prompt and orphans recall. Scoping is the group
+        #      (tenant boundary), with session scoping carried in the record's
+        #      scope path (root_scope), never the directory.
+        #   2. Relative. db_storage_path() resolves a relative
+        #      CREWAI_STORAGE_DIR against the process CWD — the backend SOURCE
+        #      TREE — so a Databricks run wrote
+        #      src/backend/kasal_databricks_<crew_id>/memory.db into the repo,
+        #      gitignored and silently accumulating.
+        #
+        # The DEFAULT branch was already fixed for both; these two were missed.
+        # For databricks/lakebase the directory is vestigial anyway — records
+        # live in Vector Search / Postgres — but the env var has to point
+        # somewhere, so it points at the same group store as everything else.
+        storage_dirname = self._default_storage_dirname()
 
         os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
 

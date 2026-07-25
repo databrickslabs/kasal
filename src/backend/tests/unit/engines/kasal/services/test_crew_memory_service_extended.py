@@ -217,34 +217,40 @@ class TestSetupStorageDirectory:
             service.setup_storage_directory(crew_id, backend_config)
 
     def test_sets_databricks_storage_dir(self):
-        service = CrewMemoryService({})
-        mock_path = MagicMock()
-        mock_path.exists.return_value = False
-        mock_path.absolute.return_value = mock_path
+        """Group-scoped and absolute, like every other backend.
 
-        with patch("src.engines.kasal.memory.crew_memory_service.Path") as MockPath:
-            MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-                "kasal_engine.utils": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
-            }):
-                service.setup_storage_directory("my_crew_id", {"backend_type": "databricks"})
+        This used to assert ``kasal_databricks_my_crew_id`` — a bare relative
+        name carrying the crew_id. Both halves were wrong: e4944393 established
+        that crew_id is never part of a memory path (it is hashed from the
+        agents/tasks, so it changes every chat prompt and orphans recall), and a
+        relative CREWAI_STORAGE_DIR resolves against the backend source tree, so
+        runs wrote store directories into the repo.
+        """
+        service = CrewMemoryService({"group_id": "g1"})
+        with patch.dict(os.environ, {"KASAL_MEMORY_DIR": "/tmp/kasal_mem_test"}):
+            service.setup_storage_directory("my_crew_id", {"backend_type": "databricks"})
+            value = os.environ.get("CREWAI_STORAGE_DIR")
 
-        assert os.environ.get("CREWAI_STORAGE_DIR") == "kasal_databricks_my_crew_id"
+        assert value == "/tmp/kasal_mem_test/kasal_default_g1"
+        assert "my_crew_id" not in value
 
     def test_sets_lakebase_storage_dir(self):
-        service = CrewMemoryService({})
-        mock_path = MagicMock()
-        mock_path.exists.return_value = False
-        mock_path.absolute.return_value = mock_path
+        """Group-scoped and absolute, like every other backend.
 
-        with patch("src.engines.kasal.memory.crew_memory_service.Path") as MockPath:
-            MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-                "kasal_engine.utils": MagicMock(db_storage_path=MagicMock(return_value="/tmp/test")),
-            }):
-                service.setup_storage_directory("my_crew_id", {"backend_type": "lakebase"})
+        This used to assert ``kasal_lakebase_my_crew_id`` — a bare relative
+        name carrying the crew_id. Both halves were wrong: e4944393 established
+        that crew_id is never part of a memory path (it is hashed from the
+        agents/tasks, so it changes every chat prompt and orphans recall), and a
+        relative CREWAI_STORAGE_DIR resolves against the backend source tree, so
+        runs wrote store directories into the repo.
+        """
+        service = CrewMemoryService({"group_id": "g1"})
+        with patch.dict(os.environ, {"KASAL_MEMORY_DIR": "/tmp/kasal_mem_test"}):
+            service.setup_storage_directory("my_crew_id", {"backend_type": "lakebase"})
+            value = os.environ.get("CREWAI_STORAGE_DIR")
 
-        assert os.environ.get("CREWAI_STORAGE_DIR") == "kasal_lakebase_my_crew_id"
+        assert value == "/tmp/kasal_mem_test/kasal_default_g1"
+        assert "my_crew_id" not in value
 
     def _setup_default(self, config, crew_id="my_crew_id", mem_root="/tmp/kasal_mem_test"):
         """Run setup_storage_directory for the default backend; returns the dir.
