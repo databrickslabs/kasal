@@ -212,6 +212,26 @@ async def lifespan(app: FastAPI):
         import asyncio as _asyncio; _asyncio.create_task(_zombie_cleanup_loop())
         system_logger.info("[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)")
 
+    # Workflow recipes: distil completed crew runs into reusable recipes.
+    # Runs in the PARENT only — the crew path writes its terminal status from
+    # inside the spawned subprocess, so a hook on that write would execute in the
+    # child interpreter where it reaches nothing. Sweeping here is idempotent,
+    # cannot fail a run, and back-fills existing history on the first pass.
+    if db_initialized:
+        async def _workflow_recipe_loop():
+            import asyncio as _asyncio
+            from src.services.workflow_recipe_service import WorkflowRecipeService
+            while True:
+                await _asyncio.sleep(300)
+                try:
+                    n = await WorkflowRecipeService.sweep()
+                    if n:
+                        system_logger.info(f"[WorkflowRecipes] Mined {n} recipe(s)")
+                except Exception as _re:
+                    system_logger.error(f"[WorkflowRecipes] Error: {_re}")
+        import asyncio as _asyncio; _asyncio.create_task(_workflow_recipe_loop())
+        system_logger.info("[WorkflowRecipes] Periodic recipe mining started (every 5 min)")
+
     # Run database seeders after DB initialization
     if db_initialized:
         # Import needed for seeders

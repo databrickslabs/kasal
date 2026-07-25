@@ -41,6 +41,9 @@ from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 # Documentation models
 from src.models.documentation_embedding import DocumentationEmbedding, KnowledgeEmbedding
 
+# Workflow reuse — executed crews kept as reusable recipes
+from src.models.workflow_recipe import WorkflowRecipe
+
 # Database configuration models
 from src.models.database_config import LakebaseConfig
 

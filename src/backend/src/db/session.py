@@ -768,6 +768,26 @@ async def _ensure_chat_sessions_table(conn) -> None:
         logger.warning(f"Could not ensure chat_sessions table: {e}")
 
 
+async def _ensure_workflow_recipes_table(conn) -> None:
+    """Idempotently create the workflow_recipes table (executed crews kept for reuse).
+
+    create_all is skipped on existing DBs, so this is how the table reaches
+    already-deployed installs. No alembic revision: the migration graph
+    currently has many heads, and a new table needs no ALTER — checkfirst-create
+    covers SQLite, PostgreSQL and Lakebase identically.
+    """
+    try:
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        def _create_workflow_recipes_table(sync_conn):
+            WorkflowRecipe.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_workflow_recipes_table)
+        logger.info("Ensured workflow_recipes table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure workflow_recipes table: {e}")
+
+
 async def _ensure_chat_sessions_columns(conn) -> None:
     """Idempotently add the running_job_id + preview_* columns to chat_sessions.
 
@@ -1053,6 +1073,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_databricks_config_columns(conn)
     await _ensure_chat_sessions_table(conn)
     await _ensure_chat_sessions_columns(conn)
+    await _ensure_workflow_recipes_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_crew_columns(conn)
