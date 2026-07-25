@@ -1,17 +1,22 @@
 """
-LLM Manager for handling model configuration and LLM interactions.
+LLM Manager — the public facade for LLM work in kasal.
 
-This module provides a centralized manager for configuring and interacting with
-different LLM providers through CrewAI's LLM class.
+Turns a model KEY from the catalogue into a configured ``kasal_engine`` LLM:
+database lookup, per-tenant credentials (OBO -> PAT -> SPN), endpoint URLs and
+the parameter rules a given endpoint imposes. Entry points:
 
-All LLM calls are routed through two main entry points:
-- ``LLMManager.completion()`` — async helper for standalone calls (intent
-  detection, generation services, etc.)
-- ``LLMManager.configure_kasal_llm()`` / ``LLMManager.get_llm()`` — returns
-  a configured CrewAI ``LLM`` instance for crew execution
+- ``LLMManager.completion()`` — standalone calls (intent detection, generation
+  services, ...); 38+ call sites, so this signature stays stable.
+- ``LLMManager.configure_kasal_llm()`` / ``get_llm()`` — a configured ``LLM``
+  for crew, flow and chat execution.
+- ``LLMManager.get_embedding(s)()`` — thin delegates to
+  ``src/core/llm/embeddings.py``.
 
-litellm remains as a transitive dependency (used internally by CrewAI) but is
-**not** called directly from application services.
+Layering is documented in ``src/core/llm/__init__.py``. The rule that matters
+here: **litellm is not on the LLM path**. The engine drives endpoints with the
+OpenAI SDK, so litellm globals and patches reach only ``completion_with_usage``,
+and every parameter set when building an LLM IS sent — there is no drop-params
+safety net behind this module.
 """
 
 import asyncio
@@ -20,7 +25,6 @@ import contextvars
 import functools
 import logging
 import os
-import json
 from contextlib import nullcontext
 from typing import Dict, Any, List, Optional, Union, Tuple
 import time
@@ -55,132 +59,16 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
     return await loop.run_in_executor(_LLM_EXECUTOR, call)
 
 
-class _VLLMFunctionCallingLLM(LLM):
-    """CrewAI LLM subclass for self-hosted vLLM endpoints that forces native
-    function-calling ON so attached tools are actually used.
-
-    CrewAI decides native-tools vs ReAct-text via
-    ``check_native_tool_support`` -> ``llm.supports_function_calling()``. For a
-    litellm-backed custom model this returns False (no registry entry), so CrewAI
-    falls back to the ReAct TEXT protocol — which Qwen3-Coder follows poorly: it
-    answers directly, never emits a tool call, and attached tools (e.g.
-    PerplexityTool) are silently dropped. Overriding the method is necessary but
-    NOT sufficient on its own: CrewAI copies the LLM before execution
-    (Crew.copy() -> agent.copy(), also kickoff_for_each/train/test/replay) and the
-    base ``LLM.__copy__``/``__deepcopy__`` hardcode ``return LLM(...)``, which drops
-    instance attributes AND the subclass type. We re-stamp ``__class__`` after the
-    base copy so the override survives every copy path. This is deterministic and
-    does NOT depend on litellm's model registry (which the execution subprocess can
-    reset). The vLLM backend runs with ``--enable-auto-tool-choice
-    --tool-call-parser``, so native tool calls work. Opt out via
-    ``VLLM_SUPPORTS_TOOLS=false`` (e.g. an mlx_lm.server without a tool parser).
-    """
-
-    def supports_function_calling(self) -> bool:  # noqa: D102
-        return True
-
-    def __copy__(self):
-        new = super().__copy__()
-        new.__class__ = _VLLMFunctionCallingLLM
-        return new
-
-    def __deepcopy__(self, memo):
-        new = super().__deepcopy__(memo)
-        new.__class__ = _VLLMFunctionCallingLLM
-        return new
-
-    def _prepare_completion_params(self, messages, tools=None, skip_file_processing=False):
-        """Force a tool call on the FIRST turn so Qwen3-Coder cannot skip attached
-        tools and fabricate an answer.
-
-        Making native function-calling *available* is not enough: under CrewAI's
-        large ReAct-scaffolded prompt, Qwen3-Coder declines ``tool_choice="auto"``
-        and emits a fabricated "Final Answer" in a single turn without ever calling
-        the tool (verified against the live vLLM endpoint: short prompts tool-call
-        under ``auto``, the full crew prompt does not). We pin
-        ``tool_choice="required"`` only while no tool result is present in the
-        message history (i.e. the opening turn); once any tool has run we revert to
-        the model's default so it can produce the final answer instead of looping.
-        Opt out with ``VLLM_FORCE_TOOL_FIRST_TURN=false``.
-        """
-        params = super()._prepare_completion_params(
-            messages, tools=tools, skip_file_processing=skip_file_processing
-        )
-        # Force a tool call on the opening turn (see docstring) — opt out via env.
-        if os.getenv("VLLM_FORCE_TOOL_FIRST_TURN", "true").lower() == "true":
-            # Only act when tools are offered this turn and nothing else already
-            # pinned tool_choice (e.g. structured-output / guardrail calls).
-            if params.get("tools") and "tool_choice" not in params:
-                history = params.get("messages") or []
-                already_used_tool = any(
-                    isinstance(m, dict) and (m.get("role") == "tool" or m.get("tool_calls"))
-                    for m in history
-                )
-                if not already_used_tool:
-                    params["tool_choice"] = "required"
-        self._clamp_output_to_window(params)
-        return params
-
-    def _clamp_output_to_window(self, params: dict) -> None:
-        """Reduce ``max_tokens`` so ``prompt_tokens + max_tokens`` fits the model's
-        context window.
-
-        Small self-hosted vLLM models enforce ``prompt + max_tokens <= max-model-len``
-        and return a 400 ("passed N input and requested M output") otherwise. CrewAI/
-        litellm set ``max_tokens`` from the model config's ``max_output_tokens`` without
-        knowing the ACTUAL prompt size, so a large prompt + full output overflows.
-        Shrink the requested output to what still fits (never grow it), leaving a
-        margin. No-op when the window is unknown or the request already fits, so
-        larger models are unaffected.
-        """
-        try:
-            want = params.get("max_tokens")
-            ctx = _context_window_for(self.model)
-            if not want or not ctx:
-                return
-            msgs = params.get("messages") or []
-            try:
-                input_tokens = litellm.token_counter(model=self.model, messages=msgs)
-            except Exception:
-                # Rough char/4 fallback when litellm can't tokenize the model.
-                input_tokens = sum(
-                    len(str(m.get("content", ""))) for m in msgs if isinstance(m, dict)
-                ) // 4
-            # token_counter(messages=...) omits the tools/function schemas, which DO
-            # count toward the server-side prompt — add a rough estimate for them.
-            tools = params.get("tools")
-            if tools:
-                try:
-                    import json as _json
-                    input_tokens += len(_json.dumps(tools, default=str)) // 4
-                except Exception:
-                    pass
-            # litellm's generic tokenizer systematically UNDERCOUNTS a self-hosted
-            # model's real (server-side) token count — observed 1-5% on Qwen, varying
-            # by content — and vLLM 400s on even a 1-token overrun of
-            # prompt+max_tokens<=window. Tight margins (256, then 1024/5%) each came up
-            # ~1 token short, so budget generously: 15% + a 2048 floor comfortably
-            # covers the drift. A small model simply can't do both a huge prompt AND a
-            # huge output; this trades some output headroom for never 400ing.
-            margin = max(2048, int(input_tokens * 0.15))
-            allowed = ctx - input_tokens - margin
-            if allowed < want:
-                params["max_tokens"] = max(256, allowed)
-                logger.warning(
-                    f"[vLLM clamp] model={self.model} input~={input_tokens} + "
-                    f"max_tokens={want} > ctx={ctx}; clamped output to {params['max_tokens']}"
-                )
-        except Exception as clamp_err:  # never fail a completion over budgeting
-            logger.debug(f"[vLLM clamp] skipped: {clamp_err}")
 from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.model_config_service import ModelConfigService
 from src.services.api_keys_service import ApiKeysService
-from src.core.unit_of_work import UnitOfWork
 import pathlib
 
-# Import custom model handlers (applied early for monkey patches)
-# This ensures the monkey patches are applied to handle model-specific responses
-from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksGPTOSSHandler, DatabricksRetryLLM
+# Endpoint-specific LLM subclasses. This import no longer carries side effects:
+# the module used to apply two litellm monkey patches at import time, both of
+# which the engine bypasses (it speaks to endpoints with the OpenAI SDK).
+from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+from src.core.llm.handlers.vllm import VLLMFunctionCallingLLM
 # The former crewai_memory_patch / crewai_instructor_patch side-effect
 # imports are gone: kasal_engine's analyze models are tolerant of
 # stringified-JSON metadata by design, and InternalInstructor accepts
@@ -195,24 +83,17 @@ log_file_path = os.path.join(log_dir, "llm.log")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Import LoggerManager for documentation embedding logger
-from src.core.logger import LoggerManager
-embedding_logger = LoggerManager.get_instance().documentation_embedding
-
-# Set drop_params to True to automatically drop unsupported parameters
-# This is especially useful for GPT-5 and other new models that may have different parameter support
-# Note: With litellm 1.75.8+, GPT-5 is natively supported
 
 # Module-level token for subprocess callback fallback (contextvars don't propagate to callback threads)
 _subprocess_user_token: Optional[str] = None
 
 def set_subprocess_user_token(token: str) -> None:
-    """Set token for LiteLLM callback fallback in subprocess mode."""
+    """Set the token usage telemetry falls back to in subprocess mode.
+
+    Contextvars do not propagate into the worker threads LLM calls run on.
+    """
     global _subprocess_user_token
     _subprocess_user_token = token
-
-litellm.drop_params = True
-logger.info("Set litellm.drop_params=True to handle unsupported parameters gracefully")
 
 # Register Databricks model context windows with CrewAI
 # This is CRITICAL for CrewAI's respect_context_window to work correctly.
@@ -274,36 +155,18 @@ except Exception as reg_err:
     logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
 
 
-def _context_window_for(model_name: str) -> int:
-    """Best-effort context window for a litellm model id, read from the CrewAI
-    registry populated above (0 when unknown). Used by the vLLM output clamp."""
-    try:
-        from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES as _sizes
-        return int(_sizes.get(model_name) or 0)
-    except Exception:
-        return 0
+# _context_window_for() read the same registry the engine reads, for the output
+# clamp that now lives in OpenAICompletion._raw_context_window. The registration
+# loop above is what this module still owns: teaching the engine the windows of
+# models only kasal's catalogue knows about.
 
 
-# Teach CrewAI to RECOGNIZE a self-hosted vLLM / OpenAI-compatible server's
-# context-overflow error so ``respect_context_window`` (summarize the message
-# history + retry) actually fires for it. CrewAI's CONTEXT_LIMIT_ERRORS list is
-# tuned for OpenAI/Anthropic phrasing; vLLM says "... the model's context length is
-# only N tokens ... maximum input length ... Please reduce the length of the input",
-# which matches NONE of the built-in phrases. Without this, a crew whose sequential
-# -task context grows past the window HARD-FAILS instead of summarizing — the output
-# clamp can't help once the INPUT alone nears the window.
-try:
-    from kasal_engine.llm import CONTEXT_LIMIT_ERRORS as _CREWAI_CTX_ERRORS
-    for _phrase in (
-        "maximum input length",
-        "please reduce the length of the input",
-        "the model's context length is only",
-    ):
-        if _phrase not in _CREWAI_CTX_ERRORS:
-            _CREWAI_CTX_ERRORS.append(_phrase)
-    logger.info("Extended CrewAI CONTEXT_LIMIT_ERRORS with vLLM context-overflow phrasing")
-except Exception as _ctx_patch_err:
-    logger.warning(f"Could not extend CrewAI CONTEXT_LIMIT_ERRORS: {_ctx_patch_err}")
+# Which errors mean "context window overflow" is owned by src/core/llm/
+# context_limits.py, which extends the engine's CONTEXT_LIMIT_ERRORS once with
+# every phrasing kasal's endpoints emit (vLLM, Anthropic-on-Databricks, ...).
+# Importing it applies the extension; DatabricksRetryLLM matches against the same
+# list rather than a private copy.
+from src.core.llm import context_limits as _context_limits  # noqa: F401
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
@@ -346,128 +209,27 @@ class LiteLLMFileLogger(CustomLogger):
 # Create logger instance
 litellm_file_logger = LiteLLMFileLogger()
 
-# Dedicated callback for token telemetry to Databricks logfood
-class LiteLLMTokenTelemetryLogger(CustomLogger):
-    """
-    Sends token usage telemetry to Databricks logfood.
-    Uses get_auth_context for unified authentication.
-    """
-    
-    def __init__(self):
-        # Use module logger (already configured with handlers)
-        self.logger = logger
-    
-    def _should_send(self, kwargs: Dict[str, Any], response_obj: Any) -> Tuple[bool, Optional[Dict], Optional[str], Optional[str]]:
-        """Check if telemetry should be sent. Returns (should_send, usage, model, product_context)."""
+# Token telemetry used to be a litellm CustomLogger registered here on
+# litellm.callbacks / success_callback. litellm is no longer on the path of
+# any crew, flow or chat call, so it silently stopped reporting. It now
+# listens on the engine's LLMCallCompletedEvent, which carries the same usage
+# dict the engine already counts — see src/core/llm/usage_telemetry.py.
+from src.core.llm.usage_telemetry import register_usage_telemetry
 
-        # Token telemetry targets Databricks "logfood"; a non-Databricks (local)
-        # deployment has no workspace to send to. Bail out CHEAPLY here — before the
-        # auth chain, any async-task scheduling, or logging — because litellm/CrewAI
-        # re-fires this callback many times for a single streamed completion. Without
-        # this guard, one completion scheduled tens of thousands of no-op telemetry
-        # coroutines (each running get_auth_context + a WARNING log), which flooded
-        # crew.log (100k+ lines / 100s+ MB) and starved the event loop so runs barely
-        # progressed. Databricks Apps always set DATABRICKS_HOST; OBO flows carry a
-        # user token — so this only short-circuits genuinely-local setups.
-        from src.utils.user_context import UserContext
-        if not os.getenv("DATABRICKS_HOST") and not (UserContext.get_user_token() or _subprocess_user_token):
-            return False, None, None, None
+register_usage_telemetry()
 
-        usage = response_obj.get('usage', {})
-        if not usage:
-            self.logger.debug(f"[TokenTelemetry] No usage in response - type={type(response_obj).__name__}")
-            return False, None, None, None
-        
-        model = kwargs.get('model', 'unknown')
-        
-        # Extract product context from User-Agent (e.g., "kasal_agent/0.1.0" -> "agent")
-        extra_headers = kwargs.get('extra_headers', {})
-        user_agent = extra_headers.get('User-Agent', '')
-        if '_' in user_agent and '/' in user_agent:
-            product_context = user_agent.split('_')[1].split('/')[0]
-        else:
-            product_context = "llm"
-        
-        return True, usage, model, product_context
-    
-    def log_success_event(self, kwargs, response_obj, start_time, end_time):
-        """Sync callback."""
-        model = kwargs.get('model', 'unknown')
-        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
-        
-        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
-        if not should_send:
-            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
-            return
-        
-        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
-        self.logger.info(msg)
-        
-        try:
-            import asyncio
-            from src.utils.telemetry import send_logfood_telemetry
-            from src.utils.user_context import UserContext
-            
-            # Get user token from context (set during request via contextvars)
-            # Falls back to module-level token for subprocess callback threads
-            user_token = UserContext.get_user_token() or _subprocess_user_token
-            
-            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
-            # which can cause SQLAlchemy session conflicts with ongoing transactions
-            coro = send_logfood_telemetry(
-                usage=usage, model=model, product_context=product_context, 
-                user_token=user_token, skip_db_auth=True
-            )
-            
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(coro)
-            except RuntimeError:
-                asyncio.run(coro)
-        except Exception as e:
-            self.logger.debug(f"Token telemetry failed: {e}")
-    
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        """Async callback."""
-        model = kwargs.get('model', 'unknown')
-        usage = response_obj.get('usage', {}) if hasattr(response_obj, 'get') else {}
-        
-        should_send, usage, model, product_context = self._should_send(kwargs, response_obj)
-        if not should_send:
-            self.logger.debug(f"[TokenTelemetry] _should_send returned False")
-            return
-        
-        msg = f"[TokenTelemetry] Sending: model={model}, context={product_context}, tokens={usage.get('total_tokens', 0)}"
-        self.logger.info(msg)
-        
-        try:
-            from src.utils.telemetry import send_logfood_telemetry
-            from src.utils.user_context import UserContext
-            
-            # Get user token from context (set during request via contextvars)
-            # Falls back to module-level token for subprocess callback threads
-            user_token = UserContext.get_user_token() or _subprocess_user_token
-            
-            # Use skip_db_auth=True to avoid opening database sessions during callbacks,
-            # which can cause SQLAlchemy session conflicts with ongoing transactions
-            await send_logfood_telemetry(
-                usage=usage, model=model, product_context=product_context,
-                user_token=user_token, skip_db_auth=True
-            )
-        except Exception as e:
-            self.logger.debug(f"Token telemetry failed: {e}")
-
-
-# Create telemetry logger instance
-litellm_token_telemetry_logger = LiteLLMTokenTelemetryLogger()
-
-# Register callbacks with LiteLLM
-litellm.callbacks = [litellm_token_telemetry_logger]
-
-# Set up other litellm configuration
-litellm.modify_params = True  # This helps with Anthropic API compatibility
-litellm.num_retries = 5  # Global retries setting
-litellm.retry_on = ["429", "timeout", "rate_limit_error"]  # Retry on these error types
+# litellm globals. SCOPE: these reach exactly ONE call path —
+# LLMManager.completion_with_usage, which calls litellm.completion directly for
+# Anthropic prompt caching (it needs structured content blocks and the usage
+# block back). Every other LLM call in kasal goes through the engine, which never
+# imports litellm's completion path, so nothing here affects crew, flow or chat
+# runs. `drop_params = True` was also set here and is gone: it only ever
+# described litellm's behaviour, but its presence made it look as though
+# unsupported params were being filtered everywhere — which is precisely the
+# assumption that let temperature reach a GPT-5 endpoint and 400.
+litellm.modify_params = True  # Anthropic API compatibility
+litellm.num_retries = 5
+litellm.retry_on = ["429", "timeout", "rate_limit_error"]
 
 
 def _configure_litellm_caching() -> None:
@@ -539,243 +301,25 @@ def _configure_litellm_caching() -> None:
 
 _configure_litellm_caching()
 
-# Configure MLflow integration for Databricks observability
-_mlflow_configured = False
-# Default to disabled globally; we enable per-workspace dynamically
-_use_mlflow = False
+# MLflow configuration and the MLflowTrackedLLM wrapper used to live here.
+# Both are gone: MLflow setup is owned by
+# src/services/otel_tracing/mlflow_setup.py, which configures it in the
+# EXECUTION SUBPROCESS with the right experiment, UC trace location and
+# autologs. Two copies meant two places racing to set DATABRICKS_HOST /
+# DATABRICKS_TOKEN and to call mlflow.set_experiment. The wrapper had no
+# callers at all — get_llm returns the built LLM directly.
 
-def _configure_databricks_mlflow():
-    """
-    Configure MLflow using unified Databricks authentication.
-
-    MLflow is configured ONCE at application startup with service-level credentials.
-    MLflow does NOT support OBO (On-Behalf-Of) authentication because it uses
-    environment variables which are process-wide and would cause race conditions.
-
-    This is acceptable because MLflow is for observability/tracking, not user-specific
-    data access operations.
-    """
-    global _mlflow_configured
-
-    if _mlflow_configured is True:
-        return
-
-    try:
-        import mlflow
-        import asyncio
-        from src.utils.databricks_auth import get_auth_context
-
-        # Get service-level authentication context (NO OBO - PAT/SPN only)
-        # This is configured ONCE at startup to avoid race conditions
-        # Pass user_token=None to skip OBO and use PAT/SPN
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Already in async context, need to run in executor
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, get_auth_context(user_token=None))
-                    auth = future.result()
-            else:
-                # Not in event loop, can use asyncio.run
-                auth = asyncio.run(get_auth_context(user_token=None))
-        except RuntimeError:
-            # No event loop, use asyncio.run
-            auth = asyncio.run(get_auth_context(user_token=None))
-
-        if auth and auth.workspace_url:
-            # Set environment variables ONCE at startup for MLflow
-            # MLflow ONLY supports environment variable authentication
-            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-            os.environ["DATABRICKS_TOKEN"] = auth.token
-            # On Databricks Apps the platform injects DATABRICKS_CLIENT_ID/
-            # SECRET (oauth). Exporting DATABRICKS_TOKEN alongside them makes
-            # every env-auth SDK consumer (e.g. litellm's WorkspaceClient()
-            # fallback) raise "validate: more than one authorization method
-            # configured: oauth and pat". An explicit auth preference makes
-            # the SDK pick the self-refreshing SPN oauth instead of erroring.
-            if os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"):
-                os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-            logger.info(f"MLflow configured with {auth.auth_method} authentication")
-
-            # MLflow will automatically use DATABRICKS_HOST and DATABRICKS_TOKEN environment variables
-            tracking_uri = "databricks"  # Simple form - uses environment variables
-            mlflow.set_tracking_uri(tracking_uri)
-
-            # Set up experiment for LLM operations
-            experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "/Shared/kasal-llm-operations")
-            try:
-                exp = mlflow.set_experiment(experiment_name)
-                logger.info(f"MLflow experiment set to: {experiment_name} (ID: {getattr(exp, 'experiment_id', 'unknown')})")
-                # Explicitly configure MLflow 3.x tracing destination and enable it
-                tracing_ok = False
-                try:
-                    from mlflow.tracing.destination import Databricks as _Dest
-                    mlflow.tracing.set_destination(_Dest(experiment_id=str(getattr(exp, "experiment_id", ""))))
-                    mlflow.tracing.enable()
-                    logger.info("MLflow tracing destination set and tracing enabled")
-                    tracing_ok = True
-                except Exception as te:
-                    logger.warning(f"Could not configure MLflow tracing destination: {te}")
-                    tracing_ok = False
-            except Exception as e:
-                logger.warning(f"Could not set MLflow experiment '{experiment_name}': {e}")
-                # Continue with default experiment
-                tracing_ok = False
-
-            # Enable comprehensive MLflow autolog for both LiteLLM and CrewAI
-            # This dual approach ensures maximum coverage of LLM calls
-
-            # 1. Enable LiteLLM autolog (captures underlying LLM calls)
-            try:
-                mlflow.litellm.autolog(log_traces=tracing_ok)
-                logger.info(f"✅ MLflow LiteLLM autolog enabled (log_traces={tracing_ok})")
-            except Exception as e:
-                logger.warning(f"Failed to enable MLflow LiteLLM autolog: {e}")
-
-            # 2. Enable CrewAI autolog (captures CrewAI workflow structure)
-            try:
-                mlflow.crewai.autolog()
-                logger.info("✅ MLflow CrewAI autolog enabled")
-            except AttributeError:
-                logger.warning("⚠️ MLflow CrewAI autolog not available (older MLflow version or integration issues)")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to enable CrewAI autolog: {e}")
-
-            # SECURITY: autolog captures raw inputs (incl. the Agent's llm.api_key OBO
-            # token) into span data. Register the secret-redaction span processor so
-            # credentials are scrubbed before any trace is exported. Idempotent.
-            try:
-                from src.services.otel_tracing.trace_redaction import enable_secret_redaction
-                enable_secret_redaction()
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to enable trace secret redaction: {e}")
-
-            # Note: CrewAI uses LiteLLM internally, so LiteLLM autolog should capture
-            # the underlying calls even when using CrewAI's LLM wrapper
-
-            _mlflow_configured = True
-            logger.info(f"Databricks MLflow configured successfully with {auth.auth_method} authentication")
-
-        else:
-            logger.info("No Databricks workspace available for MLflow")
-
-    except ImportError:
-        logger.info("MLflow not available - install with 'pip install mlflow' for Databricks observability")
-    except Exception as e:
-        logger.warning(f"Failed to configure Databricks MLflow: {e}")
-
-# Configure litellm callbacks to file logger and telemetry logger
-litellm.success_callback = [litellm_file_logger, litellm_token_telemetry_logger]
+# File logging for the litellm path (completion_with_usage only — see the scope
+# note above). Token telemetry is NOT registered here any more: it listens on the
+# engine's event bus so it covers every call, not just this one.
+litellm.success_callback = [litellm_file_logger]
 litellm.failure_callback = [litellm_file_logger]
-logger.info("Using file-based logging and token telemetry for LLM observability")
 
 # Configure logging
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
 
-# Enhanced LLM Wrapper for MLflow Integration
-class MLflowTrackedLLM:
-    """
-    Wrapper around CrewAI LLM that ensures all calls are tracked in MLflow.
-    This addresses the issue where CrewAI's LLM wrapper doesn't trigger MLflow autolog.
-    """
-
-    def __init__(self, llm_instance, model_name: str):
-        self.llm = llm_instance
-        self.model_name = model_name
-        self._ensure_mlflow_configured()
-
-    def _ensure_mlflow_configured(self):
-        """Ensure MLflow is configured when LLM is used"""
-        global _mlflow_configured
-        if not _mlflow_configured:
-            _configure_databricks_mlflow()
-
-    def _log_llm_call(self, method_name: str, input_data, output_data, duration: float):
-        """Manually log LLM call to MLflow if autolog didn't capture it"""
-        try:
-            import mlflow
-            import time
-
-            # Only log if we have an active MLflow session
-            if _mlflow_configured and _use_mlflow:
-                # Try to get the current run, or create one if needed
-                run = mlflow.active_run()
-                if not run:
-                    # Start a run for this LLM call
-                    mlflow.start_run(run_name=f"crewai_llm_{self.model_name}")
-                    run = mlflow.active_run()
-
-                if run:
-                    # Log the LLM call details
-                    mlflow.log_metric(f"llm_call_duration_{method_name}", duration)
-                    mlflow.log_param(f"llm_model", self.model_name)
-                    mlflow.log_param(f"llm_method", method_name)
-
-                    # Log input/output lengths for tracking
-                    if isinstance(input_data, str):
-                        mlflow.log_metric(f"input_length_{method_name}", len(input_data))
-                    if isinstance(output_data, str):
-                        mlflow.log_metric(f"output_length_{method_name}", len(output_data))
-                    elif hasattr(output_data, 'content'):
-                        mlflow.log_metric(f"output_length_{method_name}", len(str(output_data.content)))
-
-                    logger.info(f"✅ MLflow logged CrewAI LLM call: {method_name} for {self.model_name}")
-
-        except Exception as e:
-            logger.warning(f"Failed to log LLM call to MLflow: {e}")
-
-    def invoke(self, input_data, **kwargs):
-        """Tracked version of LLM invoke"""
-        import time
-        start_time = time.time()
-
-        try:
-            result = self.llm.invoke(input_data, **kwargs)
-            duration = time.time() - start_time
-            self._log_llm_call("invoke", input_data, result, duration)
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            self._log_llm_call("invoke_error", input_data, str(e), duration)
-            raise
-
-    async def ainvoke(self, input_data, **kwargs):
-        """Tracked version of LLM ainvoke"""
-        import time
-        start_time = time.time()
-
-        try:
-            result = await self.llm.ainvoke(input_data, **kwargs)
-            duration = time.time() - start_time
-            self._log_llm_call("ainvoke", input_data, result, duration)
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            self._log_llm_call("ainvoke_error", input_data, str(e), duration)
-            raise
-
-    def __call__(self, input_data, **kwargs):
-        """Tracked version of LLM __call__"""
-        import time
-        start_time = time.time()
-
-        try:
-            result = self.llm(input_data, **kwargs)
-            duration = time.time() - start_time
-            self._log_llm_call("call", input_data, result, duration)
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            self._log_llm_call("call_error", input_data, str(e), duration)
-            raise
-
-    def __getattr__(self, name):
-        """Delegate all other attributes to the wrapped LLM"""
-        return getattr(self.llm, name)
-
 # Export functions for external use
-__all__ = ['LLMManager', 'DatabricksGPTOSSHandler', 'DatabricksRetryLLM']
+__all__ = ['LLMManager', 'DatabricksRetryLLM']
 
 
 def _is_http_400(exc: Exception) -> bool:
@@ -795,12 +339,17 @@ def _is_http_400(exc: Exception) -> bool:
 
 
 class LLMManager:
-    """Manager for LLM configurations and interactions."""
+    """The public facade for LLM work in kasal.
 
-    # Circuit breaker for embeddings to prevent repeated failures
-    _embedding_failures = {}  # Track failures by provider
-    _embedding_failure_threshold = 3  # Number of failures before circuit opens
-    _circuit_reset_time = 300  # Reset circuit after 5 minutes
+    Resolves a model KEY from the catalogue to a configured ``kasal_engine`` LLM
+    (credentials, endpoint, per-endpoint parameter rules) and exposes the handful
+    of entry points the rest of the codebase uses — ``completion`` alone has 38
+    call sites. Implementation detail lives in ``src/core/llm/``; this class stays
+    stable so callers do not have to track it.
+
+    The embeddings circuit-breaker state that used to be declared here moved with
+    the code to ``src/core/llm/embeddings.py``.
+    """
 
     @staticmethod
     def _get_group_id_from_context(required: bool = True) -> Optional[str]:
@@ -1005,6 +554,14 @@ class LLMManager:
         elif getattr(llm, "max_completion_tokens", None):
             call_kwargs["max_completion_tokens"] = llm.max_completion_tokens
 
+        # This is the ONE remaining direct litellm call in kasal (everything else
+        # goes through the engine). A litellm.completion monkey patch used to
+        # sanitize messages for Databricks on its behalf; that patch is gone, so
+        # apply the sanitizer explicitly — Databricks rejects assistant messages
+        # whose content is empty while carrying tool_calls.
+        if isinstance(messages, list):
+            DatabricksRetryLLM._sanitize_messages_for_databricks(messages)
+
         start_time = time.time()
         resp = await asyncio.to_thread(lambda: litellm.completion(**call_kwargs))
         duration = time.time() - start_time
@@ -1141,18 +698,20 @@ class LLMManager:
                 "timeout": 300 if is_gpt5 else 297,
             }
 
-            # GPT-5 reasoning models on Databricks reject stop, temperature, and other params.
-            # litellm DatabricksConfig lists them as "supported" so drop_params=True won't help.
-            # CrewAI has a built-in retry that catches the stop error, but pre-setting
-            # additional_drop_params avoids the wasted first-call failure on every LLM call.
-            # See: https://community.crewai.com/t/gpt5-crewai-issues/6829
+            # `additional_drop_params` used to be set here for GPT-5 (stop,
+            # temperature, presence_penalty, frequency_penalty, logit_bias) and for
+            # any temperature-rejecting model. It was a litellm knob and the engine
+            # ignores it entirely, so it protected nothing. What actually keeps
+            # those params off the wire now:
+            #   - temperature: omitted below when the model rejects it;
+            #   - stop: the engine only sends it when supports_stop_words(), which
+            #     is False for gpt-5 and the o-series;
+            #   - presence_penalty / frequency_penalty / logit_bias: never set by
+            #     kasal, and the engine only forwards params that are not None.
             if is_gpt5:
-                llm_params["additional_drop_params"] = ["stop", "temperature", "presence_penalty", "frequency_penalty", "logit_bias"]
-                logger.info(f"Databricks GPT-5 model: {model_name_value} — additional_drop_params and 300s timeout set")
+                logger.info(f"Databricks GPT-5 model: {model_name_value} — 300s timeout set")
             elif rejects_temperature:
-                # e.g. Claude Opus 4.8 — endpoint 400s on `temperature`.
-                llm_params["additional_drop_params"] = ["temperature"]
-                logger.info(f"Databricks model {model_name_value} rejects temperature — dropping it")
+                logger.info(f"Databricks model {model_name_value} rejects temperature — omitting it")
 
             # Add temperature only for models that accept it.
             if temperature is not None and not rejects_temperature:
@@ -1184,12 +743,12 @@ class LLMManager:
             logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
 
             # gpt-5-3-codex ONLY supports the Responses API on Databricks.
-            # DatabricksCodexCompletion extends OpenAICompletion with:
+            # DatabricksResponsesLLM extends OpenAICompletion with:
             #  - phase preservation (prevents early stopping / skipped tool calls)
             #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
             #  - diagnostic logging for tool-calling debugging
             if "gpt-5-3-codex" in model_name_value.lower():
-                from src.core.llm_handlers.databricks_codex_handler import DatabricksCodexCompletion
+                from src.core.llm.handlers.databricks_responses_llm import DatabricksResponsesLLM
                 # The Responses API is served under a DIFFERENT base path than chat:
                 # /ai-gateway/openai/v1 (gateway) or /serving-endpoints (otherwise).
                 # `api_base` here is the CHAT base (/ai-gateway/mlflow/v1 when the
@@ -1197,8 +756,8 @@ class LLMManager:
                 # 404 "Supervisor API is not enabled". Build the Responses base instead.
                 responses_workspace = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
                 responses_base_url = DatabricksURLUtils.construct_responses_base_url(responses_workspace)
-                logger.info(f"Using DatabricksCodexCompletion for Responses API model: {model_name_value} (base_url={responses_base_url})")
-                return DatabricksCodexCompletion(
+                logger.info(f"Using DatabricksResponsesLLM for Responses API model: {model_name_value} (base_url={responses_base_url})")
+                return DatabricksResponsesLLM(
                     model=model_name_value,
                     api_key=api_key,
                     base_url=responses_base_url,
@@ -1208,7 +767,8 @@ class LLMManager:
 
             # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
             # Provides retry logic for empty responses, rate limits, and message sanitization.
-            # GPT-OSS Harmony response format is handled by the monkey patch in DatabricksGPTOSSHandler.
+            # Databricks-specific message sanitization (empty content, Llama format,
+            # Gemini system-prompt merge and $ref resolution) happens inside call().
             logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
             return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.VLLM:
@@ -1216,21 +776,11 @@ class LLMManager:
             api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
             api_key = os.getenv("VLLM_API_KEY", "vllm")
             prefixed_model = f"openai/{model_name_value}"
-            # Tell litellm/CrewAI the self-hosted model supports native function
-            # calling. litellm has no registry entry for a custom model, so
-            # supports_function_calling() returns False → CrewAI falls back to the
-            # ReAct TEXT tool protocol, which smaller local models follow poorly:
-            # the agent never emits an "Action:" and answers directly, so its tools
-            # (e.g. PerplexityTool) are silently ignored. The vLLM backend is launched
-            # with --enable-auto-tool-choice --tool-call-parser, so native tool calls
-            # work — registering the model makes CrewAI use them. Opt out by setting
-            # VLLM_SUPPORTS_TOOLS=false (e.g. an mlx_lm.server without a tool parser).
-            if os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true":
-                try:
-                    _tool_info = {"supports_function_calling": True, "litellm_provider": "openai", "mode": "chat"}
-                    litellm.register_model({prefixed_model: _tool_info, model_name_value: _tool_info})
-                except Exception as reg_err:  # noqa: BLE001 — never block LLM creation
-                    logger.debug(f"Could not register vllm function-calling support: {reg_err}")
+            # A litellm.register_model call used to sit here (and in the Kimi
+            # branch) to claim supports_function_calling=True for a model litellm
+            # has no registry entry for. The engine asks its own BaseLLM, which
+            # returns True unconditionally and never consults litellm's registry,
+            # so registering had no effect on whether tools are sent. Removed.
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
             # native "moonshot" provider, so route via the openai/ prefix with an
@@ -1243,15 +793,8 @@ class LLMManager:
                 )
             api_base = os.getenv("KIMI_ENDPOINT", "https://api.moonshot.ai/v1")
             prefixed_model = f"openai/{model_name_value}"
-            # These model ids aren't in litellm's registry under the openai/ prefix,
-            # so supports_function_calling() would return False and CrewAI would fall
-            # back to the ReAct text tool protocol. Kimi K2.x supports native tool
-            # calling — register the models so CrewAI sends real `tools=[...]`.
-            try:
-                _tool_info = {"supports_function_calling": True, "litellm_provider": "openai", "mode": "chat"}
-                litellm.register_model({prefixed_model: _tool_info, model_name_value: _tool_info})
-            except Exception as reg_err:  # noqa: BLE001 — never block LLM creation
-                logger.debug(f"Could not register kimi function-calling support: {reg_err}")
+            # (see the vLLM branch: the litellm.register_model call that used to
+            # be here was inert once the engine stopped reading litellm's registry)
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
@@ -1271,81 +814,78 @@ class LLMManager:
             prefixed_model = f"{provider.lower()}/{model_name_value}" if provider else model_name_value
         
         # Configure LLM parameters (for all providers except Databricks which returns early)
-        # Use longer timeout for GPT-5 models as they take more time to respond
-        timeout_value = 300 if (provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower()) else 300
-        
+        # 300s across the board: reasoning models can take 2-4 minutes on a complex
+        # prompt, and no provider here is served by an endpoint that caps lower.
+        # (This used to be a ternary whose two branches were both 300, under a
+        # comment claiming 120s for non-GPT-5 models.)
         llm_params = {
             "model": prefixed_model,
-            # Add built-in retry capability
-            "timeout": timeout_value,  # Longer timeout for GPT-5 (300s), standard for others (120s)
+            "timeout": 300,
         }
-        
-        # Add temperature if specified
-        if temperature is not None:
+
+        # Temperature is OMITTED — never merely "dropped later" — for models whose
+        # endpoint rejects it. There is no drop_params safety net any more:
+        # `drop_params` / `additional_drop_params` were litellm knobs, and the
+        # engine's LLM neither reads nor forwards them (pydantic `extra="allow"`
+        # swallowed them silently), so every param set here IS sent. Three call
+        # sites used to set them; all are gone.
+        #
+        # Two reasons a model refuses the param:
+        #   - model_rejects_temperature(): the GPT-5 family and Claude Opus 4.7+ /
+        #     Fable 5 return 400 for any temperature. Previously only the Databricks
+        #     branch consulted this, so a DIRECT-OpenAI gpt-5 model was sent
+        #     temperature=0.7 and 400ed ("Only the default (1) is supported").
+        #   - Kimi K2.x: 400s on ANY temperature other than 1 ("invalid temperature:
+        #     only 1 is allowed for this model"). The seeds pass 0.7 and the A2UI
+        #     surface composer passes 0, both of which silently killed surface
+        #     generation. Omitted = server default (1), which is what we want.
+        from src.utils.model_config import model_rejects_temperature
+
+        rejects_temperature = (
+            model_rejects_temperature(model_name_value) or provider == ModelProvider.KIMI
+        )
+        if temperature is not None and not rejects_temperature:
             llm_params["temperature"] = temperature
             logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
+        elif temperature is not None:
+            logger.info(
+                f"Model {model_name_value} rejects `temperature` — omitting it "
+                f"(requested {temperature})"
+            )
+        # NOTE for Kimi: `tool_choice` must likewise never be forced — K2.7 cannot
+        # disable thinking, and a forced tool_choice 400s ("tool_choice 'specified'
+        # is incompatible with thinking enabled"). Nothing sets tool_choice for a
+        # Kimi model today (only VLLMFunctionCallingLLM and the Databricks codex
+        # handler do, neither of which serves Kimi), so there is nothing to strip
+        # here — but any future forced-tool path must exclude Kimi.
 
-        # Kimi K2.x endpoints 400 on ANY temperature other than 1 ("invalid
-        # temperature: only 1 is allowed for this model"). The seeds pass 0.7 and
-        # the A2UI surface composer passes 0 (deterministic JSON) — both were
-        # rejected, which silently killed surface generation (no presentation/quiz
-        # UI). Drop the param entirely instead of pinning it: omitted = server
-        # default (1). additional_drop_params also strips it if CrewAI re-injects
-        # temperature on a downstream call (global drop_params won't — litellm
-        # considers temperature "supported" by the openai provider).
-        if provider == ModelProvider.KIMI:
-            if llm_params.pop("temperature", None) is not None:
-                logger.info(f"Kimi model {model_name_value} only accepts temperature=1 — dropping temperature")
-            # tool_choice is dropped too: K2.7 thinking cannot be disabled ("invalid
-            # thinking: only type=enabled is allowed") and a FORCED tool_choice 400s
-            # ("tool_choice 'specified' is incompatible with thinking enabled") —
-            # which broke CrewAI memory extraction (3 failed generations per save)
-            # and any planning/instructor call that forces a function. Dropping it
-            # falls back to auto; verified the model still emits the tool call.
-            llm_params["additional_drop_params"] = ["temperature", "tool_choice"]
-
-        # GPT-5 doesn't support certain parameters - enable drop_params
-        if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
-            llm_params["drop_params"] = True
-            llm_params["additional_drop_params"] = ["stop", "presence_penalty", "frequency_penalty", "logit_bias"]
-            logger.info(f"Enabled drop_params and additional_drop_params for GPT-5 CrewAI model: {model_name_value}")
-        
-        if timeout_value == 300:
-            logger.info(f"Using extended timeout of {timeout_value}s for GPT-5 model: {model_name_value}")
-        
         # Add API key and base URL if available
         if api_key:
             llm_params["api_key"] = api_key
         if api_base:
             llm_params["api_base"] = api_base
-        
+
         # Add max_output_tokens if defined in model config
         if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
-            # GPT-5 and newer OpenAI reasoning models use max_completion_tokens instead of max_tokens
+            # GPT-5 and newer OpenAI reasoning models take max_completion_tokens
+            # instead of max_tokens (the engine sends whichever is set, preferring
+            # max_completion_tokens).
             if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
                 llm_params["max_completion_tokens"] = model_config_dict["max_output_tokens"]
                 logger.info(f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for GPT-5 model {prefixed_model}")
             else:
                 llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
                 logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
-        
-        # Create and return the CrewAI LLM
-        # GPT-5 models: CrewAI's drop_params=True (default) handles unsupported params,
-        # and max_completion_tokens is already set above instead of max_tokens.
-        if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
-            # Drop params that GPT-5 reasoning models don't support
-            llm_params["additional_drop_params"] = ["stop", "temperature"]
-            logger.info(f"Creating CrewAI LLM for GPT-5 model: {prefixed_model} (with additional_drop_params)")
-        logger.info(f"Creating CrewAI LLM with model: {prefixed_model}")
 
-        # Self-hosted vLLM: build a subclass that forces native function-calling ON
-        # so CrewAI sends `tools=[...]` to the endpoint (and its --tool-call-parser
-        # engages) instead of the ReAct text protocol that Qwen3-Coder follows poorly.
-        # See _VLLMFunctionCallingLLM for why a plain instance override is not enough
-        # (CrewAI copies the LLM before execution and drops instance attrs). Opt out
-        # with VLLM_SUPPORTS_TOOLS=false (e.g. an mlx_lm.server without a tool parser).
+        logger.info(f"Creating LLM with model: {prefixed_model}")
+
+        # Self-hosted vLLM: a subclass that pins tool_choice on the opening turn and
+        # clamps max_tokens to the window (see VLLMFunctionCallingLLM). Native
+        # function-calling itself needs no help from us — the engine reports every
+        # model as tool-capable. VLLM_SUPPORTS_TOOLS=false opts out of the forced
+        # opening turn (e.g. an mlx_lm.server without a tool parser).
         if provider == ModelProvider.VLLM and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true":
-            return _VLLMFunctionCallingLLM(**llm_params)
+            return VLLMFunctionCallingLLM(**llm_params)
 
         return LLM(**llm_params)
 
@@ -1378,7 +918,7 @@ class LLMManager:
         ``configure_kasal_llm`` with the same auth/endpoint. gpt-5-3-codex is
         excluded because it needs the Responses API (different base path).
         """
-        from src.core.llm_handlers.model_fallback import candidates_from_model_configs
+        from src.core.llm.handlers.model_fallback import candidates_from_model_configs
         from src.db.session import request_scoped_session
         from src.services.model_config_service import ModelConfigService
 
@@ -1391,6 +931,12 @@ class LLMManager:
             logger.warning(f"Could not load fallback model candidates: {e}")
             return []
 
+    # ---------------------------------------------------------------- embeddings
+    # The implementations live in src/core/llm/embeddings.py — a different
+    # protocol (direct HTTP to an embeddings endpoint, its own auth, batching and
+    # circuit breaker) that never touches the engine's LLM. These two methods stay
+    # here because five knowledge/RAG services call them through LLMManager.
+
     @staticmethod
     async def get_embeddings(
         texts: List[str],
@@ -1398,389 +944,20 @@ class LLMManager:
         embedder_config: Optional[Dict[str, Any]] = None,
         batch_size: Optional[int] = None,
     ) -> List[Optional[List[float]]]:
-        """
-        Get embedding vectors for many texts efficiently.
+        """Embed many texts, resolving auth once and batching the requests."""
+        from src.core.llm.embeddings import get_embeddings
 
-        Resolves Databricks auth ONCE and sends texts in batched requests, instead
-        of one auth lookup + one HTTP round-trip per text. Returns a list aligned
-        with ``texts`` (None for any text that failed). For non-Databricks
-        providers, falls back to sequential ``get_embedding`` calls.
-        """
-        if not texts:
-            return []
-
-        provider = 'databricks'
-        embedding_model = model
-        if embedder_config:
-            provider = embedder_config.get('provider', 'databricks')
-            embedding_model = embedder_config.get('config', {}).get('model', model)
-
-        # Only the Databricks serving endpoint supports the batched payload here;
-        # other providers fall back to the existing per-text path.
-        if not (provider == 'databricks' or 'databricks' in embedding_model):
-            return [
-                await LLMManager.get_embedding(t, model=model, embedder_config=embedder_config)
-                for t in texts
-            ]
-
-        if batch_size is None:
-            batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
-
-        try:
-            from src.utils.databricks_auth import get_auth_context
-            from src.utils.user_context import UserContext
-
-            # Resolve auth ONCE for the whole file (this is the per-chunk cost we
-            # are eliminating — each get_auth_context() opens a DB session).
-            user_token = UserContext.get_user_token()
-            emb_group_id = LLMManager._get_group_id_from_context(required=False)
-            auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
-            if not auth:
-                embedding_logger.warning("No Databricks auth available for batch embeddings")
-                return [None] * len(texts)
-
-            if auth.auth_method in ("OBO", "OAuth"):
-                request_headers = auth.get_headers().copy()
-                request_headers.setdefault("Content-Type", "application/json")
-            else:
-                request_headers = {
-                    "Authorization": f"Bearer {auth.token}",
-                    "Content-Type": "application/json",
-                }
-
-            # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
-            # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
-            endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
-                auth.workspace_url, embedding_model
-            )
-
-            import aiohttp
-            timeout = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "60"))
-            )
-            results: List[Optional[List[float]]] = []
-            from src.utils.aiohttp_session import shared_client_session
-            async with shared_client_session() as session:
-                for start in range(0, len(texts), batch_size):
-                    batch = texts[start:start + batch_size]
-                    payload = {"input": batch}
-                    if body_model:
-                        payload["model"] = body_model
-                    try:
-                        async with session.post(
-                            endpoint_url, headers=request_headers, json=payload, timeout=timeout
-                        ) as response:
-                            if response.status == 200:
-                                result = await response.json()
-                                data = result.get('data', [])
-                                try:
-                                    data = sorted(data, key=lambda d: d.get('index', 0))
-                                except Exception:
-                                    pass
-                                if len(data) == len(batch):
-                                    results.extend([d.get('embedding', d) for d in data])
-                                else:
-                                    embedding_logger.warning(
-                                        f"Batch embedding size mismatch: got {len(data)} for {len(batch)}"
-                                    )
-                                    results.extend(
-                                        [data[i].get('embedding') if i < len(data) else None
-                                         for i in range(len(batch))]
-                                    )
-                            else:
-                                error_text = await response.text()
-                                embedding_logger.error(
-                                    f"Batch embedding API error {response.status}: {error_text}"
-                                )
-                                results.extend([None] * len(batch))
-                    except Exception as batch_err:
-                        embedding_logger.error(f"Batch embedding request failed: {batch_err}")
-                        results.extend([None] * len(batch))
-            return results
-
-        except Exception as e:
-            embedding_logger.error(f"Error in batch embeddings: {e}")
-            return [None] * len(texts)
+        return await get_embeddings(
+            texts, model=model, embedder_config=embedder_config, batch_size=batch_size
+        )
 
     @staticmethod
-    async def get_embedding(text: str, model: str = "databricks-gte-large-en", embedder_config: Optional[Dict[str, Any]] = None) -> Optional[List[float]]:
-        """
-        Get an embedding vector for the given text using configurable embedder.
-        
-        Args:
-            text: The text to create an embedding for
-            model: The embedding model to use (can be overridden by embedder_config)
-            embedder_config: Optional embedder configuration with provider and model settings
-            
-        Returns:
-            List[float]: The embedding vector or None if creation fails
-        """
-        provider = 'databricks'  # Default provider
-        try:
-            # Determine provider and model from embedder_config or defaults
-            if embedder_config:
-                provider = embedder_config.get('provider', 'databricks')
-                config = embedder_config.get('config', {})
-                embedding_model = config.get('model', model)
-            else:
-                provider = 'databricks'
-                embedding_model = model
-            
-            # Check circuit breaker for this provider
-            current_time = time.time()
-            if provider in LLMManager._embedding_failures:
-                failure_info = LLMManager._embedding_failures[provider]
-                failure_count = failure_info.get('count', 0)
-                last_failure_time = failure_info.get('last_failure', 0)
-                
-                # If circuit is open, check if it should be reset
-                if failure_count >= LLMManager._embedding_failure_threshold:
-                    if current_time - last_failure_time < LLMManager._circuit_reset_time:
-                        embedding_logger.warning(f"Circuit breaker OPEN for {provider} embeddings. Failing fast.")
-                        return None
-                    else:
-                        # Reset circuit after timeout
-                        embedding_logger.info(f"Resetting circuit breaker for {provider} embeddings")
-                        LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
-            
-            embedding_logger.info(f"Creating embedding using provider: {provider}, model: {embedding_model}")
-            
-            # Handle different embedding providers
-            if provider == 'databricks' or 'databricks' in embedding_model:
-                # Use unified Databricks authentication for embeddings
-                try:
-                    from src.utils.databricks_auth import get_auth_context
-                    from src.utils.user_context import UserContext
+    async def get_embedding(
+        text: str,
+        model: str = "databricks-gte-large-en",
+        embedder_config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[List[float]]:
+        """Embed a single text with the configured provider."""
+        from src.core.llm.embeddings import get_embedding
 
-                    # Get user token from context for OBO authentication
-                    user_token = UserContext.get_user_token()
-
-                    # Use unified authentication (OBO → OAuth → PAT)
-                    embedding_logger.info("Attempting unified Databricks authentication for embeddings")
-                    emb_group_id = LLMManager._get_group_id_from_context(required=False)
-                    auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
-                    if auth:
-                        embedding_logger.info(f"Using Databricks {auth.auth_method} authentication for embeddings")
-                        # For OAuth/OBO, use headers approach
-                        if auth.auth_method in ["OBO", "OAuth"]:
-                            headers = auth.get_headers()
-                            api_key = None
-                        else:
-                            # For PAT, use API key approach
-                            api_key = auth.token
-                            headers = None
-                        api_base = DatabricksURLUtils.construct_llm_base_url(auth.workspace_url)
-                    else:
-                        embedding_logger.warning("No Databricks authentication available for embeddings")
-                        return None
-
-                except ImportError:
-                    # SECURITY: databricks_auth module is required - no fallback allowed
-                    embedding_logger.error("Unified Databricks auth module not available for embeddings")
-                    raise ImportError("databricks_auth module is required for Databricks authentication")
-                
-                # Check if we have either OAuth headers or API key + base URL
-                if not ((headers and api_base) or (api_key and api_base)):
-                    logger.warning(f"Missing Databricks credentials - OAuth headers: {bool(headers)}, API key: {bool(api_key)}, API base: {bool(api_base)}")
-                    return None
-                
-                # Ensure model has databricks prefix
-                if not embedding_model.startswith('databricks/'):
-                    embedding_model = f"databricks/{embedding_model}"
-                
-                # Use direct HTTP request to avoid config file issues
-                import aiohttp
-                
-                try:
-                    # Construct the direct API endpoint using centralized utility.
-                    # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
-                    # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
-                    workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
-                    endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(workspace_url, embedding_model)
-
-                    # Use OAuth headers if available, otherwise fall back to API key
-                    if headers:
-                        request_headers = headers.copy()
-                        if "Content-Type" not in request_headers:
-                            request_headers["Content-Type"] = "application/json"
-                    else:
-                        request_headers = {
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json"
-                        }
-
-                    payload = {
-                        "input": [text] if isinstance(text, str) else text
-                    }
-                    if body_model:
-                        payload["model"] = body_model
-
-                    timeout = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30")))
-                    from src.utils.aiohttp_session import shared_client_session
-                    async with shared_client_session() as session:
-                        async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as response:
-                            if response.status == 200:
-                                result = await response.json()
-                                # Databricks embedding API returns embeddings in 'data' field
-                                if 'data' in result and len(result['data']) > 0:
-                                    embedding = result['data'][0].get('embedding', result['data'][0])
-                                    embedding_logger.info(f"Successfully created embedding with {len(embedding)} dimensions using direct Databricks API")
-                                    return embedding
-                                else:
-                                    embedding_logger.warning("No embedding data found in Databricks response")
-                                    return None
-                            elif response.status == 401:
-                                # Token expired, try to refresh and retry once
-                                embedding_logger.warning("Received 401 error, attempting to refresh token and retry")
-                                try:
-                                    # Refresh token and get new headers
-                                    headers_result, error = await get_databricks_auth_headers()
-                                    if headers_result and not error:
-                                        # Update request headers with refreshed token
-                                        if headers_result:
-                                            request_headers = headers_result.copy()
-                                            if "Content-Type" not in request_headers:
-                                                request_headers["Content-Type"] = "application/json"
-
-                                        # Retry the request with new token
-                                        async with session.post(endpoint_url, headers=request_headers, json=payload, timeout=timeout) as retry_response:
-                                            if retry_response.status == 200:
-                                                result = await retry_response.json()
-                                                if 'data' in result and len(result['data']) > 0:
-                                                    embedding = result['data'][0].get('embedding', result['data'][0])
-                                                    embedding_logger.info(f"Successfully created embedding after token refresh")
-                                                    return embedding
-                                                else:
-                                                    embedding_logger.warning("No embedding data found in Databricks response after retry")
-                                                    return None
-                                            else:
-                                                error_text = await retry_response.text()
-                                                embedding_logger.error(f"Databricks embedding API error after retry {retry_response.status}: {error_text}")
-                                                return None
-                                    else:
-                                        embedding_logger.error(f"Failed to refresh token: {error}")
-                                        return None
-                                except Exception as refresh_error:
-                                    embedding_logger.error(f"Error refreshing token: {refresh_error}")
-                                    return None
-                            else:
-                                error_text = await response.text()
-                                embedding_logger.error(f"Databricks embedding API error {response.status}: {error_text}")
-                                return None
-
-                except Exception as e:
-                    embedding_logger.error(f"Error calling Databricks embedding API directly: {str(e)}")
-                    return None
-                
-            elif provider == 'ollama':
-                # Use Ollama for embeddings via direct HTTP
-                import aiohttp
-                api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
-                # Strip ollama/ prefix if present for the raw API call
-                raw_model = embedding_model.removeprefix("ollama/")
-
-                timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                from src.utils.aiohttp_session import shared_client_session
-                async with shared_client_session() as http_session:
-                    async with http_session.post(
-                        f"{api_base}/api/embed",
-                        json={"model": raw_model, "input": text},
-                        timeout=timeout_val,
-                    ) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            embedding_logger.error(f"Ollama embedding API error {resp.status}: {error_text}")
-                            return None
-                        result = await resp.json()
-                        embeddings_list = result.get("embeddings", [])
-                        if embeddings_list:
-                            embedding = embeddings_list[0]
-                            embedding_logger.info(f"Successfully created embedding with {len(embedding)} dimensions using Ollama")
-                            if provider in LLMManager._embedding_failures:
-                                LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
-                            return embedding
-                        embedding_logger.warning("No embedding data in Ollama response")
-                        return None
-
-            elif provider == 'google':
-                # Use Google AI for embeddings via direct HTTP
-                import aiohttp
-                group_id = LLMManager._get_group_id_from_context()
-                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.GEMINI, group_id=group_id)
-
-                if not api_key:
-                    embedding_logger.warning("No Google API key found for creating embeddings")
-                    return None
-
-                # Strip gemini/ prefix if present
-                raw_model = embedding_model.removeprefix("gemini/")
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{raw_model}:embedContent?key={api_key}"
-                payload = {"model": f"models/{raw_model}", "content": {"parts": [{"text": text}]}}
-
-                timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                from src.utils.aiohttp_session import shared_client_session
-                async with shared_client_session() as http_session:
-                    async with http_session.post(url, json=payload, timeout=timeout_val) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            embedding_logger.error(f"Google embedding API error {resp.status}: {error_text}")
-                            return None
-                        result = await resp.json()
-                        embedding_data = result.get("embedding", {})
-                        values = embedding_data.get("values", [])
-                        if values:
-                            embedding_logger.info(f"Successfully created embedding with {len(values)} dimensions using Google")
-                            if provider in LLMManager._embedding_failures:
-                                LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
-                            return values
-                        embedding_logger.warning("No embedding data in Google response")
-                        return None
-
-            else:
-                # Default to OpenAI for embeddings via direct HTTP
-                import aiohttp
-                group_id = LLMManager._get_group_id_from_context()
-                api_key = await ApiKeysService.get_provider_api_key(ModelProvider.OPENAI, group_id=group_id)
-
-                if not api_key:
-                    embedding_logger.warning(f"No OpenAI API key found for creating embeddings with group_id: {group_id}")
-                    return None
-
-                url = "https://api.openai.com/v1/embeddings"
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                payload = {"model": embedding_model, "input": text}
-
-                timeout_val = aiohttp.ClientTimeout(total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")))
-                from src.utils.aiohttp_session import shared_client_session
-                async with shared_client_session() as http_session:
-                    async with http_session.post(url, headers=headers, json=payload, timeout=timeout_val) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            embedding_logger.error(f"OpenAI embedding API error {resp.status}: {error_text}")
-                            return None
-                        result = await resp.json()
-                        data = result.get("data", [])
-                        if data:
-                            embedding = data[0].get("embedding", [])
-                            embedding_logger.info(f"Successfully created embedding with {len(embedding)} dimensions using OpenAI")
-                            if provider in LLMManager._embedding_failures:
-                                LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
-                            return embedding
-                        embedding_logger.warning("No embedding data in OpenAI response")
-                        return None
-                
-        except Exception as e:
-            embedding_logger.error(f"Error creating embedding: {str(e)}")
-            # Track failure for circuit breaker
-            if provider not in LLMManager._embedding_failures:
-                LLMManager._embedding_failures[provider] = {'count': 0, 'last_failure': 0}
-            LLMManager._embedding_failures[provider]['count'] += 1
-            LLMManager._embedding_failures[provider]['last_failure'] = time.time()
-            
-            # Log circuit breaker status
-            failure_count = LLMManager._embedding_failures[provider]['count']
-            if failure_count >= LLMManager._embedding_failure_threshold:
-                embedding_logger.error(f"Circuit breaker tripped for {provider} embeddings after {failure_count} failures")
-
-            return None
-
+        return await get_embedding(text, model=model, embedder_config=embedder_config)

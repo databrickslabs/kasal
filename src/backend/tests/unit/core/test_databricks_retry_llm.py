@@ -1,8 +1,8 @@
 """
-Unit tests for DatabricksGPTOSSHandler module.
+Unit tests for the Databricks retry/fallback LLM.
 
-Tests the specialized handling of Databricks GPT-OSS models including
-response format transformation and parameter filtering.
+Covers the retry/backoff and fallback behaviour plus the Databricks message
+sanitization DatabricksRetryLLM applies before every call.
 """
 
 import pytest
@@ -11,169 +11,12 @@ import json
 import sys
 import logging
 
-from src.core.llm_handlers.databricks_gpt_oss_handler import (
-    DatabricksGPTOSSHandler,
+from src.core.llm.handlers.databricks_retry_llm import (
     DatabricksRetryLLM,
-    apply_empty_content_fix,
     _resolve_schema_refs,
     _is_gemini_model,
     _sanitize_tools_for_gemini,
 )
-
-class TestDatabricksGPTOSSHandler:
-    """Test suite for DatabricksGPTOSSHandler."""
-
-    def test_is_gpt_oss_model_true(self):
-        """Test identifying GPT-OSS models correctly."""
-        assert DatabricksGPTOSSHandler.is_gpt_oss_model("databricks-gpt-oss-2024")
-        assert DatabricksGPTOSSHandler.is_gpt_oss_model("gpt-oss-v1")
-        assert DatabricksGPTOSSHandler.is_gpt_oss_model("GPT-OSS-TURBO")
-
-    def test_is_gpt_oss_model_false(self):
-        """Test identifying non-GPT-OSS models correctly."""
-        assert not DatabricksGPTOSSHandler.is_gpt_oss_model("gpt-4")
-        assert not DatabricksGPTOSSHandler.is_gpt_oss_model("claude-3")
-        assert not DatabricksGPTOSSHandler.is_gpt_oss_model("")
-        assert not DatabricksGPTOSSHandler.is_gpt_oss_model(None)
-
-    def test_extract_text_from_string_response(self):
-        """Test extracting text from a simple string response."""
-        content = "This is a simple response"
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "This is a simple response"
-
-    def test_extract_text_from_json_string(self):
-        """Test extracting text from a JSON string response."""
-        content = json.dumps(
-            [
-                {"type": "reasoning", "summary": [], "content": []},
-                {"type": "text", "text": "Actual response text"},
-            ]
-        )
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Actual response text"
-
-    def test_extract_text_from_harmony_format(self):
-        """Test extracting text from Harmony format response."""
-        content = [
-            {
-                "type": "reasoning",
-                "summary": [{"type": "summary_text", "text": "Some summary"}],
-                "content": [{"type": "reasoning_text", "text": "Reasoning content"}],
-            },
-            {"type": "text", "text": "Main response text"},
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Main response text"
-
-    def test_extract_text_prioritizes_text_blocks(self):
-        """Test that text blocks are prioritized over reasoning blocks."""
-        content = [
-            {
-                "type": "reasoning",
-                "content": [{"type": "reasoning_text", "text": "Reasoning text"}],
-            },
-            {"type": "text", "text": "Primary text"},
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Primary text"
-
-    def test_extract_text_falls_back_to_reasoning(self):
-        """Test fallback to reasoning text when no text blocks exist."""
-        content = [
-            {
-                "type": "reasoning",
-                "content": [{"type": "reasoning_text", "text": "Only reasoning text"}],
-            }
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Only reasoning text"
-
-    def test_extract_text_from_dict_with_text_field(self):
-        """Test extracting text from a dict with a text field."""
-        content = {"text": "Dict text response"}
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Dict text response"
-
-    def test_extract_text_from_dict_with_content_field(self):
-        """Test extracting text from a dict with a content field."""
-        content = {"content": "Dict content response"}
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Dict content response"
-
-    def test_extract_text_from_dict_with_content_list(self):
-        """Test extracting text from a dict with content as a list."""
-        content = {"content": [{"type": "text", "text": "Nested text"}]}
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Nested text"
-
-    def test_extract_text_filters_metadata(self):
-        """Test that metadata responses are filtered out."""
-        content = [
-            {"type": "text", "text": '{"suggestions": ["item1"], "quality": "high"}'}
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == ""
-
-    def test_extract_text_handles_empty_content(self):
-        """Test handling of empty content."""
-        assert DatabricksGPTOSSHandler.extract_text_from_response([]) == ""
-        assert DatabricksGPTOSSHandler.extract_text_from_response({}) == ""
-        assert DatabricksGPTOSSHandler.extract_text_from_response(None) == ""
-        assert DatabricksGPTOSSHandler.extract_text_from_response("") == ""
-
-    def test_extract_text_from_invalid_json_string(self):
-        """Test handling of invalid JSON strings - returns as-is."""
-        content = '{"invalid json'
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == '{"invalid json'
-
-    def test_extract_text_from_dict_content_field_with_list(self):
-        """Test extraction from dict with content field containing a list."""
-        content = {
-            "content": [
-                {"type": "reasoning", "content": []},
-                {"type": "text", "text": "Nested list text"},
-            ]
-        }
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "Nested list text"
-
-    def test_extract_text_with_plain_string_items_in_list(self):
-        """Test list containing plain strings."""
-        content = ["First string", "Second string"]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == "First string Second string"
-
-    def test_extract_text_warns_on_unexpected_type(self):
-        """Test warning and fallback for unexpected content types."""
-        result = DatabricksGPTOSSHandler.extract_text_from_response(12345)
-        assert result == "12345"
-
-    @patch(
-        "src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksGPTOSSHandler.extract_text_from_response"
-    )
-    def test_apply_monkey_patch(self, mock_extract):
-        """Test that monkey patch is applied correctly."""
-        mock_extract.return_value = "Extracted text"
-
-        # Mock the litellm module structure
-        with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksGPTOSSHandler.apply_monkey_patch"
-        ) as mock_patch:
-            DatabricksGPTOSSHandler.apply_monkey_patch()
-            mock_patch.assert_called_once()
-
-    def test_apply_monkey_patch_handles_import_error(self):
-        """Test that ImportError is handled gracefully when DatabricksConfig not found."""
-        # This test verifies the try/except ImportError block at lines 319-322
-        # We can't easily test the ImportError path since the module is already imported
-        # but we can verify the method completes without error
-        try:
-            DatabricksGPTOSSHandler.apply_monkey_patch()
-        except Exception as e:
-            pytest.fail(f"apply_monkey_patch raised unexpected exception: {e}")
-
 
 class TestSanitizeMessagesForDatabricks:
     """Test suite for DatabricksRetryLLM._sanitize_messages_for_databricks."""
@@ -290,44 +133,6 @@ class TestSanitizeMessagesForDatabricks:
         assert msgs[1]["content"] is None
 
 
-class TestApplyEmptyContentFix:
-    """Test suite for apply_empty_content_fix litellm.completion patch."""
-
-    def test_sanitizes_messages_before_litellm_call(self):
-        """Verify litellm.completion receives sanitized messages."""
-        import litellm
-
-        captured_messages = []
-        original = litellm.completion
-
-        def capturing_completion(*args, **kwargs):
-            captured_messages.append(kwargs.get("messages", []))
-            raise RuntimeError("stop here")
-
-        litellm.completion = capturing_completion
-        apply_empty_content_fix()
-
-        try:
-            litellm.completion(
-                model="test",
-                messages=[
-                    {"role": "user", "content": "Hello"},
-                    {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
-                    {"role": "user", "content": "Retry"},
-                ],
-            )
-        except RuntimeError:
-            pass
-        finally:
-            litellm.completion = original
-            apply_empty_content_fix()
-
-        assert len(captured_messages) == 1
-        msgs = captured_messages[0]
-        assert msgs[1]["content"] == "Calling tools."
-        assert msgs[1]["tool_calls"] == [{"id": "1"}]
-
-
 class TestEngineToolCallsWithContent:
     """Regression guard replacing the crewAI-era apply_tool_calls_fix patch:
     kasal_engine must execute tool_calls even when the same response also
@@ -386,7 +191,7 @@ class TestEngineToolCallsWithContent:
 class TestDatabricksRetryLLMOTelTracing:
     """Tests for OTel tracing integration in DatabricksRetryLLM retry logic."""
 
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer")
+    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_creates_span_with_attributes(
         self, mock_crew_log, mock_get_tracer
@@ -406,7 +211,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
+            "src.core.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=1,
@@ -437,7 +242,7 @@ class TestDatabricksRetryLLMOTelTracing:
         # sleep should happen inside the span
         mock_time.sleep.assert_called_once_with(2.0)
 
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer")
+    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_sleeps_without_tracer(
         self, mock_crew_log, mock_get_tracer
@@ -450,7 +255,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
+            "src.core.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=0,
@@ -464,7 +269,7 @@ class TestDatabricksRetryLLMOTelTracing:
 
         mock_time.sleep.assert_called_once_with(1.0)
 
-    @patch("src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer")
+    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_still_sleeps_on_tracer_exception(
         self, mock_crew_log, mock_get_tracer
@@ -479,7 +284,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
+            "src.core.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=0,
@@ -785,10 +590,10 @@ class TestGetRetryTracer:
     def test_returns_none_when_opentelemetry_not_installed(self):
         """Verify _get_retry_tracer returns None when OTel is unavailable."""
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler._get_retry_tracer"
+            "src.core.llm.handlers.databricks_retry_llm._get_retry_tracer"
         ) as mock:
             mock.return_value = None
-            from src.core.llm_handlers.databricks_gpt_oss_handler import (
+            from src.core.llm.handlers.databricks_retry_llm import (
                 _get_retry_tracer,
             )
 
@@ -865,7 +670,7 @@ class TestDatabricksRetryLLMRetryLogic:
             ],
         ):
             with patch(
-                "src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"
+                "src.core.llm.handlers.databricks_retry_llm._time_mod"
             ) as mock_time:
                 result = llm.call([{"role": "user", "content": "test"}])
 
@@ -884,7 +689,7 @@ class TestDatabricksRetryLLMRetryLogic:
 
         test_error = Exception("Connection timeout")
         with patch.object(type(llm).__bases__[0], "call", side_effect=test_error):
-            with patch("src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"):
+            with patch("src.core.llm.handlers.databricks_retry_llm._time_mod"):
                 with pytest.raises(Exception) as exc_info:
                     llm.call([{"role": "user", "content": "test"}])
 
@@ -981,119 +786,12 @@ class TestDatabricksRetryLLMRetryLogic:
         assert mock_retry_llm._get_max_retries(is_rate_limit=True) == 5
 
 
-class TestApplyEmptyContentFixGemini:
-    """Test suite for the Gemini tool schema sanitization in apply_empty_content_fix."""
-
-    def test_sanitizes_gemini_tool_schemas_before_litellm_call(self):
-        """Verify litellm.completion receives resolved tool schemas for Gemini."""
-        import litellm
-
-        captured_kwargs = []
-        original = litellm.completion
-
-        def capturing_completion(*args, **kwargs):
-            captured_kwargs.append(kwargs)
-            raise RuntimeError("stop here")
-
-        litellm.completion = capturing_completion
-        apply_empty_content_fix()
-
-        try:
-            litellm.completion(
-                model="databricks-gemini-2-5-flash",
-                messages=[{"role": "user", "content": "Hello"}],
-                tools=[
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "eval_tool",
-                            "parameters": {
-                                "$defs": {
-                                    "TaskEval": {
-                                        "type": "object",
-                                        "properties": {
-                                            "quality": {"type": "number"},
-                                        },
-                                    }
-                                },
-                                "type": "object",
-                                "properties": {
-                                    "evaluation": {"$ref": "#/$defs/TaskEval"},
-                                },
-                            },
-                        },
-                    }
-                ],
-            )
-        except RuntimeError:
-            pass
-        finally:
-            litellm.completion = original
-            apply_empty_content_fix()
-
-        assert len(captured_kwargs) == 1
-        params = captured_kwargs[0]["tools"][0]["function"]["parameters"]
-        assert "$defs" not in params
-        assert "$ref" not in params["properties"]["evaluation"]
-        assert params["properties"]["evaluation"]["type"] == "object"
-
-    def test_does_not_sanitize_tools_for_non_gemini_model(self):
-        """Verify tool schemas are untouched for non-Gemini models."""
-        import litellm
-        import copy
-
-        captured_kwargs = []
-        original = litellm.completion
-
-        def capturing_completion(*args, **kwargs):
-            captured_kwargs.append(kwargs)
-            raise RuntimeError("stop here")
-
-        litellm.completion = capturing_completion
-        apply_empty_content_fix()
-
-        tool_with_refs = {
-            "type": "function",
-            "function": {
-                "name": "eval_tool",
-                "parameters": {
-                    "$defs": {"Foo": {"type": "string"}},
-                    "type": "object",
-                    "properties": {"bar": {"$ref": "#/$defs/Foo"}},
-                },
-            },
-        }
-        expected_params = copy.deepcopy(tool_with_refs["function"]["parameters"])
-
-        try:
-            litellm.completion(
-                model="databricks-claude-sonnet",
-                messages=[{"role": "user", "content": "Hello"}],
-                tools=[tool_with_refs],
-            )
-        except RuntimeError:
-            pass
-        finally:
-            litellm.completion = original
-            apply_empty_content_fix()
-
-        assert len(captured_kwargs) == 1
-        actual_params = captured_kwargs[0]["tools"][0]["function"]["parameters"]
-        assert "$defs" in actual_params
-        assert actual_params == expected_params
-
-
-# ---------------------------------------------------------------------------
-# Additional coverage tests for missing lines
-# ---------------------------------------------------------------------------
-
-
 class TestGetRetryTracerExceptionPath:
     """Cover the exception path in _get_retry_tracer (lines 37-38)."""
 
     def test_returns_none_when_otel_raises(self):
         """_get_retry_tracer returns None when opentelemetry raises on import."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import _get_retry_tracer
+        from src.core.llm.handlers.databricks_retry_llm import _get_retry_tracer
         import sys
 
         # Remove otel from sys.modules so import raises
@@ -1118,99 +816,6 @@ class TestGetRetryTracerExceptionPath:
                 sys.modules["opentelemetry.trace"] = saved_trace
         # Test passes as long as no unhandled exception occurred
         assert result is None or result is not None
-
-
-class TestExtractTextMissingCoverage:
-    """Cover remaining uncovered paths in extract_text_from_response."""
-
-    def test_reasoning_item_without_content_field(self):
-        """Reasoning block with no 'content' field (line 149-151 area)."""
-        content = [
-            {"type": "reasoning", "summary": []},  # no 'content' key
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        # No text found, should return empty
-        assert result == ""
-
-    def test_summary_text_with_suggestions_filtered(self):
-        """Summary text containing 'suggestions' is filtered (line 177-178)."""
-        content = [
-            {
-                "type": "reasoning",
-                "summary": [
-                    {"type": "summary_text", "text": '{"suggestions": ["a", "b"]}'}
-                ],
-                "content": [],
-            }
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == ""
-
-    def test_result_starts_with_brace_with_suggestions(self):
-        """Result that starts with '{' and contains 'suggestions' is discarded."""
-        content = [
-            {"type": "text", "text": '{"suggestions": ["a"], "quality": "high"}'}
-        ]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        assert result == ""
-
-    def test_result_starts_with_brace_no_suggestions(self):
-        """Result starting with '{' but not metadata is kept."""
-        content = [{"type": "text", "text": '{"answer": "Paris"}'}]
-        result = DatabricksGPTOSSHandler.extract_text_from_response(content)
-        # Not metadata, should be kept
-        assert result == '{"answer": "Paris"}'
-
-
-class TestMonkeyPatchPaths:
-    """Cover patched method paths (lines 222-299)."""
-
-    def test_patched_extract_content_str_gpt_oss_format(self):
-        """The patched extract_content_str handles GPT-OSS list format."""
-        from litellm.llms.databricks.chat.transformation import DatabricksConfig
-
-        # The monkey patch was applied at module import time
-        # Call the patched method with a GPT-OSS format list
-        content = [
-            {
-                "type": "reasoning",
-                "content": [{"type": "reasoning_text", "text": "thinking"}],
-            },
-            {"type": "text", "text": "Final answer"},
-        ]
-        result = DatabricksConfig.extract_content_str(content)
-        assert result == "Final answer"
-
-    def test_patched_extract_content_str_non_gpt_oss_format(self):
-        """The patched extract_content_str delegates non-GPT-OSS format to original."""
-        from litellm.llms.databricks.chat.transformation import DatabricksConfig
-
-        # Simple string, not GPT-OSS
-        result = DatabricksConfig.extract_content_str("simple text")
-        assert result == "simple text"
-
-    def test_patched_extract_reasoning_content_gpt_oss(self):
-        """The patched extract_reasoning_content handles GPT-OSS list format."""
-        from litellm.llms.databricks.chat.transformation import DatabricksConfig
-
-        content = [
-            {"type": "text", "text": "Answer here"},
-        ]
-        result = DatabricksConfig.extract_reasoning_content(content)
-        # Returns (text, None) for GPT-OSS
-        assert isinstance(result, tuple)
-        assert result[0] == "Answer here"
-        assert result[1] is None
-
-    def test_patched_extract_content_str_empty_gpt_oss(self):
-        """When GPT-OSS format returns no text, returns empty string."""
-        from litellm.llms.databricks.chat.transformation import DatabricksConfig
-
-        content = [
-            {"type": "reasoning", "content": []},  # no text blocks
-        ]
-        result = DatabricksConfig.extract_content_str(content)
-        assert result == ""
 
 
 class TestDatabricksRetryLLMProperties:
@@ -1415,7 +1020,7 @@ class TestCallMethodMissingCoverage:
 
         # Always return empty (3 retries = MAX_RETRIES)
         with patch.object(type(llm).__bases__[0], "call", return_value=""):
-            with patch("src.core.llm_handlers.databricks_gpt_oss_handler._time_mod"):
+            with patch("src.core.llm.handlers.databricks_retry_llm._time_mod"):
                 result = llm.call([{"role": "user", "content": "test"}])
         assert result == ""
 
@@ -1438,7 +1043,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_merges_multiple_system_messages(self):
         """Multiple system messages are merged into one for Gemini."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1459,7 +1064,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_single_system_message_unchanged(self):
         """Single system message is not modified."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1473,7 +1078,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_non_gemini_model(self):
         """No-op for non-Gemini models."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1487,7 +1092,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_empty_messages(self):
         """No-op for empty messages list."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1497,7 +1102,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_filters_empty_system_content(self):
         """System messages with empty content are excluded from merge."""
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1511,42 +1116,72 @@ class TestMergeSystemMessagesForGemini:
         assert len(messages) == 3  # unchanged (only 1 non-empty system)
 
 
-class TestApplyEmptyContentFixGeminiSystemMerge:
-    """Test that apply_empty_content_fix merges Gemini system messages."""
 
-    def test_merges_gemini_system_messages_in_litellm_call(self):
-        """litellm.completion receives merged system messages for Gemini."""
-        import litellm
 
-        captured = []
-        original = litellm.completion
+class TestGeminiSanitizationRunsInCall:
+    """The Gemini fixes must run on the path the request actually takes.
 
-        def capturing(*args, **kwargs):
-            captured.append(kwargs.copy())
-            raise RuntimeError("stop")
+    They used to live only inside a ``litellm.completion`` monkey patch, which the
+    engine bypasses entirely — so a Databricks-served Gemini model reached the
+    endpoint with multiple system prompts (only one is supported) and $defs/$ref
+    left in its tool schemas (rejected). ``call()`` now applies both.
+    """
 
-        litellm.completion = capturing
-        apply_empty_content_fix()
+    def _llm(self, model):
+        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
+            return DatabricksRetryLLM(model=model, api_key="k")
 
-        try:
-            litellm.completion(
-                model="databricks-gemini-2-5-flash",
-                messages=[
-                    {"role": "system", "content": "Prompt A"},
-                    {"role": "user", "content": "Hello"},
-                    {"role": "system", "content": "Prompt B"},
-                ],
-            )
-        except RuntimeError:
-            pass
-        finally:
-            litellm.completion = original
-            apply_empty_content_fix()
+    def test_call_merges_system_messages_for_gemini(self):
+        llm = self._llm("databricks/databricks-gemini-3-5-flash")
+        messages = [
+            {"role": "system", "content": "You are an agent."},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Be concise."},
+        ]
+        with patch(
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ) as mock_call:
+            llm.call(messages)
 
-        assert len(captured) == 1
-        msgs = captured[0]["messages"]
-        system_msgs = [m for m in msgs if m.get("role") == "system"]
-        # Should be merged to 1 system message
-        assert len(system_msgs) == 1
-        assert "Prompt A" in system_msgs[0]["content"]
-        assert "Prompt B" in system_msgs[0]["content"]
+        sent = mock_call.call_args[0][0]
+        assert [m["role"] for m in sent].count("system") == 1
+        assert "You are an agent." in sent[0]["content"]
+        assert "Be concise." in sent[0]["content"]
+
+    def test_call_resolves_ref_in_tool_schema_for_gemini(self):
+        llm = self._llm("databricks/databricks-gemini-3-5-flash")
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {
+                        "$defs": {"Q": {"type": "string"}},
+                        "type": "object",
+                        "properties": {"q": {"$ref": "#/$defs/Q"}},
+                    },
+                },
+            }
+        ]
+        with patch(
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ):
+            llm.call([{"role": "user", "content": "hi"}], tools=tools)
+
+        params = tools[0]["function"]["parameters"]
+        assert "$defs" not in params
+        assert params["properties"]["q"] == {"type": "string"}
+
+    def test_non_gemini_model_is_untouched(self):
+        llm = self._llm("databricks/databricks-claude-sonnet-4-6")
+        messages = [
+            {"role": "system", "content": "one"},
+            {"role": "system", "content": "two"},
+            {"role": "user", "content": "hi"},
+        ]
+        with patch(
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ) as mock_call:
+            llm.call(messages)
+
+        assert [m["role"] for m in mock_call.call_args[0][0]].count("system") == 2

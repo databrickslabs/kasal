@@ -18,6 +18,7 @@ from typing import Dict, Any, List, Optional
 import os
 import logging
 
+from src.core.llm import embeddings as _embeddings
 from src.core.llm_manager import (
     LLMManager,
     log_file_path,
@@ -51,19 +52,19 @@ class TestClassAttributes:
     """Test LLMManager class attributes and circuit breaker config."""
 
     def test_embedding_failure_tracking_attributes(self):
-        assert isinstance(LLMManager._embedding_failures, dict)
-        assert isinstance(LLMManager._embedding_failure_threshold, int)
-        assert isinstance(LLMManager._circuit_reset_time, int)
+        assert isinstance(_embeddings._embedding_failures, dict)
+        assert isinstance(_embeddings._EMBEDDING_FAILURE_THRESHOLD, int)
+        assert isinstance(_embeddings._CIRCUIT_RESET_SECONDS, int)
 
     def test_circuit_breaker_defaults(self):
-        assert LLMManager._embedding_failure_threshold == 3
-        assert LLMManager._circuit_reset_time == 300
+        assert _embeddings._EMBEDDING_FAILURE_THRESHOLD == 3
+        assert _embeddings._CIRCUIT_RESET_SECONDS == 300
 
     def test_embedding_failures_manipulation(self):
-        LLMManager._embedding_failures.clear()
-        LLMManager._embedding_failures["test"] = {"count": 1, "last_failure": _time.time()}
-        assert LLMManager._embedding_failures["test"]["count"] == 1
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
+        _embeddings._embedding_failures["test"] = {"count": 1, "last_failure": _time.time()}
+        assert _embeddings._embedding_failures["test"]["count"] == 1
+        _embeddings._embedding_failures.clear()
 
     def test_static_methods_exist(self):
         for name in ("_get_group_id_from_context", "completion", "configure_kasal_llm", "get_llm", "get_embedding"):
@@ -350,7 +351,14 @@ class TestConfigureCrewaiLlm:
             assert call_kwargs["api_key"] == "sk-key"
 
     @pytest.mark.asyncio
-    async def test_openai_gpt5_drop_params(self):
+    async def test_openai_gpt5_omits_temperature(self):
+        """A direct-OpenAI GPT-5 model must be built with NO `temperature`.
+
+        This used to be handled by `additional_drop_params=["stop","temperature"]`,
+        which the engine's LLM silently swallowed as an unused pydantic extra — so
+        `temperature=0.7` was sent and OpenAI 400ed ("Only the default (1) is
+        supported"). The param is now simply never set.
+        """
         config = _make_model_config("gpt-5", "openai", max_output_tokens=128000)
         p_session, p_service = _patch_session_and_config(config)
         with (
@@ -359,11 +367,44 @@ class TestConfigureCrewaiLlm:
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
             patch("src.core.llm_manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_kasal_llm("gpt-5", "group-1", None)
+            await LLMManager.configure_kasal_llm("gpt-5", "group-1", 0.7)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["timeout"] == 300
-            assert "additional_drop_params" in call_kwargs
+            assert "temperature" not in call_kwargs
             assert "max_completion_tokens" in call_kwargs
+            # litellm-only knobs must not be passed: the engine ignores them.
+            assert "additional_drop_params" not in call_kwargs
+            assert "drop_params" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_openai_non_reasoning_model_keeps_temperature(self):
+        """The omission is targeted — an ordinary model still gets its temperature."""
+        config = _make_model_config("gpt-4o", "openai")
+        p_session, p_service = _patch_session_and_config(config)
+        with (
+            p_session,
+            p_service,
+            patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
+            patch("src.core.llm_manager.LLM") as MockLLM,
+        ):
+            await LLMManager.configure_kasal_llm("gpt-4o", "group-1", 0.3)
+            assert MockLLM.call_args[1]["temperature"] == 0.3
+
+    @pytest.mark.asyncio
+    async def test_kimi_omits_temperature(self):
+        """Kimi K2.x 400s on any temperature but 1, so the param is omitted."""
+        config = _make_model_config("kimi-k2.7-code", "kimi")
+        p_session, p_service = _patch_session_and_config(config)
+        with (
+            p_session,
+            p_service,
+            patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="kimi-key"),
+            patch("src.core.llm_manager.LLM") as MockLLM,
+        ):
+            await LLMManager.configure_kasal_llm("kimi-k2.7-code", "group-1", 0.0)
+            call_kwargs = MockLLM.call_args[1]
+            assert "temperature" not in call_kwargs
+            assert call_kwargs["model"] == "openai/kimi-k2.7-code"
 
     @pytest.mark.asyncio
     async def test_anthropic_provider(self):
@@ -439,14 +480,15 @@ class TestConfigureCrewaiLlm:
             await LLMManager.configure_kasal_llm("databricks-gpt-5", "group-1", None)
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["timeout"] == 300  # GPT-5 gets 300s
-            assert "additional_drop_params" in call_kwargs
             assert "max_completion_tokens" in call_kwargs
             # Temperature should NOT be set for GPT-5 (even if passed)
             assert "temperature" not in call_kwargs
+            # The engine ignores litellm's drop knobs — omission is the mechanism.
+            assert "additional_drop_params" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_databricks_codex_model(self):
-        """gpt-5-3-codex should return DatabricksCodexCompletion."""
+        """gpt-5-3-codex should return DatabricksResponsesLLM."""
         config = _make_model_config("databricks-gpt-5-3-codex", "databricks", max_output_tokens=128000)
         p_session, p_service = _patch_session_and_config(config)
 
@@ -465,7 +507,7 @@ class TestConfigureCrewaiLlm:
             patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
             patch("src.utils.user_context.UserContext.get_user_token", return_value="user-tok"),
             patch("src.core.llm_manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
-            patch("src.core.llm_handlers.databricks_codex_handler.DatabricksCodexCompletion", mock_codex_cls),
+            patch("src.core.llm.handlers.databricks_responses_llm.DatabricksResponsesLLM", mock_codex_cls),
         ):
             result = await LLMManager.configure_kasal_llm("databricks-gpt-5-3-codex", "group-1", None)
             mock_codex_cls.assert_called_once()
@@ -632,15 +674,15 @@ class TestGetEmbeddingCircuitBreaker:
     """Test circuit breaker logic in get_embedding."""
 
     def setup_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     def teardown_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_open_returns_none(self):
         """When circuit is open, should return None immediately."""
-        LLMManager._embedding_failures["databricks"] = {
+        _embeddings._embedding_failures["databricks"] = {
             "count": 5,
             "last_failure": _time.time(),
         }
@@ -653,7 +695,7 @@ class TestGetEmbeddingCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_after_timeout(self):
         """After reset time, circuit should close and allow retry."""
-        LLMManager._embedding_failures["databricks"] = {
+        _embeddings._embedding_failures["databricks"] = {
             "count": 5,
             "last_failure": _time.time() - 400,  # older than reset_time (300s)
         }
@@ -668,7 +710,7 @@ class TestGetEmbeddingCircuitBreaker:
         # Returns None because auth is None, but circuit was reset
         assert result is None
         # Circuit should be reset
-        assert LLMManager._embedding_failures.get("databricks", {}).get("count", 0) == 0
+        assert _embeddings._embedding_failures.get("databricks", {}).get("count", 0) == 0
 
     @pytest.mark.asyncio
     async def test_embedding_tracks_failures(self):
@@ -679,7 +721,7 @@ class TestGetEmbeddingCircuitBreaker:
         ):
             result = await LLMManager.get_embedding("test text")
         assert result is None
-        assert LLMManager._embedding_failures["databricks"]["count"] == 1
+        assert _embeddings._embedding_failures["databricks"]["count"] == 1
 
     @pytest.mark.asyncio
     async def test_embedding_with_ollama_provider(self):
@@ -802,10 +844,10 @@ class TestGetEmbeddingDatabricksPaths:
     """Additional tests for Databricks embedding paths (lines 466-572)."""
 
     def setup_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     def teardown_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     @pytest.mark.asyncio
     async def test_databricks_obo_auth_uses_headers(self):
@@ -967,10 +1009,10 @@ class TestGetEmbeddingOllama:
     """Test Ollama embedding path (lines 574-600)."""
 
     def setup_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     def teardown_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     @pytest.mark.asyncio
     async def test_ollama_non_200_returns_none(self):
@@ -996,24 +1038,24 @@ class TestGetEmbeddingOllama:
     async def test_ollama_success_resets_circuit_breaker(self):
         """Successful Ollama call resets the circuit breaker."""
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
-        LLMManager._embedding_failures["ollama"] = {"count": 2, "last_failure": 0}
+        _embeddings._embedding_failures["ollama"] = {"count": 2, "last_failure": 0}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embeddings": [[0.1, 0.2]]})
 
         with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
         assert result == [0.1, 0.2]
-        assert LLMManager._embedding_failures.get("ollama", {}).get("count", 0) == 0
+        assert _embeddings._embedding_failures.get("ollama", {}).get("count", 0) == 0
 
 
 class TestGetEmbeddingGoogle:
     """Test Google embedding path (lines 602-633)."""
 
     def setup_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     def teardown_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     @pytest.mark.asyncio
     async def test_google_no_api_key_returns_none(self):
@@ -1068,7 +1110,7 @@ class TestGetEmbeddingGoogle:
     async def test_google_resets_circuit_breaker_on_success(self):
         """Successful Google call resets circuit breaker."""
         embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
-        LLMManager._embedding_failures["google"] = {"count": 2, "last_failure": 0}
+        _embeddings._embedding_failures["google"] = {"count": 2, "last_failure": 0}
 
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embedding": {"values": [0.1, 0.2]}})
         mock_ctx = MagicMock()
@@ -1081,17 +1123,17 @@ class TestGetEmbeddingGoogle:
         ):
             result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
         assert result == [0.1, 0.2]
-        assert LLMManager._embedding_failures.get("google", {}).get("count", 0) == 0
+        assert _embeddings._embedding_failures.get("google", {}).get("count", 0) == 0
 
 
 class TestGetEmbeddingOpenAI:
     """Test OpenAI embedding path (lines 635-665)."""
 
     def setup_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     def teardown_method(self):
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
     @pytest.mark.asyncio
     async def test_openai_no_api_key_returns_none(self):
@@ -1146,7 +1188,7 @@ class TestGetEmbeddingOpenAI:
     async def test_circuit_breaker_trips_after_failures(self):
         """Circuit breaker trips after _embedding_failure_threshold failures."""
         embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
-        LLMManager._embedding_failures.clear()
+        _embeddings._embedding_failures.clear()
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
@@ -1156,10 +1198,10 @@ class TestGetEmbeddingOpenAI:
             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
             patch("src.core.llm_manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, side_effect=RuntimeError("API error")),
         ):
-            for _ in range(LLMManager._embedding_failure_threshold):
+            for _ in range(_embeddings._EMBEDDING_FAILURE_THRESHOLD):
                 await LLMManager.get_embedding("test text", embedder_config=embedder_config)
 
-        assert LLMManager._embedding_failures["openai"]["count"] >= LLMManager._embedding_failure_threshold
+        assert _embeddings._embedding_failures["openai"]["count"] >= _embeddings._EMBEDDING_FAILURE_THRESHOLD
 
 
 class TestModuleRegistration:

@@ -1,5 +1,5 @@
 """
-Unit tests for llm_handlers __init__.py module.
+Unit tests for the llm handlers package __init__.
 
 Verifies that all expected symbols are exported correctly.
 Uses AST parsing to avoid triggering the heavy import chain (litellm/openai).
@@ -10,11 +10,15 @@ import pathlib
 import pytest
 
 
+# parents[5] is src/backend: this file sits at
+# tests/unit/core/llm/handlers/, and the package it inspects moved to
+# src/core/llm/handlers/ when the two sibling LLM folders were merged.
 _INIT_PATH = (
-    pathlib.Path(__file__).resolve().parents[4]
+    pathlib.Path(__file__).resolve().parents[5]
     / "src"
     / "core"
-    / "llm_handlers"
+    / "llm"
+    / "handlers"
     / "__init__.py"
 )
 
@@ -52,11 +56,7 @@ def _get_imported_names(tree):
 
 
 class TestLLMHandlersExports:
-    """Test that llm_handlers __init__.py exports the expected symbols."""
-
-    def test_exports_databricks_gpt_oss_handler(self, init_tree):
-        names = _get_imported_names(init_tree)
-        assert "DatabricksGPTOSSHandler" in names
+    """Test that the handlers package exports the expected symbols."""
 
     def test_exports_databricks_retry_llm(self, init_tree):
         names = _get_imported_names(init_tree)
@@ -64,17 +64,23 @@ class TestLLMHandlersExports:
 
     def test_exports_databricks_codex_completion(self, init_tree):
         names = _get_imported_names(init_tree)
-        assert "DatabricksCodexCompletion" in names
+        assert "DatabricksResponsesLLM" in names
 
     def test_all_list_contains_expected_names(self, init_tree):
         all_list = _get_all_list(init_tree)
-        assert "DatabricksGPTOSSHandler" in all_list
         assert "DatabricksRetryLLM" in all_list
-        assert "DatabricksCodexCompletion" in all_list
+        assert "VLLMFunctionCallingLLM" in all_list
+        assert "DatabricksResponsesLLM" in all_list
+
+    def test_exports_vllm_function_calling_llm(self, init_tree):
+        names = _get_imported_names(init_tree)
+        assert "VLLMFunctionCallingLLM" in names
 
     def test_all_list_length(self, init_tree):
+        """Every handler in the package is exported — vllm.py was added without
+        being registered here, which is exactly what this count catches."""
         all_list = _get_all_list(init_tree)
         assert len(all_list) == 3
 
     def test_docstring_present(self, init_source):
-        assert "LLM Handlers" in init_source
+        assert "LLM handlers" in init_source

@@ -42,265 +42,16 @@ def _get_retry_tracer():
         return None
 
 
-class DatabricksGPTOSSHandler:
-    """
-    Handler for Databricks GPT-OSS models that manages response format transformation
-    and parameter filtering.
-    """
-
-    @staticmethod
-    def is_gpt_oss_model(model_name: str) -> bool:
-        """
-        Check if a model is a GPT-OSS variant.
-
-        Args:
-            model_name: The model name to check
-
-        Returns:
-            True if the model is a GPT-OSS variant, False otherwise
-        """
-        if not model_name:
-            return False
-        model_lower = model_name.lower()
-        return "gpt-oss" in model_lower
-
-    @staticmethod
-    def extract_text_from_response(content: Union[str, List, Dict]) -> str:
-        """
-        Extract text content from GPT-OSS response format (Harmony format).
-
-        GPT-OSS models return content in a structured format:
-        [
-            {"type": "reasoning", "summary": [...], "content": [...]},
-            {"type": "text", "text": "actual response text"}
-        ]
-
-        Args:
-            content: The response content from GPT-OSS model
-
-        Returns:
-            Extracted text content as a string
-        """
-        # If it's already a string, return it
-        if isinstance(content, str):
-            # Check if it's a JSON string that needs parsing
-            if content.strip().startswith("[") or content.strip().startswith("{"):
-                try:
-                    import json
-
-                    parsed = json.loads(content)
-                    # Recursively process the parsed content
-                    return DatabricksGPTOSSHandler.extract_text_from_response(parsed)
-                except:
-                    pass
-            return content
-
-        # If it's a list, process each item (Harmony format)
-        if isinstance(content, list):
-            logger.debug(f"Processing GPT-OSS list response with {len(content)} items")
-            text_parts = []
-            reasoning_text = []
-
-            for i, item in enumerate(content):
-                if isinstance(item, dict):
-                    logger.debug(f"  Item {i}: dict with keys {item.keys()}")
-
-                    # Handle text blocks (primary output)
-                    if item.get("type") == "text":
-                        if "text" in item:
-                            text_parts.append(item["text"])
-                            logger.debug(
-                                f"    Found text block: {item['text'][:50] if item['text'] else 'empty'}..."
-                            )
-
-                    # Handle reasoning blocks (Harmony format)
-                    elif item.get("type") == "reasoning":
-                        # Extract from content array if present (Harmony format)
-                        if "content" in item and isinstance(item["content"], list):
-                            for content_item in item["content"]:
-                                if isinstance(content_item, dict):
-                                    if (
-                                        content_item.get("type") == "reasoning_text"
-                                        and "text" in content_item
-                                    ):
-                                        reasoning_text.append(content_item["text"])
-                                        logger.debug(
-                                            f"    Found reasoning_text in content"
-                                        )
-
-                        # Also check summary for useful text
-                        if "summary" in item:
-                            summary = item["summary"]
-                            if isinstance(summary, list):
-                                for sum_item in summary:
-                                    if (
-                                        isinstance(sum_item, dict)
-                                        and sum_item.get("type") == "summary_text"
-                                    ):
-                                        if "text" in sum_item:
-                                            # Only use if it's not metadata
-                                            text = sum_item["text"]
-                                            if not (
-                                                text.strip().startswith("{")
-                                                or "suggestions" in text.lower()
-                                            ):
-                                                reasoning_text.append(text)
-                                                logger.debug(
-                                                    f"    Found useful summary_text"
-                                                )
-
-                    # Handle direct content field
-                    elif "content" in item and not item.get("type"):
-                        text_parts.append(str(item["content"]))
-                        logger.debug(f"    Found content field")
-
-                elif isinstance(item, str):
-                    text_parts.append(item)
-                    logger.debug(
-                        f"  Item {i}: string - {item[:50] if item else 'empty'}..."
-                    )
-
-            # Prioritize text blocks over reasoning
-            if text_parts:
-                result = " ".join(text_parts).strip()
-            elif reasoning_text:
-                result = " ".join(reasoning_text).strip()
-            else:
-                result = ""
-
-            if result:
-                # Final check - ensure it's not metadata
-                if result.strip().startswith("{"):
-                    try:
-                        import json
-
-                        parsed = json.loads(result)
-                        if "suggestions" in parsed or "quality" in parsed:
-                            logger.warning("Detected metadata response, discarding")
-                            return ""
-                    except:
-                        pass  # Not JSON or failed to parse, keep the content
-
-                logger.debug(
-                    f"Successfully extracted text from GPT-OSS response: {result[:100]}..."
-                )
-                return result
-            else:
-                logger.warning(f"No text extracted from GPT-OSS list response")
-                return ""
-
-        # If it's a dict, try to extract text
-        if isinstance(content, dict):
-            if "text" in content:
-                return str(content["text"])
-            elif "content" in content:
-                # Check if content is a list (Harmony format)
-                if isinstance(content["content"], list):
-                    return DatabricksGPTOSSHandler.extract_text_from_response(
-                        content["content"]
-                    )
-                return str(content["content"])
-
-        # Fallback: convert to string
-        logger.warning(f"Unexpected GPT-OSS response format: {type(content)}")
-        return str(content) if content else ""
-
-    @staticmethod
-    def apply_monkey_patch():
-        """
-        Apply monkey patch to litellm's Databricks transformation to handle
-        GPT-OSS response format differences.
-        """
-        try:
-            from litellm.llms.databricks.chat.transformation import DatabricksConfig
-
-            # Store the original methods
-            original_extract_reasoning = DatabricksConfig.extract_reasoning_content
-            original_extract_content = DatabricksConfig.extract_content_str
-
-            # Patch extract_content_str - this is what actually extracts message content
-            @staticmethod
-            def patched_extract_content_str(content):
-                """Patched version that handles GPT-OSS Harmony response format."""
-                # Check if this is a GPT-OSS response format (list with Harmony format)
-                if isinstance(content, list):
-                    # Check if it looks like GPT-OSS format (has reasoning/text blocks)
-                    is_gpt_oss = any(
-                        isinstance(item, dict)
-                        and item.get("type") in ["reasoning", "text"]
-                        for item in content
-                    )
-
-                    if is_gpt_oss:
-                        logger.info(
-                            f"[MONKEY PATCH extract_content_str] Detected GPT-OSS format"
-                        )
-                        # Use our extractor for GPT-OSS format
-                        text_content = (
-                            DatabricksGPTOSSHandler.extract_text_from_response(content)
-                        )
-                        if text_content:
-                            logger.info(
-                                f"[MONKEY PATCH extract_content_str] Extracted: {text_content[:100]}..."
-                            )
-                        return text_content if text_content else ""
-
-                # For non-GPT-OSS format, use original method
-                try:
-                    return original_extract_content(content)
-                except Exception as e:
-                    logger.debug(f"Original extract_content_str failed: {e}")
-                    # Try our extraction as fallback
-                    text_content = DatabricksGPTOSSHandler.extract_text_from_response(
-                        content
-                    )
-                    return text_content if text_content else ""
-
-            # Patch extract_reasoning_content too
-            @staticmethod
-            def patched_extract_reasoning_content(content):
-                """Patched version that handles GPT-OSS Harmony response format."""
-                # Check if this is a GPT-OSS response format (list with dicts or Harmony format)
-                if isinstance(content, list):
-                    # This is likely a GPT-OSS response in Harmony format
-                    logger.info(
-                        f"[MONKEY PATCH reasoning] Detected GPT-OSS Harmony format"
-                    )
-
-                    # Extract text from GPT-OSS Harmony format
-                    text_content = DatabricksGPTOSSHandler.extract_text_from_response(
-                        content
-                    )
-
-                    # Return format: (text_content, reasoning_blocks)
-                    # For GPT-OSS, we return the extracted text and None for reasoning blocks
-                    return text_content if text_content else "", None
-
-                # For non-GPT-OSS format, use original method
-                try:
-                    return original_extract_reasoning(content)
-                except Exception as e:
-                    logger.debug(f"Original extract_reasoning_content failed: {e}")
-                    text_content = DatabricksGPTOSSHandler.extract_text_from_response(
-                        content
-                    )
-                    return text_content if text_content else "", None
-
-            # Apply both patches
-            DatabricksConfig.extract_content_str = patched_extract_content_str
-            DatabricksConfig.extract_reasoning_content = (
-                patched_extract_reasoning_content
-            )
-            logger.info(
-                "Successfully applied GPT-OSS response format patches (content_str and reasoning)"
-            )
-
-        except ImportError:
-            logger.warning(
-                "Could not import DatabricksConfig for patching - litellm version may be different"
-            )
-        except Exception as e:
-            logger.error(f"Failed to apply GPT-OSS patch: {e}")
+# DatabricksGPTOSSHandler lived here: a Harmony-format text extractor plus
+# apply_monkey_patch(), which rewrote
+# litellm.llms.databricks.chat.transformation.DatabricksConfig.extract_content_str
+# and .extract_reasoning_content so gpt-oss reasoning blocks (which arrive with
+# no "signature" field) would parse. It patched litellm's Databricks provider,
+# which the engine never invokes, so it had no effect on any live call — and the
+# models it existed for (databricks-gpt-oss-20b/120b) are on the REMOVED_MODELS
+# prune list in seeds/model_configs.py. Recover it from git if a gpt-oss endpoint
+# is ever re-seeded; it would need reimplementing against the engine's response
+# handling rather than litellm's.
 
 
 # Placeholder injected into tool-call-only assistant HISTORY messages — the
@@ -405,10 +156,22 @@ class DatabricksRetryLLM(LLM):
         if "timeout" not in kwargs:
             kwargs["timeout"] = self.REQUEST_TIMEOUT
 
-        # IMPORTANT: Databricks provider ignores the timeout parameter in litellm.completion()
-        # We must set litellm.request_timeout globally to enforce request timeouts
-        # See: litellm's get_supported_openai_params() returns False for 'timeout' on Databricks
-        litellm.request_timeout = self.REQUEST_TIMEOUT
+        # ONE retry policy, and it is this class's. The engine hands `max_retries`
+        # to the OpenAI SDK client, which retries internally with its own backoff
+        # — underneath the loop below, which cannot see it. At the default of 2
+        # that turned a rate-limited call into (2+1) x 5 = 15 HTTP attempts, each
+        # outer attempt paying the SDK's backoff before ours. The wrapper's
+        # retryable set already covers what the SDK would retry (timeout,
+        # connection, 429, 5xx) and its backoff is tuned to how Databricks quota
+        # actually resets, so the inner layer is switched off. An explicit
+        # max_retries still wins, for callers that want the SDK behaviour.
+        kwargs.setdefault("max_retries", 0)
+
+        # A global `litellm.request_timeout = REQUEST_TIMEOUT` used to be set here,
+        # because litellm's Databricks provider ignored the per-call timeout. The
+        # engine does not call litellm at all — `timeout` above is handed straight
+        # to the OpenAI client that OpenAICompletion builds — so the global did
+        # nothing but mutate process-wide litellm state.
 
         super().__init__(**kwargs)
         self._original_model_name = kwargs.get("model", "")
@@ -469,7 +232,7 @@ class DatabricksRetryLLM(LLM):
 
     def _select_fallback(self, candidates, reason):
         """Choose the next model for ``reason`` given what's already been tried."""
-        from src.core.llm_handlers.model_fallback import select_fallback
+        from src.core.llm.handlers.model_fallback import select_fallback
 
         current_window = 0
         try:
@@ -555,31 +318,21 @@ class DatabricksRetryLLM(LLM):
         except Exception:
             pass
 
-    def supports_function_calling(self) -> bool:
-        """Check if this Databricks model supports native function calling (tool_calls).
-
-        litellm's model registry has supports_function_calling=None for
-        Databricks-hosted models, even when 'tools' IS in their
-        supported_openai_params.  We return True so CrewAI uses native
-        function calling (tool_calls) rather than the ReAct text pattern.
-
-        Native function calling is preferred because:
-        - GPT-5 reasoning models do not follow ReAct text format (they
-          hallucinate tool results instead of emitting Action:/Action Input:).
-        - Llama/Maverick and other Databricks models also support tool_calls.
-
-        To prevent infinite tool-call loops (GPT-5 keeps calling tools without
-        producing a final answer), call() enforces a MAX_TOOL_CALLS limit
-        that strips tools after N rounds, forcing text output.
-        """
-        return True
+    # supports_function_calling() used to be overridden here to return True,
+    # because litellm's registry reported None for Databricks-hosted models and
+    # crewAI would then fall back to the ReAct text pattern (which GPT-5 does not
+    # follow — it hallucinates tool results instead of emitting Action:). The
+    # engine's BaseLLM returns True for every model and consults no registry, so
+    # the override said nothing the base class did not already say.
+    # Infinite tool-call loops are still bounded by call()'s MAX_TOOL_CALLS.
 
     def supports_stop_words(self) -> bool:
         """Check if this model supports the 'stop' parameter.
 
-        GPT-5 reasoning models reject 'stop', so return False for them
-        to prevent CrewAI from adding stop words to the request.
-        For other Databricks models, delegate to the parent.
+        Mostly redundant with ``OpenAICompletion.supports_stop_words`` (which
+        already returns False when "gpt-5" appears in the model id). Kept for the
+        one case it covers and the base does not: an endpoint named "gpt5" with no
+        hyphen. Delegates otherwise.
         """
         model_lower = self._original_model_name.lower()
         if "gpt-5" in model_lower or "gpt5" in model_lower:
@@ -667,22 +420,17 @@ class DatabricksRetryLLM(LLM):
         same oversized prompt can't help, so we surface guidance instead.
 
         The returned text deliberately starts with "context length exceeded" —
-        CrewAI's recovery (summarize-and-continue under respect_context_window)
-        is triggered by PHRASE-matching str(exception) against its
-        CONTEXT_LIMIT_ERRORS list, not by exception type alone."""
-        markers = (
-            "prompt is too long",
-            "context length",
-            "context_length",
-            "maximum context",
-            "context window",
-            "tokens > ",
-            "too many tokens",
-            "input is too long",
-            "exceeds token limit",
-            "expected a string with maximum length",
-        )
-        if any(m in error_str for m in markers):
+        recovery (summarize-and-continue under respect_context_window) is
+        triggered by PHRASE-matching str(exception) against CONTEXT_LIMIT_ERRORS,
+        not by exception type alone.
+
+        Matching is delegated to src/core/llm/context_limits, which extends the
+        engine's shared phrase list. This method used to keep a private tuple of
+        markers, so a phrase learned here never reached the engine's own recovery
+        path (and vice versa)."""
+        from src.core.llm.context_limits import is_context_limit_error
+
+        if is_context_limit_error(error_str):
             return (
                 "Context length exceeded: the crew's input exceeded the model's "
                 "context window. This usually means a tool returned too much "
@@ -997,7 +745,7 @@ class DatabricksRetryLLM(LLM):
         what keeps a run alive when the context-window fallback target (e.g.
         databricks-gemini-2-5-flash) is enabled in config but not served here.
         """
-        from src.core.llm_handlers.model_fallback import classify_llm_error
+        from src.core.llm.handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
@@ -1024,7 +772,7 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise  # a non-swappable error from the fallback → surface it
-                from src.core.llm_handlers.model_fallback import (
+                from src.core.llm.handlers.model_fallback import (
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )
@@ -1043,7 +791,7 @@ class DatabricksRetryLLM(LLM):
 
     async def _amaybe_model_fallback(self, exc, method, call_kwargs):
         """Async variant of _maybe_model_fallback (cascades on swappable failures)."""
-        from src.core.llm_handlers.model_fallback import classify_llm_error
+        from src.core.llm.handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
@@ -1069,7 +817,7 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise
-                from src.core.llm_handlers.model_fallback import (
+                from src.core.llm.handlers.model_fallback import (
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )
@@ -1083,36 +831,19 @@ class DatabricksRetryLLM(LLM):
                 continue
         return _NO_FALLBACK
 
-    @staticmethod
-    def _coerce_to_response_model(result, kwargs):
-        """Return a parsed ``response_model`` instance when the model answered with
-        a JSON string.
+    def _coerce_to_response_model(self, result, kwargs):
+        """Parse a JSON-string result into ``response_model``.
 
-        CrewAI's structured-output callers (e.g. long-term-memory consolidation /
-        save-analysis in ``crewai/memory/analyze.py``) pass ``response_model`` and
-        then do ``isinstance(response, Model) or Model.model_validate(response)``.
-        litellm hands structured output back as a JSON *string*, and
-        ``model_validate(<str>)`` expects a dict — so it raises and CrewAI silently
-        falls back ("Consolidation analysis failed, defaulting to insert" /
-        "Memory save analysis failed, using defaults"). Parsing the string into the
-        model here makes ``isinstance`` true so the plan is actually used. On any
-        parse failure we return the original result unchanged — behaviour is then
-        identical to before (the caller's safe fallback still applies).
+        The parsing itself lives in ``BaseLLM._validate_structured_output`` — the
+        engine honours ``response_model`` for every provider now, so this is only
+        the adapter for the ``**kwargs`` shape this wrapper's callers use, and no
+        longer a second implementation. Returns ``result`` untouched when there is
+        no model to parse into.
         """
         rm = kwargs.get("response_model")
         if rm is None or not isinstance(result, str):
             return result
-        if not hasattr(rm, "model_validate_json"):
-            return result
-        text = result.strip()
-        # Some models wrap structured output in a ```json … ``` fence.
-        if text.startswith("```"):
-            text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", text)
-            text = re.sub(r"\s*```$", "", text).strip()
-        try:
-            return rm.model_validate_json(text)
-        except Exception:  # noqa: BLE001 — leave as-is; caller falls back safely
-            return result
+        return self._validate_structured_output(result, rm)
 
     def call(
         self,
@@ -1162,6 +893,15 @@ class DatabricksRetryLLM(LLM):
         fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
         # Sanitize empty content blocks that Databricks API rejects
         fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
+        # Gemini-on-Databricks quirks. These ran inside a litellm.completion monkey
+        # patch, which the engine bypasses entirely — so a Databricks-served Gemini
+        # model was reaching the endpoint unsanitized: multiple system prompts (only
+        # one is supported) and $defs/$ref in tool schemas (rejected). Applying them
+        # on the path the request actually takes is both the fix and the reason the
+        # patch could be deleted.
+        _merge_system_messages_for_gemini(fixed_messages, str(getattr(self, "model", "")))
+        if tools and isinstance(tools, list):
+            _sanitize_tools_for_gemini(tools, str(getattr(self, "model", "")))
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
 
         # --- Tool-call limiter: prevent infinite tool-calling loops ---
@@ -1522,52 +1262,11 @@ def _sanitize_tools_for_gemini(tools, model):
             func["parameters"] = _resolve_schema_refs(params)
 
 
-def apply_empty_content_fix():
-    """Patch litellm.completion to fix Databricks-specific issues.
-
-    1. **Empty assistant content** – Databricks (Claude-based) endpoints reject
-       assistant messages where ``content`` is None/empty.  CrewAI's instructor
-       retry wraps tool-call-only responses (content=None) back into the
-       conversation and calls ``litellm.completion`` directly, bypassing our
-       DatabricksRetryLLM wrapper.
-
-    2. **Gemini $ref in tool schemas** – Gemini models on Databricks reject JSON
-       Schema ``$defs``/``$ref`` in tool parameter definitions.  CrewAI's
-       instructor generates these from Pydantic models.
-
-    3. **Gemini multiple system prompts** – Gemini models on Databricks only
-       support a single system prompt.  CrewAI builds conversations with
-       multiple system messages (agent backstory, task instructions, etc.)
-       which must be merged into one.
-
-    Patching at the litellm level ensures every code path is covered.
-    """
-    _original_completion = litellm.completion
-
-    def _sanitized_completion(*args, **kwargs):
-        messages = kwargs.get("messages")
-        model = kwargs.get("model", "")
-
-        if messages and isinstance(messages, list):
-            DatabricksRetryLLM._sanitize_messages_for_databricks(messages)
-            # Gemini: merge multiple system messages into one
-            _merge_system_messages_for_gemini(messages, model)
-
-        # Resolve $ref/$defs in tool schemas for Gemini models
-        tools = kwargs.get("tools")
-        if tools and isinstance(tools, list):
-            _sanitize_tools_for_gemini(tools, model)
-
-        return _original_completion(*args, **kwargs)
-
-    litellm.completion = _sanitized_completion
-    logger.info(
-        "Patched litellm.completion: assistant messages with empty content "
-        "are sanitized, Gemini tool schemas are resolved, and Gemini system "
-        "messages are merged before API calls"
-    )
-
-
-# Apply the monkey patches when this module is imported
-DatabricksGPTOSSHandler.apply_monkey_patch()
-apply_empty_content_fix()
+# `apply_empty_content_fix()` used to live here and ran at import: it wrapped
+# litellm.completion to sanitize empty assistant content plus Gemini tool
+# schemas / system messages "at the litellm level [so] every code path is
+# covered". No code path goes through litellm any more — the engine talks to
+# the endpoint with the OpenAI SDK — so it covered nothing. Its three fixes now
+# run inside DatabricksRetryLLM.call(), on the path requests actually take.
+# LLMManager.completion_with_usage, the one remaining direct litellm caller,
+# applies _sanitize_messages_for_databricks itself.

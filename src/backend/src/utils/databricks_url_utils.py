@@ -161,7 +161,7 @@ class DatabricksURLUtils:
     def construct_responses_base_url(workspace_url: Optional[str]) -> Optional[str]:
         """
         Construct the base URL for the OpenAI Responses API, used by gpt-5-codex
-        models (via DatabricksCodexCompletion). The OpenAI client appends
+        models (via DatabricksResponsesLLM). The OpenAI client appends
         ``/responses`` to this base.
 
         IMPORTANT: the Responses API is NOT served under the mlflow chat gateway

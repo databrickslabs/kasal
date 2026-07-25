@@ -17,7 +17,7 @@ from unittest.mock import patch
 from kasal_engine.llm import is_context_length_exceeded
 from kasal_engine.llm import LLMContextLengthExceededError
 
-from src.core.llm_handlers.databricks_gpt_oss_handler import DatabricksRetryLLM
+from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
 
 def _bare_handler() -> DatabricksRetryLLM:
@@ -66,7 +66,7 @@ class TestContextLengthHint:
 class TestCallRaisesRecognizableOverflow:
     def _make_handler(self) -> DatabricksRetryLLM:
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.litellm"
+            "src.core.llm.handlers.databricks_retry_llm.litellm"
         ):
             return DatabricksRetryLLM(model="databricks/test-model")
 
@@ -75,7 +75,7 @@ class TestCallRaisesRecognizableOverflow:
         overflow = Exception("prompt is too long: 2523462 tokens > 1000000 maximum")
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call", side_effect=overflow
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call", side_effect=overflow
         ), pytest.raises(LLMContextLengthExceededError) as exc_info:
             handler.call(messages=[{"role": "user", "content": "hi"}])
 
@@ -89,7 +89,7 @@ class TestCallRaisesRecognizableOverflow:
 
         # Non-retryable, non-auth, non-overflow error must propagate unwrapped.
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
         ), pytest.raises(RuntimeError):
             handler.call(messages=[{"role": "user", "content": "hi"}])
 
@@ -100,14 +100,14 @@ class TestPlaceholderResponseRetry:
     answer. It must be treated as empty and retried with a corrective nudge."""
 
     def _make_handler(self) -> DatabricksRetryLLM:
-        with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
+        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
             handler = DatabricksRetryLLM(model="databricks/test-model")
         # No real backoff waits in tests.
         handler._get_backoff_time = lambda *a, **k: 0
         return handler
 
     def test_is_placeholder_response_detection(self):
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _is_placeholder_response,
         )
 
@@ -121,7 +121,7 @@ class TestPlaceholderResponseRetry:
         assert _is_placeholder_response(42) is False
 
     def test_append_placeholder_nudge_is_idempotent_and_safe(self):
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _PLACEHOLDER_NUDGE,
             _append_placeholder_nudge,
         )
@@ -134,7 +134,7 @@ class TestPlaceholderResponseRetry:
         _append_placeholder_nudge("not-a-list")  # no crash
 
     def test_call_retries_placeholder_and_returns_the_real_answer(self):
-        from src.core.llm_handlers.databricks_gpt_oss_handler import (
+        from src.core.llm.handlers.databricks_retry_llm import (
             _PLACEHOLDER_NUDGE,
         )
 
@@ -142,7 +142,7 @@ class TestPlaceholderResponseRetry:
         messages = [{"role": "user", "content": "list the tables"}]
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call",
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call",
             side_effect=["Calling tools.", "Here are the 12 tables…"],
         ) as mock_call, patch("time.sleep"):
             result = handler.call(messages=messages)
@@ -157,7 +157,7 @@ class TestPlaceholderResponseRetry:
         handler = self._make_handler()
 
         with patch(
-            "src.core.llm_handlers.databricks_gpt_oss_handler.LLM.call",
+            "src.core.llm.handlers.databricks_retry_llm.LLM.call",
             side_effect=["Calling tools."] * 10,
         ), patch("time.sleep"):
             result = handler.call(messages=[{"role": "user", "content": "hi"}])
@@ -171,11 +171,14 @@ class TestPlaceholderResponseRetry:
 # Structured-output coercion (_coerce_to_response_model)
 # ---------------------------------------------------------------------------
 #
-# CrewAI's long-term-memory consolidation / save-analysis pass response_model and
-# then do `isinstance(resp, Model) or Model.model_validate(resp)`. litellm returns
-# structured output as a JSON *string*, so model_validate(<str>) raised and CrewAI
-# fell back ("Consolidation analysis failed, defaulting to insert"). The wrapper
-# now parses the string into the model so the plan is actually used.
+# Long-term-memory consolidation / save-analysis pass response_model and then do
+# `isinstance(resp, Model) or Model.model_validate(resp)`. A JSON *string* makes
+# model_validate(<str>) raise, so the caller falls back silently
+# ("Consolidation analysis failed, defaulting to insert").
+#
+# The parsing now lives in BaseLLM._validate_structured_output and the engine
+# applies it for EVERY provider; this wrapper method is just the adapter for the
+# **kwargs shape its callers use. These tests pin the adapter's contract.
 
 from pydantic import BaseModel  # noqa: E402
 
@@ -186,8 +189,15 @@ class _Plan(BaseModel):
 
 
 class TestCoerceToResponseModel:
+    @staticmethod
+    def _llm():
+        from unittest.mock import patch as _patch
+
+        with _patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
+            return DatabricksRetryLLM(model="databricks/x", api_key="k")
+
     def test_parses_json_string_into_response_model(self):
-        out = DatabricksRetryLLM._coerce_to_response_model(
+        out = self._llm()._coerce_to_response_model(
             '{"keep": true, "note": "hi"}', {"response_model": _Plan}
         )
         assert isinstance(out, _Plan)
@@ -195,24 +205,24 @@ class TestCoerceToResponseModel:
 
     def test_strips_markdown_json_fence(self):
         fenced = "```json\n{\"keep\": false}\n```"
-        out = DatabricksRetryLLM._coerce_to_response_model(fenced, {"response_model": _Plan})
+        out = self._llm()._coerce_to_response_model(fenced, {"response_model": _Plan})
         assert isinstance(out, _Plan)
         assert out.keep is False
 
     def test_no_response_model_returns_result_unchanged(self):
-        out = DatabricksRetryLLM._coerce_to_response_model('{"keep": true}', {})
+        out = self._llm()._coerce_to_response_model('{"keep": true}', {})
         assert out == '{"keep": true}'
 
     def test_non_string_result_returned_unchanged(self):
         plan = _Plan(keep=True)
-        out = DatabricksRetryLLM._coerce_to_response_model(plan, {"response_model": _Plan})
+        out = self._llm()._coerce_to_response_model(plan, {"response_model": _Plan})
         assert out is plan
 
     def test_invalid_json_falls_back_to_original_string(self):
         # Not valid for the model → return the original string so the caller's
         # own fallback still applies (behaviour identical to before the fix).
         bad = "not json at all"
-        out = DatabricksRetryLLM._coerce_to_response_model(bad, {"response_model": _Plan})
+        out = self._llm()._coerce_to_response_model(bad, {"response_model": _Plan})
         assert out == bad
 
 
@@ -226,7 +236,7 @@ class TestStructuredOutputKeepsToolLoop:
     claiming support is now correct and the output_json downgrade is gone."""
 
     def _make(self, model: str) -> DatabricksRetryLLM:
-        with patch("src.core.llm_handlers.databricks_gpt_oss_handler.litellm"):
+        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
             return DatabricksRetryLLM(model=model)
 
     def test_claims_native_structured_output(self):

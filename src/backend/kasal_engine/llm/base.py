@@ -15,6 +15,7 @@ Engine-native fixes for things kasal fought in crewAI:
 
 import asyncio
 import json
+import re
 import logging
 import threading
 from collections.abc import Callable
@@ -176,10 +177,25 @@ class BaseLLM(BaseModel):
     def _validate_structured_output(
         self, text: str, response_format: Any
     ) -> Any:
+        """Parse ``text`` into ``response_format``, or return it unchanged.
+
+        Callers do ``isinstance(response, Model) or Model.model_validate(response)``;
+        ``model_validate(<str>)`` raises, so handing back a JSON *string* makes
+        them fall back silently (long-term-memory consolidation reporting
+        "analysis failed, defaulting to insert" is the usual symptom). Returning
+        the original text on failure keeps that fallback available.
+        """
         if not (isinstance(response_format, type) and issubclass(response_format, BaseModel)):
             return text
+        if not isinstance(text, str):
+            return text
+        candidate = text.strip()
+        # Some models wrap structured output in a ```json … ``` fence.
+        if candidate.startswith("```"):
+            candidate = re.sub(r"^```[a-zA-Z0-9]*\s*", "", candidate)
+            candidate = re.sub(r"\s*```$", "", candidate).strip()
         try:
-            return response_format.model_validate_json(text)
+            return response_format.model_validate_json(candidate)
         except Exception:
             logger.warning(
                 "structured output did not validate against %s", response_format.__name__

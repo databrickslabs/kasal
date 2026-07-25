@@ -696,14 +696,14 @@ class CrewPreparation:
                 # calling never engages, and Qwen3-Coder falls back to ReAct text and
                 # skips the tool entirely. Mirror the task's resolved tools onto its
                 # agent and rebuild the executor so they are present at execution.
-                # Scoped to vLLM agents (the _VLLMFunctionCallingLLM subclass) so
+                # Scoped to vLLM agents (the VLLMFunctionCallingLLM subclass) so
                 # Databricks/other providers are unaffected. De-dup by tool name.
                 try:
-                    from src.core.llm_manager import _VLLMFunctionCallingLLM
+                    from src.core.llm.handlers.vllm import VLLMFunctionCallingLLM
 
                     task_tools = getattr(task, "tools", None) or []
                     if task_tools and isinstance(
-                        getattr(agent, "llm", None), _VLLMFunctionCallingLLM
+                        getattr(agent, "llm", None), VLLMFunctionCallingLLM
                     ):
                         existing = {
                             getattr(t, "name", id(t)) for t in (agent.tools or [])

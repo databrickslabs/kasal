@@ -1,12 +1,12 @@
 """
-Unit tests for core/llm_handlers/gpt5_llm_wrapper.py
+Unit tests for core/llm/handlers/gpt5_llm_wrapper.py
 
 Auto-generated test template. TODO: Add comprehensive test coverage.
 """
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.core.llm_handlers.gpt5_llm_wrapper import (
+from src.core.llm.handlers.gpt5_llm_wrapper import (
     GPT5CompatibleLLM,
     call
 )

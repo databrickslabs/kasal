@@ -1,5 +1,5 @@
 """
-Unit tests for DatabricksCodexCompletion handler.
+Unit tests for DatabricksResponsesLLM handler.
 
 Tests the specialized handling for gpt-5.3-codex on Databricks, which uses
 the Responses API with phase preservation, stop-word suppression, and
@@ -125,7 +125,7 @@ _MOCK_MODULES = {
         LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
     ),
 }
-_HANDLER_MODULE_KEY = "src.core.llm_handlers.databricks_codex_handler"
+_HANDLER_MODULE_KEY = "src.core.llm.handlers.databricks_responses_llm"
 
 # Save originals so we can restore them after loading
 _saved_modules = {}
@@ -137,28 +137,34 @@ for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
 for _key, _mock_mod in _MOCK_MODULES.items():
     sys.modules[_key] = _mock_mod
 
-# Load the module directly from its file path to bypass __init__.py
+# Load the module directly from its file path to bypass __init__.py.
+# Derived from the module key rather than hand-assembled path parts: those did
+# not follow the package when it moved, and a load failure here leaves the mocks
+# below installed for the WHOLE session (a MagicMock standing in for
+# `kasal_engine.events` makes every later `kasal_engine.events.bus` import fail
+# with "not a package"). Hence the try/finally too — restore must be
+# unconditional.
 _handler_path = str(
-    __import__("pathlib").Path(__file__).resolve().parents[4]
-    / "src"
-    / "core"
-    / "llm_handlers"
-    / "databricks_codex_handler.py"
+    __import__("pathlib").Path(__file__).resolve().parents[5].joinpath(
+        *_HANDLER_MODULE_KEY.split(".")
+    ).with_suffix(".py")
 )
-_spec = importlib.util.spec_from_file_location(_HANDLER_MODULE_KEY, _handler_path)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules[_HANDLER_MODULE_KEY] = _mod
-_spec.loader.exec_module(_mod)
+assert __import__("os").path.exists(_handler_path), f"handler moved? {_handler_path}"
+try:
+    _spec = importlib.util.spec_from_file_location(_HANDLER_MODULE_KEY, _handler_path)
+    _mod = importlib.util.module_from_spec(_spec)
+    sys.modules[_HANDLER_MODULE_KEY] = _mod
+    _spec.loader.exec_module(_mod)
 
-# Extract the class we need (survives module cleanup because held by reference)
-DatabricksCodexCompletion = _mod.DatabricksCodexCompletion
-
-# Restore sys.modules — put back originals or remove entries we added
-for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
-    if _key in _saved_modules:
-        sys.modules[_key] = _saved_modules[_key]
-    else:
-        sys.modules.pop(_key, None)
+    # Extract the class we need (survives module cleanup because held by reference)
+    DatabricksResponsesLLM = _mod.DatabricksResponsesLLM
+finally:
+    # Restore sys.modules — put back originals or remove entries we added
+    for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
+        if _key in _saved_modules:
+            sys.modules[_key] = _saved_modules[_key]
+        else:
+            sys.modules.pop(_key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +174,8 @@ for _key in list(_MOCK_MODULES) + [_HANDLER_MODULE_KEY]:
 
 @pytest.fixture
 def handler():
-    """Create a DatabricksCodexCompletion instance for testing."""
-    return DatabricksCodexCompletion(
+    """Create a DatabricksResponsesLLM instance for testing."""
+    return DatabricksResponsesLLM(
         model="databricks-gpt-5-3-codex",
         api_key="test-key",
         base_url="https://example.com/serving-endpoints",
@@ -229,7 +235,7 @@ class TestInit:
 
     def test_default_api_responses(self):
         """__init__ should default api to 'responses'."""
-        handler = DatabricksCodexCompletion(model="test")
+        handler = DatabricksResponsesLLM(model="test")
         # The api kwarg is set via setdefault — verify internal state
         assert handler._last_output_items == []
         assert handler._tool_call_count == 0
@@ -237,7 +243,7 @@ class TestInit:
 
     def test_preserves_explicit_kwargs(self):
         """Explicit kwargs should be preserved."""
-        handler = DatabricksCodexCompletion(
+        handler = DatabricksResponsesLLM(
             model="my-model",
             api_key="key-123",
             base_url="https://example.com",
@@ -1212,21 +1218,21 @@ class TestMaxOutputTokensCap:
 
     def test_capability_value_is_capped(self, monkeypatch):
         monkeypatch.delenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", raising=False)
-        h = DatabricksCodexCompletion(
+        h = DatabricksResponsesLLM(
             model="m", api_key="k", base_url="https://example.com", max_tokens=128000
         )
         assert self._params(h)["max_output_tokens"] == 16000
 
     def test_smaller_explicit_budget_is_respected(self, monkeypatch):
         monkeypatch.delenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", raising=False)
-        h = DatabricksCodexCompletion(
+        h = DatabricksResponsesLLM(
             model="m", api_key="k", base_url="https://example.com", max_tokens=4000
         )
         assert self._params(h)["max_output_tokens"] == 4000
 
     def test_env_override_raises_cap(self, monkeypatch):
         monkeypatch.setenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", "64000")
-        h = DatabricksCodexCompletion(
+        h = DatabricksResponsesLLM(
             model="m", api_key="k", base_url="https://example.com", max_tokens=128000
         )
         assert self._params(h)["max_output_tokens"] == 64000
