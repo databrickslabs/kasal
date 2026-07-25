@@ -9,6 +9,28 @@ from src.engines.kasal.tools.custom.metric_view_validator_tool import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleeping():
+    """Don't spend the retry backoff for real.
+
+    The tool retries "not in DB yet" up to 5 times with time.sleep(3)/sleep(2)
+    between attempts. Tests that exercise those paths were sleeping the full
+    wall-clock — 10s, 20s, even 30s each, ~90s for this file alone. Under
+    pytest-xdist's default per-FILE distribution that single file set the floor
+    for the whole run.
+
+    Patched here rather than per-test so a new test covering a retry path cannot
+    silently reintroduce the delay. The retry LOGIC is untouched — only the
+    waiting is skipped, and the call counts still assert as before.
+
+    Patched on the ``time`` module itself: the tool imports it INSIDE the retry
+    functions (``import time`` at call time), so there is no module attribute to
+    patch on the tool.
+    """
+    with patch("time.sleep"):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------

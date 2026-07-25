@@ -53,9 +53,13 @@ def main():
         help="Verbose output"
     )
     parser.add_argument(
-        "--parallel", "-n", 
-        type=int,
-        help="Number of parallel workers"
+        "--parallel", "-n",
+        default="auto",
+        help=(
+            "Parallel workers: 'auto' (default, one per core), a number, or "
+            "'0'/'1' to run serially. Serial is ~9x slower on this suite "
+            "(129s vs 15s) with no benefit outside step-through debugging."
+        ),
     )
     parser.add_argument(
         "--markers", "-m",
@@ -100,9 +104,11 @@ def main():
     if args.verbose:
         pytest_cmd.append("-v")
     
-    # Add parallel execution
-    if args.parallel:
-        pytest_cmd.extend(["-n", str(args.parallel)])
+    # Parallel by default. --dist loadfile keeps each FILE on one worker:
+    # several suites stub sys.modules or set env at module scope, which is only
+    # safe if their tests share a process.
+    if str(args.parallel) not in ("0", "1", "", "none", "None"):
+        pytest_cmd.extend(["-n", str(args.parallel), "--dist", "loadfile"])
     
     # Add markers
     if args.markers:

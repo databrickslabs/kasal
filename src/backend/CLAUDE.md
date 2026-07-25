@@ -7,10 +7,17 @@ Backend-specific instructions for Claude Code when working in the backend direct
 ### Development
 - **Dependencies are managed with `uv`** (not Poetry). Install/sync: `uv sync` (or `uv sync --frozen`). The venv lives at `src/backend/.venv`.
 - **Start server**: `./run.sh` (defaults to PostgreSQL) or `./run.sh sqlite` for SQLite. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`.
-- **Run tests**: `python run_tests.py` (runs all tests with linting)
+- **Run tests**: `python run_tests.py` (all tests + linting; **parallel by default**)
 - **Run specific tests**: `python run_tests.py --type unit` or `python run_tests.py --type integration`
 - **Run tests with coverage**: `python run_tests.py --coverage --html-coverage`
 - **Run single test file**: `.venv/bin/python -m pytest tests/unit/test_file.py -v`
+- **Run a slice fast**: add `-n auto --dist loadfile` to any raw pytest command.
+  The unit suite is ~15s parallel vs ~130s serial; `--dist loadfile` keeps each
+  file on one worker, which several suites need (they stub `sys.modules` or set
+  env at module scope). Use `-n 0` to force serial when step-through debugging.
+- **Watch for sleeping tests**: `--durations=12` surfaces them. A single file
+  that called the real `time.sleep` in a retry path cost ~91s of the old
+  runtime; patch `time.sleep` in tests that exercise retry/backoff.
 
 ### Database
 - **Migrations**: `alembic upgrade head`
