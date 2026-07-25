@@ -110,6 +110,22 @@ class ChatSessionRepository:
         await self.session.flush()
         return record
 
+    async def set_context_summary(
+        self,
+        session_id: str,
+        group_ids: List[str],
+        summary: str,
+        upto,
+    ) -> Optional[ChatSession]:
+        """Save the running context summary and its fold-marker timestamp."""
+        record = await self.get_by_id_and_group(session_id, group_ids)
+        if not record:
+            return None
+        record.context_summary = summary
+        record.context_summary_upto = upto
+        await self.session.flush()
+        return record
+
     async def delete_by_id_and_group(
         self, session_id: str, group_ids: List[str]
     ) -> bool:

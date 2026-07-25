@@ -42,6 +42,13 @@ class ChatSession(Base):
     preview_data = Column(Text, nullable=True)
     preview_title = Column(String(512), nullable=True)
 
+    # Context compaction: running summary of turns older than the verbatim
+    # window injected into each chat run. context_summary_upto marks the
+    # timestamp of the newest chat_history row folded into the summary —
+    # rows after it are injected verbatim. NULL until the first compaction.
+    context_summary = Column(Text, nullable=True)
+    context_summary_upto = Column(DateTime, nullable=True)
+
     # Multi-group fields (REQUIRED for all models)
     group_id = Column(String(100), index=True, nullable=True)
     group_email = Column(String(255), nullable=True)

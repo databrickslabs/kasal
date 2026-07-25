@@ -207,6 +207,50 @@ class OpenAICompletion(BaseLLM):
                 f"for model {self.model}."
             )
 
+    def _trim_conversation_to_window(
+        self, conversation: list[dict[str, Any]], from_agent: Any = None
+    ) -> None:
+        """Best-effort in-place trim so a tool-heavy turn cannot overflow the
+        context window (which previously failed the whole run): once the
+        estimated size (chars/4 ≈ tokens) approaches the 0.85-derated window,
+        the OLDEST tool results are replaced with a stub — never the system
+        prompt, user messages, or tool_call structure (pairing must survive).
+        Honors Agent.respect_context_window (default on; previously inert).
+        """
+        if from_agent is not None and getattr(from_agent, "respect_context_window", True) is False:
+            return
+        window = self.get_context_window_size()
+        if not window:
+            return
+
+        def estimated_tokens() -> int:
+            total = 0
+            for message in conversation:
+                for key in ("content", "output"):
+                    value = message.get(key)
+                    if isinstance(value, str):
+                        total += len(value)
+                if message.get("tool_calls"):
+                    total += len(str(message["tool_calls"]))
+            return total // 4
+
+        if estimated_tokens() <= window:
+            return
+        stub = "[earlier tool result trimmed to fit the context window]"
+        for message in conversation:
+            is_tool_result = (
+                message.get("role") == "tool"
+                or message.get("type") == "function_call_output"
+            )
+            if not is_tool_result:
+                continue
+            key = "content" if message.get("role") == "tool" else "output"
+            if message.get(key) == stub:
+                continue
+            message[key] = stub
+            if estimated_tokens() <= window:
+                return
+
     def _call_completions_api(
         self,
         conversation: list[dict[str, Any]],
@@ -219,6 +263,7 @@ class OpenAICompletion(BaseLLM):
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round)
+            self._trim_conversation_to_window(conversation, from_agent)
             params = self._prepare_completion_params(conversation, tools)
             if self.stream:
                 content, usage, function_calls = self._stream_chat_completion(params)
@@ -416,6 +461,7 @@ class OpenAICompletion(BaseLLM):
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round)
+            self._trim_conversation_to_window(conversation, from_agent)
             response = self.client.responses.create(
                 **self._prepare_responses_params(conversation, tools)
             )

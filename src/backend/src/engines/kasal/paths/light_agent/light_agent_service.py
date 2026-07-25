@@ -937,6 +937,31 @@ class LightAgentService:
                         metadata={"execution_id": execution_id},
                     )
 
+                # ── Context compaction — fire-and-forget. When the session's
+                # un-summarized history is long enough, fold old turns into the
+                # running per-session summary so the next turn's preamble stays
+                # bounded. Kill-switch: CHAT_COMPACTION=false.
+                try:
+                    from src.engines.kasal.paths.light_agent.context_compaction import (
+                        compaction_enabled,
+                        maintain_session_summary,
+                    )
+                    _session_id = getattr(config, "session_id", None)
+                    _compact_groups = list(getattr(group_context, "group_ids", None) or [])
+                    if not _compact_groups and group_id and group_id != "default":
+                        _compact_groups = [group_id]
+                    if compaction_enabled() and _session_id and _compact_groups:
+                        _model_name = getattr(
+                            getattr(agent, "llm", None), "model", None
+                        )
+                        asyncio.create_task(
+                            maintain_session_summary(
+                                _session_id, _compact_groups, _model_name
+                            )
+                        )
+                except Exception as compact_err:  # noqa: BLE001
+                    logger.debug(f"[light_agent] compaction skipped: {compact_err}")
+
             _log(f"Chat agent '{role}' completed ({len(answer or '')} chars)")
 
             # Compose a renderable A2UI surface from the answer — the SAME shared
@@ -1312,10 +1337,15 @@ class LightAgentService:
         max_assistant_turns = int(os.getenv("CHAT_HISTORY_MAX_ASSISTANT_TURNS", "8"))
         max_chars = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "6000"))
 
+        context_summary = None
+        summary_upto = None
         try:
             from src.db.session import request_scoped_session
             from src.repositories.chat_history_repository import (
                 ChatHistoryRepository,
+            )
+            from src.repositories.chat_session_repository import (
+                ChatSessionRepository,
             )
             async with request_scoped_session() as db_session:
                 # MOST RECENT window (not the oldest page) — a session longer than
@@ -1323,9 +1353,23 @@ class LightAgentService:
                 messages = await ChatHistoryRepository(
                     db_session
                 ).get_recent_by_session_and_group(session_id, group_ids, limit=recent_limit)
+                # Running compaction summary: turns at or before summary_upto are
+                # represented by the summary block, not injected verbatim.
+                session_record = await ChatSessionRepository(
+                    db_session
+                ).get_by_id_and_group(session_id, group_ids)
+                if session_record is not None:
+                    context_summary = getattr(session_record, "context_summary", None)
+                    summary_upto = getattr(session_record, "context_summary_upto", None)
         except Exception as hist_err:  # noqa: BLE001
             logger.debug(f"[light_agent] chat history fetch skipped: {hist_err}")
             return ""
+
+        if summary_upto is not None:
+            messages = [
+                m for m in messages
+                if getattr(m, "timestamp", None) is None or m.timestamp > summary_upto
+            ]
 
         # Drop the current turn: everything from the LAST 'user' row onward is
         # this run (that user message + its placeholder assistant rows).
@@ -1371,7 +1415,15 @@ class LightAgentService:
         while selected and _total(selected) > max_chars:
             drop_at = next((i for i, (role, _) in enumerate(selected) if role == "assistant"), None)
             if drop_at is None:
-                break  # only user turns remain — keep them even if slightly over
+                # Only user turns remain. This used to be an unbounded growth
+                # path (user turns were never dropped, so hundred-question
+                # sessions eventually overflowed the model window and the run
+                # died). Now the OLDEST user turns go too — their facts live on
+                # in the compaction summary — under a hard 1.5x budget ceiling.
+                if _total(selected) <= int(max_chars * 1.5):
+                    break
+                selected.pop(0)
+                continue
             selected.pop(drop_at)
 
         lines = [line for _, line in selected]
@@ -1379,9 +1431,17 @@ class LightAgentService:
         log(
             f"Recalling {len(lines)} prior message(s) from this chat session "
             f"({user_count} from you)"
+            + (" + earlier-conversation summary" if context_summary else "")
+        )
+        from src.engines.kasal.paths.light_agent.context_compaction import (
+            SUMMARY_HEADER,
+        )
+        summary_block = (
+            f"{SUMMARY_HEADER}\n{context_summary.strip()}\n\n" if context_summary else ""
         )
         return (
-            "Conversation so far in THIS chat session (most recent last). The "
+            summary_block
+            + "Conversation so far in THIS chat session (most recent last). The "
             "User's statements below are authoritative facts about the user and "
             "their request — rely on them directly when answering (e.g. the user's "
             "name, preferences, and earlier instructions):\n" + "\n".join(lines)

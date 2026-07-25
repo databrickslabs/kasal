@@ -784,6 +784,8 @@ async def _ensure_chat_sessions_columns(conn) -> None:
         ("preview_type", "VARCHAR(50)"),
         ("preview_data", "TEXT"),
         ("preview_title", "VARCHAR(512)"),
+        ("context_summary", "TEXT"),
+        ("context_summary_upto", "TIMESTAMP"),
     ]
     try:
         if is_sqlite:
