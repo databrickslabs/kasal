@@ -51,7 +51,6 @@ dependencies = [
     "langchain-text-splitters", # langchain 1.x moved text splitters out of core
     "mcp>=1.26.0,<1.27.0", # Kasal's own MCP integration
     "mcpadapt",
-    "chromadb>=1.1.1,<2.0.0", # default memory vector store + Databricks embedder interface (was transitive via crewai)
     # Observability
     "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
     "opentelemetry-sdk>=1.27.0,<2.0.0",

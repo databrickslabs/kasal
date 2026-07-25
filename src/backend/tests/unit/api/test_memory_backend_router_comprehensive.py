@@ -674,21 +674,28 @@ class TestLocalDefaultStoreReadDelete:
 
         Also returns the full store count as ``total`` (via ``storage.count``)
         so the browser knows how many pages exist beyond the one returned.
+
+        This test used to mock ``kasal_engine.memory.Memory`` — the very thing
+        that had broken. The real call built a bare ``Memory()`` under
+        ``CREWAI_STORAGE_DIR``, which since crewAI's removal defaults to an
+        in-process dict, so the browser reported an EMPTY store (0 shown against
+        13 on disk) while this stayed green. It now mocks the storage class the
+        runtime actually writes through, and requires the memory.db to exist.
         """
         from src.api.memory_backend_router import _browse_default_records
 
         store = tmp_path / "kasal_default_g"
         store.mkdir()
+        (store / "memory.db").touch()          # the real store file must exist
         storage = MagicMock()
         storage.list_records.return_value = ["rec"]
         storage.count.return_value = 412
-        memory_obj = MagicMock(_storage=storage)
 
         with patch(
             "src.api.memory_backend_router.local_memory_store_dir", return_value=store
-        ), patch.dict(
-            "sys.modules",
-            {"kasal_engine.memory": MagicMock(Memory=MagicMock(return_value=memory_obj))},
+        ), patch(
+            "src.engines.kasal.memory.local_storage_backend.LocalMemoryStorage",
+            return_value=storage,
         ), patch(
             "src.api.memory_backend_router._memory_record_to_dict",
             return_value={"created_at": "2026-01-01", "metadata": {}},
@@ -703,6 +710,39 @@ class TestLocalDefaultStoreReadDelete:
         storage.list_records.assert_called_once()
         assert storage.list_records.call_args.kwargs.get("scope_prefix") == "/g/sess1"
         assert storage.count.call_args.kwargs.get("scope_prefix") == "/g/sess1"
+
+    def test_browse_returns_nothing_when_the_db_file_is_absent(self, tmp_path):
+        """A store directory left over from the LanceDB era has no memory.db."""
+        from src.api.memory_backend_router import _browse_default_records
+
+        store = tmp_path / "kasal_default_g"
+        (store / "memory" / "memories.lance").mkdir(parents=True)   # legacy leftover
+        with patch(
+            "src.api.memory_backend_router.local_memory_store_dir", return_value=store
+        ):
+            assert _browse_default_records(group_id="g", scope=None, limit=10, offset=0) == ([], 0)
+
+    def test_scoped_delete_uses_the_real_store(self, tmp_path):
+        """The scoped delete had the same defect as browse: it reported 0 while
+        removing nothing."""
+        from src.api.memory_backend_router import _delete_default_records
+
+        store = tmp_path / "kasal_default_g"
+        store.mkdir()
+        (store / "memory.db").touch()
+        storage = MagicMock()
+        storage.delete.return_value = 7
+
+        with patch(
+            "src.api.memory_backend_router.local_memory_store_dir", return_value=store
+        ), patch(
+            "src.engines.kasal.memory.local_storage_backend.LocalMemoryStorage",
+            return_value=storage,
+        ):
+            deleted = _delete_default_records(group_id="g", scope="/g/sess1")
+
+        assert deleted == 7
+        assert storage.delete.call_args.kwargs.get("scope_prefix") == "/g/sess1"
 
     def test_delete_returns_zero_when_store_missing(self, tmp_path):
         from src.api.memory_backend_router import _delete_default_records

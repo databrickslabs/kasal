@@ -233,7 +233,7 @@ class CrewConfigBuilder:
         if memory_backend_config:
             logger.info(f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}")
         else:
-            logger.info("Memory backend: Default (CrewAI unified Memory / LanceDB)")
+            logger.info("Memory backend: Default (local SQLite store)")
 
         if memory_value in (True, False, None):
             logger.info(f"Unified Memory: {memory_value}")
@@ -277,12 +277,16 @@ class CrewConfigBuilder:
                     logger.info("=" * 80)
                 else:
                     logger.info("=" * 80)
-                    logger.info("MEMORY BACKEND: DEFAULT (CrewAI unified Memory / LanceDB)")
+                    logger.info("MEMORY BACKEND: DEFAULT (local SQLite store)")
                     logger.info("=" * 80)
             else:
                 logger.info("=" * 80)
-                logger.info("MEMORY BACKEND: DEFAULT (ChromaDB + SQLite)")
-                logger.info("CrewAI will manage local ChromaDB collections for short-term/entity and SQLite for long-term")
+                logger.info("MEMORY BACKEND: DEFAULT (local SQLite store)")
+                logger.info(
+                    "Records live in memory.db under the group's storage dir; "
+                    "search is a numpy cosine over stored embeddings "
+                    "(engines/kasal/memory/local_storage_backend.py)"
+                )
                 logger.info("=" * 80)
         except Exception as banner_err:
             logger.debug(f"Could not print memory backend banner: {banner_err}")

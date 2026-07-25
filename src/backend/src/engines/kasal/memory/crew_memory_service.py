@@ -299,8 +299,9 @@ class CrewMemoryService:
             embedder: Embedder callable or provider config dict.
 
         Returns:
-            A ``StorageBackend`` instance, or ``None`` when the CrewAI default
-            (LanceDB) storage should be used.
+            A ``StorageBackend`` instance, or ``None`` when the DEFAULT
+            configuration applies — the caller then builds the local SQLite
+            store (see ``_build_local_storage``).
 
         Raises:
             DatabricksIndexValidationError: If the Databricks index is missing
@@ -417,7 +418,7 @@ class CrewMemoryService:
                         "RECOMMENDATION:",
                         "  1. Create the missing indexes in Databricks",
                         "  2. OR disable Databricks memory backend in settings",
-                        "  3. OR use default CrewAI memory (ChromaDB + SQLite)",
+                        "  3. OR switch to the default local memory backend (SQLite)",
                     ]
                 )
             elif error.error_type == "provisioning_indexes":
@@ -499,9 +500,10 @@ class CrewMemoryService:
     ) -> Dict[str, Any]:
         """Configure the crew's unified ``Memory`` instance.
 
-        Replaces the legacy three-class setup. Instantiates a single
-        ``crewai.memory.Memory`` bound to the Kasal-specific ``StorageBackend``
-        (or signals CrewAI to use its default LanceDB backend).
+        Replaces the legacy three-class setup. Instantiates a single engine
+        ``Memory`` bound to a kasal ``StorageBackend`` — Databricks Vector
+        Search, Lakebase, or the local SQLite store for the DEFAULT
+        configuration.
 
         Args:
             crew_kwargs: Crew keyword arguments to update.

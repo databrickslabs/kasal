@@ -926,7 +926,7 @@ class CrewPreparation:
                 }
                 logger.info(
                     "Created default memory backend configuration "
-                    "(CrewAI unified Memory / LanceDB)"
+                    "(local SQLite store)"
                 )
 
             # 6. Generate crew ID and setup storage
@@ -1018,7 +1018,7 @@ class CrewPreparation:
             actual_backend = (
                 memory_backend_config.get("backend_type", "unknown")
                 if memory_backend_config
-                else "default (LanceDB)"
+                else "default (local SQLite)"
             )
             logger.info("Backend Type: %s", actual_backend)
             resolved_memory = crew_kwargs.get("memory")

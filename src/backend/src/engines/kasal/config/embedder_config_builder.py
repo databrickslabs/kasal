@@ -9,7 +9,7 @@ Handles embedder setup for:
 - Other providers
 """
 
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 import logging
 
 from src.core.logger import LoggerManager
@@ -126,8 +126,23 @@ class EmbedderConfigBuilder:
         try:
             from src.utils.databricks_auth import get_databricks_auth_headers
             from src.services.api_keys_service import ApiKeysService
-            from chromadb import EmbeddingFunction, Documents, Embeddings
             from typing import cast
+
+            # The embedder interface, defined locally rather than imported from
+            # chromadb. chromadb supplied `EmbeddingFunction` (an ABC whose only
+            # abstract method is __call__) plus two type aliases, and dragged in
+            # 31 direct requirements — kubernetes, grpcio, fastapi, hnswlib — for
+            # exactly that. Nothing consumes this object as a chromadb type:
+            # every backend duck-types it (`callable(...)` or
+            # `hasattr(..., "embed_documents")`), so the shape is the contract.
+            Documents = List[str]
+            Embeddings = List[List[float]]
+
+            class EmbeddingFunction:
+                """Callable that turns documents into embeddings."""
+
+                def __call__(self, input: Documents) -> Embeddings:  # noqa: A002
+                    raise NotImplementedError
 
             databricks_key = None
             auth_headers = None

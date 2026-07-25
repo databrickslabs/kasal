@@ -1657,23 +1657,27 @@ def _browse_default_records(
     limit: int,
     offset: int,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Read records from the LOCAL LanceDB memory store for the group.
+    """Read records from the LOCAL SQLite memory store for the group.
 
-    Kasal's DEFAULT backend sets ``CREWAI_STORAGE_DIR`` to
-    ``kasal_default_{group_id}`` — one workspace-scoped store — which CrewAI
-    resolves as a relative name (under the backend CWD or the platform data
-    dir). This helper finds that store and reads its LanceDB records.
+    Opens the SAME ``LocalMemoryStorage`` the runtime writes through — the
+    ``memory.db`` under the group's store directory.
+
+    It used to set ``CREWAI_STORAGE_DIR`` and construct a bare ``Memory()``,
+    trusting crewAI to resolve ``memory/memories.lance`` underneath it. crewAI
+    is gone: ``Memory()`` with no storage now falls back to an in-process dict,
+    so the browser reported an EMPTY store no matter how much the runtime had
+    persisted (13 records on disk, 0 shown). No embedder is needed here —
+    browsing lists and counts rows, it never embeds a query.
 
     Returns ``(records, total)`` where ``total`` is the full record count in
     the store for this scope, so the client can paginate beyond one page.
     """
-    import os
     from pathlib import Path
 
     try:
-        from kasal_engine.memory import Memory
+        from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Default memory browse failed (crewai.memory missing): %s", exc)
+        logger.warning("Default memory browse failed (local storage missing): %s", exc)
         return [], 0
 
     # ONE deterministic store per group at the known memory root
@@ -1692,22 +1696,18 @@ def _browse_default_records(
 
     aggregated: List[Dict[str, Any]] = []
     total = 0
-    original_storage = os.environ.get("CREWAI_STORAGE_DIR")
     try:
         for storage_dir in storage_dirs:
             try:
-                # Point CrewAI's unified Memory at this crew's store. Using
-                # env var propagation keeps us compatible with whatever path
-                # layout the installed crewai version expects under the
-                # storage dir (memory/memories.lance on 1.14.x).
-                os.environ["CREWAI_STORAGE_DIR"] = str(storage_dir)
-                memory = Memory()
-                storage = (
-                    getattr(memory, "_storage", None)
-                    or getattr(memory, "storage", None)
-                )
-                if storage is None or not hasattr(storage, "list_records"):
+                # The runtime's own store, opened directly: memory.db under the
+                # group's store dir (see CrewMemoryService._build_local_storage).
+                db_path = storage_dir / "memory.db"
+                if not db_path.is_file():
+                    logger.info(
+                        "[memory/records] No memory.db in %s", storage_dir
+                    )
                     continue
+                storage = LocalMemoryStorage(db_path)
                 # True store count for this scope, so the client knows whether
                 # more pages exist beyond the one being returned.
                 if hasattr(storage, "count"):
@@ -1738,10 +1738,7 @@ def _browse_default_records(
                     "Failed to read local memory store %s: %s", storage_dir, exc
                 )
     finally:
-        if original_storage is None:
-            os.environ.pop("CREWAI_STORAGE_DIR", None)
-        else:
-            os.environ["CREWAI_STORAGE_DIR"] = original_storage
+        pass
 
     aggregated.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return aggregated[offset : offset + limit], total
@@ -1924,14 +1921,13 @@ def _delete_default_records(
     group_id: str,
     scope: Optional[str],
 ) -> int:
-    """Wipe the local LanceDB store for the group on the backend host.
+    """Wipe the local SQLite store for the group on the backend host.
 
-    Looks in the same candidate roots as ``_browse_default_records``. When
-    ``scope`` is provided, deletes only records matching that prefix via
-    ``crewai.memory.Memory`` (the LanceDB storage exposes scope-aware
-    ``delete``). When ``scope`` is unset, the entire group store directory is
-    removed — the cleanest way to guarantee no orphan LanceDB manifest files
-    remain.
+    With ``scope``, deletes only records matching that prefix through the same
+    ``LocalMemoryStorage`` the runtime writes — previously it built a bare
+    ``Memory()`` under ``CREWAI_STORAGE_DIR``, which since crewAI's removal is an
+    in-process dict, so a scoped delete silently removed nothing and reported 0.
+    Without ``scope`` the whole group store directory is removed.
     """
     import os
     import shutil
@@ -1949,38 +1945,29 @@ def _delete_default_records(
     # intact in each store.
     if scope:
         try:
-            from kasal_engine.memory import Memory
+            from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Default memory delete failed (crewai.memory missing): %s", exc)
+            logger.warning("Default memory delete failed (local storage missing): %s", exc)
             return 0
-        original_storage = os.environ.get("CREWAI_STORAGE_DIR")
-        try:
-            for storage_dir in storage_dirs:
-                try:
-                    os.environ["CREWAI_STORAGE_DIR"] = str(storage_dir)
-                    memory = Memory()
-                    storage = (
-                        getattr(memory, "_storage", None)
-                        or getattr(memory, "storage", None)
-                    )
-                    if storage is None or not hasattr(storage, "delete"):
-                        continue
-                    result = storage.delete(scope_prefix=scope)
-                    if isinstance(result, int):
-                        deleted += result
-                    else:
-                        deleted += 1
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to delete from local memory store %s: %s",
-                        storage_dir,
-                        exc,
-                    )
-        finally:
-            if original_storage is None:
-                os.environ.pop("CREWAI_STORAGE_DIR", None)
-            else:
-                os.environ["CREWAI_STORAGE_DIR"] = original_storage
+        for storage_dir in storage_dirs:
+            try:
+                db_path = storage_dir / "memory.db"
+                if not db_path.is_file():
+                    continue
+                storage = LocalMemoryStorage(db_path)
+                if not hasattr(storage, "delete"):
+                    continue
+                result = storage.delete(scope_prefix=scope)
+                if isinstance(result, int):
+                    deleted += result
+                else:
+                    deleted += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete from local memory store %s: %s",
+                    storage_dir,
+                    exc,
+                )
         return deleted
 
     # Wholesale wipe → remove each per-crew directory.

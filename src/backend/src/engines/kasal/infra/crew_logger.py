@@ -17,7 +17,6 @@ from datetime import datetime
 
 # Suppress known deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
 warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
 warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")

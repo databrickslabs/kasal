@@ -1521,7 +1521,7 @@ class LightAgentService:
             embedder_builder = EmbedderConfigBuilder(mem_config, user_token)
             crew_kwargs, custom_embedder, _embedder_config = await embedder_builder.configure_embedder(crew_kwargs)
 
-            # Backend config from DB → default (LanceDB) fallback.
+            # Backend config from DB → default (local SQLite) fallback.
             memory_backend_config = await memory_service.fetch_memory_backend_config()
             if not memory_backend_config:
                 memory_backend_config = {"backend_type": "default"}

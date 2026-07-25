@@ -1,6 +1,13 @@
-"""Deterministic on-disk location for LOCAL (DEFAULT / LanceDB) cognitive memory.
+"""Deterministic on-disk location for LOCAL (DEFAULT) cognitive memory.
 
-CrewAI resolves a *relative* ``CREWAI_STORAGE_DIR`` inconsistently — sometimes
+The DEFAULT backend is kasal's own SQLite store — ``memory.db`` under the group
+directory, written by engines/kasal/memory/local_storage_backend.py (embeddings
+as float32 blobs, search by numpy cosine). It is NOT LanceDB: that was crewAI's
+built-in default and left with the crewai library. A leftover
+``<group>/memory/memories.lance/`` directory from before the engine migration is
+dead weight and safe to delete.
+
+crewAI resolved a *relative* ``CREWAI_STORAGE_DIR`` inconsistently — sometimes
 under the process CWD (the backend source tree), sometimes under the platform
 data dir (macOS Application Support, Linux ``~/.local/share``). That scattered
 the store across locations and left the memory browser reading a different place
@@ -31,10 +38,10 @@ def sanitize_dir_component(value: str) -> str:
 
 
 def local_memory_root() -> Path:
-    """Absolute base dir holding every group's local LanceDB memory store.
+    """Absolute base dir holding every group's local SQLite memory store.
 
     ``KASAL_MEMORY_DIR`` overrides the default ``~/.kasal/memory``. The base dir
-    is created if missing so CrewAI can write the store underneath it.
+    is created if missing so the store can be written underneath it.
     """
     override = os.environ.get("KASAL_MEMORY_DIR")
     root = (

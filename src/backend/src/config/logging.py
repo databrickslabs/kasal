@@ -21,7 +21,6 @@ from src.core.logger import LoggerManager
 
 # Suppress known deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="chromadb")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
 warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
 warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
@@ -277,7 +276,7 @@ class CentralizedLoggingConfig:
             'httpx', 'httpcore', 'urllib3', 'requests',
             'crewai', 'kasal_engine', 'mlflow', 'litellm', 'LiteLLM',
             'asyncio', 'PIL', 'matplotlib', 'langchain', 'opentelemetry',
-            'chromadb', 'websockets'
+            'websockets'
         ]
 
         for lib in third_party_libs:
