@@ -149,6 +149,27 @@ class LLMStreamChunkEvent(LLMEventBase):
     chunk_index: int | None = None
 
 
+class ContextCompactionEvent(LLMEventBase):
+    """The conversation was compacted to fit the model's context window.
+
+    Emitted ONLY when compaction actually drops something, so a quiet run stays
+    quiet in the trace. Compaction is lossy — the tool-loop variant replaces the
+    OLDEST tool results with a stub — and until this event existed it happened
+    with no log, event or span at all. An agent that silently lost the schema it
+    had just read would re-query it and loop until the round budget ran out
+    ("Tool-calling did not converge within N rounds"), and nothing in the trace
+    explained why. Surfacing it makes that failure mode self-evident.
+    """
+
+    type: Literal["context_compaction"] = "context_compaction"
+    strategy: str = "tool_result_stub"
+    tokens_before: int | None = None
+    tokens_after: int | None = None
+    window: int | None = None
+    messages_compacted: int = 0
+    reason: str | None = None
+
+
 class LLMCallStartedEvent(LLMEventBase):
     """Engine replacement for crewai.events.types.llm_events.LLMCallStartedEvent"""
 

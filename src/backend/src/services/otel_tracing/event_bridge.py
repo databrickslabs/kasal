@@ -67,6 +67,9 @@ _EVENT_SPAN_MAP = {
     "LLMCallStartedEvent": ("kasal.llm.call_started", "llm_call"),
     "LLMCallCompletedEvent": ("kasal.llm.call_completed", "llm_response"),
     "LLMCallFailedEvent": ("kasal.llm.call_failed", "llm_call_failed"),
+    # Context compaction — lossy, so it must be visible: a silently amputated
+    # conversation makes an agent re-query what it already knew and loop.
+    "ContextCompactionEvent": ("kasal.llm.context_compaction", "context_compaction"),
 }
 
 # Events to skip. LLMStreamChunkEvent: too noisy (one per token).
@@ -157,7 +160,7 @@ def _get_tool_name(event: Any) -> str:
 def _get_output(event: Any) -> str:
     """Extract output/result content from an event object."""
     for attr in ("output", "result", "results", "response", "content",
-                 "message", "value", "memory_content"):
+                 "message", "reason", "value", "memory_content"):
         val = getattr(event, attr, None)
         if val is not None:
             return str(val)
@@ -719,6 +722,21 @@ class OTelEventBridge:
                     "kasal.extra.memory_content",
                     "(no memories matched the query)",
                 )
+
+        # ── Context compaction fields ──
+        # The numbers are the point of this event: how close to the budget the
+        # conversation got, how much was dropped to get under it, and against
+        # which window — a threshold far below the model's real window is what
+        # turns compaction into a re-query loop.
+        for compaction_field in (
+            "tokens_before", "tokens_after", "window", "messages_compacted",
+        ):
+            compaction_value = getattr(event, compaction_field, None)
+            if compaction_value is not None:
+                span.set_attribute(f"kasal.extra.{compaction_field}", int(compaction_value))
+        strategy = getattr(event, "strategy", None)
+        if strategy:
+            span.set_attribute("kasal.extra.strategy", str(strategy))
 
         limit = getattr(event, "limit", None)
         if limit is not None:

@@ -169,6 +169,29 @@ async def maintain_session_summary(
             f"[compaction] session {session_id}: folded {len(to_fold)} rows "
             f"into summary ({len(new_summary)} chars)"
         )
+        # Same event the tool-loop trim emits, so BOTH kinds of compaction show
+        # up as one row type in the trace instead of only the chat log knowing.
+        try:
+            from kasal_engine.events.bus import crewai_event_bus
+            from kasal_engine.events.types import ContextCompactionEvent
+
+            crewai_event_bus.emit(
+                None,
+                ContextCompactionEvent(
+                    model=model,
+                    strategy="chat_history_summary",
+                    tokens_before=len(fold_transcript) // 4,
+                    tokens_after=len(new_summary) // 4,
+                    messages_compacted=len(to_fold),
+                    reason=(
+                        f"folded {len(to_fold)} earlier chat turn(s) "
+                        f"({len(fold_transcript)} chars) into a running summary "
+                        f"({len(new_summary)} chars)"
+                    ),
+                ),
+            )
+        except Exception:  # noqa: BLE001 — observability must never fail a fold
+            pass
         return True
     except Exception as compact_err:  # noqa: BLE001
         logger.warning(f"[compaction] session {session_id} skipped: {compact_err}")

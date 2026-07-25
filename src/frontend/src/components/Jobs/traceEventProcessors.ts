@@ -14,6 +14,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
+import CompressIcon from '@mui/icons-material/Compress';
 
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
@@ -584,6 +585,39 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     return { type: 'error', description: errorMsg };
   },
 
+  // Context Compaction — the conversation was trimmed to fit the model window.
+  // Lossy, so the row leads with WHAT was dropped and against which budget: a
+  // run that compacts repeatedly is losing tool results it still needs, which
+  // is what drives an agent to re-query and burn its round budget.
+  context_compaction: (trace: Trace): ProcessedEvent => {
+    const metadata = parseTraceMetadata(trace);
+    const extra = extractExtraData(trace);
+    const num = (field: string): number | undefined => {
+      const value = (metadata?.[field] ?? extra?.[field]) as unknown;
+      return typeof value === 'number' ? value : undefined;
+    };
+    const compact = (tokens: number): string =>
+      tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+
+    const before = num('tokens_before');
+    const after = num('tokens_after');
+    const dropped = num('messages_compacted');
+    const window = num('window');
+
+    let description = 'Context Compacted';
+    if (before !== undefined && after !== undefined) {
+      description += ` — ${compact(before)} → ${compact(after)} tokens`;
+    }
+    if (window !== undefined) {
+      description += ` (budget ${compact(window)})`;
+    }
+    if (dropped) {
+      description += `, ${dropped} message${dropped === 1 ? '' : 's'} dropped`;
+    }
+
+    return { type: 'context_compaction', description };
+  },
+
   // Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
   crew_execution: (): ProcessedEvent | null => {
     return null;
@@ -674,6 +708,9 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   guardrail: { Component: CheckCircleIcon, color: 'warning' },
   llm_request: { Component: PlayCircleIcon, color: 'primary' },
   crew_planning: { Component: PlayCircleIcon, color: 'info' },
+  // Compaction is LOSSY — warning-coloured on purpose. A run that
+  // compacts repeatedly is losing tool results it may still need.
+  context_compaction: { Component: CompressIcon, color: 'warning' },
 };
 
 /**
@@ -717,6 +754,7 @@ export const CLICKABLE_TYPES = new Set([
   'memory_context',
   'memory_backend_error',
   'crew_planning',
+  'context_compaction',
 ]);
 
 /**

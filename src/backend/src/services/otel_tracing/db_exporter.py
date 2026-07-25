@@ -66,6 +66,8 @@ SPAN_NAME_MAP: Dict[str, str] = {
     "kasal.hitl.feedback_received": "hitl_feedback_received",
     # LLM retry backoff (emitted by DatabricksRetryLLM)
     "kasal.llm.retry": "llm_retry",
+    # Context compaction (emitted when a conversation is trimmed to fit)
+    "kasal.llm.context_compaction": "context_compaction",
 }
 
 

@@ -16,8 +16,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, PrivateAttr
 
 from ..events.bus import crewai_event_bus
-from ..events.types import LLMCallType, LLMStreamChunkEvent
+from ..events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
 from .base import BaseLLM
+from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
     ExecutionBudgetExceededError,
     LLMContextLengthExceededError,
@@ -207,6 +208,43 @@ class OpenAICompletion(BaseLLM):
                 f"for model {self.model}."
             )
 
+    def _model_window_is_known(self) -> bool:
+        """Does LLM_CONTEXT_WINDOW_SIZES actually know this model?
+
+        Mirrors BaseLLM.get_context_window_size's exact-then-substring lookup.
+        Needed because that method returns DEFAULT_CONTEXT_WINDOW_SIZE for an
+        unknown model, indistinguishable from a model genuinely sized at 8192.
+        """
+        if self.model in LLM_CONTEXT_WINDOW_SIZES:
+            return True
+        return any(
+            self.model.startswith(key) or key in self.model
+            for key in LLM_CONTEXT_WINDOW_SIZES
+        )
+
+    def _effective_context_window(self, from_agent: Any = None) -> int:
+        """Window to trim against.
+
+        The model table stays authoritative when it KNOWS the model — an agent
+        may only claim a window the provider cannot honour, and trimming too
+        late is a hard request failure rather than a degraded one.
+
+        It is the UNKNOWN case that needs help: an unregistered model silently
+        gets DEFAULT_CONTEXT_WINDOW_SIZE (8192 → 6963 after the 0.85 derate).
+        For a self-hosted model that can be off by 4x, so the trim shreds tool
+        results the agent still needs. ``src.core.llm_manager`` registers every
+        configured model at import and covers the common path, but nothing
+        guarantees it ran — a direct engine embedding, or a model added to an
+        agent but not to MODEL_CONFIGS, both land here. When the table has no
+        opinion, the agent's explicitly configured size is the better estimate
+        than a hardcoded 8192.
+        """
+        if not self._model_window_is_known():
+            configured = getattr(from_agent, "max_context_window_size", None) if from_agent else None
+            if isinstance(configured, int) and configured > 0:
+                return int(configured * CONTEXT_WINDOW_USAGE_RATIO)
+        return self.get_context_window_size()
+
     def _trim_conversation_to_window(
         self, conversation: list[dict[str, Any]], from_agent: Any = None
     ) -> None:
@@ -216,10 +254,14 @@ class OpenAICompletion(BaseLLM):
         the OLDEST tool results are replaced with a stub — never the system
         prompt, user messages, or tool_call structure (pairing must survive).
         Honors Agent.respect_context_window (default on; previously inert).
+
+        Compaction is lossy, so every trim that actually drops something emits a
+        ContextCompactionEvent — it used to happen with no trace at all, which
+        made the resulting re-query loop impossible to diagnose from the UI.
         """
         if from_agent is not None and getattr(from_agent, "respect_context_window", True) is False:
             return
-        window = self.get_context_window_size()
+        window = self._effective_context_window(from_agent)
         if not window:
             return
 
@@ -234,9 +276,11 @@ class OpenAICompletion(BaseLLM):
                     total += len(str(message["tool_calls"]))
             return total // 4
 
-        if estimated_tokens() <= window:
+        tokens_before = estimated_tokens()
+        if tokens_before <= window:
             return
         stub = "[earlier tool result trimmed to fit the context window]"
+        compacted = 0
         for message in conversation:
             is_tool_result = (
                 message.get("role") == "tool"
@@ -248,8 +292,49 @@ class OpenAICompletion(BaseLLM):
             if message.get(key) == stub:
                 continue
             message[key] = stub
+            compacted += 1
             if estimated_tokens() <= window:
-                return
+                break
+        if compacted:
+            self._emit_compaction(
+                tokens_before=tokens_before,
+                tokens_after=estimated_tokens(),
+                window=window,
+                messages_compacted=compacted,
+                from_agent=from_agent,
+            )
+
+    def _emit_compaction(
+        self,
+        *,
+        tokens_before: int,
+        tokens_after: int,
+        window: int,
+        messages_compacted: int,
+        from_agent: Any = None,
+    ) -> None:
+        """Announce a compaction on the event bus. Never raises — observability
+        must not be able to fail a run."""
+        try:
+            crewai_event_bus.emit(
+                self,
+                ContextCompactionEvent(
+                    model=self.model,
+                    from_agent=from_agent,
+                    strategy="tool_result_stub",
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    window=window,
+                    messages_compacted=messages_compacted,
+                    reason=(
+                        f"conversation reached ~{tokens_before} tokens against a "
+                        f"{window}-token budget; {messages_compacted} of the oldest "
+                        f"tool result(s) replaced with a stub"
+                    ),
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _call_completions_api(
         self,
