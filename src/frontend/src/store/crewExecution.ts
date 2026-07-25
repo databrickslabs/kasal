@@ -25,6 +25,69 @@ interface RunHistoryItem {
 export type { ReasoningConfig } from '../types/crews';
 import type { ReasoningConfig } from '../types/crews';
 
+type ToolConfigs = Record<string, unknown>;
+
+/**
+ * Merge the canvas node's ``tool_configs`` with the DB row's before a run.
+ *
+ * The pre-execution refresh below re-reads every agent/task from the database and
+ * spreads it over the node's data. A plain spread makes the DB authoritative,
+ * which silently DISCARDS anything configured on the canvas that never made it to
+ * the database — most visibly MCP servers (``tool_configs.MCP_SERVERS``), whose
+ * chips stay on the node while the run receives none, so the crew executes
+ * tool-less with no error anywhere.
+ *
+ * Union instead: neither side loses an entry, and on conflict the canvas wins
+ * because that is what the user is looking at. The one case not covered is a
+ * config the user removed on the canvas while the DB copy still has it — the
+ * stale entry survives. That only diverges when a save failed; a successful save
+ * updates both sides.
+ */
+export const mergeToolConfigs = (canvas: unknown, db: unknown): ToolConfigs | undefined => {
+  const isPlainObject = (v: unknown): v is ToolConfigs =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  const canvasConfigs = isPlainObject(canvas) ? canvas : {};
+  const dbConfigs = isPlainObject(db) ? db : {};
+  const merged = { ...dbConfigs, ...canvasConfigs };
+  // Keep the field absent rather than writing an empty object, so a node that
+  // never had tool_configs stays that way.
+  if (Object.keys(merged).length === 0) {
+    return isPlainObject(canvas) || isPlainObject(db) ? merged : undefined;
+  }
+  return merged;
+};
+
+/**
+ * Log the canvas/DB differences that the merge above papered over, so an
+ * unsaved edit is visible instead of silently changing what the run does.
+ * Covers tool_configs as well as tools — an MCP-only mismatch used to be
+ * invisible because only `tools` was compared.
+ */
+const warnOnConfigMismatch = (
+  kind: 'agent' | 'task',
+  name: string,
+  canvasData: Record<string, unknown>,
+  dbData: Record<string, unknown>,
+): void => {
+  const normalizeTools = (v: unknown) =>
+    JSON.stringify((Array.isArray(v) ? v : []).map(String).sort());
+  if (normalizeTools(canvasData?.tools) !== normalizeTools(dbData?.tools)) {
+    console.warn(
+      `[CrewExecution] Tool mismatch for ${kind} "${name}" — canvas: [${canvasData?.tools}], ` +
+      `DB: [${dbData?.tools}]. Using DB version. If unexpected, ensure you saved after editing tools.`
+    );
+  }
+  const canvasConfigs = JSON.stringify(canvasData?.tool_configs ?? {});
+  const dbConfigs = JSON.stringify(dbData?.tool_configs ?? {});
+  if (canvasConfigs !== dbConfigs) {
+    console.warn(
+      `[CrewExecution] tool_configs mismatch for ${kind} "${name}" — canvas: ${canvasConfigs}, ` +
+      `DB: ${dbConfigs}. Merging (canvas wins). A canvas-only entry means the save did not reach ` +
+      `the database — MCP server selections live here.`
+    );
+  }
+};
+
 // Low/small by default: validated to make a non-converging agent self-terminate in
 // ~15s with a synthesized answer (vs. the medium/large profile that tripped the
 // workspace rate limit and retry-looped for minutes). Users can raise per crew.
@@ -386,6 +449,16 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
               const freshAgent = await agentStore.getAgent(node.data.id, true);
               if (freshAgent) {
                 console.log(`[CrewExecution] Refreshed agent ${freshAgent.name} - tools:`, freshAgent.tools);
+                warnOnConfigMismatch(
+                  'agent',
+                  freshAgent.name,
+                  node.data as Record<string, unknown>,
+                  freshAgent as unknown as Record<string, unknown>,
+                );
+                const mergedToolConfigs = mergeToolConfigs(
+                  node.data?.tool_configs,
+                  (freshAgent as unknown as Record<string, unknown>)?.tool_configs,
+                );
                 return {
                   ...node,
                   data: {
@@ -393,6 +466,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
                     ...freshAgent,
                     // Preserve canvas-specific data
                     position: node.data.position,
+                    // The DB row must not erase a canvas-only tool config (MCP servers)
+                    ...(mergedToolConfigs !== undefined ? { tool_configs: mergedToolConfigs } : {}),
                   }
                 };
               }
@@ -417,16 +492,19 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
             try {
               const freshTask = await TaskService.getTask(taskId);
               if (freshTask) {
-                // Warn if DB tools differ from canvas — helps catch unsaved edits
-                const canvasTools = Array.isArray(node.data?.tools) ? node.data.tools : [];
-                const dbTools = Array.isArray(freshTask.tools) ? freshTask.tools : [];
-                if (JSON.stringify(canvasTools.map(String).sort()) !== JSON.stringify(dbTools.map(String).sort())) {
-                  console.warn(
-                    `[CrewExecution] Tool mismatch for task "${freshTask.name}" — canvas: [${canvasTools}], DB: [${dbTools}]. ` +
-                    `Using DB version. If unexpected, ensure you saved the task after editing tools.`
-                  );
-                }
+                // Surface DB/canvas divergence in tools AND tool_configs — an
+                // unsaved edit otherwise changes the run with no trace anywhere.
+                warnOnConfigMismatch(
+                  'task',
+                  freshTask.name,
+                  node.data as Record<string, unknown>,
+                  freshTask as unknown as Record<string, unknown>,
+                );
                 console.log(`[CrewExecution] Refreshed task ${freshTask.name} - tools:`, freshTask.tools);
+                const mergedToolConfigs = mergeToolConfigs(
+                  node.data?.tool_configs,
+                  (freshTask as unknown as Record<string, unknown>)?.tool_configs,
+                );
                 return {
                   ...node,
                   data: {
@@ -434,6 +512,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
                     ...freshTask,
                     taskId: freshTask.id,
                     label: freshTask.name,
+                    // The DB row must not erase a canvas-only tool config (MCP servers)
+                    ...(mergedToolConfigs !== undefined ? { tool_configs: mergedToolConfigs } : {}),
                   }
                 };
               }

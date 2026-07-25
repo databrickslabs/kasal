@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Node, Edge } from 'reactflow';
+import { mergeToolConfigs } from './crewExecution';
 
 /**
  * Extract and test the node resolution logic used in handleRunClick.
@@ -634,5 +635,57 @@ describe('crewExecution - default state values', () => {
   it('should default inputMode to dialog', () => {
     const defaultInputMode = 'dialog';
     expect(defaultInputMode).toBe('dialog');
+  });
+});
+
+/**
+ * Regression guard for the MCP-selection loss.
+ *
+ * The pre-execution refresh spreads the DB row over the canvas node. A plain
+ * spread made the DB authoritative, so an MCP server picked on a task/agent node
+ * whose save never reached the database was discarded right before the run — the
+ * chips stayed on the node, the crew ran with zero MCP tools, and nothing was
+ * logged. These tests exercise the real merge helper (imported, not replicated)
+ * so a future refactor cannot quietly restore the overwrite.
+ */
+describe('crewExecution - mergeToolConfigs (pre-run refresh)', () => {
+  it('keeps a canvas-only MCP selection when the DB row has none', () => {
+    const canvas = { MCP_SERVERS: { servers: ['yahoo_finance', 'postgres'] } };
+    expect(mergeToolConfigs(canvas, {})).toEqual(canvas);
+  });
+
+  it('keeps a canvas-only MCP selection when the DB row is null/undefined', () => {
+    const canvas = { MCP_SERVERS: { servers: ['postgres'] } };
+    expect(mergeToolConfigs(canvas, null)).toEqual(canvas);
+    expect(mergeToolConfigs(canvas, undefined)).toEqual(canvas);
+  });
+
+  it('picks up a DB-only config the canvas has not seen yet', () => {
+    const db = { GenieTool: { spaceId: 'abc' } };
+    expect(mergeToolConfigs({}, db)).toEqual(db);
+  });
+
+  it('unions both sides and resolves conflicts to the canvas value', () => {
+    const canvas = { MCP_SERVERS: { servers: ['postgres'] } };
+    const db = { MCP_SERVERS: { servers: ['stale'] }, GenieTool: { spaceId: 'abc' } };
+    expect(mergeToolConfigs(canvas, db)).toEqual({
+      MCP_SERVERS: { servers: ['postgres'] },
+      GenieTool: { spaceId: 'abc' },
+    });
+  });
+
+  it('returns undefined when neither side has tool_configs, leaving the field absent', () => {
+    expect(mergeToolConfigs(undefined, undefined)).toBeUndefined();
+  });
+
+  it('returns an empty object when a side explicitly holds one', () => {
+    expect(mergeToolConfigs({}, undefined)).toEqual({});
+  });
+
+  it('ignores non-object values rather than throwing', () => {
+    expect(mergeToolConfigs('nonsense', { GenieTool: { spaceId: 'a' } })).toEqual({
+      GenieTool: { spaceId: 'a' },
+    });
+    expect(mergeToolConfigs(['array'], undefined)).toBeUndefined();
   });
 });

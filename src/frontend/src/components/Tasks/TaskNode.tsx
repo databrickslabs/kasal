@@ -18,6 +18,7 @@ import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { useErrorStore } from '../../store/error';
 import { findTaskStoreKey } from '../../utils/taskIdUtils';
 
 import { type LLMGuardrailConfig } from '../../types/task';
@@ -107,6 +108,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
 
   // Tab dirty state management
   const { markCurrentTabDirty } = useTabDirtyState();
+
+  // Global error surface — a failed save must not stay console-only
+  const showErrorMessage = useErrorStore(state => state.showErrorMessage);
 
   // Get current layout orientation
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
@@ -310,21 +314,38 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       return node;
     }));
 
-    // Persist both tools and MCP in a single API call
+    // Persist both tools and MCP in a single API call. A failure here used to be
+    // console-only: the chips stayed on the node, the database kept the old
+    // (empty) tool_configs, and the pre-run refresh in crewExecution then merged
+    // against a row that never got the MCP servers. Surface it instead.
     if (data.taskId) {
       TaskService.updateTask(data.taskId, {
         tools: selectedTools,
         tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
       }).catch(err => {
         console.error('Failed to persist tool/MCP selection:', err);
+        showErrorMessage(
+          `Could not save the tool/MCP selection for "${data.label}": ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          `The selection is only on the canvas — reopen the task and save it before running.`
+        );
       });
+    } else {
+      // No taskId means the task was never persisted, so there is nothing to
+      // update — the selection lives on the canvas only. Say so rather than
+      // skipping the write silently.
+      console.warn(`[TaskNode] Task "${data.label}" has no taskId; tool/MCP selection not persisted.`);
+      showErrorMessage(
+        `"${data.label}" has not been saved yet, so its tool/MCP selection exists only on the canvas. ` +
+        `Open the task and save it to keep the selection.`
+      );
     }
 
     // Mark tab as dirty since task was modified
     markCurrentTabDirty();
 
     setIsToolDialogOpen(false);
-  }, [id, data.taskId, data.tool_configs, setNodes, markCurrentTabDirty]);
+  }, [id, data.taskId, data.label, data.tool_configs, setNodes, markCurrentTabDirty, showErrorMessage]);
 
   const iconStyles = {
     mr: 1.5,
