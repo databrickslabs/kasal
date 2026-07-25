@@ -349,12 +349,70 @@ export function cleanTaskLabel(taskName: string): string {
   return firstLine.length > 80 ? `${firstLine.slice(0, 80).trim()}…` : firstLine;
 }
 
+/**
+ * The label announcing who is about to work, shown BEFORE their tokens stream.
+ *
+ * Prefers the agent's role (`event_source`) — "Presentation Lead" — because the
+ * trace's task *name* is the fully interpolated task description, and using it
+ * put 80 characters of prompt where a name belongs. Falls back to the collapsed
+ * description when no role is attributed.
+ */
+export function taskHeaderLabel(agentRole: string, taskName: string): string {
+  const role = (agentRole || '').trim();
+  // Some sources report a module/class rather than a person-ish role; those read
+  // worse than the task line, so only take a role that looks like one.
+  if (role && role.length <= 60 && !/^(crew|kasal|engine|system)$/i.test(role)) {
+    return role;
+  }
+  const fromTask = cleanTaskLabel(taskName);
+  return fromTask === 'Task' ? '' : fromTask;
+}
+
+/**
+ * True when a task's "output" is really its own description echoed back.
+ *
+ * Weak models restate the brief instead of answering, and the raw echo arrives
+ * as a Python-ish repr — `description='…\\n\\nUS…'` — which rendered in chat as
+ * the task title followed by the same text again, escapes and all. It carries
+ * no information the header above it doesn't already give.
+ */
+export function isEchoedTaskSpec(output: string, taskName: string): boolean {
+  const trimmed = output.trim();
+  if (!trimmed) return false;
+  // A repr of the task/agent object rather than an answer.
+  if (/^(description|expected_output|raw|task|agent)\s*=\s*['"]/i.test(trimmed)) return true;
+  if (!taskName) return false;
+  // Or literally the task description (or its opening) restated as the answer.
+  const head = taskName.trim().slice(0, 60).toLowerCase();
+  return head.length >= 20 && trimmed.slice(0, 200).toLowerCase().includes(head);
+}
+
+/**
+ * Turn literal escape sequences into real characters.
+ *
+ * Output that reaches chat via a repr shows "\\n\\n" as visible backslash-n
+ * rather than a paragraph break.
+ */
+export function unescapeLiterals(text: string): string {
+  if (!text.includes('\\n') && !text.includes('\\t') && !text.includes('\\"')) return text;
+  return text
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'");
+}
+
 export function summarizeTaskOutput(
   raw: string,
   preview: PreviewContent | null,
+  taskName = '',
 ): string | null {
-  const trimmed = raw.trim();
+  const trimmed = unescapeLiterals(raw).trim();
   if (!trimmed) return null;
+
+  // The task restating itself is not an answer — the header already named it.
+  if (isEchoedTaskSpec(trimmed, taskName)) return null;
 
   // Status noise like "Calling tools.", "Thinking...", "Using tool X" — skip.
   if (
@@ -805,6 +863,12 @@ const ChatWorkspace: React.FC = () => {
   // polling fallback (Job-History style) can both deliver the same trace; this
   // guarantees each trace renders exactly once regardless of transport.
   const seenTraceIdsRef = useRef<Set<number>>(new Set());
+  // jobId -> label of the last task header posted, so a trace redelivered by the
+  // polling fallback does not post a duplicate header (or split the bubble).
+  const taskHeadersRef = useRef<Map<string, string>>(new Map());
+  // Task names that already got a header, so task_completed renders only the
+  // body instead of repeating the name it was announced under.
+  const headedTasksRef = useRef<Set<string>>(new Set());
   // jobId → the session that STARTED that job. Every trace/output carries its
   // job_id, so we attribute it to the right session even when runs overlap or
   // the user switched away — instead of trusting the single global "current
@@ -869,9 +933,13 @@ const ChatWorkspace: React.FC = () => {
     // Build a concise chat-message body. Raw task output (HTML dumps, status
     // pings like "Calling tools.", or echoed task descriptions) clutters the
     // chat; the real content lives in the preview pane.
-    const chatBody = summarizeTaskOutput(displayContent, preview);
+    const chatBody = summarizeTaskOutput(displayContent, preview, taskName);
     if (chatBody !== null) {
-      const msg = `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
+      // No label prefix: task_started already posted a header above this task's
+      // streamed tokens. Repeating it here is what produced
+      // "**<80 chars of prompt>** — <the same prompt again>".
+      const alreadyHeaded = headedTasksRef.current.has(taskName);
+      const msg = alreadyHeaded ? chatBody : `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
       if (ownerSession) {
         sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg);
       } else {
@@ -952,6 +1020,35 @@ const ChatWorkspace: React.FC = () => {
             messageId: id,
             resolved: trace.kind === 'tool_result',
           });
+        }
+      }
+    }
+
+    // task_started announces WHO is about to work, BEFORE their tokens stream.
+    // Previously this event was dropped as noise and the only identity in the
+    // chat came from task_completed — i.e. after everything that task had
+    // already streamed, so a crew read as one wall of text followed by a stack
+    // of labels. Closing the open bubble here is what keeps the next task's
+    // tokens under its own header.
+    if ((data?.event_type as string) === 'task_started') {
+      const metadata = data?.trace_metadata as Record<string, unknown> | undefined;
+      const taskName = (metadata?.task_name as string) || (data?.event_context as string) || '';
+      const label = taskHeaderLabel((data?.event_source as string) || '', taskName);
+      if (label && jobId) {
+        const store = useSessionStore.getState();
+        const already = taskHeadersRef.current.get(jobId);
+        // One header per task; a re-delivered trace (SSE + poller) must not
+        // split the bubble again mid-answer.
+        if (already !== label) {
+          taskHeadersRef.current.set(jobId, label);
+          headedTasksRef.current.add(taskName);
+          useExecutionStore.getState().closeStreamBubble(jobId);
+          const header = `**${label}**`;
+          if (ownerSession) {
+            store.addMessageToTargetSession(ownerSession, 'assistant', header);
+          } else {
+            store.addMessage('assistant', header);
+          }
         }
       }
     }

@@ -172,6 +172,13 @@ interface ExecutionActions {
    * completeExecution is authoritative either way.
    */
   appendStreamChunk: (jobId: string, chunk: string) => void;
+  /**
+   * End the current streaming bubble at a task boundary, flushing any paced
+   * text still queued. The next chunk opens a fresh bubble, so a multi-task
+   * crew reads as header → tokens → header → tokens instead of one bubble with
+   * every task's headers piled up after it.
+   */
+  closeStreamBubble: (jobId: string) => void;
   // jobId routes the completion to the session that OWNS that job, so a run
   // finishing in a backgrounded session (parallel sessions) lands in the right
   // place instead of the single global slot. Omitting it keeps the legacy
@@ -228,6 +235,111 @@ const jobOwners = new Map<string, string>();
 // jobId -> message id of the live token-streaming bubble (SSE `llm_chunk`).
 // Same lifecycle discipline as jobOwners: entries die when the job finalizes.
 const streamBubbles = new Map<string, string>();
+// jobId -> how many bubbles this run has opened, so each task boundary can
+// start a new one with a distinct message id.
+const streamBubbleSeq = new Map<string, number>();
+
+// ── Stream pacing ───────────────────────────────────────────────────────────
+// Chunks used to be painted the instant an SSE frame arrived. The backend
+// coalesces tokens, so what reached the eye was a burst — a paragraph appearing
+// at once, a pause, another burst. It reads as stuttering, not as typing, and on
+// a fast model the whole answer could land in one frame.
+//
+// Frames are buffered per job and drained on a rAF tick at a fixed character
+// budget, so text flows at a readable, steady rate no matter how the server
+// batches. The buffer only ever DELAYS text — nothing is dropped, and every
+// terminal path (task boundary, completion, failure) flushes what remains.
+const streamBuffers = new Map<string, string>();
+const streamTimers = new Map<string, number>();
+// ~55 chars per frame ≈ 3.3k/s at 60fps: faster than anyone reads, slow enough
+// to look continuous. Tunable in one place if it feels off in the live app.
+const STREAM_CHARS_PER_TICK = 55;
+
+/**
+ * Stop pacing a job. `flush` paints whatever is still queued (terminal paths
+ * that keep the bubble); otherwise the queue is dropped (the bubble is gone).
+ */
+function discardStreamPacing(jobId: string, flush: boolean): void {
+  if (flush) {
+    flushStreamBuffer(jobId);
+    streamBubbleSeq.delete(jobId);
+    return;
+  }
+  const timer = streamTimers.get(jobId);
+  if (timer !== undefined) cancelAnimationFrame(timer);
+  streamTimers.delete(jobId);
+  streamBuffers.delete(jobId);
+  streamBubbleSeq.delete(jobId);
+}
+
+/**
+ * The message id this job is currently streaming into, opening one if needed.
+ *
+ * Shared by the paced painter and the flush: a task that finishes before the
+ * first frame paints still has to land its text somewhere, and looking up a
+ * bubble that had not been created yet silently dropped the whole answer.
+ */
+function ensureStreamBubble(jobId: string): string {
+  const existing = streamBubbles.get(jobId);
+  if (existing) return existing;
+  // The id carries a sequence: a crew closes the bubble at each task boundary
+  // (closeStreamBubble) so the NEXT task's tokens open a fresh one below its own
+  // header, instead of every task pouring into a single bubble with all the
+  // headers stacked at the end.
+  const seq = (streamBubbleSeq.get(jobId) ?? 0) + 1;
+  streamBubbleSeq.set(jobId, seq);
+  const bubbleId = `stream-${jobId}-${seq}`;
+  streamBubbles.set(jobId, bubbleId);
+  useSessionStore.getState().addMessage('assistant', '', { id: bubbleId, isStreaming: true });
+  return bubbleId;
+}
+
+/** Drain a job's buffer into its bubble immediately (no pacing). */
+function flushStreamBuffer(jobId: string): void {
+  const timer = streamTimers.get(jobId);
+  if (timer !== undefined) {
+    cancelAnimationFrame(timer);
+    streamTimers.delete(jobId);
+  }
+  const pending = streamBuffers.get(jobId);
+  streamBuffers.delete(jobId);
+  if (pending) {
+    useSessionStore.getState().appendToMessage(ensureStreamBubble(jobId), pending);
+  }
+}
+
+/**
+ * Queue text for the paced painter. The bubble is opened lazily on the first
+ * tick that actually has something to paint, so an empty bubble never appears
+ * ahead of its content.
+ */
+function enqueueStreamText(jobId: string, chunk: string): void {
+  streamBuffers.set(jobId, (streamBuffers.get(jobId) ?? '') + chunk);
+  if (streamTimers.has(jobId)) return;
+
+  const tick = () => {
+    streamTimers.delete(jobId);
+    const pending = streamBuffers.get(jobId) ?? '';
+    if (!pending) return;
+    const bubbleId = ensureStreamBubble(jobId);
+    // Break on whitespace when one is near the budget so words are not sliced
+    // mid-token — a word appearing letter by letter reads as a glitch.
+    let take = Math.min(STREAM_CHARS_PER_TICK, pending.length);
+    if (take < pending.length) {
+      const nextBreak = pending.slice(take, take + 20).search(/\s/);
+      if (nextBreak >= 0) take += nextBreak + 1;
+    }
+    useSessionStore.getState().appendToMessage(bubbleId, pending.slice(0, take));
+    const rest = pending.slice(take);
+    if (rest) {
+      streamBuffers.set(jobId, rest);
+      streamTimers.set(jobId, requestAnimationFrame(tick));
+    } else {
+      streamBuffers.delete(jobId);
+    }
+  };
+  streamTimers.set(jobId, requestAnimationFrame(tick));
+}
 
 // Load a session's preview into the live slot when there's no in-memory
 // snapshot. Single source of truth: derive each run's deliverable from its
@@ -533,14 +645,19 @@ export const useExecutionStore = create<ExecutionStore>()(
     // stream while the owner session is on screen. Switching away just pauses
     // the live text; completeExecution still routes the final answer by owner.
     if (sessionStore.currentSessionId !== ownerSession) return;
-    const existing = streamBubbles.get(jobId);
-    if (existing) {
-      sessionStore.appendToMessage(existing, chunk);
-      return;
-    }
-    const bubbleId = `stream-${jobId}`;
-    streamBubbles.set(jobId, bubbleId);
-    sessionStore.addMessage('assistant', chunk, { id: bubbleId, isStreaming: true });
+    // Paced, not painted per SSE frame — see enqueueStreamText.
+    enqueueStreamText(jobId, chunk);
+  },
+
+  closeStreamBubble: (jobId) => {
+    if (!jobId) return;
+    // Flush whatever is still buffered into the bubble before letting go of it,
+    // otherwise the tail of a task's answer would be dropped at the boundary.
+    flushStreamBuffer(jobId);
+    const bubbleId = streamBubbles.get(jobId);
+    if (!bubbleId) return;
+    streamBubbles.delete(jobId);
+    useSessionStore.getState().updateMessage(bubbleId, { isStreaming: false });
   },
 
   completeExecution: (resultText: string, jobId?: string, surface?: Surface) => {
@@ -557,6 +674,9 @@ export const useExecutionStore = create<ExecutionStore>()(
     // Live token bubble for this job (if any). The terminal result is
     // authoritative (it may be post-processed text or an A2UI surface), so the
     // bubble is finalized in place below rather than left as a duplicate.
+    // Drain the pacing buffer before finalizing: any text still queued belongs
+    // in the bubble (or would otherwise vanish under the terminal result).
+    if (jobId) discardStreamPacing(jobId, true);
     const streamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
     if (jobId) streamBubbles.delete(jobId);
     const currentSessionId = useSessionStore.getState().currentSessionId;
@@ -728,6 +848,8 @@ export const useExecutionStore = create<ExecutionStore>()(
       if (!jobOwners.has(jobId)) return; // already finalized — no-op
       jobOwners.delete(jobId);
     }
+    // Keep whatever streamed before the failure — it is often the only clue.
+    if (jobId) discardStreamPacing(jobId, true);
     const failStreamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
     if (jobId) streamBubbles.delete(jobId);
     const currentSessionId = useSessionStore.getState().currentSessionId;
@@ -797,6 +919,8 @@ export const useExecutionStore = create<ExecutionStore>()(
     // Untracked or already finalized — nothing to do (keeps double calls, e.g.
     // the reconnect backstop AND a late poller 'jobNotFound', a clean no-op).
     if (!jobId || !jobOwners.has(jobId)) return;
+    // Abandoned: the run is gone, so queued text has nowhere to land.
+    discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
     const ownerSession = jobOwners.get(jobId)!;
     jobOwners.delete(jobId);
@@ -927,6 +1051,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   jobOwnerOf: (jobId: string) => jobOwners.get(jobId) ?? null,
   clearJobOwner: (jobId: string) => {
     jobOwners.delete(jobId);
+    discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
   },
 
