@@ -9,10 +9,28 @@ and the winner is stored on the run for explicit review-and-apply as a
 group-scoped template override (never the base row — the seeder
 overwrites base rows on startup).
 
-Run state lives in an in-process registry: the optimization itself is
-recorded durably in MLflow, but Kasal-side status is lost on backend
-restart. A `prompt_optimization_runs` table can replace the registry
-when this graduates from Phase 1.
+Run state is DURABLE: every run is a `prompt_optimization_runs` row
+(model + repository), so a proposal — and the before-image an apply can
+be reverted from — survives a backend restart. `_RUNS` remains only as
+an in-process cache for IN-FLIGHT runs: it carries the asyncio task
+handle, the cancel flag, and the live progress counters that the worker
+thread mutates without a DB round trip. A heartbeat flushes those
+counters (and `updated_at`) to the row, which is also what lets reads
+tell a live run from one orphaned by a restart.
+
+JUDGE INTEGRITY (the two properties this module must not lose):
+  * The judge is NOT the model under optimization by default. Target ==
+    judge is self-preference: the judge systematically prefers its own
+    outputs, so the measured gain is partly an artifact.
+  * The crew correctness judge is ANSWER-FIRST: it commits to its own
+    reference answer for the objective BEFORE it sees any candidate
+    deliverable. A reference-free judge is measurably exploitable —
+    optimizing against one drove judge pass rate 0.72 -> 0.94 while true
+    accuracy stayed at 0.20, and forcing the commit-first order cut the
+    false-positive rate 0.719 -> 0.012 (arXiv:2607.05904).
+  * Judge grades are SAMPLED and reduced by MEDIAN: identical prompts
+    have scored 0.0 and 4/10 minutes apart, so a single draw made
+    accept/reject a coin flip.
 """
 
 import asyncio
@@ -27,6 +45,9 @@ from typing import Any, Dict, List, Optional
 
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
+from src.repositories.prompt_optimization_run_repository import (
+    PromptOptimizationRunRepository,
+)
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.schemas.template import PromptTemplateUpdate
 from src.services.template_service import TemplateService
@@ -41,6 +62,20 @@ DEFAULT_TARGET_MODEL = os.getenv(
 )
 
 MIN_EXAMPLES = 5
+
+# Judge sampling: how many times the correctness judge grades one deliverable
+# before the grades are reduced by MEDIAN. 1 restores single-draw behavior
+# (and takes a no-op path — no extra calls, no median arithmetic).
+DEFAULT_JUDGE_SAMPLES = 3
+# A sample spread at or above this is reported: an unstable judge cannot rank
+# candidates, and a run whose judge disagrees with itself this much is not
+# measuring prompt quality.
+JUDGE_SPREAD_WARN = 0.3
+
+# A pending/running row whose heartbeat is older than this was orphaned by a
+# backend restart (a live run bumps updated_at every HEARTBEAT_SECONDS).
+RUN_HEARTBEAT_SECONDS = 30
+RUN_STALE_SECONDS = 300
 
 
 def _extract_user_from_log(prompt: str) -> Optional[str]:
@@ -269,6 +304,39 @@ def _checklist_grade(verdict: str, n_requirements: int) -> Optional[float]:
     return max(0.0, min(1.0, 0.8 * fraction + 0.2 * quality))
 
 
+def _grade_judge_verdict(verdict: str, n_requirements: int) -> Optional[tuple]:
+    """One correctness-judge verdict -> (grade 0-1, rationale), or None.
+
+    Order matters and is load-bearing:
+      1. CHECKLIST first when the run has human requirements — the grade is
+         COMPUTED from the PASS/FAIL marks, never from the judge's own
+         arithmetic (a judge writing "40" as its final number would otherwise
+         clamp to a perfect 10/10, observed live).
+      2. Otherwise LAST number wins — thinking models emit incidental numbers
+         while reasoning before stating the grade — with values in (10, 100]
+         read as percentages, because clamping alone turned a hallucinated
+         "40" into 10/10.
+
+    Returns None when the reply carries no usable grade at all, so the caller
+    can discard that sample instead of scoring it 0 (a parse miss is not
+    evidence the deliverable was bad).
+    """
+    text = str(verdict or "").strip()
+    rationale = text
+    if n_requirements > 0:
+        checklist_value = _checklist_grade(text, n_requirements)
+        if checklist_value is not None:
+            return checklist_value, rationale
+    matches = re.findall(r"\d+(?:\.\d+)?", text)
+    if not matches:
+        logger.warning(f"Crew optimization judge reply not numeric: {verdict!r}")
+        return None
+    number = float(matches[-1])
+    if 10.0 < number <= 100.0:
+        number /= 10.0
+    return max(0.0, min(10.0, number)) / 10.0, rationale
+
+
 def _job_name_score(outputs: Any) -> float:
     """Format scorer for generate_job_name: a short plain-text name (2-4 words,
     no JSON/markdown artifacts)."""
@@ -369,7 +437,12 @@ VALID_INTENTS = {
     "unknown",
 }
 
-# In-process run registry (see module docstring for the durability tradeoff).
+# In-process cache for IN-FLIGHT runs only — the durable record is the
+# `prompt_optimization_runs` row. This dict holds what cannot live in the DB
+# (the asyncio task handle, the cancel flag) plus the progress counters the
+# worker thread bumps on every crew execution; a heartbeat flushes those to
+# the row. Reads merge the two: the row is the truth, memory is fresher for a
+# live run's counters.
 _RUNS: Dict[str, Dict[str, Any]] = {}
 _MAX_KEPT_RUNS = 50
 
@@ -379,12 +452,17 @@ _PUBLIC_FIELDS = (
     "status",
     "dataset_size",
     "model",
+    "judge_model",
+    "reflection_model",
     "initial_score",
     "final_score",
     "baseline_template",
     "optimized_template",
     "error",
     "applied",
+    "applied_at",
+    "applied_by",
+    "revertible",
     "created_at",
     "kind",
     "crew_id",
@@ -395,6 +473,104 @@ _PUBLIC_FIELDS = (
     "human_feedback_count",
     "candidates_tried",
 )
+
+# Progress counters the worker thread owns in memory; flushed by the heartbeat
+# and read back over the row for live runs.
+_LIVE_COUNTERS = (
+    "executions_used",
+    "candidates_tried",
+    "human_feedback_count",
+)
+
+# run-dict key -> DB column. The run dict keeps the API's names (`run_id`,
+# `template_name`); the row uses `id`/`target_name`.
+_RUN_COLUMNS = {
+    "template_name": "target_name",
+    "kind": "kind",
+    "crew_id": "crew_id",
+    "status": "status",
+    "error": "error",
+    "model": "model",
+    "judge_model": "judge_model",
+    "reflection_model": "reflection_model",
+    "budget": "budget",
+    "dataset_size": "dataset_size",
+    "executions_used": "executions_used",
+    "execution_cap": "execution_cap",
+    "candidates_tried": "candidates_tried",
+    "human_feedback_count": "human_feedback_count",
+    "initial_score": "initial_score",
+    "final_score": "final_score",
+    "baseline_template": "baseline_template",
+    "optimized_template": "optimized_template",
+    "baseline_fields": "baseline_fields",
+    "optimized_fields": "optimized_fields",
+    "before_image": "before_image",
+    "applied": "applied",
+    "applied_at": "applied_at",
+    "applied_by": "applied_by",
+}
+
+
+def _row_to_public(row: Any) -> Dict[str, Any]:
+    """Project a run row onto the API's field names (see _PUBLIC_FIELDS)."""
+    before = getattr(row, "before_image", None)
+    return {
+        "run_id": row.id,
+        "template_name": row.target_name,
+        "kind": row.kind,
+        "crew_id": row.crew_id,
+        "status": row.status,
+        "error": row.error,
+        "dataset_size": row.dataset_size or 0,
+        "model": row.model,
+        "judge_model": row.judge_model,
+        "reflection_model": row.reflection_model,
+        "initial_score": row.initial_score,
+        "final_score": row.final_score,
+        "baseline_template": row.baseline_template,
+        "optimized_template": row.optimized_template,
+        "baseline_fields": row.baseline_fields,
+        "optimized_fields": row.optimized_fields,
+        "executions_used": row.executions_used,
+        "execution_cap": row.execution_cap,
+        "human_feedback_count": row.human_feedback_count,
+        "candidates_tried": row.candidates_tried,
+        "applied": bool(row.applied),
+        "applied_at": row.applied_at,
+        "applied_by": row.applied_by,
+        # An apply is undoable only while its before-image is on the row.
+        "revertible": bool(row.applied and before),
+        "created_at": row.created_at,
+    }
+
+
+def _run_to_columns(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Column values for the keys `run` actually carries."""
+    return {column: run[key] for key, column in _RUN_COLUMNS.items() if key in run}
+
+
+async def _persist_run_changes(run_id: str, changes: Dict[str, Any]) -> None:
+    """Patch a run row from BACKGROUND work, on its OWN session.
+
+    Background tasks must never touch the request session (it is closed when
+    the request returns), so this opens one per write and commits it. Failures
+    are logged, never raised: losing a status write must not kill an
+    optimization that is otherwise fine.
+    """
+    if not changes:
+        return
+    try:
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            repo = PromptOptimizationRunRepository(session)
+            await repo.update_fields(run_id, changes)
+            await session.commit()
+    except Exception as persist_err:
+        logger.warning(
+            f"Could not persist prompt optimization run {run_id}: {persist_err}"
+        )
 
 
 def _intent_format_score(outputs: Any) -> float:
@@ -555,6 +731,109 @@ def _stored_judge_model_to_key(stored: Any) -> Optional[str]:
     if ":/" in text:
         return text.split(":/", 1)[1] or None
     return text
+
+
+def _resolve_judge_model(requested: Optional[str], target_model: str, what: str) -> str:
+    """Pick the correctness judge's model, preferring anything but the target.
+
+    Resolution order:
+      1. an explicit `judge_model` on the request,
+      2. the configured default `GEPA_JUDGE_MODEL` (when it differs from the
+         model under optimization),
+      3. the target model — today's behavior, kept so a run never fails to
+         start, but logged as a WARNING.
+
+    Step 3 is SELF-PREFERENCE: when the judge is the model being optimized it
+    grades its own outputs, systematically favors them, and the reported gain
+    is partly an artifact of that bias rather than a real improvement. The
+    same applies when a caller explicitly asks for the target as judge, so
+    that case warns too.
+    """
+    chosen = (requested or "").strip()
+    if chosen:
+        if chosen == target_model:
+            logger.warning(
+                "%s: judge_model was explicitly set to the model under "
+                "optimization (%s). Target == judge is SELF-PREFERENCE — the "
+                "judge favors its own outputs, so treat the score gain as "
+                "unverified.",
+                what,
+                target_model,
+            )
+        return chosen
+    configured = (os.getenv("GEPA_JUDGE_MODEL") or "").strip()
+    if configured and configured != target_model:
+        logger.info(
+            "%s: judge model defaulted to GEPA_JUDGE_MODEL=%s (target=%s)",
+            what,
+            configured,
+            target_model,
+        )
+        return configured
+    logger.warning(
+        "%s: no judge model configured — falling back to the model under "
+        "optimization (%s). Target == judge is SELF-PREFERENCE: the judge "
+        "favors its own outputs and the measured gain may not be real. Set "
+        "judge_model on the request, or GEPA_JUDGE_MODEL for a default.",
+        what,
+        target_model,
+    )
+    return target_model
+
+
+def _judge_sample_count() -> int:
+    """How many times to sample the correctness judge (GEPA_JUDGE_SAMPLES).
+
+    Bounded to 1-9: sampling multiplies judge cost per DISTINCT candidate, and
+    1 is an explicit opt-out that must not pay any median overhead.
+    """
+    raw = os.getenv("GEPA_JUDGE_SAMPLES")
+    if raw is None or not str(raw).strip():
+        return DEFAULT_JUDGE_SAMPLES
+    try:
+        return max(1, min(9, int(str(raw).strip())))
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Ignoring non-integer GEPA_JUDGE_SAMPLES={raw!r}; "
+            f"using {DEFAULT_JUDGE_SAMPLES}"
+        )
+        return DEFAULT_JUDGE_SAMPLES
+
+
+def _median_sample(samples: List[tuple]) -> tuple:
+    """Reduce (grade, rationale) samples to (median grade, one rationale).
+
+    MEDIAN, not mean: the judge is stochastic and its outliers are large (the
+    same prompt has drawn 0.0 and 0.4 minutes apart), and a median ignores a
+    single wild draw instead of letting it move the score. The rationale kept
+    is the one from the sample NEAREST the median, so the text GEPA's
+    reflection model reads actually explains the score it was given.
+    """
+    if not samples:
+        return 0.0, ""
+    if len(samples) == 1:
+        return samples[0]
+    grades = sorted(float(g) for g, _ in samples)
+    middle = len(grades) // 2
+    median = (
+        grades[middle]
+        if len(grades) % 2
+        else (grades[middle - 1] + grades[middle]) / 2.0
+    )
+    nearest = min(samples, key=lambda s: abs(float(s[0]) - median))
+    spread = grades[-1] - grades[0]
+    if spread >= JUDGE_SPREAD_WARN:
+        logger.warning(
+            "Judge disagreed with itself across %d samples of the SAME "
+            "deliverable: %s (spread %.2f, median %.2f). A judge this "
+            "unstable cannot rank candidates — the run's score movement may "
+            "be noise.",
+            len(grades),
+            [round(g, 2) for g in grades],
+            spread,
+            median,
+        )
+    return median, nearest[1]
 
 
 def _parse_grade_from_text(text: str) -> Optional[float]:
@@ -725,6 +1004,7 @@ class PromptOptimizationService:
         self.session = session
         self.log_repository = LLMLogRepository(session)
         self.model_repository = ModelConfigRepository(session)
+        self.run_repository = PromptOptimizationRunRepository(session)
 
     # ------------------------------------------------------------------ start
 
@@ -766,7 +1046,13 @@ class PromptOptimizationService:
             )
 
         target_model = request.model or DEFAULT_TARGET_MODEL
-        judge_model = request.judge_model or target_model
+        # NOT `or target_model`: judging with the model under optimization is
+        # self-preference (see _resolve_judge_model).
+        judge_model = _resolve_judge_model(
+            request.judge_model,
+            target_model,
+            f"Prompt optimization '{request.template_name}'",
+        )
         # Reflection is a Kasal model key like every other model here —
         # invocation goes through LLMManager (keys, endpoints, provider quirks
         # all owned there), so no URI/env resolution happens in this service.
@@ -780,9 +1066,13 @@ class PromptOptimizationService:
         run: Dict[str, Any] = {
             "run_id": run_id,
             "template_name": request.template_name,
+            "kind": "template",
             "status": "pending",
             "dataset_size": len(examples),
             "model": target_model,
+            "judge_model": judge_model,
+            "reflection_model": reflection_model,
+            "budget": request.max_metric_calls,
             "group_id": group_id,
             "baseline_template": baseline,
             "applied": False,
@@ -793,6 +1083,7 @@ class PromptOptimizationService:
         }
         _RUNS[run_id] = run
         self._prune_runs()
+        await self._record_run(run, group_context)
 
         # Keep a strong reference on the run entry so the task isn't GC'd.
         run["task"] = asyncio.create_task(
@@ -909,6 +1200,61 @@ class PromptOptimizationService:
             )
         return "databricks-uc", f"{catalog}.{schema}.{base_name}"
 
+    # ------------------------------------------------------------- durability
+
+    async def _record_run(
+        self, run: Dict[str, Any], group_context: Optional[GroupContext]
+    ) -> None:
+        """Insert the run's durable row.
+
+        Uses the REQUEST session (this runs while the caller's request is still
+        open) and flushes without committing — the session lifecycle owns the
+        transaction. A failure here is logged, not raised: an unrecordable run
+        still optimizes, it just loses restart survival, and failing the start
+        call would be a worse outcome for the user.
+        """
+        try:
+            await self.run_repository.create(
+                {
+                    "id": run["run_id"],
+                    "group_id": run.get("group_id"),
+                    "group_email": getattr(group_context, "group_email", None),
+                    "created_by_email": getattr(group_context, "group_email", None),
+                    # Naive UTC in the DB (every other model's convention); the
+                    # API re-attaches tzinfo on read so browsers localize.
+                    "created_at": run["created_at"].replace(tzinfo=None),
+                    "updated_at": run["created_at"].replace(tzinfo=None),
+                    **_run_to_columns(run),
+                }
+            )
+        except Exception as create_err:
+            logger.warning(
+                f"Could not record prompt optimization run {run['run_id']}: "
+                f"{create_err}"
+            )
+
+    @staticmethod
+    async def _heartbeat(run_id: str) -> None:
+        """Flush a live run's progress counters to its row until it ends.
+
+        Two jobs: keep `executions_used`/`candidates_tried` recoverable after a
+        restart, and keep `updated_at` fresh so a reader can tell this run is
+        ALIVE. Without the second, a run orphaned by `--reload` would sit at
+        'running' forever and the UI's "run in progress" lock would never clear.
+        """
+        try:
+            while True:
+                await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
+                run = _RUNS.get(run_id)
+                if run is None or run.get("status") not in ("pending", "running"):
+                    return
+                await _persist_run_changes(
+                    run_id,
+                    {k: run.get(k) for k in _LIVE_COUNTERS if run.get(k) is not None},
+                )
+        except asyncio.CancelledError:
+            return
+
     # ------------------------------------------------------------ background
 
     async def _run_optimization(self, run_id: str, sync_fn=None, **kwargs) -> None:
@@ -916,6 +1262,8 @@ class PromptOptimizationService:
         if run is None:
             return
         run["status"] = "running"
+        await _persist_run_changes(run_id, {"status": "running"})
+        heartbeat = asyncio.create_task(self._heartbeat(run_id))
         try:
             result = await asyncio.to_thread(
                 sync_fn or self._execute_optimization_sync,
@@ -928,6 +1276,14 @@ class PromptOptimizationService:
                 f"Prompt optimization {run_id} completed: "
                 f"{result.get('initial_score')} -> {result.get('final_score')}"
             )
+            await _persist_run_changes(
+                run_id,
+                {
+                    "status": "completed",
+                    **{k: run.get(k) for k in _LIVE_COUNTERS if k in run},
+                    **_run_to_columns(result),
+                },
+            )
         except Exception as e:
             import traceback as _tb
 
@@ -935,6 +1291,14 @@ class PromptOptimizationService:
                 logger.info(f"Prompt optimization {run_id} cancelled by user")
                 run["status"] = "cancelled"
                 run["error"] = None
+                await _persist_run_changes(
+                    run_id,
+                    {
+                        "status": "cancelled",
+                        "error": None,
+                        **{k: run.get(k) for k in _LIVE_COUNTERS if k in run},
+                    },
+                )
                 return
             logger.error(f"Prompt optimization {run_id} failed: {e}", exc_info=True)
             run["status"] = "failed"
@@ -943,6 +1307,16 @@ class PromptOptimizationService:
             run["error"] = (
                 f"{e}\n\n{''.join(_tb.format_exc().splitlines(keepends=True)[-30:])}"
             )
+            await _persist_run_changes(
+                run_id,
+                {
+                    "status": "failed",
+                    "error": run["error"],
+                    **{k: run.get(k) for k in _LIVE_COUNTERS if k in run},
+                },
+            )
+        finally:
+            heartbeat.cancel()
 
     @staticmethod
     def _execute_optimization_sync(
@@ -1310,7 +1684,12 @@ class PromptOptimizationService:
             logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
 
         target_model = request.model or DEFAULT_TARGET_MODEL
-        judge_model = request.judge_model or target_model
+        # NOT `or target_model`: the crew judge grades deliverables the target
+        # model produced, so target == judge is self-preference — and the crew
+        # judge is the one whose grade drives accept/reject.
+        judge_model = _resolve_judge_model(
+            request.judge_model, target_model, f"Crew optimization '{crew.name}'"
+        )
         # A Kasal model key; invoked through LLMManager (no URI/env plumbing).
         reflection_model = request.reflection_model or target_model
         registry_uri, _ = await self._resolve_registry("crew", group_context)
@@ -1338,6 +1717,9 @@ class PromptOptimizationService:
             "execution_cap": request.max_metric_calls,
             "dataset_size": 1,
             "model": target_model,
+            "judge_model": judge_model,
+            "reflection_model": reflection_model,
+            "budget": request.max_metric_calls,
             "group_id": group_id,
             "baseline_template": baseline_doc,
             "baseline_fields": baseline_fields,
@@ -1348,6 +1730,7 @@ class PromptOptimizationService:
         }
         _RUNS[run_id] = run
         self._prune_runs()
+        await self._record_run(run, group_context)
 
         run["task"] = asyncio.create_task(
             self._run_optimization(
@@ -1653,6 +2036,83 @@ class PromptOptimizationService:
             # nothing in wall-clock.
             execute_lock = threading.Lock()
 
+            # ANSWER-FIRST JUDGING. A reference-free judge — one that only ever
+            # sees a candidate answer and decides whether it looks good — is
+            # measurably exploitable by an optimizer: optimizing against one
+            # drove judge pass rate 0.72 -> 0.94 while true accuracy stayed at
+            # 0.20, and making the judge COMMIT to its own answer before it sees
+            # the candidate cut the false-positive rate 0.719 -> 0.012
+            # (arXiv:2607.05904). So before grading anything, the judge writes
+            # the answer IT would give for this objective + rubric, and every
+            # candidate is then graded against that fixed reference.
+            #
+            # Cached by (objective, rubric): one extra judge call per RUN, not
+            # per candidate. Computed lazily so a run that never reaches
+            # grading pays nothing.
+            reference_cache: Dict[str, str] = {}
+
+            def _judge_reference() -> str:
+                key = hashlib.sha256(
+                    f"{objective}\x00{judge_rubric}".encode("utf-8")
+                ).hexdigest()
+                if key in reference_cache:
+                    return reference_cache[key]
+                reference = ""
+                try:
+                    reference = (
+                        _sync_llm_completion(
+                            loop,
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "You are establishing the GROUND TRUTH used "
+                                        "to grade an AI crew's work. You have NOT "
+                                        "seen any candidate answer and must not ask "
+                                        "for one.\n"
+                                        "Write, in at most 400 words:\n"
+                                        "1. The answer YOU would give for the "
+                                        "objective below, at the level of detail the "
+                                        "expectations demand.\n"
+                                        "2. Then a short 'MUST INCLUDE:' list of the "
+                                        "concrete, checkable things any acceptable "
+                                        "answer has to contain (specific facts, "
+                                        "scope, structure).\n"
+                                        "Output nothing else."
+                                    ),
+                                },
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        f"Objective: {objective}\n\n"
+                                        f"Per-task expectations:\n{judge_rubric}"
+                                    ),
+                                },
+                            ],
+                            model=judge_model,
+                            max_tokens=1500,
+                            group_context=group_context,
+                            user_token=user_token,
+                        )
+                        or ""
+                    ).strip()
+                except Exception as ref_err:
+                    # Degrade to reference-free grading rather than failing the
+                    # run — but say so loudly, because that is the exploitable
+                    # mode this whole step exists to remove.
+                    logger.warning(
+                        "Could not establish the judge's reference answer "
+                        f"({ref_err}); grading falls back to REFERENCE-FREE, "
+                        "which is exploitable by the optimizer."
+                    )
+                reference_cache[key] = reference
+                if reference:
+                    logger.info(
+                        "Crew optimization: judge committed a reference answer "
+                        f"({len(reference)} chars) before seeing any candidate"
+                    )
+                return reference
+
             def predict_fn(**inputs) -> str:
                 run_entry = _RUNS.get(cancel_run_id, {}) if cancel_run_id else {}
                 # User-requested stop: abort BEFORE spending a crew execution.
@@ -1768,6 +2228,12 @@ class PromptOptimizationService:
                     # the crew's own task text may contradict the human
                     # requirements (it said "cities like Zurich, Geneva" while
                     # the human demanded German-side only).
+                    #
+                    # This mode is deliberately NOT answer-first: it already
+                    # grades against ground truth (the distilled HUMAN
+                    # requirements), which beats a judge-written reference. And
+                    # a reference derived from the objective would reintroduce
+                    # exactly the contradiction the withheld objective avoids.
                     req_lines = "\n".join(
                         f"R{i + 1}. {r}" for i, r in enumerate(human_requirements)
                     )
@@ -1806,6 +2272,26 @@ class PromptOptimizationService:
                         },
                     ]
                 else:
+                    # ANSWER-FIRST: the judge already committed to its own
+                    # reference answer for this objective (before it had seen
+                    # any candidate), and grades against THAT. Without it the
+                    # judge is reference-free and the optimizer can climb its
+                    # preferences instead of answer quality.
+                    reference = _judge_reference()
+                    answer_first_rules = (
+                        (
+                            "\nBefore seeing this answer you committed to your OWN "
+                            "reference answer and a MUST INCLUDE list for this "
+                            "objective; both are given below.\n"
+                            "- Grade the candidate against THAT reference and that "
+                            "list. Do NOT revise the reference to fit the candidate.\n"
+                            "- Credit only content the reference or the MUST INCLUDE "
+                            "list actually calls for; a fluent answer that misses "
+                            "them is not a good answer.\n"
+                        )
+                        if reference
+                        else ""
+                    )
                     judge_messages = [
                         {
                             "role": "system",
@@ -1818,6 +2304,7 @@ class PromptOptimizationService:
                                 "10 = flawless and exceptional (rare). 7 = solid with minor "
                                 "gaps. 5 = acceptable but generic. 3 = major omissions. "
                                 "0 = failed.\n"
+                                f"{answer_first_rules}"
                                 "First, in one or two sentences, name the SPECIFIC "
                                 "failures, quoting the exact expectation that was "
                                 "violated. Then write the final grade alone on the "
@@ -1828,55 +2315,79 @@ class PromptOptimizationService:
                             "role": "user",
                             "content": (
                                 f"Objective: {inputs.get('request', objective)}\n"
-                                f"Expectations:\n{judge_rubric}\n\nFinal output:\n{text[:6000]}"
+                                f"Expectations:\n{judge_rubric}\n"
+                                + (
+                                    "\nYour committed reference answer and required "
+                                    f"content:\n{reference[:4000]}\n"
+                                    if reference
+                                    else ""
+                                )
+                                + f"\nFinal output:\n{text[:6000]}"
                             ),
                         },
                     ]
-                try:
-                    verdict = _sync_llm_completion(
-                        loop,
-                        messages=judge_messages,
-                        model=judge_model,
-                        # Room for forced-thinking models (Kimi K2.x): even 300
-                        # tokens were consumed entirely by reasoning, leaving
-                        # empty visible content (observed live at 300/300).
-                        max_tokens=1500,
-                        group_context=group_context,
-                        user_token=user_token,
-                    )
-                except Exception as judge_err:
+
+                # MULTI-SAMPLE + MEDIAN. One draw made accept/reject a coin
+                # flip: the same prompt has been graded 0.0 and then 4/10 two
+                # minutes apart. N samples reduced by median absorb that. The
+                # per-candidate cost is bounded because judge_cache means a
+                # DISTINCT deliverable is only ever sampled once per run.
+                sample_count = _judge_sample_count()
+                samples: List[tuple] = []
+                judge_error: Optional[Exception] = None
+                for index in range(sample_count):
+                    messages = judge_messages
+                    if sample_count > 1:
+                        # Distinct requests: litellm's process-global cache
+                        # replays a byte-identical prompt, which would make
+                        # samples 2..N copies of sample 1 (the same trap the
+                        # reflection bridge already works around). Skipped when
+                        # sample_count == 1 so that path stays byte-identical
+                        # to single-draw behavior.
+                        messages = [
+                            {
+                                "role": "system",
+                                "content": f"grading pass {uuid.uuid4().hex}",
+                            }
+                        ] + judge_messages
+                    try:
+                        verdict = _sync_llm_completion(
+                            loop,
+                            messages=messages,
+                            model=judge_model,
+                            # Room for forced-thinking models (Kimi K2.x): even
+                            # 300 tokens were consumed entirely by reasoning,
+                            # leaving empty visible content (observed live).
+                            max_tokens=1500,
+                            group_context=group_context,
+                            user_token=user_token,
+                        )
+                    except Exception as judge_err:
+                        logger.error(
+                            f"Crew optimization judge call failed "
+                            f"(sample {index + 1}/{sample_count}): {judge_err}"
+                        )
+                        judge_error = judge_err
+                        continue
+                    sample = _grade_judge_verdict(verdict, len(human_requirements))
+                    if sample is not None:
+                        samples.append(sample)
+                if not samples and judge_error is not None:
                     # A broken judge must be LOUD: silent zeros flatten the
                     # whole score landscape and make runs look like "no
                     # improvement possible" (observed live with an unsupported
-                    # judge provider — every grade was an exception).
-                    logger.error(f"Crew optimization judge call failed: {judge_err}")
-                    raise
+                    # judge provider — every grade was an exception). Only
+                    # raised when NO sample survived; a partial outage still
+                    # yields a usable median.
+                    raise judge_error
+
                 grades: List[float] = []
                 rationale_parts: List[str] = []
-                if verdict and str(verdict).strip():
-                    rationale_parts.append(str(verdict).strip())
-                checklist_value = (
-                    _checklist_grade(verdict or "", len(human_requirements))
-                    if human_requirements
-                    else None
-                )
-                if checklist_value is not None:
-                    grades.append(checklist_value)
-                else:
-                    # LAST number wins: thinking models may reason (with
-                    # incidental numbers) before stating the final grade. A
-                    # number above 10 is treated as a percentage — clamping
-                    # alone turned a hallucinated "40" into a perfect 10/10.
-                    matches = re.findall(r"\d+(?:\.\d+)?", verdict or "")
-                    if matches:
-                        number = float(matches[-1])
-                        if 10.0 < number <= 100.0:
-                            number /= 10.0
-                        grades.append(max(0.0, min(10.0, number)) / 10.0)
-                    else:
-                        logger.warning(
-                            f"Crew optimization judge reply not numeric: {verdict!r}"
-                        )
+                if samples:
+                    median_grade, median_rationale = _median_sample(samples)
+                    grades.append(median_grade)
+                    if median_rationale:
+                        rationale_parts.append(median_rationale)
                 # Registered judges grade the SAME deliverable here rather than
                 # running as separate MLflow scorers — trace-based scorers were
                 # each re-triggering their own crew execution (observed live as
@@ -2419,21 +2930,94 @@ class PromptOptimizationService:
 
     # ---------------------------------------------------------------- reads
 
-    def get_run(
+    async def get_run(
         self, run_id: str, group_context: Optional[GroupContext] = None
     ) -> Optional[Dict[str, Any]]:
-        run = _RUNS.get(run_id)
-        if run is None or not self._visible(run, group_context):
+        """One run, from its durable row (group-scoped), with live counters."""
+        group_id = group_context.primary_group_id if group_context else None
+        row = await self.run_repository.get_by_group(run_id, group_id)
+        if row is None:
             return None
-        return {k: run.get(k) for k in _PUBLIC_FIELDS}
+        await self._settle_orphans(group_id)
+        if row.status in ("pending", "running") and run_id not in _RUNS:
+            # Re-read once: _settle_orphans may have just failed this row.
+            row = await self.run_repository.get_by_group(run_id, group_id)
+            if row is None:
+                return None
+        return self._public(row, group_context)
 
-    def list_runs(
+    async def list_runs(
         self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
-        runs = [r for r in _RUNS.values() if self._visible(r, group_context)]
-        _epoch = datetime.min.replace(tzinfo=timezone.utc)
-        runs.sort(key=lambda r: r.get("created_at") or _epoch, reverse=True)
-        return [{k: r.get(k) for k in _PUBLIC_FIELDS} for r in runs]
+        """Recent runs for the caller's group, newest first."""
+        group_id = group_context.primary_group_id if group_context else None
+        await self._settle_orphans(group_id)
+        rows = await self.run_repository.list_by_group(group_id, limit=_MAX_KEPT_RUNS)
+        return [self._public(row, group_context) for row in rows]
+
+    def _public(
+        self, row: Any, group_context: Optional[GroupContext]
+    ) -> Dict[str, Any]:
+        """Row -> API dict, overlaying a LIVE run's fresher progress counters.
+
+        The worker thread bumps `executions_used`/`candidates_tried` in memory
+        on every crew execution and the heartbeat only flushes them every
+        RUN_HEARTBEAT_SECONDS, so the row lags for an active run. The overlay is
+        group-checked so a cached entry can never leak across groups.
+        """
+        public = _row_to_public(row)
+        run = _RUNS.get(row.id)
+        if run is not None and self._visible(run, group_context):
+            for key in _LIVE_COUNTERS:
+                if run.get(key) is not None:
+                    public[key] = run[key]
+            # Memory also holds the freshest terminal state (the DB write for a
+            # just-finished run may still be in flight).
+            if run.get("status"):
+                public["status"] = run["status"]
+        # Timestamps are stored naive-UTC (every model's convention here) but
+        # must serialize with +00:00 so browsers render local time — a naive
+        # stamp showed a 01:20 local run as "11:20 PM" (observed live).
+        for key in ("created_at", "applied_at"):
+            value = public.get(key)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                public[key] = value.replace(tzinfo=timezone.utc)
+        return {k: public.get(k) for k in _PUBLIC_FIELDS}
+
+    async def _settle_orphans(self, group_id: Optional[str]) -> None:
+        """Fail runs whose heartbeat died with the backend that owned them.
+
+        A `--reload` (or any restart) kills the asyncio task but leaves the row
+        at 'running'. Left alone, that run polls forever and the UI's "run in
+        progress" lock never clears, so no new run can be started. Only rows
+        with a STALE heartbeat and no in-process entry are touched, which is
+        why a legitimately long crew run (hours) is never mistaken for one.
+        """
+        try:
+            stale = await self.run_repository.find_stale_active(
+                group_id, RUN_STALE_SECONDS
+            )
+        except Exception as stale_err:
+            logger.debug(f"Could not scan for orphaned runs: {stale_err}")
+            return
+        for row in stale:
+            if row.id in _RUNS:
+                continue  # alive in this process, heartbeat merely lagging
+            logger.info(
+                f"Prompt optimization {row.id} was orphaned by a backend "
+                f"restart (last heartbeat {row.updated_at}); marking failed"
+            )
+            await _persist_run_changes(
+                row.id,
+                {
+                    "status": "failed",
+                    "error": (
+                        "The backend restarted while this run was in flight, so "
+                        "it was abandoned. Its MLflow record (if any) survives; "
+                        "start a new run to get a proposal."
+                    ),
+                },
+            )
 
     @staticmethod
     def _visible(run: Dict[str, Any], group_context: Optional[GroupContext]) -> bool:
@@ -2455,18 +3039,36 @@ class PromptOptimizationService:
 
     # ---------------------------------------------------------------- cancel
 
-    def cancel_run(
+    async def cancel_run(
         self, run_id: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
         """Request a running optimization to stop. The flag is honored before
         the NEXT crew execution — an in-flight execution finishes first."""
-        run = _RUNS.get(run_id)
-        if run is None or not self._visible(run, group_context):
+        group_id = group_context.primary_group_id if group_context else None
+        row = await self.run_repository.get_by_group(run_id, group_id)
+        if row is None:
             raise ValueError(f"Optimization run '{run_id}' not found")
-        if run.get("status") not in ("pending", "running"):
+        if row.status not in ("pending", "running"):
             raise ValueError(f"Optimization run '{run_id}' is not active")
-        run["cancel_requested"] = True
-        logger.info(f"Prompt optimization {run_id}: cancellation requested")
+        run = _RUNS.get(run_id)
+        if run is not None and self._visible(run, group_context):
+            run["cancel_requested"] = True
+            logger.info(f"Prompt optimization {run_id}: cancellation requested")
+            return {"run_id": run_id, "cancelling": True}
+        # Active in the DB but not in this process: the worker that owned it is
+        # gone (restart), so there is nothing to signal — settle the record
+        # instead of leaving a run that can never stop or finish.
+        logger.info(
+            f"Prompt optimization {run_id}: no in-process task to cancel "
+            f"(orphaned by a restart); marking cancelled"
+        )
+        await _persist_run_changes(
+            run_id,
+            {
+                "status": "cancelled",
+                "error": None,
+            },
+        )
         return {"run_id": run_id, "cancelling": True}
 
     # ---------------------------------------------------------------- apply
@@ -2474,47 +3076,73 @@ class PromptOptimizationService:
     async def apply_run(
         self, run_id: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
-        """Write a completed run's proposal as a group-scoped template override."""
-        run = _RUNS.get(run_id)
-        if run is None or not self._visible(run, group_context):
+        """Apply a completed run's proposal, recording a before-image first.
+
+        The before-image is captured HERE, not from the run's baseline: the
+        rows may have been edited between the run and the apply, and what
+        `revert_run` must restore is what was actually overwritten.
+        """
+        group_id = group_context.primary_group_id if group_context else None
+        row = await self.run_repository.get_by_group(run_id, group_id)
+        if row is None:
             raise ValueError(f"Optimization run '{run_id}' not found")
-        if run.get("status") != "completed" or not run.get("optimized_template"):
+        if row.status != "completed" or not row.optimized_template:
             raise ValueError(
                 f"Optimization run '{run_id}' has no completed proposal to apply"
             )
 
-        if run.get("kind") == "crew":
-            return await self._apply_crew_run(run)
+        if row.kind == "crew":
+            result = await self._apply_crew_run(row)
+        else:
+            template_service = TemplateService(self.session)
+            template_row = await template_service.find_by_name_with_group_check(
+                row.target_name, group_context
+            )
+            if template_row is None:
+                raise ValueError(f"Template '{row.target_name}' not found")
+            before_image = {
+                "template": str(getattr(template_row, "template", "") or "")
+            }
+            updated = await template_service.update_with_group_check(
+                template_row.id,
+                PromptTemplateUpdate(template=row.optimized_template),
+                group_context,
+            )
+            if updated is None:
+                raise ValueError(f"Failed to update template '{row.target_name}'")
+            result = {
+                "run_id": run_id,
+                "template_name": row.target_name,
+                "applied": True,
+                "before_image": before_image,
+            }
 
-        template_service = TemplateService(self.session)
-        row = await template_service.find_by_name_with_group_check(
-            run["template_name"], group_context
+        before_image = result.pop("before_image", None)
+        await self.run_repository.update_fields(
+            run_id,
+            {
+                "applied": True,
+                "applied_at": datetime.utcnow(),
+                "applied_by": getattr(group_context, "group_email", None),
+                "before_image": before_image,
+            },
         )
-        if row is None:
-            raise ValueError(f"Template '{run['template_name']}' not found")
-        updated = await template_service.update_with_group_check(
-            row.id,
-            PromptTemplateUpdate(template=run["optimized_template"]),
-            group_context,
-        )
-        if updated is None:
-            raise ValueError(f"Failed to update template '{run['template_name']}'")
-        run["applied"] = True
-        return {
-            "run_id": run_id,
-            "template_name": run["template_name"],
-            "applied": True,
-        }
+        run = _RUNS.get(run_id)
+        if run is not None:
+            run["applied"] = True
+        return result
 
-    async def _apply_crew_run(self, run: Dict[str, Any]) -> Dict[str, Any]:
-        """Write a crew run's optimized fields back onto the agent/task rows."""
-        from src.repositories.agent_repository import AgentRepository
-        from src.repositories.task_repository import TaskRepository
+    async def _apply_crew_run(self, row: Any) -> Dict[str, Any]:
+        """Write a crew run's optimized fields onto the agent/task rows.
 
-        optimized: Dict[str, str] = run.get("optimized_fields") or {}
-        baseline: Dict[str, str] = run.get("baseline_fields") or {}
-        agent_repo = AgentRepository(self.session)
-        task_repo = TaskRepository(self.session)
+        Returns the result plus a `before_image` of every field written, read
+        from the CURRENT rows immediately before the write — without it an
+        apply is irreversible, which matters because crew-level GEPA inverts
+        with team size (measured +2.4 at 2 agents, -2.1 at 10, worst -16.0), so
+        a good-looking score can permanently degrade a large crew.
+        """
+        optimized: Dict[str, str] = row.optimized_fields or {}
+        baseline: Dict[str, str] = row.baseline_fields or {}
 
         # Group per entity, skipping unchanged fields.
         changes: Dict[tuple, Dict[str, str]] = {}
@@ -2527,20 +3155,142 @@ class PromptOptimizationService:
                 continue
             changes.setdefault((entity_kind, entity_id), {})[field] = value
 
-        applied = 0
+        before_image = await self._read_crew_fields(changes)
+        applied = await self._write_crew_fields(changes)
+        logger.info(
+            f"Crew optimization {row.id} applied to {applied} entities "
+            f"({len(before_image)} fields snapshotted for revert)"
+        )
+        return {
+            "run_id": row.id,
+            "template_name": row.target_name,
+            "applied": True,
+            "before_image": before_image,
+        }
+
+    async def _read_crew_fields(
+        self, changes: Dict[tuple, Dict[str, str]]
+    ) -> Dict[str, str]:
+        """Current values of every field about to be written, as a flat
+        'agent.<id>.role' -> text map (the same shape as optimized_fields)."""
+        from src.repositories.agent_repository import AgentRepository
+        from src.repositories.task_repository import TaskRepository
+
+        agent_repo = AgentRepository(self.session)
+        task_repo = TaskRepository(self.session)
+        before: Dict[str, str] = {}
+        for (entity_kind, entity_id), patch in changes.items():
+            repo = agent_repo if entity_kind == "agent" else task_repo
+            try:
+                entity = await repo.get(entity_id)
+            except Exception as read_err:
+                logger.warning(
+                    f"Could not snapshot {entity_kind} {entity_id} before apply: "
+                    f"{read_err}"
+                )
+                continue
+            if entity is None:
+                continue
+            for field in patch:
+                before[f"{entity_kind}.{entity_id}.{field}"] = str(
+                    getattr(entity, field, "") or ""
+                )
+        return before
+
+    async def _write_crew_fields(self, changes: Dict[tuple, Dict[str, str]]) -> int:
+        """Write per-entity field patches; returns the number of rows updated."""
+        from src.repositories.agent_repository import AgentRepository
+        from src.repositories.task_repository import TaskRepository
+
+        agent_repo = AgentRepository(self.session)
+        task_repo = TaskRepository(self.session)
+        written = 0
         for (entity_kind, entity_id), patch in changes.items():
             if entity_kind == "agent":
                 if await agent_repo.update(entity_id, patch):
-                    applied += 1
+                    written += 1
             elif entity_kind == "task":
                 if await task_repo.update(entity_id, patch):
-                    applied += 1
-        run["applied"] = True
-        logger.info(f"Crew optimization {run['run_id']} applied to {applied} entities")
+                    written += 1
+        return written
+
+    # --------------------------------------------------------------- revert
+
+    async def revert_run(
+        self, run_id: str, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
+        """Restore the before-image an apply recorded, undoing that apply.
+
+        This is the escape hatch for a proposal that scored well and performed
+        worse in practice — the measured inversion of crew-level GEPA with team
+        size makes that a realistic outcome, not a hypothetical one.
+        """
+        group_id = group_context.primary_group_id if group_context else None
+        row = await self.run_repository.get_by_group(run_id, group_id)
+        if row is None:
+            raise ValueError(f"Optimization run '{run_id}' not found")
+        if not row.applied:
+            raise ValueError(
+                f"Optimization run '{run_id}' has not been applied — "
+                f"there is nothing to revert"
+            )
+        before: Dict[str, str] = row.before_image or {}
+        if not before:
+            raise ValueError(
+                f"Optimization run '{run_id}' has no before-image (it was "
+                f"applied by an older backend that did not record one), so it "
+                f"cannot be reverted automatically"
+            )
+
+        if row.kind == "crew":
+            changes: Dict[tuple, Dict[str, str]] = {}
+            for key, value in before.items():
+                try:
+                    entity_kind, entity_id, field = key.split(".", 2)
+                except ValueError:
+                    continue
+                changes.setdefault((entity_kind, entity_id), {})[field] = value
+            restored = await self._write_crew_fields(changes)
+            logger.info(
+                f"Crew optimization {run_id} reverted across {restored} entities"
+            )
+        else:
+            template_service = TemplateService(self.session)
+            template_row = await template_service.find_by_name_with_group_check(
+                row.target_name, group_context
+            )
+            if template_row is None:
+                raise ValueError(f"Template '{row.target_name}' not found")
+            updated = await template_service.update_with_group_check(
+                template_row.id,
+                PromptTemplateUpdate(template=before.get("template", "")),
+                group_context,
+            )
+            if updated is None:
+                raise ValueError(f"Failed to restore template '{row.target_name}'")
+            restored = 1
+
+        # The before-image is CONSUMED: it described the state at apply time,
+        # and keeping it would let a second revert overwrite fresh edits with
+        # a stale snapshot.
+        await self.run_repository.update_fields(
+            run_id,
+            {
+                "applied": False,
+                "applied_at": None,
+                "applied_by": None,
+                "before_image": None,
+            },
+        )
+        run = _RUNS.get(run_id)
+        if run is not None:
+            run["applied"] = False
         return {
-            "run_id": run["run_id"],
-            "template_name": run["template_name"],
-            "applied": True,
+            "run_id": run_id,
+            "template_name": row.target_name,
+            "applied": False,
+            "reverted": True,
+            "restored": restored,
         }
 
 

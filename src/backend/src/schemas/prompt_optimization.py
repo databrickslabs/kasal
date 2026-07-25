@@ -34,7 +34,10 @@ class PromptOptimizationRequest(BaseModel):
     )
     judge_model: Optional[str] = Field(
         None,
-        description="Model used to judge output correctness (defaults to the target model)",
+        description="Model used to judge output correctness. Should NOT be the "
+        "target model — a model judging its own outputs shows self-preference. "
+        "Defaults to GEPA_JUDGE_MODEL, and only then to the target model (with "
+        "a warning).",
     )
     reflection_model: Optional[str] = Field(
         None,
@@ -71,7 +74,12 @@ class CrewOptimizationRequest(BaseModel):
     model: Optional[str] = Field(
         None, description="Model the crew executes with during evaluation"
     )
-    judge_model: Optional[str] = Field(None, description="Judge model for deliverables")
+    judge_model: Optional[str] = Field(
+        None,
+        description="Judge model for deliverables. Should NOT be the crew's "
+        "execution model — self-preference inflates the score. Defaults to "
+        "GEPA_JUDGE_MODEL, and only then to the execution model (with a warning).",
+    )
     reflection_model: Optional[str] = Field(None, description="GEPA reflection model")
     guidance: Optional[str] = Field(
         None, description="Optional extra judging guidance (what 'good' looks like)"
@@ -106,6 +114,14 @@ class PromptOptimizationRunStatus(BaseModel):
     status: Literal["pending", "running", "completed", "failed", "cancelled"]
     dataset_size: int = 0
     model: Optional[str] = None
+    judge_model: Optional[str] = Field(
+        None,
+        description="Model that graded correctness. Equal to `model` means the "
+        "run judged itself (self-preference) — read its scores with suspicion.",
+    )
+    reflection_model: Optional[str] = Field(
+        None, description="Model GEPA used to mutate the prompt"
+    )
     initial_score: Optional[float] = Field(None, description="Baseline template score")
     final_score: Optional[float] = Field(None, description="Optimized template score")
     baseline_template: Optional[str] = Field(
@@ -117,6 +133,15 @@ class PromptOptimizationRunStatus(BaseModel):
     error: Optional[str] = None
     applied: bool = Field(
         False, description="Whether the proposal was applied as a group override"
+    )
+    applied_at: Optional[datetime] = Field(
+        None, description="When the proposal was applied"
+    )
+    applied_by: Optional[str] = Field(None, description="Who applied the proposal")
+    revertible: bool = Field(
+        False,
+        description="Whether the apply can be undone — true while the "
+        "before-image taken at apply time is still on the run",
     )
     created_at: Optional[datetime] = None
     kind: Optional[str] = Field(
@@ -157,3 +182,15 @@ class PromptOptimizationApplyResponse(BaseModel):
     run_id: str
     template_name: str
     applied: bool
+
+
+class PromptOptimizationRevertResponse(BaseModel):
+    """Result of reverting an applied run back to its before-image."""
+
+    run_id: str
+    template_name: str
+    applied: bool = Field(False, description="Always false after a revert")
+    reverted: bool = True
+    restored: int = Field(
+        0, description="Entities (crew) or templates restored from the before-image"
+    )

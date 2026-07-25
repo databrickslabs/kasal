@@ -52,8 +52,10 @@ const POLL_INTERVAL_MS = 10000;
 /* Layout constants for the run-configuration row. Every control in that row has
    a width that does NOT depend on its content, so the row wraps only when the
    dialog itself is narrow — never because a model id happens to be long or
-   because the start button's label changed to "Run in progress…". */
-const MODEL_SELECT_WIDTH = 260;
+   because the start button's label changed to "Run in progress…". Both the
+   target and judge Selects share one width so the pair reads as a set; it is
+   narrower than the single-Select surfaces because two of them sit in this row. */
+const MODEL_SELECT_WIDTH = 220;
 const START_BUTTON_WIDTH = 172;
 const ELLIPSIS_SELECT_SX = {
   '& .MuiSelect-select': {
@@ -115,6 +117,12 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
 }) => {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
+  // The correctness judge for THIS run (distinct from `judgeModel` below, which
+  // belongs to the custom-judge creation form). Must not be the crew's own
+  // execution model: a model grading its own deliverables prefers them, which
+  // inflates the score without improving the prompts. Empty = the backend's
+  // configured default (GEPA_JUDGE_MODEL), which warns if it has none.
+  const [runJudgeModel, setRunJudgeModel] = useState('');
   const [budget, setBudget] = useState(10);
   const [guidance, setGuidance] = useState('');
   const [starting, setStarting] = useState(false);
@@ -218,6 +226,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
       const started = await PromptOptimizationService.startCrewOptimization({
         crew_id: crewId,
         model: model || undefined,
+        judge_model: runJudgeModel || undefined,
         guidance: guidance || undefined,
         max_metric_calls: budget,
       });
@@ -255,6 +264,19 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
       await refreshRuns();
     } catch {
       setError('Failed to apply the optimized prompts');
+    } finally {
+      setApplying(null);
+    }
+  };
+
+  const handleRevert = async (runId: string) => {
+    setApplying(runId);
+    try {
+      await PromptOptimizationService.revertRun(runId);
+      toast.success("The crew's prompts before this apply have been restored");
+      await refreshRuns();
+    } catch {
+      setError('Failed to revert the applied prompts');
     } finally {
       setApplying(null);
     }
@@ -435,7 +457,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
             {/* FIXED width, not minWidth: a Select sizes itself to its selected
                 value, so a long model id used to widen this control and shove
                 the Start button onto its own line. Truncate instead, so the row
-                is laid out identically whatever model is picked. */}
+                is laid out identically whatever models are picked. */}
             <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
               <InputLabel>Model</InputLabel>
               <Select
@@ -455,6 +477,27 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 ))}
               </Select>
             </FormControl>
+            <Tooltip title="The model that grades each deliverable. Pick a DIFFERENT model from the crew's — a model judging its own work prefers it, so the score climbs without the prompts getting better. The judge also commits to its own answer before it sees any candidate.">
+              <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
+                <InputLabel>Judge model</InputLabel>
+                <Select
+                  value={runJudgeModel}
+                  label="Judge model"
+                  onChange={(e) => setRunJudgeModel(e.target.value)}
+                  SelectDisplayProps={{ title: runJudgeModel || 'Default (configured judge)' }}
+                  sx={ELLIPSIS_SELECT_SX}
+                >
+                  <MenuItem value="">
+                    <em>Default (configured judge)</em>
+                  </MenuItem>
+                  {models.map((key) => (
+                    <MenuItem key={key} value={key}>
+                      {key}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Tooltip>
             <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. The baseline costs 1 execution; each further execution evaluates one NEW candidate prompt set (re-evaluations are cached and free). Executions have real side effects (tools, emails, database writes).">
               <TextField
                 size="small"
@@ -721,19 +764,40 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                     {cancelling === run.run_id ? 'Stopping…' : 'Stop'}
                   </Button>
                 )}
-                {run.status === 'completed' && changed.length > 0 && (
+                {run.judge_model && run.model && run.judge_model === run.model && (
+                  <Tooltip title="This run was graded by the same model the crew ran on. A model judging its own deliverables prefers them, so treat the score gain as unverified.">
+                    <Chip
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      label="judged itself"
+                    />
+                  </Tooltip>
+                )}
+                {run.status === 'completed' && changed.length > 0 && !run.applied && (
                   <Button
                     size="small"
                     variant="outlined"
-                    disabled={run.applied || applying === run.run_id}
+                    disabled={applying === run.run_id}
                     onClick={() => handleApply(run.run_id)}
                   >
                     {applying === run.run_id
                       ? 'Applying…'
-                      : run.applied
-                        ? 'Applied'
-                        : `Apply ${changed.length} changes`}
+                      : `Apply ${changed.length} changes`}
                   </Button>
+                )}
+                {run.applied && run.revertible && (
+                  <Tooltip title="Restore the agent and task prompts exactly as they were immediately before this apply. Worth doing if the crew got WORSE — optimization gain shrinks and can invert as a crew grows. Works once: the snapshot is consumed.">
+                    <Button
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      disabled={applying === run.run_id}
+                      onClick={() => handleRevert(run.run_id)}
+                    >
+                      {applying === run.run_id ? 'Reverting…' : 'Revert'}
+                    </Button>
+                  </Tooltip>
                 )}
                 <IconButton
                   size="small"

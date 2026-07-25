@@ -15,6 +15,7 @@ import {
   Select,
   Snackbar,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -36,9 +37,10 @@ const POLL_INTERVAL_MS = 5000;
    independent: a Select sizes itself to its selected value, so a long template
    or model id would otherwise widen its control and shove the start button onto
    its own line. The button is fixed too, since its label changes to
-   "Run in progress…" mid-run. */
+   "Run in progress…" mid-run. The row may still wrap on a narrow viewport —
+   that is legitimate; wrapping because of which model you picked is not. */
 const TEMPLATE_SELECT_WIDTH = 280;
-const MODEL_SELECT_WIDTH = 260;
+const MODEL_SELECT_WIDTH = 240;
 const START_BUTTON_WIDTH = 200;
 const ELLIPSIS_SELECT_SX = {
   '& .MuiSelect-select': {
@@ -84,6 +86,10 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
     }
   }, [fixedTemplate]);
   const [model, setModel] = useState('');
+  // A judge that IS the model under optimization grades its own outputs and
+  // systematically prefers them, so the reported gain is partly an artifact.
+  // Left empty the backend falls back to GEPA_JUDGE_MODEL, then warns.
+  const [judgeModel, setJudgeModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [budget, setBudget] = useState(40);
   const [starting, setStarting] = useState(false);
@@ -134,6 +140,7 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
       const started = await PromptOptimizationService.startOptimization({
         template_name: templateName,
         model: model || undefined,
+        judge_model: judgeModel || undefined,
         max_metric_calls: budget,
       });
       setNotification({
@@ -170,6 +177,23 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
       await refreshRuns();
     } catch {
       setNotification({ open: true, message: 'Failed to apply template', severity: 'error' });
+    } finally {
+      setApplying(null);
+    }
+  };
+
+  const handleRevert = async (runId: string) => {
+    setApplying(runId);
+    try {
+      await PromptOptimizationService.revertRun(runId);
+      setNotification({
+        open: true,
+        message: 'Reverted — the template before the apply has been restored',
+        severity: 'success',
+      });
+      await refreshRuns();
+    } catch {
+      setNotification({ open: true, message: 'Failed to revert', severity: 'error' });
     } finally {
       setApplying(null);
     }
@@ -233,6 +257,27 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
                 ))}
               </Select>
             </FormControl>
+            <Tooltip title="The model that grades correctness. Pick a DIFFERENT model from the one being optimized — a model judging its own outputs prefers them, which inflates the score without improving the prompt.">
+              <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
+                <InputLabel>Judge model</InputLabel>
+                <Select
+                  value={judgeModel}
+                  label="Judge model"
+                  onChange={(e) => setJudgeModel(e.target.value)}
+                  SelectDisplayProps={{ title: judgeModel || 'Default (configured judge)' }}
+                  sx={ELLIPSIS_SELECT_SX}
+                >
+                  <MenuItem value="">
+                    <em>Default (configured judge)</em>
+                  </MenuItem>
+                  {models.map((key) => (
+                    <MenuItem key={key} value={key}>
+                      {key}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Tooltip>
             <TextField
               size="small"
               type="number"
@@ -292,16 +337,39 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
                 />
               )}
               {run.applied && <Chip size="small" color="success" variant="outlined" label="applied" />}
+              {run.judge_model && run.model && run.judge_model === run.model && (
+                <Tooltip title="This run was graded by the same model it optimized. A model judging its own outputs prefers them, so the score gain is not independently verified.">
+                  <Chip
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    label="judged itself"
+                  />
+                </Tooltip>
+              )}
               <Box sx={{ flexGrow: 1 }} />
-              {run.status === 'completed' && (
+              {run.status === 'completed' && !run.applied && (
                 <Button
                   size="small"
                   variant="outlined"
-                  disabled={run.applied || applying === run.run_id}
+                  disabled={applying === run.run_id}
                   onClick={() => handleApply(run.run_id)}
                 >
-                  {applying === run.run_id ? 'Applying…' : run.applied ? 'Applied' : 'Apply'}
+                  {applying === run.run_id ? 'Applying…' : 'Apply'}
                 </Button>
+              )}
+              {run.applied && run.revertible && (
+                <Tooltip title="Restore the template as it was immediately before this apply. Works once — the snapshot is consumed.">
+                  <Button
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    disabled={applying === run.run_id}
+                    onClick={() => handleRevert(run.run_id)}
+                  >
+                    {applying === run.run_id ? 'Reverting…' : 'Revert'}
+                  </Button>
+                </Tooltip>
               )}
               <Button
                 size="small"

@@ -1021,6 +1021,23 @@ async def _ensure_powerbi_extraction_table(conn) -> None:
         logger.warning(f"Could not ensure powerbi_extraction table: {e}")
 
 
+async def _ensure_prompt_optimization_runs_table(conn) -> None:
+    """Idempotently create the prompt_optimization_runs table (durable GEPA
+    optimization runs, including the before-image an apply can be reverted
+    from). create_all is skipped on existing DBs, so DBs created before this
+    table existed need this self-heal."""
+    try:
+        from src.models.prompt_optimization_run import PromptOptimizationRun
+
+        def _create_prompt_optimization_runs_table(sync_conn):
+            PromptOptimizationRun.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_prompt_optimization_runs_table)
+        logger.info("Ensured prompt_optimization_runs table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure prompt_optimization_runs table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -1076,6 +1093,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_workflow_recipes_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
+    await _ensure_prompt_optimization_runs_table(conn)
     await _ensure_crew_columns(conn)
     await _ensure_ui_config_columns(conn)
     await _ensure_hot_polling_indexes(conn)

@@ -60,6 +60,9 @@ from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 # Memory backend models
 from src.models.memory_backend import MemoryBackend
 
+# Prompt optimization models
+from src.models.prompt_optimization_run import PromptOptimizationRun
+
 # Add additional models here as your application grows
 # from src.models.order import Order
 
@@ -117,5 +120,7 @@ __all__ = [
     "PowerBIFieldSynonym",
     "PowerBISemanticModelCache",
     # Memory backend models
-    "MemoryBackend"
+    "MemoryBackend",
+    # Prompt optimization models
+    "PromptOptimizationRun"
 ]

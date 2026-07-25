@@ -23,6 +23,7 @@ router_module = importlib.import_module("src.api.prompt_optimization_router")
 from src.api.prompt_optimization_router import (
     add_eval_feedback,
     apply_run,
+    revert_run,
     assign_judge,
     cancel_run,
     create_judge,
@@ -58,7 +59,9 @@ RUN = {
     "initial_score": 0.5,
     "final_score": 0.9,
     "applied": False,
+    "revertible": False,
     "created_at": datetime.now(timezone.utc),
+    "judge_model": "independent-judge",
     "human_feedback_count": 3,
     "candidates_tried": 4,
 }
@@ -266,7 +269,8 @@ class TestJudgeEndpoints:
 class TestRunEndpoints:
     @pytest.mark.asyncio
     async def test_list_runs_wraps_status_models(self, service):
-        service.list_runs = MagicMock(return_value=[RUN])
+        # Reads go through the durable runs table, so they are awaited.
+        service.list_runs = AsyncMock(return_value=[RUN])
         response = await list_runs(_group(), MagicMock())
         assert len(response.runs) == 1
         status = response.runs[0]
@@ -276,23 +280,23 @@ class TestRunEndpoints:
 
     @pytest.mark.asyncio
     async def test_get_run_found(self, service):
-        service.get_run = MagicMock(return_value=RUN)
+        service.get_run = AsyncMock(return_value=RUN)
         status = await get_run("abc123", _group(), MagicMock())
         assert status.final_score == 0.9
 
     @pytest.mark.asyncio
     async def test_get_run_missing_is_404(self, service):
-        service.get_run = MagicMock(return_value=None)
+        service.get_run = AsyncMock(return_value=None)
         with pytest.raises(NotFoundError, match="abc123"):
             await get_run("abc123", _group(), MagicMock())
 
     @pytest.mark.asyncio
     async def test_cancel_run_passthrough_and_404(self, service):
-        service.cancel_run = MagicMock(
+        service.cancel_run = AsyncMock(
             return_value={"run_id": "abc123", "cancelling": True}
         )
         assert (await cancel_run("abc123", _group(), MagicMock()))["cancelling"]
-        service.cancel_run = MagicMock(side_effect=ValueError("not found"))
+        service.cancel_run = AsyncMock(side_effect=ValueError("not found"))
         with pytest.raises(NotFoundError):
             await cancel_run("abc123", _group(), MagicMock())
 
@@ -310,3 +314,36 @@ class TestRunEndpoints:
         service.apply_run = AsyncMock(side_effect=ValueError("no completed proposal"))
         with pytest.raises(NotFoundError):
             await apply_run("abc123", _group(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_get_run_surfaces_the_judge_model(self, service):
+        """The judge model is part of the run's readable record: judge == model
+        means the run judged itself, which the reader must be able to see."""
+        service.get_run = AsyncMock(return_value=RUN)
+        status = await get_run("abc123", _group(), MagicMock())
+        assert status.judge_model == "independent-judge"
+        assert status.revertible is False
+
+    @pytest.mark.asyncio
+    async def test_revert_run_success(self, service):
+        service.revert_run = AsyncMock(
+            return_value={
+                "run_id": "abc123",
+                "template_name": "crew:Research",
+                "applied": False,
+                "reverted": True,
+                "restored": 3,
+            }
+        )
+        response = await revert_run("abc123", _group(), MagicMock())
+        assert response.reverted is True
+        assert response.applied is False
+        assert response.restored == 3
+
+    @pytest.mark.asyncio
+    async def test_revert_run_error_becomes_404(self, service):
+        service.revert_run = AsyncMock(
+            side_effect=ValueError("has no before-image")
+        )
+        with pytest.raises(NotFoundError, match="before-image"):
+            await revert_run("abc123", _group(), MagicMock())

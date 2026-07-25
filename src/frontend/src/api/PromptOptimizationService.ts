@@ -19,12 +19,21 @@ export interface PromptOptimizationRun {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   dataset_size: number;
   model?: string | null;
+  /** Model that graded correctness. Equal to `model` means the run judged
+   *  itself (self-preference) — its score gain is not independently verified. */
+  judge_model?: string | null;
+  reflection_model?: string | null;
   initial_score?: number | null;
   final_score?: number | null;
   baseline_template?: string | null;
   optimized_template?: string | null;
   error?: string | null;
   applied: boolean;
+  applied_at?: string | null;
+  applied_by?: string | null;
+  /** True while the before-image taken at apply time is still on the run, i.e.
+   *  the apply can still be undone. */
+  revertible?: boolean;
   created_at?: string | null;
   kind?: 'template' | 'crew' | null;
   crew_id?: string | null;
@@ -215,5 +224,14 @@ export class PromptOptimizationService {
       `/prompt-optimization/runs/${runId}/apply`,
     );
     return Boolean(response.data?.applied);
+  }
+
+  /** Undo an applied run by restoring the before-image taken at apply time.
+   *  The snapshot is consumed, so this works exactly once per apply. */
+  static async revertRun(runId: string): Promise<boolean> {
+    const response = await apiClient.post<{ reverted: boolean }>(
+      `/prompt-optimization/runs/${runId}/revert`,
+    );
+    return Boolean(response.data?.reverted);
   }
 }

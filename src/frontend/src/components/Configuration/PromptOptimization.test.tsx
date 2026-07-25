@@ -72,8 +72,12 @@ describe('PromptOptimization', () => {
     await waitFor(() => expect(listRuns).toHaveBeenCalled());
     await screen.findByText(/detect_intent/);
     expect(screen.queryByText(/generate_agent/)).not.toBeInTheDocument();
-    // Only the model select remains.
-    expect(screen.getAllByRole('combobox')).toHaveLength(1);
+    // The template picker is gone; the target-model and judge-model selects
+    // remain (the judge must be pickable separately from the model being
+    // optimized — a model judging its own outputs prefers them).
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+    // MUI's outlined label renders its text twice (label + fieldset legend).
+    expect(screen.getAllByText('Judge model').length).toBeGreaterThan(0);
   });
 
   it('starts an optimization for the scoped template', async () => {

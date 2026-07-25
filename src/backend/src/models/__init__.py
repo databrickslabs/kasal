@@ -32,3 +32,4 @@ from src.models.chat_session import ChatSession
 from src.models.crew_feedback import CrewFeedback
 from src.models.group_tool import GroupTool
 from src.models.ui_config import UIConfig
+from src.models.prompt_optimization_run import PromptOptimizationRun

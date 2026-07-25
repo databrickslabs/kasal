@@ -16,6 +16,7 @@ from src.schemas.prompt_optimization import (
     CrewOptimizationRequest,
     PromptOptimizationApplyResponse,
     PromptOptimizationRequest,
+    PromptOptimizationRevertResponse,
     PromptOptimizationRunList,
     PromptOptimizationRunStatus,
     PromptOptimizationStartResponse,
@@ -204,11 +205,17 @@ async def delete_judge(name: str, group_context: GroupContextDep, session: Sessi
 
 @router.get("/runs", response_model=PromptOptimizationRunList)
 async def list_runs(group_context: GroupContextDep, session: SessionDep):
-    """List recent optimization runs for the caller's group."""
+    """List recent optimization runs for the caller's group.
+
+    Runs are read from the durable `prompt_optimization_runs` table, so they
+    survive a backend restart; in-flight progress counters are overlaid from
+    the running task.
+    """
     service = PromptOptimizationService(session)
     return PromptOptimizationRunList(
         runs=[
-            PromptOptimizationRunStatus(**r) for r in service.list_runs(group_context)
+            PromptOptimizationRunStatus(**r)
+            for r in await service.list_runs(group_context)
         ]
     )
 
@@ -217,7 +224,7 @@ async def list_runs(group_context: GroupContextDep, session: SessionDep):
 async def get_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
     """Get the status/result of an optimization run, including the proposed template."""
     service = PromptOptimizationService(session)
-    run = service.get_run(run_id, group_context)
+    run = await service.get_run(run_id, group_context)
     if run is None:
         raise NotFoundError(f"Optimization run '{run_id}' not found")
     return PromptOptimizationRunStatus(**run)
@@ -229,7 +236,7 @@ async def cancel_run(run_id: str, group_context: GroupContextDep, session: Sessi
     execution; an in-flight execution finishes first)."""
     service = PromptOptimizationService(session)
     try:
-        return service.cancel_run(run_id, group_context)
+        return await service.cancel_run(run_id, group_context)
     except ValueError as e:
         raise NotFoundError(str(e))
 
@@ -237,10 +244,15 @@ async def cancel_run(run_id: str, group_context: GroupContextDep, session: Sessi
 @router.post("/runs/{run_id}/apply", response_model=PromptOptimizationApplyResponse)
 async def apply_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
     """
-    Apply a completed run's proposed template as a group-scoped override.
+    Apply a completed run's proposal.
 
-    The base template row is never mutated (the seeder overwrites base rows on
-    startup); reverting is a template reset in Prompt Configuration.
+    Template runs: written as a group-scoped override — the base template row is
+    never mutated (the seeder overwrites base rows on startup). Crew runs: the
+    optimized role/goal/backstory/description/expected_output are written onto
+    the crew's agent and task rows.
+
+    Either way a BEFORE-IMAGE of every field this touches is recorded on the
+    run first, so `POST /runs/{run_id}/revert` can undo it.
     """
     service = PromptOptimizationService(session)
     try:
@@ -248,3 +260,22 @@ async def apply_run(run_id: str, group_context: GroupContextDep, session: Sessio
     except ValueError as e:
         raise NotFoundError(str(e))
     return PromptOptimizationApplyResponse(**result)
+
+
+@router.post("/runs/{run_id}/revert", response_model=PromptOptimizationRevertResponse)
+async def revert_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+    """
+    Undo an applied run by restoring the before-image taken at apply time.
+
+    Matters most for crew runs: crew-level optimization gain inverts with team
+    size (measured positive at 2 agents, negative at 10), so a proposal that
+    scored well can degrade a large crew in practice. The before-image is
+    consumed by the revert — a second revert would restore a stale snapshot
+    over any edits made since.
+    """
+    service = PromptOptimizationService(session)
+    try:
+        result = await service.revert_run(run_id, group_context)
+    except ValueError as e:
+        raise NotFoundError(str(e))
+    return PromptOptimizationRevertResponse(**result)
