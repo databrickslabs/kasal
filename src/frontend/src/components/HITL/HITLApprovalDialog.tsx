@@ -5,7 +5,7 @@
  * Allows users to quickly approve or reject a pending HITL gate.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -58,6 +58,13 @@ interface HITLApprovalDialogProps {
   onClose: () => void;
   /** Callback when an approval action is completed */
   onActionComplete?: (action: 'approve' | 'reject') => void;
+  /**
+   * Called when the gate turns out to be already decided (nothing pending).
+   * Defaults to closing the dialog: a resolved gate is the SUCCESS case — the
+   * decision was made and the run moved on — so trapping the user behind a red
+   * error panel is wrong. Parents that track gate state can use this to refresh.
+   */
+  onResolved?: () => void;
 }
 
 const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
@@ -65,6 +72,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   executionId,
   onClose,
   onActionComplete,
+  onResolved,
 }) => {
   const navigate = useNavigate();
   const [approval, setApproval] = useState<HITLApprovalResponse | null>(null);
@@ -91,6 +99,10 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   // feeds back to the agent as the retry prompt, so it stays required.
   const rejectReasonOptional =
     (approval?.gate_config as { kind?: string } | undefined)?.kind === 'tool_call';
+
+  // Latest "gate already decided" handler, read without re-creating fetchApproval.
+  const resolvedHandlerRef = useRef<() => void>(() => { /* replaced below */ });
+  resolvedHandlerRef.current = onResolved ?? onClose;
 
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
@@ -137,16 +149,22 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             .finally(() => setOutputLoading(false));
         }
       } else {
+        // Already decided. This is the normal outcome after approving (and
+        // after a stale badge click), NOT an error — dismiss instead of
+        // showing a red panel the user has to escape from.
         setApproval(null);
-        setError(
-          'Nothing is waiting for approval — the decision was already made and the run has continued.'
-        );
+        setError(null);
+        resolvedHandlerRef.current();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch approval');
     } finally {
       setLoading(false);
     }
+    // Deliberately keyed on executionId alone: parents pass inline arrows for
+    // onClose, so putting the handlers in here would give fetchApproval a new
+    // identity every render and the "fetch on open" effect would re-fire in a
+    // loop. The ref above always holds the latest handler.
   }, [executionId]);
 
   // Fetch on open

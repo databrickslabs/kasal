@@ -103,15 +103,28 @@ async def _restore_running(execution_id: str) -> None:
 
     Safe unconditionally: the run cannot reach a terminal state while its
     worker thread is blocked on the gate.
+
+    A FAILED restore is not cosmetic and must not be swallowed: the run keeps
+    executing while its status stays WAITING_FOR_APPROVAL, so the UI shows the
+    gate badge forever and re-opening it reports "nothing is waiting for
+    approval" — the decision was made, but nothing reflects it. The usual cause
+    is a missing parent row, so say which it is.
     """
     from src.models.execution_status import ExecutionStatus
     from src.services.execution_status_service import ExecutionStatusService
 
-    await ExecutionStatusService.update_status(
+    updated = await ExecutionStatusService.update_status(
         job_id=execution_id,
         status=ExecutionStatus.RUNNING.value,
         message="Approval decided — run continuing",
     )
+    if not updated:
+        exists = await ExecutionStatusService.get_status(execution_id) is not None
+        logger.error(
+            f"[tool_approval] could not restore RUNNING for {execution_id} "
+            f"(execution row present={exists}) — the run continues but its status "
+            f"stays WAITING_FOR_APPROVAL, so the UI will keep showing the gate"
+        )
 
 
 async def _approval_status(approval_id: str) -> Optional[str]:

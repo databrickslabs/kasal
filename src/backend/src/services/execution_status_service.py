@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+
 class ExecutionStatusService:
     """
     Service for managing execution status operations.
@@ -157,27 +158,67 @@ class ExecutionStatusService:
                     await session.commit() # Attempt to COMMIT the transaction
                     logger.info(f"[ExecutionStatusService] Successfully committed status update for job_id: {job_id} (record_id: {record_id}) to {status}.")
 
-                    # Broadcast SSE event for real-time updates
-                    # Skip SSE broadcast in subprocess mode - subprocess has its own SSE manager with no clients
+                    # Announce the new status for real-time updates.
                     import os
                     is_subprocess = os.environ.get('CREW_SUBPROCESS_MODE') == 'true'
-                    if is_subprocess:
-                        logger.debug(f"[ExecutionStatusService] Skipping SSE broadcast in subprocess mode for job_id={job_id}")
-                    else:
-                        try:
-                            from datetime import datetime as dt
-                            event_data = {
-                                "job_id": job_id,
-                                "status": status,
-                                "message": message,
-                                "updated_at": dt.now().isoformat(),  # Use current timestamp since model has no updated_at
-                                "group_id": updated_execution.group_id  # Include group_id for filtering
-                            }
+                    try:
+                        from datetime import datetime as dt
+                        event_data = {
+                            "job_id": job_id,
+                            "status": status,
+                            "message": message,
+                            "updated_at": dt.now().isoformat(),  # Use current timestamp since model has no updated_at
+                            "group_id": updated_execution.group_id  # Include group_id for filtering
+                        }
+                        if status in [ExecutionStatus.COMPLETED.value, ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value]:
+                            event_data["completed_at"] = updated_execution.completed_at.isoformat() if updated_execution.completed_at else None
+
+                        if is_subprocess:
+                            # The subprocess has its own SSE manager with no clients
+                            # attached, so broadcasting here reaches nobody. Relay the
+                            # frame to the parent instead — the SAME transport
+                            # hitl_request already uses — and let it broadcast.
+                            #
+                            # Without this, a status change made inside the crew
+                            # subprocess never reached the UI. The visible case: a
+                            # tool-approval gate sets WAITING_FOR_APPROVAL (announced
+                            # via the hitl_request frame), the human approves, and the
+                            # gate flips the run back to RUNNING — but that transition
+                            # was announced to nobody, so the badge sat on "Awaiting
+                            # Approval" forever even though the run had continued.
+                            # Surfaces only where the client is not separately polling
+                            # this job (a run it did not launch itself, e.g. a crew
+                            # started by prompt optimization); a canvas run masked it
+                            # because its own status poll refreshed the badge anyway.
+                            #
+                            # `result` is deliberately NOT forwarded: terminal payloads
+                            # can be large and the pipe drops frames when full. Clients
+                            # fetch the result over REST once the status is terminal.
+                            try:
+                                from src.services import execution_event_pipe
+
+                                writer = execution_event_pipe._active_writer
+                                if writer is not None:
+                                    writer._put({
+                                        "kind": "execution_update",
+                                        "_event_id": f"{job_id}_{status}_{record_id}",
+                                        **event_data,
+                                    })
+                                    logger.debug(
+                                        f"[ExecutionStatusService] Relayed status {status} for job_id: {job_id} over the event pipe"
+                                    )
+                                else:
+                                    logger.debug(
+                                        f"[ExecutionStatusService] No event-pipe writer in subprocess; "
+                                        f"status {status} for job_id {job_id} not announced live"
+                                    )
+                            except Exception as pipe_err:  # noqa: BLE001
+                                logger.warning(
+                                    f"[ExecutionStatusService] Failed to relay status over the event pipe: {pipe_err}"
+                                )
+                        else:
                             if result is not None:
                                 event_data["result"] = result
-                            if status in [ExecutionStatus.COMPLETED.value, ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value]:
-                                event_data["completed_at"] = updated_execution.completed_at.isoformat() if updated_execution.completed_at else None
-
                             event = SSEEvent(
                                 data=event_data,
                                 event="execution_update",
@@ -185,9 +226,9 @@ class ExecutionStatusService:
                             )
                             await sse_manager.broadcast_to_job(job_id, event)
                             logger.debug(f"[ExecutionStatusService] Broadcasted SSE event for job_id: {job_id}")
-                        except Exception as sse_error:
-                            # Don't fail the update if SSE fails
-                            logger.warning(f"[ExecutionStatusService] Failed to broadcast SSE event: {sse_error}")
+                    except Exception as sse_error:
+                        # Don't fail the update if the announcement fails
+                        logger.warning(f"[ExecutionStatusService] Failed to broadcast SSE event: {sse_error}")
 
                     return True
                 else:

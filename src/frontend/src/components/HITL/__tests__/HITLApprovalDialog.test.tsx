@@ -369,7 +369,11 @@ describe('HITLApprovalDialog', () => {
   });
 
   describe('No Pending Approval', () => {
-    it('shows error alert when no pending approval exists', async () => {
+    // A gate with nothing pending has ALREADY been decided — that is the normal
+    // state right after approving, not an error. It used to raise a red alert
+    // the user had to escape from, which read as "my approval failed" even
+    // though the run had continued. It now dismisses itself.
+    it('dismisses itself when the gate has already been decided', async () => {
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(null));
 
       render(
@@ -379,13 +383,31 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        // The component sets error when no pending_approval, so it shows error alert
-        expect(screen.getByText('Nothing is waiting for approval — the decision was already made and the run has continued.')).toBeInTheDocument();
+        expect(defaultProps.onClose).toHaveBeenCalled();
       });
+      expect(
+        screen.queryByText(/Nothing is waiting for approval/i)
+      ).not.toBeInTheDocument();
     });
 
-    it('shows refresh button when no approval found', async () => {
+    it('prefers onResolved over onClose when the parent supplies one', async () => {
+      const onResolved = vi.fn();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(null));
+
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} onResolved={onResolved} />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(onResolved).toHaveBeenCalled();
+      });
+      expect(defaultProps.onClose).not.toHaveBeenCalled();
+    });
+
+    it('does not dismiss on a fetch failure — that IS an error worth showing', async () => {
+      mocks.mockGetExecutionHITLStatus.mockRejectedValue(new Error('network down'));
 
       render(
         <TestWrapper>
@@ -394,8 +416,9 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /refresh/i })).toBeInTheDocument();
+        expect(screen.getByText(/network down/i)).toBeInTheDocument();
       });
+      expect(defaultProps.onClose).not.toHaveBeenCalled();
     });
   });
 
@@ -1109,7 +1132,7 @@ describe('HITLApprovalDialog', () => {
       });
     });
 
-    it('shows an info message when there is no pending approval', async () => {
+    it('never leaves the "already decided" state on screen as an error', async () => {
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(null));
       render(
         <TestWrapper>
@@ -1117,8 +1140,9 @@ describe('HITLApprovalDialog', () => {
         </TestWrapper>
       );
       await waitFor(() => {
-        expect(screen.getByText(/Nothing is waiting for approval/i)).toBeInTheDocument();
+        expect(defaultProps.onClose).toHaveBeenCalled();
       });
+      expect(screen.queryByText(/Nothing is waiting for approval/i)).not.toBeInTheDocument();
     });
 
     it('changes the rejection action and returns to the default view via Back', async () => {

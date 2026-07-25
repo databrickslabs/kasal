@@ -442,6 +442,24 @@ async def _relay_loop(
                     SSEEvent(data=payload, event="hitl_request"),
                     skip_replay=True,
                 )
+            elif kind == "execution_update":
+                # A status change made INSIDE the subprocess (most importantly a
+                # tool-approval gate flipping WAITING_FOR_APPROVAL back to RUNNING
+                # once the human decides). The subprocess's own SSE manager has no
+                # clients, so it hands the event here for the parent to broadcast.
+                # Replay stays ON, unlike hitl_request: status is durable lifecycle
+                # state, so a client that reconnects must still catch up to it —
+                # dropping it is what leaves a badge stuck on a stale status.
+                payload = {k: v for k, v in frame.items() if k not in ("kind", "_event_id")}
+                payload.setdefault("job_id", execution_id)
+                await sse_manager.broadcast_to_job(
+                    execution_id,
+                    SSEEvent(
+                        data=payload,
+                        event="execution_update",
+                        id=frame.get("_event_id") or f"{execution_id}_{payload.get('status')}",
+                    ),
+                )
             else:
                 continue  # forward compatibility: ignore unknown frame kinds
         except Exception as sse_err:
