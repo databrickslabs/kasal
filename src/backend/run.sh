@@ -336,4 +336,14 @@ echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 # WatchFiles also watches tests/, so editing a test bounces the live server
 # mid-execution and tears down in-flight crew/flow subprocesses, which stalls
 # the reload until everything is force-killed.
-exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000
+#
+# --timeout-graceful-shutdown bounds how long a reload waits for in-flight
+# requests. Uvicorn's default is None = WAIT FOREVER, and the frontend holds
+# open SSE streams (sse_router timeout defaults to 3600s) whose keepalive loop
+# deliberately keeps them alive — so on every reload the old worker sat waiting
+# on connections that would not close for an hour, and "WatchFiles detected
+# changes... Reloading..." simply hung until something force-killed it. Five
+# seconds is longer than any real request here and turns reload back into a
+# second-or-two operation.
+exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000 \
+    --timeout-graceful-shutdown 5

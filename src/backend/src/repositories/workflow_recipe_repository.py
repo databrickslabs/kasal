@@ -13,6 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workflow_recipe import WorkflowRecipe
 
+# Curations that take a recipe out of circulation entirely. "bad" and "hidden"
+# differ in meaning — one is a judgement, the other a preference — but both mean
+# "do not offer this", and conflating them at the query is what guarantees they
+# behave the same.
+SUPPRESSED_CURATIONS = ("bad", "hidden")
+
+# Every value the curation column accepts. Anything else is rejected at the API
+# rather than silently stored, since an unrecognised value would read as
+# "uncurated" to the filter above and quietly resurrect a rejected recipe.
+VALID_CURATIONS = ("good", "bad", "hidden")
+
 
 class WorkflowRecipeRepository:
     def __init__(self, session: AsyncSession):
@@ -108,11 +119,31 @@ class WorkflowRecipeRepository:
         return await self._find_similar_postgres(query_embedding, group_ids, limit)
 
     def _base_query(self, group_ids: List[str]):
+        """Retrievable recipes for these workspaces.
+
+        Suppressed curations are filtered HERE rather than at each caller, so no
+        present or future reuse path can forget to honour a human's "never
+        suggest this again" — the one signal in the system that is unambiguous.
+        """
         return select(WorkflowRecipe).where(
             WorkflowRecipe.group_id.in_(group_ids),
             WorkflowRecipe.embedding.is_not(None),
-            (WorkflowRecipe.curation.is_(None)) | (WorkflowRecipe.curation != "hidden"),
+            (WorkflowRecipe.curation.is_(None))
+            | (WorkflowRecipe.curation.not_in(SUPPRESSED_CURATIONS)),
         )
+
+    async def get_by_id(
+        self, recipe_id: int, group_ids: List[str]
+    ) -> Optional[WorkflowRecipe]:
+        """One recipe, scoped — used by curation and reuse-recording."""
+        if not group_ids:
+            return None
+        stmt = select(WorkflowRecipe).where(
+            WorkflowRecipe.id == recipe_id,
+            WorkflowRecipe.group_id.in_(group_ids),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
 
     async def _find_similar_sqlite(
         self, query_embedding: List[float], group_ids: List[str], limit: int

@@ -21,6 +21,21 @@ class RecipeSuggestRequest(BaseModel):
     )
 
 
+class RecipeCurateRequest(BaseModel):
+    """Record (or clear) a human judgement on a recipe.
+
+    ``None`` clears the judgement. 'bad' and 'hidden' both remove the recipe
+    from suggestions; they differ only in what they mean to the person setting
+    them ("this crew is wrong" vs "stop offering me this").
+    """
+
+    curation: Optional[str] = Field(
+        None,
+        description="'good' | 'bad' | 'hidden', or null to clear",
+        json_schema_extra={"enum": ["good", "bad", "hidden", None]},
+    )
+
+
 class RecipeSummary(BaseModel):
     """A recipe as offered for reuse.
 

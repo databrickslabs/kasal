@@ -292,43 +292,109 @@ class WorkflowRecipeService:
         """
         threshold = MIN_SIMILARITY if min_similarity is None else min_similarity
         hits = await self.find_similar_for_prompt(prompt, group_ids, limit=limit)
+        relevant = [(r, s) for r, s in hits if s >= threshold]
+
+        # Relevance first, then human judgement. Everything left has already
+        # cleared the similarity floor, so all of it is genuinely on-topic; among
+        # equals, an explicit "this is the good one" outranks a few hundredths of
+        # cosine distance. Stable sort, so similarity order survives within each
+        # group. Ordering only — a 'bad'/'hidden' recipe never reaches this point,
+        # the retrieval query already dropped it.
+        relevant.sort(key=lambda pair: getattr(pair[0], "curation", None) != "good")
+
         return [
-            {
-                "recipe_id": recipe.id,
-                "similarity": round(score, 4),
-                "intent_text": recipe.intent_text,
-                "run_count": recipe.run_count,
-                "agent_count": len(recipe.agents_yaml or {}),
-                "task_count": len(recipe.tasks_yaml or {}),
-                "tool_names": recipe.tool_names or [],
-                "mcp_servers": recipe.mcp_servers or [],
-                "source_job_id": recipe.source_job_id,
-            }
-            for recipe, score in hits
-            if score >= threshold
+            self.to_summary(recipe, similarity=round(score, 4))
+            for recipe, score in relevant
         ]
+
+    # ---------------------------------------------------------------- curation
+
+    async def curate(
+        self,
+        recipe_id: int,
+        curation: Optional[str],
+        group_ids: List[str],
+        curated_by: Optional[str] = None,
+    ) -> Optional[Any]:
+        """Record a human judgement on a recipe, or clear it with ``None``.
+
+        This is the ONLY trustworthy quality signal the system has. Everything
+        mined is merely "a crew that finished" — which says nothing about whether
+        the right rows landed in postgres — so 'good' here is what a later phase
+        is allowed to learn from, and 'bad'/'hidden' immediately take a recipe
+        out of circulation.
+
+        Returns None when the recipe does not exist in these workspaces, so the
+        caller can 404 rather than silently no-op.
+        """
+        from datetime import datetime
+
+        from src.repositories.workflow_recipe_repository import VALID_CURATIONS
+
+        if curation is not None and curation not in VALID_CURATIONS:
+            raise ValueError(
+                f"Invalid curation {curation!r}; expected one of "
+                f"{VALID_CURATIONS} or null"
+            )
+
+        recipe = await self.repository.get_by_id(recipe_id, group_ids)
+        if recipe is None:
+            return None
+
+        recipe.curation = curation
+        recipe.curated_by = curated_by if curation else None
+        recipe.curated_at = datetime.utcnow() if curation else None
+        await self.session.commit()
+        await self.session.refresh(recipe)
+        return recipe
+
+    async def record_reuse(self, recipe_id: int, group_ids: List[str]) -> Optional[Any]:
+        """Note that a suggestion was actually taken up.
+
+        The accept rate is the cheapest honest signal available: it is a human
+        choosing this crew over generating a fresh one, captured without asking
+        anyone to rate anything. It also measures whether the similarity floor is
+        set sensibly — suggestions that are never accepted mean it is too low.
+        """
+        recipe = await self.repository.get_by_id(recipe_id, group_ids)
+        if recipe is None:
+            return None
+        recipe.times_reused = (recipe.times_reused or 0) + 1
+        await self.session.commit()
+        await self.session.refresh(recipe)
+        return recipe
+
+    @staticmethod
+    def to_summary(recipe: Any, similarity: Optional[float] = None) -> Any:
+        """Recipe row -> API summary. One mapping, so the library listing and a
+        curation/reuse response cannot drift apart.
+
+        Callers that just committed must ``refresh`` first: commit expires the
+        instance, so reading these attributes would lazy-load and raise
+        MissingGreenlet on the async session — the write lands and only the
+        response fails, which is a confusing 500 to debug.
+        """
+        from src.schemas.workflow_recipe import RecipeSummary
+
+        return RecipeSummary(
+            recipe_id=recipe.id,
+            intent_text=recipe.intent_text,
+            run_count=recipe.run_count,
+            agent_count=len(recipe.agents_yaml or {}),
+            task_count=len(recipe.tasks_yaml or {}),
+            tool_names=recipe.tool_names or [],
+            mcp_servers=recipe.mcp_servers or [],
+            source_job_id=recipe.source_job_id,
+            similarity=similarity,
+            curation=recipe.curation,
+            times_reused=recipe.times_reused,
+            updated_at=recipe.updated_at.isoformat() if recipe.updated_at else None,
+        )
 
     async def list_for_group(self, group_ids: List[str], limit: int = 50) -> List[Any]:
         """The workspace's recipe library, as summaries."""
-        from src.schemas.workflow_recipe import RecipeSummary
-
         recipes = await self.repository.list_by_group(group_ids, limit=limit)
-        return [
-            RecipeSummary(
-                recipe_id=r.id,
-                intent_text=r.intent_text,
-                run_count=r.run_count,
-                agent_count=len(r.agents_yaml or {}),
-                task_count=len(r.tasks_yaml or {}),
-                tool_names=r.tool_names or [],
-                mcp_servers=r.mcp_servers or [],
-                source_job_id=r.source_job_id,
-                curation=r.curation,
-                times_reused=r.times_reused,
-                updated_at=r.updated_at.isoformat() if r.updated_at else None,
-            )
-            for r in recipes
-        ]
+        return [self.to_summary(r) for r in recipes]
 
     async def mine_new_executions(self) -> int:
         """Distil any completed crew runs that have no recipe yet.

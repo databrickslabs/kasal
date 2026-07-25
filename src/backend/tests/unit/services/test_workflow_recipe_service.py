@@ -242,6 +242,9 @@ class TestRetrievalThreshold:
             tool_names=["postgres_execute_sql"],
             mcp_servers=["postgres"],
             source_job_id="job-1",
+            curation=None,
+            times_reused=0,
+            updated_at=None,
         )
         noise = SimpleNamespace(
             id=2,
@@ -252,6 +255,9 @@ class TestRetrievalThreshold:
             tool_names=[],
             mcp_servers=[],
             source_job_id="job-2",
+            curation=None,
+            times_reused=0,
+            updated_at=None,
         )
 
         async def fake_find(self, prompt, group_ids, limit=3):
@@ -264,9 +270,9 @@ class TestRetrievalThreshold:
         service = module.WorkflowRecipeService(session=None)
         out = await service.suggest_for_prompt("load companies", ["g1"])
 
-        assert [r["recipe_id"] for r in out] == [1], "the 0.456 row must not be offered"
-        assert out[0]["similarity"] == 0.818
-        assert out[0]["mcp_servers"] == ["postgres"]
+        assert [r.recipe_id for r in out] == [1], "the 0.456 row must not be offered"
+        assert out[0].similarity == 0.818
+        assert out[0].mcp_servers == ["postgres"]
 
     @pytest.mark.asyncio
     async def test_nothing_close_yields_no_suggestion(self, monkeypatch):
@@ -316,3 +322,133 @@ class TestRetrievalThreshold:
         )
         service = module.WorkflowRecipeService(session=None)
         assert await service.find_similar_for_prompt("anything", ["g1"]) == []
+
+
+class TestCuration:
+    """Explicit human judgement is the only trustworthy signal here — everything
+    mined is merely "a crew that finished", which says nothing about whether its
+    output was right."""
+
+    @pytest.mark.asyncio
+    async def test_suppressed_recipes_are_filtered_in_the_query_itself(self):
+        """'bad' and 'hidden' are excluded by the retrieval query, not by each
+        caller — so no present or future reuse path can forget to honour a
+        human's "never suggest this again"."""
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from src.models.workflow_recipe import WorkflowRecipe
+        from src.repositories.workflow_recipe_repository import (
+            SUPPRESSED_CURATIONS,
+            WorkflowRecipeRepository,
+        )
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(WorkflowRecipe.__table__.create)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        vector = [1.0, 0.0, 0.0]
+        async with factory() as session:
+            for name, curation in (
+                ("keeper", None),
+                ("blessed", "good"),
+                ("rejected", "bad"),
+                ("muted", "hidden"),
+            ):
+                session.add(
+                    WorkflowRecipe(
+                        group_id="g1",
+                        intent_text=name,
+                        intent_hash=name,
+                        agents_yaml={"a": {}},
+                        tasks_yaml={"t": {}},
+                        source_job_id=f"job-{name}",
+                        mined_job_ids=[f"job-{name}"],
+                        embedding=vector,
+                        curation=curation,
+                    )
+                )
+            await session.commit()
+
+        async with factory() as session:
+            hits = await WorkflowRecipeRepository(session).find_similar(
+                vector, ["g1"], limit=10
+            )
+        names = {r.intent_text for r, _ in hits}
+
+        assert names == {"keeper", "blessed"}
+        assert not names & {"rejected", "muted"}
+        assert set(SUPPRESSED_CURATIONS) == {"bad", "hidden"}
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_a_good_recipe_outranks_a_closer_uncurated_one(self, monkeypatch):
+        """Both have already cleared the relevance floor, so a human's explicit
+        "this is the good one" beats a few hundredths of cosine distance."""
+        from src.services import workflow_recipe_service as module
+
+        def row(rid, curation):
+            return SimpleNamespace(
+                id=rid,
+                intent_text=f"r{rid}",
+                run_count=1,
+                agents_yaml={},
+                tasks_yaml={},
+                tool_names=[],
+                mcp_servers=[],
+                source_job_id="j",
+                curation=curation,
+                times_reused=0,
+                updated_at=None,
+            )
+
+        async def fake_find(self, prompt, group_ids, limit=3):
+            return [(row(1, None), 0.83), (row(2, "good"), 0.79)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        out = await module.WorkflowRecipeService(session=None).suggest_for_prompt(
+            "anything", ["g1"]
+        )
+        assert [r.recipe_id for r in out] == [2, 1]
+
+    @pytest.mark.asyncio
+    async def test_curation_below_the_floor_is_still_not_suggested(self, monkeypatch):
+        """Curation reorders, it never rescues an irrelevant recipe."""
+        from src.services import workflow_recipe_service as module
+
+        good_but_irrelevant = SimpleNamespace(
+            id=5,
+            intent_text="unrelated",
+            run_count=1,
+            agents_yaml={},
+            tasks_yaml={},
+            tool_names=[],
+            mcp_servers=[],
+            source_job_id="j",
+            curation="good",
+            times_reused=0,
+            updated_at=None,
+        )
+
+        async def fake_find(self, prompt, group_ids, limit=3):
+            return [(good_but_irrelevant, 0.40)]
+
+        monkeypatch.setattr(
+            module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
+        )
+        out = await module.WorkflowRecipeService(session=None).suggest_for_prompt(
+            "snake game", ["g1"]
+        )
+        assert out == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_curation_value_is_rejected(self):
+        """An unrecognised value would read as "uncurated" to the filter and
+        quietly resurrect a rejected recipe, so it is refused up front."""
+        from src.services.workflow_recipe_service import WorkflowRecipeService
+
+        with pytest.raises(ValueError):
+            await WorkflowRecipeService(session=None).curate(1, "excellent", ["g1"])
