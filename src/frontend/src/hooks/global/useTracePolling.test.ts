@@ -355,3 +355,185 @@ describe('useTracePolling - terminal events are gated on the active job', () => 
     },
   );
 });
+
+describe('useTracePolling - HITL pending-approval probe (SSE parity)', () => {
+  const hitlProbeCount = () =>
+    apiGet.mock.calls.filter(([url]) => url === `/hitl/execution/${JOB}`).length;
+
+  const pendingApproval = (over: Record<string, unknown> = {}) => ({
+    id: 42,
+    execution_id: JOB,
+    status: 'pending',
+    is_expired: false,
+    gate_config: {
+      kind: 'tool_call',
+      tool_name: 'GenieTool',
+      tool_args: { q: 'select 1' },
+      agent_role: 'Analyst',
+      task_name: null,
+      timeout_seconds: 300,
+      timeout_action: 'auto_reject',
+      message: "Agent wants to run 'GenieTool' — approval required.",
+    },
+    ...over,
+  });
+
+  it('dispatches ONE hitlRequest with the SSE-shaped flat detail when a pending approval appears', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) {
+        return Promise.resolve({ data: { status: 'waiting_for_approval' } });
+      }
+      if (url === `/hitl/execution/${JOB}`) {
+        return Promise.resolve({
+          data: { execution_id: JOB, has_pending_approval: true, pending_approval: pendingApproval() },
+        });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    const hitl = vi.fn();
+    window.addEventListener('hitlRequest', hitl as EventListener);
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // Deduped by approval id: the gate fires exactly once even though the
+    // probe keeps running every tick while WAITING_FOR_APPROVAL.
+    expect(hitl).toHaveBeenCalledTimes(1);
+    const detail = (hitl.mock.calls[0][0] as CustomEvent).detail;
+    // Same flat shape SSEConnectionManager dispatches for the SSE event.
+    expect(detail).toMatchObject({
+      job_id: JOB,
+      approval_id: '42',
+      kind: 'tool_call',
+      tool_name: 'GenieTool',
+      tool_args: { q: 'select 1' },
+      agent_role: 'Analyst',
+      message: "Agent wants to run 'GenieTool' — approval required.",
+    });
+    expect(hitlProbeCount()).toBeGreaterThanOrEqual(3); // every tick while waiting
+
+    window.removeEventListener('hitlRequest', hitl as EventListener);
+  });
+
+  it('probes only every 2nd tick while the run is plain RUNNING', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) return Promise.resolve({ data: { status: 'running' } });
+      if (url === `/hitl/execution/${JOB}`) {
+        return Promise.resolve({ data: { execution_id: JOB, has_pending_approval: false } });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    // Ticks 1..4: probe fires on even ticks only (2 and 4).
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(execProbeCount()).toBe(4);
+    expect(hitlProbeCount()).toBe(2);
+  });
+
+  it('ignores an expired pending approval', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) {
+        return Promise.resolve({ data: { status: 'waiting_for_approval' } });
+      }
+      if (url === `/hitl/execution/${JOB}`) {
+        return Promise.resolve({
+          data: {
+            execution_id: JOB,
+            has_pending_approval: true,
+            pending_approval: pendingApproval({ is_expired: true }),
+          },
+        });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    const hitl = vi.fn();
+    window.addEventListener('hitlRequest', hitl as EventListener);
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(hitl).not.toHaveBeenCalled();
+    window.removeEventListener('hitlRequest', hitl as EventListener);
+  });
+
+  it('enriches task_review gates with output_preview from the ui-view approval fetch', async () => {
+    const longOutput = 'x'.repeat(900);
+    apiGet.mockImplementation((url: string, cfg?: { params?: Record<string, unknown> }) => {
+      if (url === `/executions/${JOB}`) {
+        return Promise.resolve({ data: { status: 'waiting_for_approval' } });
+      }
+      if (url === `/hitl/execution/${JOB}`) {
+        return Promise.resolve({
+          data: {
+            execution_id: JOB,
+            has_pending_approval: true,
+            pending_approval: pendingApproval({
+              id: 7,
+              gate_config: {
+                kind: 'task_review',
+                task_name: 'write_report',
+                message: "Task 'write_report' finished — review the output.",
+              },
+              has_previous_crew_output: true,
+            }),
+          },
+        });
+      }
+      if (url === `/hitl/approvals/7`) {
+        expect(cfg?.params).toEqual({ view: 'ui' });
+        return Promise.resolve({ data: { id: 7, previous_crew_output: longOutput } });
+      }
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    const hitl = vi.fn();
+    window.addEventListener('hitlRequest', hitl as EventListener);
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(hitl).toHaveBeenCalledTimes(1);
+    const detail = (hitl.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      job_id: JOB,
+      approval_id: '7',
+      kind: 'task_review',
+      task_name: 'write_report',
+    });
+    expect(detail.output_preview).toBe('x'.repeat(500)); // sliced to the SSE preview length
+
+    window.removeEventListener('hitlRequest', hitl as EventListener);
+  });
+
+  it('a probe failure never breaks the main poll loop', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === `/executions/${JOB}`) return Promise.resolve({ data: { status: 'running' } });
+      if (url === `/hitl/execution/${JOB}`) return Promise.reject(new Error('boom'));
+      return Promise.resolve({ data: { traces: [] } });
+    });
+
+    renderHook(() => useTracePolling());
+    window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: JOB } }));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(execProbeCount()).toBe(4); // status polling unaffected
+  });
+});

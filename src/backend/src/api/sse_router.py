@@ -15,7 +15,11 @@ from fastapi.responses import StreamingResponse
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
-from src.core.sse_manager import event_stream_generator, sse_manager
+from src.core.sse_manager import (
+    event_stream_generator,
+    get_heartbeat_seconds,
+    sse_manager,
+)
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().system
@@ -38,6 +42,13 @@ SSE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
+# Default heartbeat cadence for the stream endpoints. Env-tunable via
+# SSE_HEARTBEAT_SECONDS (resolved once at import — a deploy-time knob, not a
+# per-request one). An explicit ?heartbeat= query param always wins. The
+# generation endpoint has a tighter le=60 bound, so its default is clamped.
+_DEFAULT_HEARTBEAT = get_heartbeat_seconds(15)
+_DEFAULT_GEN_HEARTBEAT = min(get_heartbeat_seconds(10), 60)
+
 
 def _parse_last_event_id(request: Request) -> Optional[int]:
     """Extract Last-Event-ID from request headers (sent by EventSource on reconnect)."""
@@ -58,7 +69,7 @@ async def stream_execution_updates(
     session: SessionDep,
     timeout: int = Query(3600, ge=30, le=7200, description="Stream timeout in seconds"),
     heartbeat: int = Query(
-        15, ge=5, le=120, description="Heartbeat interval in seconds"
+        _DEFAULT_HEARTBEAT, ge=5, le=120, description="Heartbeat interval in seconds"
     ),
 ):
     """
@@ -109,7 +120,7 @@ async def stream_all_executions(
     request: Request,
     group_context: GroupContextDep,
     timeout: int = Query(3600, ge=30, le=7200),
-    heartbeat: int = Query(15, ge=5, le=120),
+    heartbeat: int = Query(_DEFAULT_HEARTBEAT, ge=5, le=120),
 ):
     """
     Stream updates for all executions in the user's groups.
@@ -145,7 +156,9 @@ async def stream_generation_updates(
     generation_id: str,
     group_context: GroupContextDep,
     timeout: int = Query(300, ge=30, le=600, description="Stream timeout in seconds"),
-    heartbeat: int = Query(10, ge=5, le=60, description="Heartbeat interval in seconds"),
+    heartbeat: int = Query(
+        _DEFAULT_GEN_HEARTBEAT, ge=5, le=60, description="Heartbeat interval in seconds"
+    ),
 ):
     """
     Stream real-time updates for a progressive crew generation via SSE.

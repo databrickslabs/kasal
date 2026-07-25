@@ -11,9 +11,39 @@ from datetime import datetime
 from uuid import UUID
 import asyncio
 import json
+import os
 import threading
 
 from src.core.logger import LoggerManager
+
+# Default cadence for SSE keep-alive comment frames. The Databricks Apps
+# HTTP/2 proxy has been observed dropping *idle* streams — a comment line
+# every few seconds keeps bytes flowing so the proxy never sees the stream
+# as idle. Comment frames (lines starting with ":") are ignored by
+# EventSource clients per the SSE spec, so they are invisible to consumers.
+DEFAULT_HEARTBEAT_SECONDS = 15
+
+# Clamp bounds for the env override — mirrors the router's Query validation.
+_HEARTBEAT_MIN_SECONDS = 5
+_HEARTBEAT_MAX_SECONDS = 120
+
+
+def get_heartbeat_seconds(default: int = DEFAULT_HEARTBEAT_SECONDS) -> int:
+    """
+    Resolve the heartbeat interval, honoring the SSE_HEARTBEAT_SECONDS env var.
+
+    Env-tunable so a Databricks Apps deploy can shorten the keep-alive cadence
+    (e.g. SSE_HEARTBEAT_SECONDS=5) without a code change if the proxy's idle
+    window turns out to be tighter than the default. Invalid values fall back
+    to *default*; valid values are clamped to [5, 120] seconds.
+    """
+    raw = os.getenv("SSE_HEARTBEAT_SECONDS")
+    if raw:
+        try:
+            return max(_HEARTBEAT_MIN_SECONDS, min(_HEARTBEAT_MAX_SECONDS, int(raw)))
+        except (ValueError, TypeError):
+            pass
+    return default
 
 
 class _SSEEncoder(json.JSONEncoder):
@@ -310,7 +340,7 @@ sse_manager = SSEConnectionManager()
 async def event_stream_generator(
     job_id: str,
     timeout: int = 3600,
-    heartbeat_interval: int = 30,
+    heartbeat_interval: Optional[int] = None,
     last_event_id: Optional[int] = None,
 ) -> AsyncGenerator[str, None]:
     """
@@ -319,7 +349,12 @@ async def event_stream_generator(
     Args:
         job_id: The job ID to stream events for
         timeout: Maximum time to keep connection alive (seconds)
-        heartbeat_interval: Interval for sending keepalive comments (seconds)
+        heartbeat_interval: Interval for sending keepalive comments (seconds).
+            Heartbeats are SSE comment frames (``: keepalive ...``) emitted
+            only when no real event has flowed for the interval, so a proxy
+            (Databricks Apps HTTP/2) never sees an idle stream. ``None`` falls
+            back to the SSE_HEARTBEAT_SECONDS env var, then to
+            ``DEFAULT_HEARTBEAT_SECONDS``.
         last_event_id: If set, replay buffered events after this ID before
             switching to live streaming.  The browser sends this automatically
             via the ``Last-Event-ID`` header on reconnect.
@@ -327,6 +362,8 @@ async def event_stream_generator(
     Yields:
         SSE-formatted event strings
     """
+    if heartbeat_interval is None:
+        heartbeat_interval = get_heartbeat_seconds()
     queue = sse_manager.create_event_queue(job_id)
     logger.info(
         f"[SSE_STREAM] Generator started | job={job_id} | timeout={timeout}s | "
@@ -375,12 +412,17 @@ async def event_stream_generator(
         )
         yield connected_event
 
-        # Send an immediate heartbeat to push data through the proxy
-        immediate_hb = f": heartbeat {datetime.now().isoformat()}\n\n"
-        logger.info(f"[SSE_STREAM] Yielding immediate heartbeat | job={job_id}")
+        # Send an immediate keep-alive comment to push data through the proxy
+        immediate_hb = f": keepalive {datetime.now().isoformat()}\n\n"
+        logger.info(f"[SSE_STREAM] Yielding immediate keepalive | job={job_id}")
         yield immediate_hb
 
-        last_heartbeat = datetime.now()
+        # Keep-alive clock: tracks the last time ANY bytes went out (real event
+        # or heartbeat). A heartbeat comment fires only once the stream has been
+        # idle for a full heartbeat_interval — real traffic pushes it out — so
+        # the proxy always sees data within the interval, with zero extra frames
+        # on a busy stream.
+        last_activity = datetime.now()
         loop_count = 0
 
         while True:
@@ -391,26 +433,33 @@ async def event_stream_generator(
                 logger.info(f"[SSE_STREAM] Stream timeout | job={job_id} | elapsed={elapsed:.0f}s")
                 break
 
-            # Send heartbeat comment to keep connection alive
-            since_hb = (datetime.now() - last_heartbeat).total_seconds()
-            if since_hb > heartbeat_interval:
-                hb = f": heartbeat {datetime.now().isoformat()}\n\n"
+            # Send keep-alive comment if the stream has been idle too long.
+            # SSE comment lines (": ...") are ignored by EventSource clients,
+            # so heartbeats never disturb consumers or reconnect logic.
+            since_activity = (datetime.now() - last_activity).total_seconds()
+            if since_activity >= heartbeat_interval:
+                hb = f": keepalive {datetime.now().isoformat()}\n\n"
                 if loop_count <= 10 or loop_count % 20 == 0:
                     logger.info(
-                        f"[SSE_STREAM] Heartbeat #{loop_count} | job={job_id} | "
-                        f"elapsed={elapsed:.0f}s | since_last_hb={since_hb:.0f}s"
+                        f"[SSE_STREAM] Keepalive #{loop_count} | job={job_id} | "
+                        f"elapsed={elapsed:.0f}s | idle={since_activity:.0f}s"
                     )
                 yield hb
-                last_heartbeat = datetime.now()
+                last_activity = datetime.now()
+                since_activity = 0.0
 
             try:
-                # Wait for event with short timeout to allow heartbeat checks
-                event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                # Wait for an event, but never past the next heartbeat due time
+                # (capped at 5s so the outer timeout check stays responsive).
+                wait_s = min(5.0, max(0.25, heartbeat_interval - since_activity))
+                event = await asyncio.wait_for(queue.get(), timeout=wait_s)
                 logger.info(
                     f"[SSE_STREAM] Event received | job={job_id} | "
                     f"event_type={event.event} | event_id={event.id}"
                 )
                 yield event.format()
+                # Real data flowed — reset the keep-alive clock.
+                last_activity = datetime.now()
 
                 # If this is a completion event, close per-job streams only.
                 if not job_id.startswith('all_groups_') and isinstance(event.data, dict):

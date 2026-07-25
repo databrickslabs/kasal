@@ -12,6 +12,9 @@
  *   - GET /executions/{id}                   (for job lifecycle status)
  *   - GET /traces/job/{id}?since_id=N&limit=50 (only NEW traces via id cursor
  *     — the server filters id > N, so a poll never re-ships prior rows)
+ *   - GET /hitl/execution/{id}               (pending-approval probe, every
+ *     2nd tick — surfaces HITL gates as 'hitlRequest' window events, exactly
+ *     like SSE does, so approval prompts appear without SSE)
  *
  * ACTIVATION STRATEGY:
  *   Polling always starts on jobCreated (after a short delay to give SSE a chance).
@@ -22,6 +25,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '../../config/api/ApiConfig';
 import { SSE_ENABLED } from '../../utils/sseTransport';
+import { HITLService } from '../../api/HITLService';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
@@ -43,6 +47,17 @@ const SSE_GRACE_PERIOD_MS = 4000;
  * a brief just-created/not-yet-persisted race from killing a real run.
  */
 const NOT_FOUND_LIMIT = 3;
+/**
+ * How often the HITL pending-approval probe runs, in poll ticks. The endpoint
+ * is cheap (~300 bytes) but there's no need to hit it on every 2s tick — every
+ * 2nd tick (≈4s) is fast enough for a human-facing approval prompt. While the
+ * run is WAITING_FOR_APPROVAL the probe runs on EVERY tick instead, so a
+ * freshly opened gate surfaces at the full poll cadence.
+ */
+const HITL_POLL_EVERY_N_TICKS = 2;
+/** Preview length for task_review output — mirrors the backend's SSE payload
+ *  (_OUTPUT_PREVIEW_CHARS = 500 in human_review_guardrail.py). */
+const HITL_OUTPUT_PREVIEW_CHARS = 500;
 
 /**
  * Hook that polls for execution state when SSE is unavailable.
@@ -62,6 +77,71 @@ export const useTracePolling = () => {
   const notFoundCountRef = useRef(0);
   /** Set to true if SSE delivers a real trace/execution_update for the active job */
   const sseProvenWorkingRef = useRef(false);
+  /** Approval ids already announced — each gate fires 'hitlRequest' exactly once. */
+  const seenApprovalIdsRef = useRef<Set<string>>(new Set());
+  /** Poll tick counter driving the HITL probe cadence. */
+  const pollTickRef = useRef(0);
+
+  /**
+   * HITL pending-approval probe — polling-fallback parity for SSE's
+   * `hitl_request` push.
+   *
+   * With SSE the backend broadcasts `hitl_request` the instant a gate opens
+   * and SSEConnectionManager re-dispatches it as a window 'hitlRequest'
+   * CustomEvent. Without SSE nothing surfaced pending approvals at all —
+   * runs silently sat in WAITING_FOR_APPROVAL. This probe rebuilds the SAME
+   * flat event detail from GET /hitl/execution/{id} (approval row +
+   * gate_config) and dispatches the SAME window event, so every existing
+   * consumer (ChatWorkspace inline approval card, ToolApprovalListener
+   * dialog) lights up identically with zero changes. Deduped by approval id
+   * so each gate fires once per page load.
+   */
+  const pollHitlStatus = useCallback(async (jobId: string) => {
+    try {
+      const status = await HITLService.getExecutionHITLStatus(jobId);
+      const pending = status?.pending_approval;
+      if (!status?.has_pending_approval || !pending || pending.is_expired) return;
+
+      const key = String(pending.id);
+      if (seenApprovalIdsRef.current.has(key)) return;
+      seenApprovalIdsRef.current.add(key);
+
+      // Rebuild the flat shape the SSE event carries: the backend spreads
+      // gate_config (kind, tool_name, tool_args, agent_role, task_name,
+      // message, timeout_*) next to job_id + approval_id.
+      const gateConfig = (pending.gate_config ?? {}) as Record<string, unknown>;
+      const detail: Record<string, unknown> = {
+        ...gateConfig,
+        job_id: jobId,
+        approval_id: key,
+      };
+
+      // task_review gates carry an output preview over SSE (sliced from the
+      // raw task output). gate_config doesn't include it and the status
+      // endpoint omits the potentially-huge previous_crew_output, so fetch
+      // the trimmed 'ui' view on demand. Non-fatal: the card renders without
+      // the preview if this fails.
+      if (
+        gateConfig.kind === 'task_review' &&
+        detail.output_preview === undefined &&
+        pending.has_previous_crew_output
+      ) {
+        try {
+          const full = await HITLService.getApproval(pending.id, 'ui');
+          if (typeof full?.previous_crew_output === 'string') {
+            detail.output_preview = full.previous_crew_output.slice(0, HITL_OUTPUT_PREVIEW_CHARS);
+          }
+        } catch {
+          /* preview is cosmetic */
+        }
+      }
+
+      console.log(`[TracePolling] Pending HITL approval ${key} for job ${jobId} — dispatching hitlRequest`);
+      window.dispatchEvent(new CustomEvent('hitlRequest', { detail }));
+    } catch {
+      /* best-effort probe — never break the main poll */
+    }
+  }, []);
 
   const pollStates = useCallback(async () => {
     const jobId = activeJobIdRef.current;
@@ -194,6 +274,18 @@ export const useTracePolling = () => {
         }
       }
 
+      // --- 1b. HITL pending-approval probe (SSE parity for approval gates) ---
+      // Every HITL_POLL_EVERY_N_TICKS ticks, or on EVERY tick while the run
+      // sits in WAITING_FOR_APPROVAL (the status create_approval_request
+      // flips the execution to the moment a gate opens).
+      pollTickRef.current += 1;
+      if (
+        pollTickRef.current % HITL_POLL_EVERY_N_TICKS === 0 ||
+        lastStatusRef.current === 'waiting_for_approval'
+      ) {
+        await pollHitlStatus(jobId);
+      }
+
       // --- 2. Process new traces (incremental via since_id cursor) ---
       if (results[1].status === 'fulfilled') {
         const traces = results[1].value.data?.traces;
@@ -272,7 +364,7 @@ export const useTracePolling = () => {
     } finally {
       isPollingRef.current = false;
     }
-  }, []);
+  }, [pollHitlStatus]);
 
   /**
    * (Re)arm the poll interval at the cadence appropriate for tab visibility:
@@ -295,6 +387,10 @@ export const useTracePolling = () => {
     notFoundCountRef.current = 0;
     executionTypeRef.current = null;
     sseProvenWorkingRef.current = false;
+    pollTickRef.current = 0;
+    // seenApprovalIdsRef is intentionally NOT cleared: approval ids are
+    // globally unique DB rows, and re-announcing one after a poll restart
+    // would duplicate the prompt.
     console.log(`[TracePolling] ▶ Starting polling for job ${jobId}`);
 
     // Poll immediately, then at intervals
@@ -317,6 +413,7 @@ export const useTracePolling = () => {
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
     executionTypeRef.current = null;
+    pollTickRef.current = 0;
   }, []);
 
   // Listen for job lifecycle events
