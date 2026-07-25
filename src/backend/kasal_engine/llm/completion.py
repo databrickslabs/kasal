@@ -176,10 +176,21 @@ class OpenAICompletion(BaseLLM):
         Returns the configured effort unchanged for every model except the ones
         whose chat-completions endpoint rejects the combination — see
         ``_TOOLS_REJECT_REASONING_EFFORT_RE``, where the API requires "none".
+
+        Sending nothing is NOT the same as sending "none" on those models. They
+        apply a reasoning budget by default server-side, so a tool-carrying call
+        that simply omits the parameter is still refused:
+
+            400 Function tools with reasoning_effort are not supported for
+            gpt-5.6-sol in /v1/chat/completions. To use function tools, use
+            /v1/responses or set reasoning_effort to 'none'.
+
+        That killed every chat-mode run on gpt-5.6 with tools attached, even
+        though kasal had set no effort at all (the LLM logged
+        reasoning_effort=None). Hence the model+tools check runs BEFORE the
+        "nothing configured" shortcut: "none" has to be stated explicitly.
         """
-        if self.reasoning_effort is None or not tools:
-            return self.reasoning_effort
-        if _TOOLS_REJECT_REASONING_EFFORT_RE.search(str(self.model).lower()):
+        if tools and _TOOLS_REJECT_REASONING_EFFORT_RE.search(str(self.model).lower()):
             logging.getLogger(__name__).debug(
                 "%s rejects reasoning_effort alongside function tools on chat "
                 "completions; sending 'none' for this call",
