@@ -9,6 +9,7 @@ ImportError is raised on first use if it is missing.
 
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from typing import Any, Literal
@@ -28,6 +29,23 @@ from .exceptions import (
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ROUNDS = 15
+
+# OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
+# the request also carries function tools:
+#
+#   Function tools with reasoning_effort are not supported for gpt-5.6-terra in
+#   /v1/chat/completions. To use function tools, use /v1/responses or set
+#   reasoning_effort to 'none'.
+#
+# Every crew agent that has tools hits this as a hard 400, killing the run. The
+# remedy is the API's own: send effort "none" on tool-carrying calls. The model's
+# tool-free calls keep the configured effort.
+#
+# Matched by name rather than applied to all reasoning models on purpose — the
+# Databricks-served gpt-5* endpoints accept `reasoning_effort` alongside tools,
+# and blanket-dropping it there would silently disable reasoning that works.
+# An optional provider prefix ("openai/gpt-5.6-terra") is tolerated.
+_TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 
 
 class OpenAICompletion(BaseLLM):
@@ -143,6 +161,24 @@ class OpenAICompletion(BaseLLM):
 
     # --------------------------- chat completions ---------------------------
 
+    def _reasoning_effort_for(self, tools: list[dict[str, Any]] | None) -> str | None:
+        """The `reasoning_effort` to send for a call carrying ``tools``.
+
+        Returns the configured effort unchanged for every model except the ones
+        whose chat-completions endpoint rejects the combination — see
+        ``_TOOLS_REJECT_REASONING_EFFORT_RE``, where the API requires "none".
+        """
+        if self.reasoning_effort is None or not tools:
+            return self.reasoning_effort
+        if _TOOLS_REJECT_REASONING_EFFORT_RE.search(str(self.model).lower()):
+            logging.getLogger(__name__).debug(
+                "%s rejects reasoning_effort alongside function tools on chat "
+                "completions; sending 'none' for this call",
+                self.model,
+            )
+            return "none"
+        return self.reasoning_effort
+
     def _prepare_completion_params(
         self,
         messages: list[dict[str, Any]],
@@ -158,7 +194,7 @@ class OpenAICompletion(BaseLLM):
             ("top_p", self.top_p),
             ("frequency_penalty", self.frequency_penalty),
             ("presence_penalty", self.presence_penalty),
-            ("reasoning_effort", self.reasoning_effort),
+            ("reasoning_effort", self._reasoning_effort_for(tools)),
             ("stop", self.stop if self.supports_stop_words() else None),
             ("tools", tools),
         ):
