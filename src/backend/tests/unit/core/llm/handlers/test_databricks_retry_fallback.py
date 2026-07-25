@@ -7,11 +7,11 @@ The candidate cache is pre-seeded so the test never rebuilds a real LLM
 
 import asyncio
 
-from src.core.llm_handlers.databricks_gpt_oss_handler import (
+from src.core.llm.handlers.databricks_retry_llm import (
     _NO_FALLBACK,
     DatabricksRetryLLM,
 )
-from src.core.llm_handlers.model_fallback import ModelCandidate
+from src.core.llm.handlers.model_fallback import ModelCandidate
 
 FALLBACK_KEY = "databricks-claude-sonnet-4-5"
 

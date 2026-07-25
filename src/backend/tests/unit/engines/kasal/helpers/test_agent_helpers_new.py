@@ -239,7 +239,7 @@ class TestCreateAgentLLMConfig:
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm_handlers.databricks_gpt_oss_handler.DatabricksRetryLLM") as mock_retry:
+             patch("src.core.llm.handlers.databricks_retry_llm.DatabricksRetryLLM") as mock_retry:
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama-4"

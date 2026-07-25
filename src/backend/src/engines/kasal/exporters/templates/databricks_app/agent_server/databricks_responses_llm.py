@@ -1,8 +1,10 @@
 """
-Databricks Codex Handler
+Databricks Responses API
 
-Dedicated LLM handler for gpt-5.3-codex on Databricks, which ONLY supports
-the Responses API.
+The LLM for Databricks-served models that speak the Responses API rather than
+chat completions. gpt-5.3-codex is the only such model today and every quirk
+below was found on it, but the class is named for the API because that is what
+decides which models land here.
 
 The Responses API base path differs from chat/embeddings:
 - AI Gateway on:  /ai-gateway/openai/v1  (→ /ai-gateway/openai/v1/responses)
@@ -37,15 +39,15 @@ import json
 import logging
 from typing import Any
 
-from kasal_engine.llm import OpenAICompletion
-from kasal_engine.events import LLMCallType
+from crewai.llms.providers.openai.completion import OpenAICompletion
+from crewai.events.types.llm_events import LLMCallType
 
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).
 logger = logging.getLogger("crew")
 
 
-class DatabricksCodexCompletion(OpenAICompletion):
+class DatabricksResponsesLLM(OpenAICompletion):
     """OpenAICompletion subclass tailored for Databricks-hosted gpt-5.3-codex.
 
     Preserves the ``phase`` field on assistant output items across

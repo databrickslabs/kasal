@@ -157,6 +157,15 @@ class OpenAICompletion(BaseLLM):
         self._emit_call_completed_event(
             text, call_type, usage, conversation, from_task, from_agent
         )
+        # `response_model` was accepted and ignored here, so structured-output
+        # callers got a JSON *string* and their
+        # `isinstance(r, Model) or Model.model_validate(r)` fell back silently.
+        # DatabricksRetryLLM compensated with a private coercion, which meant the
+        # feature worked on exactly one provider. Honour it for all of them; the
+        # helper returns the text unchanged when it does not parse, so the
+        # caller's own fallback still applies.
+        if response_model is not None:
+            return self._validate_structured_output(text, response_model)
         return text
 
     # --------------------------- chat completions ---------------------------
@@ -217,6 +226,9 @@ class OpenAICompletion(BaseLLM):
         elif self.response_format is not None:
             params["response_format"] = self.response_format
         params.update(self.additional_params)
+        # Last, so it sees the final message list and any max_tokens the caller
+        # supplied through additional_params.
+        self._clamp_output_budget(params)
         return params
 
     def _execution_budget(self, from_agent: Any) -> tuple[int, float | None]:
@@ -242,6 +254,83 @@ class OpenAICompletion(BaseLLM):
             raise ExecutionBudgetExceededError(
                 f"max_execution_time exceeded after {rounds_done} tool round(s) "
                 f"for model {self.model}."
+            )
+
+    def _estimate_tokens(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+    ) -> int:
+        """Rough token count for a message list (chars/4), tools included.
+
+        Deliberately ONE estimator for both directions — the input trim below and
+        the output clamp in ``_prepare_completion_params`` are two halves of the
+        same budget (``prompt + max_tokens <= window``), and two different
+        estimates of "how big is this prompt" can disagree enough to trim what
+        did not need trimming while still overflowing the request.
+
+        Tool/function schemas count toward the server-side prompt, so they are
+        included when given.
+        """
+        total = 0
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            for key in ("content", "output"):
+                value = message.get(key)
+                if isinstance(value, str):
+                    total += len(value)
+                elif isinstance(value, list):
+                    # Structured content blocks (e.g. cache_control parts).
+                    total += len(str(value))
+            if message.get("tool_calls"):
+                total += len(str(message["tool_calls"]))
+        if tools:
+            total += len(str(tools))
+        return total // 4
+
+    def _raw_context_window(self) -> int:
+        """The model's FULL advertised window, 0 when unknown.
+
+        ``get_context_window_size()`` returns the 0.85-derated figure used for
+        trimming decisions. The output clamp needs the real number: the limit it
+        protects against is the server's own ``prompt + max_tokens <=
+        max-model-len``, and derating twice would shrink outputs for no reason.
+        """
+        if not self._model_window_is_known():
+            return 0
+        return int(self.get_context_window_size() / CONTEXT_WINDOW_USAGE_RATIO)
+
+    def _clamp_output_budget(self, params: dict[str, Any]) -> None:
+        """Shrink the requested output so ``prompt + max_tokens`` fits the window.
+
+        Servers that enforce the sum (vLLM and other self-hosted OpenAI-compatible
+        backends, notably) return a 400 — "passed N input and requested M output"
+        — rather than truncating. ``max_tokens`` comes from the model config's
+        ``max_output_tokens`` and knows nothing about the ACTUAL prompt size, so a
+        large prompt plus a full output request overflows.
+
+        Only ever reduces, never grows, and no-ops when the window is unknown or
+        the request already fits — so a model with room to spare is untouched.
+
+        The margin is generous on purpose: a chars/4 estimate systematically
+        UNDERCOUNTS a real tokenizer (observed 1-5% on Qwen, varying with
+        content), and vLLM 400s on a one-token overrun. Tight margins (256, then
+        1024/5%) each came up short in practice; 15% with a 2048 floor covers the
+        drift. A small model cannot do both a huge prompt and a huge output — this
+        trades output headroom for never 400ing.
+        """
+        key = "max_completion_tokens" if "max_completion_tokens" in params else "max_tokens"
+        want = params.get(key)
+        window = self._raw_context_window()
+        if not want or not window:
+            return
+        input_tokens = self._estimate_tokens(params.get("messages") or [], params.get("tools"))
+        margin = max(2048, int(input_tokens * 0.15))
+        allowed = window - input_tokens - margin
+        if allowed < want:
+            params[key] = max(256, allowed)
+            logger.warning(
+                "output clamp: model=%s input~=%d + %s=%d > window=%d; clamped to %d",
+                self.model, input_tokens, key, want, window, params[key],
             )
 
     def _model_window_is_known(self) -> bool:
@@ -302,15 +391,7 @@ class OpenAICompletion(BaseLLM):
             return
 
         def estimated_tokens() -> int:
-            total = 0
-            for message in conversation:
-                for key in ("content", "output"):
-                    value = message.get(key)
-                    if isinstance(value, str):
-                        total += len(value)
-                if message.get("tool_calls"):
-                    total += len(str(message["tool_calls"]))
-            return total // 4
+            return self._estimate_tokens(conversation)
 
         tokens_before = estimated_tokens()
         if tokens_before <= window:

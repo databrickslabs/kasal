@@ -115,10 +115,24 @@ is injected automatically by `llm_manager.py`.
 Add new product constants to `KasalProduct` in `src/utils/telemetry.py` as needed.
 Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
 
-### Known Issues
-- **databricks-gpt-oss Models**: Return reasoning blocks without "signature" field
-- **Fix**: Automatic monkey patch in `llm_manager.py` handles missing signature fields
-- **Long-term**: Upgrade to litellm 1.75.0+ when stable
+### LLM layering (do not re-implement across it)
+
+| Layer | Owns |
+|---|---|
+| `kasal_engine/llm/` | Transport. OpenAI-compatible client, tool-call loop, streaming, context-window trim **and** output clamp, usage accounting, structured output, LLM events. Model- and tenant-agnostic. |
+| `src/core/llm/` | Configuration. Model-catalogue lookup, per-tenant credentials, endpoint URLs, per-endpoint parameter rules, usage telemetry, embeddings, context-limit phrases. |
+| `src/core/llm/handlers/` | Endpoint policy. Engine-LLM subclasses: retry/backoff + fallback + message sanitization (`DatabricksRetryLLM`), Responses API (`DatabricksResponsesLLM`), self-hosted vLLM (`VLLMFunctionCallingLLM`). Named for the endpoint or protocol, never for a model. |
+| `LLMManager` | The public facade (`llm_manager.py`). 38+ call sites use `completion`; keep it stable. |
+
+Two rules, both learned the hard way:
+- **litellm is not on the LLM path.** The engine drives endpoints with the OpenAI
+  SDK. Anything configured on the `litellm` module (`drop_params`, callbacks,
+  caching, `register_model`, monkey patches) affects only
+  `LLMManager.completion_with_usage`. Params set when building an LLM ARE sent —
+  there is no drop-params safety net.
+- **Fix things on the path the request takes.** A patch on a shared library that
+  the request no longer enters is indistinguishable from no fix at all, and it
+  fails silently.
 
 ### Authentication Hierarchy
 

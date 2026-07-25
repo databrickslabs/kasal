@@ -49,6 +49,7 @@ const docSections: DocSection[] = [
     label: 'Platform',
     items: [
       { label: 'Architecture Guide', file: 'ARCHITECTURE_GUIDE' },
+      { label: 'LLM Architecture', file: 'LLM_ARCHITECTURE' },
       { label: 'Code Structure', file: 'CODE_STRUCTURE_GUIDE' },
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
     ],
