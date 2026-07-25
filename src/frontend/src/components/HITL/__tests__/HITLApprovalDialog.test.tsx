@@ -709,6 +709,48 @@ describe('HITLApprovalDialog', () => {
       });
     });
 
+    it('tool_call gates: reason is optional — empty reason submits with a generic fallback', async () => {
+      const mockApproval = createMockApproval({
+        gate_config: { kind: 'tool_call', tool_name: 'SerperDevTool', agent_role: 'Researcher' },
+      });
+      mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      mocks.mockRejectGate.mockResolvedValue({
+        success: true,
+        approval_id: 1,
+        status: HITLApprovalStatus.REJECTED,
+        message: 'Rejected',
+        execution_resumed: false,
+      });
+
+      render(
+        <TestWrapper>
+          <HITLApprovalDialog {...defaultProps} />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Optionally add a reason for rejection.')).toBeInTheDocument();
+      });
+
+      const confirmButton = screen.getByRole('button', { name: /confirm rejection/i });
+      expect(confirmButton).not.toBeDisabled();
+
+      fireEvent.click(confirmButton);
+
+      await waitFor(() => {
+        expect(mocks.mockRejectGate).toHaveBeenCalledWith(1, {
+          reason: 'Denied',
+          action: HITLRejectionAction.REJECT,
+        });
+      });
+    });
+
     it('calls rejectGate when confirming rejection', async () => {
       const mockApproval = createMockApproval();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));

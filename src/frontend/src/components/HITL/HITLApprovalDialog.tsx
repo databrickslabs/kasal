@@ -86,6 +86,12 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
   const [editedGenieConfig, setEditedGenieConfig] = useState<GenieSpaceConfig | null>(null);
 
+  // Tool-call gates: denying just lets the agent continue without the tool, so
+  // a reason is optional context. For task_review (and flow gates) the reason
+  // feeds back to the agent as the retry prompt, so it stays required.
+  const rejectReasonOptional =
+    (approval?.gate_config as { kind?: string } | undefined)?.kind === 'tool_call';
+
   // Fetch approval for the execution
   const fetchApproval = useCallback(async () => {
     if (!executionId) return;
@@ -190,13 +196,13 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
   // Handle reject action
   const handleReject = async () => {
-    /* v8 ignore next -- defensive: Confirm Rejection is disabled until both exist */
-    if (!approval || !rejectionReason) return;
+    /* v8 ignore next -- defensive: Confirm Rejection is disabled until these hold */
+    if (!approval || (!rejectionReason && !rejectReasonOptional)) return;
 
     setActionLoading(true);
     try {
       await HITLService.rejectGate(approval.id, {
-        reason: rejectionReason,
+        reason: rejectionReason || 'Denied',
         action: rejectionAction,
       });
       onActionComplete?.('reject');
@@ -342,12 +348,14 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       return (
         <Box>
           <Typography variant="body1" gutterBottom>
-            Please provide a reason for rejection.
+            {rejectReasonOptional
+              ? 'Optionally add a reason for rejection.'
+              : 'Please provide a reason for rejection.'}
           </Typography>
           <TextField
             label="Rejection Reason"
             fullWidth
-            required
+            required={!rejectReasonOptional}
             multiline
             rows={3}
             value={rejectionReason}
@@ -713,7 +721,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             variant="contained"
             color="error"
             onClick={handleReject}
-            disabled={actionLoading || !rejectionReason}
+            disabled={actionLoading || (!rejectionReason && !rejectReasonOptional)}
             startIcon={actionLoading ? <CircularProgress size={16} /> : <RejectIcon />}
           >
             Confirm Rejection
