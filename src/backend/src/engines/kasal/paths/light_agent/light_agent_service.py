@@ -392,19 +392,27 @@ class LightAgentService:
                 # ── Cognitive memory (recall + persist) — chat parity w/ crews ──
                 # Attach a unified Memory so kickoff_async auto-recalls relevant
                 # context and persists this turn. Best-effort: never breaks the run.
-                await self._attach_memory(
+                # _attach_memory RETURNS the Memory it built. It used to be read
+                # back off the agent (getattr(agent, "memory")), which cannot
+                # work: the engine's Agent is a pydantic model with no `memory`
+                # field and no extra="allow", so `agent.memory = mem` raises
+                #   ValueError: "Agent" object has no field "memory"
+                # inside _attach_crew_memory_to_agents, which swallows it at
+                # debug level. Memory was built correctly every time — the log
+                # even says "Configured unified Memory with default storage" —
+                # and then thrown away one line later, so chat had no recall or
+                # persistence while crews (which never read agent.memory) worked.
+                #
+                # The unified Memory is also the bus ``source`` for this run's
+                # MemoryQuery/Save/Retrieval events (emitted with source=<the
+                # Memory> and, unlike tool/LLM events, WITHOUT an agent_id), so
+                # the handlers scope by identity (``source is _agent_memory``) —
+                # tenant-safe for concurrent in-process light runs. None means
+                # memory was not attached (disabled / no backend) → no traces.
+                _agent_memory = await self._attach_memory(
                     agent, agent_spec, config, group_context,
                     group_id, prompt, execution_id, _log,
                 )
-                # The unified Memory instance attached above is the bus ``source``
-                # for this run's MemoryQuery/Save/Retrieval events (CrewAI emits them
-                # with source=<the Memory>, and — unlike tool/LLM events — WITHOUT an
-                # agent_id). Hold a reference so the memory handlers can scope by
-                # identity (``source is _agent_memory``), tenant-safe for concurrent
-                # in-process light runs. ``None``/``True``/``False`` means memory was
-                # not attached (disabled / no backend) → no memory traces.
-                _attached_mem = getattr(agent, "memory", None)
-                _agent_memory = _attached_mem if _attached_mem not in (None, True, False) else None
 
                 # This agent's own LLM instance. CrewAI emits tool/LLM events with
                 # ``source = <the LLM>`` (crewai/llm.py, llms/base_llm.py), and native
@@ -1471,8 +1479,8 @@ class LightAgentService:
         prompt: str,
         execution_id: str,
         log,
-    ) -> None:
-        """Attach a unified cognitive ``Memory`` to the single agent. The
+    ) -> Optional[Any]:
+        """Build this run's unified cognitive ``Memory`` and return it. The
         engine Agent does not consult memory itself — recall/persist are done
         by the memory_hooks around kickoff — chat-mode parity with crews.
 
@@ -1483,10 +1491,15 @@ class LightAgentService:
 
         Memory is ON by default; the chat "No memory" toggle arrives as
         ``agent_spec['memory'] is False`` and is honored here.
+
+        Returns the ``Memory`` instance, or ``None`` when memory is off or could
+        not be built. It is RETURNED rather than read back off the agent: the
+        engine's Agent is a pydantic model with no ``memory`` field, so the
+        assignment in ``_attach_crew_memory_to_agents`` raises and is swallowed.
         """
         if agent_spec.get("memory") is False:
             log("Memory disabled for this run")
-            return
+            return None
         try:
             from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
             from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
@@ -1532,7 +1545,7 @@ class LightAgentService:
             # "Disabled Configuration" → all memory types off → no memory.
             if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
                 log("Memory backend is the 'Disabled Configuration' — no memory")
-                return
+                return None
 
             backend_type = memory_backend_config.get("backend_type")
             embedder_for_backend = (
@@ -1556,7 +1569,9 @@ class LightAgentService:
                 memory_llm_override=memory_llm_override,
             )
 
-            attached = getattr(agent, "memory", None)
+            # The Memory the components step actually built — the crew_kwargs
+            # entry, not the agent attribute it failed to assign.
+            attached = crew_kwargs.get("memory")
             if attached not in (None, True, False):
                 scope = (
                     "session"
@@ -1564,6 +1579,7 @@ class LightAgentService:
                     else "workspace"
                 )
                 log(f"Memory enabled ({backend_type}, {scope} scope) — recall + persist")
+                return attached
             else:
                 # Report the reason the memory layer RECORDED, not a guess.
                 # "no backend/embedder" named two possible causes and identified
@@ -1579,6 +1595,7 @@ class LightAgentService:
         except Exception as mem_err:  # noqa: BLE001
             logger.warning(f"[light_agent] memory setup skipped: {mem_err}")
             log(f"Memory unavailable for this run — setup raised: {mem_err}")
+        return None
 
 
 async def run_light_agent(

@@ -27,7 +27,12 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
     """Patch the CrewMemoryService building blocks the light path composes.
 
     ``configure_crew_memory_components`` is given a side effect that mirrors the
-    real one: it sets ``agent.memory`` on each agent in ``crew_kwargs['agents']``.
+    real one: it puts the built Memory in ``crew_kwargs["memory"]``.
+
+    It used to mirror the BUG instead — setting ``agent.memory`` on each agent,
+    which only works on a SimpleNamespace. The real function's attempt to do
+    that raises on the pydantic Agent and is swallowed, so a mock that "worked"
+    kept the whole test file green while chat memory was dead.
     """
     mem_service = MagicMock()
     mem_service.fetch_memory_backend_config = AsyncMock(return_value={"backend_type": "databricks"})
@@ -37,9 +42,7 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
     mem_service.resolve_memory_llm_override = AsyncMock(return_value=None)
 
     def _configure(crew_kwargs, *a, **k):
-        if sets_memory:
-            for ag in crew_kwargs.get("agents", []):
-                ag.memory = MagicMock(name="UnifiedMemory")
+        crew_kwargs["memory"] = MagicMock(name="UnifiedMemory") if sets_memory else False
         return crew_kwargs
     mem_service.configure_crew_memory_components = MagicMock(side_effect=_configure)
 
@@ -66,19 +69,44 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
 
 
 @pytest.mark.asyncio
-async def test_attach_memory_sets_agent_memory_when_backend_configured():
-    """With a configured backend, a unified Memory is built and attached to the
-    single agent (so kickoff_async will recall + persist)."""
-    agent = SimpleNamespace(memory=None, id="aid-1")
+async def test_attach_memory_returns_the_memory_it_built():
+    """With a configured backend, a unified Memory is built and RETURNED.
+
+    It must be returned, not read back off the agent. This test previously used
+    a SimpleNamespace agent and asserted ``agent.memory is not None`` — which a
+    namespace accepts happily, so it stayed green while the real engine Agent (a
+    pydantic model with no ``memory`` field and no extra="allow") raised
+
+        ValueError: "Agent" object has no field "memory"
+
+    inside _attach_crew_memory_to_agents, which swallows it at debug level. The
+    Memory was built correctly on every chat run and discarded one line later:
+    chat had no recall or persistence while crews — which never read
+    agent.memory — worked fine.
+    """
+    from kasal_engine.core.agent import Agent
+
+    agent = Agent(role="Assistant", goal="g", backstory="b")   # the REAL class
     p_service, p_cfg, p_emb, p_mbc, mem_service = _patches()
     logs = []
     with p_service, p_cfg, p_emb, p_mbc:
-        await LightAgentService()._attach_memory(
+        memory = await LightAgentService()._attach_memory(
             agent, {"role": "Assistant"}, _config(), None, "g1", "hi", "exec-1", logs.append
         )
-    assert agent.memory is not None and agent.memory not in (True, False)
+    assert memory is not None and memory not in (True, False)
     mem_service.configure_crew_memory_components.assert_called_once()
     assert any("Memory enabled" in m for m in logs)
+
+
+@pytest.mark.asyncio
+async def test_engine_agent_cannot_hold_a_memory_attribute():
+    """Pins the constraint the bug hinged on, so a future 'just set it on the
+    agent' change fails loudly here instead of silently losing memory."""
+    from kasal_engine.core.agent import Agent
+
+    agent = Agent(role="Assistant", goal="g", backstory="b")
+    with pytest.raises(ValueError):
+        agent.memory = object()
 
 
 @pytest.mark.asyncio
