@@ -49,6 +49,20 @@ interface CrewOptimizeDialogProps {
 
 const POLL_INTERVAL_MS = 10000;
 
+/* Layout constants for the run-configuration row. Every control in that row has
+   a width that does NOT depend on its content, so the row wraps only when the
+   dialog itself is narrow — never because a model id happens to be long or
+   because the start button's label changed to "Run in progress…". */
+const MODEL_SELECT_WIDTH = 260;
+const START_BUTTON_WIDTH = 172;
+const ELLIPSIS_SELECT_SX = {
+  '& .MuiSelect-select': {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+} as const;
+
 const statusColor = (
   status: PromptOptimizationRun['status'],
 ): 'default' | 'info' | 'success' | 'error' | 'warning' => {
@@ -418,9 +432,19 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
         {/* Run configuration */}
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 230 }}>
+            {/* FIXED width, not minWidth: a Select sizes itself to its selected
+                value, so a long model id used to widen this control and shove
+                the Start button onto its own line. Truncate instead, so the row
+                is laid out identically whatever model is picked. */}
+            <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
               <InputLabel>Model</InputLabel>
-              <Select value={model} label="Model" onChange={(e) => setModel(e.target.value)}>
+              <Select
+                value={model}
+                label="Model"
+                onChange={(e) => setModel(e.target.value)}
+                SelectDisplayProps={{ title: model || 'Default' }}
+                sx={ELLIPSIS_SELECT_SX}
+              >
                 <MenuItem value="">
                   <em>Default</em>
                 </MenuItem>
@@ -449,13 +473,14 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               placeholder="what does a good deliverable look like?"
               value={guidance}
               onChange={(e) => setGuidance(e.target.value)}
-              sx={{ flex: 1, minWidth: 220 }}
+              sx={{ flex: 1, minWidth: 180 }}
             />
             <Button
               variant="contained"
               onClick={handleStart}
               disabled={starting || hasActiveRun || !crewId}
               startIcon={starting ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+              sx={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: START_BUTTON_WIDTH }}
             >
               {starting ? 'Starting…' : hasActiveRun ? 'Run in progress…' : 'Start GEPA'}
             </Button>

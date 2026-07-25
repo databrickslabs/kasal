@@ -31,6 +31,23 @@ import { OPTIMIZABLE_TEMPLATES } from './optimizableTemplates';
 
 const POLL_INTERVAL_MS = 5000;
 
+/* Layout constants for the run-configuration row — kept in step with
+   CrewOptimizeDialog so both optimizer surfaces line up. Widths are content
+   independent: a Select sizes itself to its selected value, so a long template
+   or model id would otherwise widen its control and shove the start button onto
+   its own line. The button is fixed too, since its label changes to
+   "Run in progress…" mid-run. */
+const TEMPLATE_SELECT_WIDTH = 280;
+const MODEL_SELECT_WIDTH = 260;
+const START_BUTTON_WIDTH = 200;
+const ELLIPSIS_SELECT_SX = {
+  '& .MuiSelect-select': {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+} as const;
+
 const statusColor = (
   status: PromptOptimizationRun['status'],
 ): 'default' | 'info' | 'success' | 'error' => {
@@ -179,12 +196,14 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {!fixedTemplate && (
-              <FormControl size="small" sx={{ minWidth: 280 }}>
+              <FormControl size="small" sx={{ width: TEMPLATE_SELECT_WIDTH, flexShrink: 0 }}>
                 <InputLabel>Template</InputLabel>
                 <Select
                   value={templateName}
                   label="Template"
                   onChange={(e) => setTemplateName(e.target.value)}
+                  SelectDisplayProps={{ title: templateName }}
+                  sx={ELLIPSIS_SELECT_SX}
                 >
                   {OPTIMIZABLE_TEMPLATES.map((tpl) => (
                     <MenuItem key={tpl.name} value={tpl.name}>
@@ -194,9 +213,16 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
                 </Select>
               </FormControl>
             )}
-            <FormControl size="small" sx={{ minWidth: 260 }}>
+            {/* Fixed width, not minWidth — see MODEL_SELECT_WIDTH. */}
+            <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
               <InputLabel>Model</InputLabel>
-              <Select value={model} label="Model" onChange={(e) => setModel(e.target.value)}>
+              <Select
+                value={model}
+                label="Model"
+                onChange={(e) => setModel(e.target.value)}
+                SelectDisplayProps={{ title: model || 'Default (dispatcher fast model)' }}
+                sx={ELLIPSIS_SELECT_SX}
+              >
                 <MenuItem value="">
                   <em>Default (dispatcher fast model)</em>
                 </MenuItem>
@@ -222,6 +248,7 @@ const PromptOptimization: React.FC<PromptOptimizationProps> = ({ fixedTemplate }
               onClick={handleStart}
               disabled={starting || hasActiveRun}
               startIcon={starting ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+              sx={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: START_BUTTON_WIDTH }}
             >
               {starting
                 ? 'Starting…'
