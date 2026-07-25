@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   IconButton,
@@ -9,6 +9,7 @@ import {
   Typography,
   Switch,
   FormControl,
+  FormHelperText,
   InputLabel,
   Select,
   MenuItem,
@@ -33,6 +34,7 @@ import { ModelService } from '../../api/ModelService';
 import { useCrewExecutionStore, ReasoningConfig } from '../../store/crewExecution';
 import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';
+import { useTabManagerStore } from '../../store/tabManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 
@@ -97,7 +99,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
-  const [reasoningModel, setReasoningModel] = useState<string>('');
   const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
 
   const toggleLayoutOrientation = useCallback(() => {
@@ -119,12 +120,10 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
 
   const {
-    setReasoningLLM,
     setProcessType: setStoreProcessType,
     setManagerLLM,
     processType: storeProcessType,
     managerLLM: storeManagerLLM,
-    reasoningLLM: storeReasoningLLM,
     reasoningConfig,
     setReasoningConfig,
   } = useCrewExecutionStore();
@@ -136,6 +135,33 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   // Get tutorial status
   const { hasSeenTutorial } = useWorkflowStore();
 
+  // Canvas nodes come from the ACTIVE TAB, not useWorkflowStore: that store has
+  // a single shared nodes array that goes stale when switching between the crew
+  // and flow canvases (the same reason handleRunClick resolves from the tab).
+  const activeTabNodes = useTabManagerStore(
+    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.nodes,
+  );
+
+  // Reasoning applies to each AGENT's own model, so whether the control can do
+  // anything depends on the agents currently on the canvas — not on a crew-level
+  // model setting. Distinct models first, so the helper text names them.
+  const agentModelNames = useMemo(() => {
+    const seen = new Set<string>();
+    for (const node of activeTabNodes || []) {
+      if (node.type !== 'agentNode') continue;
+      const llm = (node.data as { llm?: string } | undefined)?.llm;
+      if (llm) seen.add(llm);
+    }
+    return Array.from(seen);
+  }, [activeTabNodes]);
+
+  // Enabled when ANY agent's model has a reasoning budget: a mixed crew still
+  // benefits, and the engine applies the effort per agent.
+  const reasoningSupported = useMemo(
+    () => agentModelNames.some((key: string) => models[key]?.supports_reasoning_effort),
+    [agentModelNames, models],
+  );
+
   // Fetch models on component mount
   useEffect(() => {
     const fetchModels = async () => {
@@ -144,13 +170,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         const modelService = ModelService.getInstance();
         const response = await modelService.getEnabledModels();
         setModels(response);
-
-        // Initialize reasoning model when models are loaded
-        if (response && Object.keys(response).length > 0 && !reasoningModel) {
-          const firstModel = Object.keys(response)[0];
-          setReasoningModel(firstModel);
-          setReasoningLLM(firstModel);
-        }
 
         // Initialize manager model when models are loaded
         if (response && Object.keys(response).length > 0) {
@@ -169,7 +188,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     };
 
     fetchModels();
-  }, [reasoningModel, setReasoningLLM, managerModel, setManagerLLM, storeManagerLLM]);
+  }, [managerModel, setManagerLLM, storeManagerLLM]);
 
   // Sync local state with store values when they change (e.g., when loading a crew)
   useEffect(() => {
@@ -178,19 +197,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       setManagerModel(storeManagerLLM);
     }
   }, [storeManagerLLM, managerModel]);
-
-  useEffect(() => {
-    if (storeReasoningLLM && storeReasoningLLM !== reasoningModel) {
-      console.log('LeftSidebar: Syncing reasoning model from store:', storeReasoningLLM);
-      setReasoningModel(storeReasoningLLM);
-    }
-  }, [storeReasoningLLM, reasoningModel]);
-
-  const handleReasoningModelChange = useCallback((event: SelectChangeEvent) => {
-    const value = event.target.value;
-    setReasoningModel(value);
-    setReasoningLLM(value);
-  }, [setReasoningLLM]);
 
   const handleManagerModelChange = useCallback((event: SelectChangeEvent) => {
     const value = event.target.value;
@@ -370,40 +376,24 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 />
               </Box>
 
+              {/* No "Reasoning LLM" picker: reasoning is the model's OWN native
+                  thinking budget applied to each agent's configured LLM, not a
+                  separate model. The backend has ignored reasoning_llm since the
+                  planner was removed (crew_config_builder logs a warning and
+                  drops it), so the control only ever implied a capability that
+                  does not exist. */}
               {reasoningEnabled && (
                 <>
-                  <FormControl size="small" fullWidth sx={{ mt: 1 }}>
-                    <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning LLM</InputLabel>
-                    <Select
-                      value={reasoningModel}
-                      onChange={handleReasoningModelChange}
-                      label="Reasoning LLM"
-                      disabled={isLoadingModels}
-                      sx={{ fontSize: '0.75rem' }}
-                      renderValue={(selected: string) => {
-                        const model = models[selected];
-                        return model ? model.name : selected;
-                      }}
-                    >
-                      {isLoadingModels ? (
-                        <MenuItem value="">
-                          <CircularProgress size={16} />
-                        </MenuItem>
-                      ) : Object.keys(models).length === 0 ? (
-                        <MenuItem value="">No models available</MenuItem>
-                      ) : (
-                        Object.entries(models).map(([key, model]) => (
-                          <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
-                            <span>{model.name}</span>
-                          </MenuItem>
-                        ))
-                      )}
-                    </Select>
-                  </FormControl>
-
-                  {/* Thinking budget — maps to the model's native reasoning effort.
-                      Ignored by models that do not expose a reasoning budget. */}
-                  <FormControl size="small" fullWidth sx={{ mt: 1 }}>
+                  {/* Thinking budget — the model's native reasoning effort.
+                      Disabled when no agent on the canvas runs a model that has
+                      one: the engine drops the setting in that case, so offering
+                      it would let the user pick High and see nothing change. */}
+                  <FormControl
+                    size="small"
+                    fullWidth
+                    sx={{ mt: 1 }}
+                    disabled={!reasoningSupported}
+                  >
                     <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning Effort</InputLabel>
                     <Select
                       value={reasoningConfig.reasoning_effort ?? 'low'}
@@ -415,6 +405,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       <MenuItem value="medium" sx={{ fontSize: '0.75rem' }}>Medium — balanced thinking</MenuItem>
                       <MenuItem value="high" sx={{ fontSize: '0.75rem' }}>High — maximum thinking (slowest)</MenuItem>
                     </Select>
+                    {!reasoningSupported && (
+                      <FormHelperText sx={{ fontSize: '0.65rem' }}>
+                        {agentModelNames.length
+                          ? `${agentModelNames.join(', ')} has no reasoning budget — this setting would be ignored.`
+                          : 'Add an agent whose model has a reasoning budget (e.g. a GPT-5 / o3 / o4 model).'}
+                      </FormHelperText>
+                    )}
                   </FormControl>
                 </>
               )}

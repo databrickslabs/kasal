@@ -101,9 +101,12 @@ def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -
         model_name = spec_llm.get('model') if isinstance(spec_llm, dict) else spec_llm
 
     if not model_supports_reasoning_effort(model_name):
-        logger.debug(
-            f"Model {model_name!r} has no native reasoning budget — dropping "
-            f"reasoning_effort={effort!r} for agent {label}"
+        # INFO, not debug: the user explicitly asked for a reasoning budget and
+        # is not getting one. At debug this was invisible, so the setting looked
+        # applied and the run looked identical — with nothing anywhere saying why.
+        logger.info(
+            f"Model {model_name!r} has no native reasoning budget — "
+            f"reasoning_effort={effort!r} has no effect for agent {label}"
         )
         return
 

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelConfigBase(BaseModel):
@@ -30,8 +30,23 @@ class ModelConfigResponse(ModelConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    
+    # Derived, never stored: whether this model accepts a native reasoning
+    # budget. The UI needs it to avoid offering a Reasoning Effort control that
+    # the engine will silently discard — the allow-list lives in
+    # src/utils/model_config.py and is computed here so the UI and the engine
+    # can never disagree about which models it applies to.
+    supports_reasoning_effort: bool = Field(
+        False, description="Model accepts a native reasoning-effort budget"
+    )
+
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _derive_reasoning_support(self) -> "ModelConfigResponse":
+        from src.utils.model_config import model_supports_reasoning_effort
+
+        self.supports_reasoning_effort = model_supports_reasoning_effort(self.key)
+        return self
 class ModelToggleUpdate(BaseModel):
     """Schema for toggling model enabled status."""
     enabled: bool = Field(..., description="New enabled status")
