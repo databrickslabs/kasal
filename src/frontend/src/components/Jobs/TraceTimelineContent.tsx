@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -36,6 +36,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import BuildIcon from '@mui/icons-material/Build';
 import TargetIcon from '@mui/icons-material/TrackChanges';
 import TuneIcon from '@mui/icons-material/Tune';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import {
   isEventClickable,
   getEventIcon as getEventIconConfig,
@@ -285,18 +286,21 @@ export interface TraceTimelineContentProps {
   selectedEvent: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   } | null;
   setSelectedEvent: (event: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   } | null) => void;
   handleEventClick: (event: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   }) => void;
@@ -317,6 +321,33 @@ export interface TraceTimelineContentProps {
   formatTimeDelta: (start: Date, timestamp: Date) => string;
   truncateTaskName: (name: string, maxLength?: number) => string;
 }
+
+// Below this threshold the duration column renders blank — the time still
+// belongs to that row conceptually (sub-50ms rounding noise is acceptable
+// slack in the task-span accounting).
+const MIN_ROW_DURATION_MS = 50;
+
+// Shared duration column: ONE right-aligned muted slot on every event row.
+// The value is the row's ADDITIVE wall-time slice (own timestamp → next
+// visible row; last row → task end) so row durations sum to the task span.
+// Intrinsic op times are detail in the row's output dialog, not column values.
+const DURATION_COLUMN_SX = {
+  minWidth: 56,
+  textAlign: 'right',
+  fontFamily: 'monospace',
+  fontVariantNumeric: 'tabular-nums',
+  color: 'text.secondary',
+  flexShrink: 0,
+} as const;
+
+// Single hover affordance for clickable rows: a muted chevron that fades in.
+const OPEN_ICON_SX = {
+  fontSize: 16,
+  color: 'text.secondary',
+  opacity: 0,
+  transition: 'opacity 0.15s',
+  flexShrink: 0,
+} as const;
 
 const getEventIcon = (type: string): JSX.Element => {
   const iconProps = { fontSize: 'small' as const, sx: { fontSize: 16 } };
@@ -354,6 +385,58 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
   // Use runConfig from prop or from processedTraces
   const runConfig = runConfigProp ?? processedTraces?.runConfig;
 
+  // Compact run summary derived from the already-processed traces
+  const summaryStats = useMemo(() => {
+    if (!processedTraces || processedTraces.agents.length === 0) return null;
+
+    let llmCalls = 0;
+    let toolCalls = 0;
+    let toolResults = 0;
+    let memoryOps = 0;
+    let taskCount = 0;
+
+    const countEvent = (type: string) => {
+      if (type === 'llm' || type === 'llm_request') llmCalls++;
+      else if (type === 'tool' || type === 'mcp_tool') toolCalls++;
+      else if (type === 'tool_result' || type === 'mcp_tool_result') toolResults++;
+      else if (type.startsWith('memory')) memoryOps++;
+    };
+
+    processedTraces.agents.forEach((agent) => {
+      agent.agentEvents?.forEach((e) => countEvent(e.type));
+      agent.tasks.forEach((task) => {
+        if (!task.unassigned) taskCount++;
+        task.events.forEach((e) => countEvent(e.type));
+      });
+    });
+
+    return {
+      totalDuration: processedTraces.totalDuration,
+      agentCount: processedTraces.agents.length,
+      taskCount,
+      llmCalls,
+      // Tool "(input)"/"(output)" rows come in pairs — count calls, falling
+      // back to result rows for paths that only emit results.
+      toolCalls: toolCalls > 0 ? toolCalls : toolResults,
+      memoryOps,
+    };
+  }, [processedTraces]);
+
+  const summaryItems = useMemo(() => {
+    if (!summaryStats) return [];
+    const plural = (n: number, word: string) => `${n} ${word}${n !== 1 ? 's' : ''}`;
+    const items: string[] = [];
+    if (summaryStats.totalDuration != null) {
+      items.push(`${formatDuration(summaryStats.totalDuration)} total`);
+    }
+    items.push(plural(summaryStats.agentCount, 'agent'));
+    if (summaryStats.taskCount > 0) items.push(plural(summaryStats.taskCount, 'task'));
+    if (summaryStats.llmCalls > 0) items.push(plural(summaryStats.llmCalls, 'LLM call'));
+    if (summaryStats.toolCalls > 0) items.push(plural(summaryStats.toolCalls, 'tool call'));
+    if (summaryStats.memoryOps > 0) items.push(plural(summaryStats.memoryOps, 'memory op'));
+    return items;
+  }, [summaryStats, formatDuration]);
+
   return (
     <Box sx={{ contain: 'content' }}>
       {/* View mode toggle + Run Config button */}
@@ -385,6 +468,28 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
           </Button>
         )}
       </Box>
+
+      {/* Compact run summary strip */}
+      {summaryItems.length > 0 && (
+        <Box
+          sx={{
+            mx: 2,
+            mt: 0.5,
+            px: 1.5,
+            py: 0.75,
+            bgcolor: 'action.hover',
+            borderRadius: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.75,
+          }}
+        >
+          <AccessTimeIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.4 }}>
+            {summaryItems.join(' · ')}
+          </Typography>
+        </Box>
+      )}
 
       {/* Content area */}
       <Box sx={{ p: 0 }}>
@@ -565,15 +670,11 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                           cursor: isClickable ? 'pointer' : 'default',
                           '&:hover': {
                             bgcolor: isClickable ? 'action.hover' : 'transparent',
-                            '& .output-hint': { opacity: 1 }
+                            '& .row-open-icon': { opacity: 0.6 }
                           }
                         }}
                         onClick={() => isClickable && handleEventClick(event)}
                       >
-                        <Typography variant="caption" sx={{ minWidth: 60 }}>
-                          {processedTraces.globalStart &&
-                            formatTimeDelta(processedTraces.globalStart, event.timestamp)}
-                        </Typography>
                         <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
                           <AssignmentIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
                         </Box>
@@ -588,24 +689,13 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                         >
                           {event.description}
                         </Typography>
-                        {event.duration && (
-                          <Chip size="small" label={formatDuration(event.duration)} sx={{ height: 20 }} />
-                        )}
+                        <Typography variant="caption" sx={DURATION_COLUMN_SX}>
+                          {event.duration != null && event.duration >= MIN_ROW_DURATION_MS
+                            ? formatDuration(event.duration)
+                            : ''}
+                        </Typography>
                         {isClickable && (
-                          <Chip
-                            className="output-hint"
-                            size="small"
-                            label="View Plan"
-                            sx={{
-                              height: 18,
-                              fontSize: '0.65rem',
-                              bgcolor: 'secondary.main',
-                              color: 'white',
-                              opacity: 0.7,
-                              transition: 'opacity 0.2s',
-                              '& .MuiChip-label': { px: 0.5 }
-                            }}
-                          />
+                          <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
                         )}
                       </Box>
                     );
@@ -641,11 +731,6 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                       label={formatDuration(agent.duration)}
                       icon={<AccessTimeIcon />}
                     />
-                    {processedTraces.globalStart && (
-                      <Typography variant="caption" color="text.secondary">
-                        ({formatTimeDelta(processedTraces.globalStart, agent.endTime)})
-                      </Typography>
-                    )}
                   </Box>
                   {/* A task-less light/chat run has a single "unassigned"
                       bucket — don't frame it as a crew task. */}
@@ -705,16 +790,11 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                                   cursor: isClickable ? 'pointer' : 'default',
                                   '&:hover': {
                                     bgcolor: isClickable ? 'action.hover' : 'transparent',
-                                    '& .output-hint': { opacity: 1 },
-                                    '& .click-hint': { visibility: 'visible' }
+                                    '& .row-open-icon': { opacity: 0.6 }
                                   }
                                 }}
                                 onClick={() => isClickable && handleEventClick(event)}
                               >
-                                <Typography variant="caption" sx={{ minWidth: 60 }}>
-                                  {processedTraces.globalStart &&
-                                    formatTimeDelta(processedTraces.globalStart, event.timestamp)}
-                                </Typography>
                                 <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
                                   {getEventIcon(event.type)}
                                 </Box>
@@ -729,60 +809,13 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                                 >
                                   {event.description}
                                 </Typography>
-                                {event.duration && (
-                                  <Chip size="small" label={formatDuration(event.duration)} sx={{ height: 20 }} />
-                                )}
+                                <Typography variant="caption" sx={DURATION_COLUMN_SX}>
+                                  {event.duration != null && event.duration >= MIN_ROW_DURATION_MS
+                                    ? formatDuration(event.duration)
+                                    : ''}
+                                </Typography>
                                 {isClickable && (
-                                  <>
-                                    <Chip
-                                      className="output-hint"
-                                      size="small"
-                                      label="View"
-                                      sx={{
-                                        height: 18,
-                                        fontSize: '0.65rem',
-                                        bgcolor: 'primary.main',
-                                        color: 'white',
-                                        opacity: 0.7,
-                                        transition: 'opacity 0.2s',
-                                        '& .MuiChip-label': { px: 0.5 }
-                                      }}
-                                    />
-                                    <Typography
-                                      className="click-hint"
-                                      variant="caption"
-                                      sx={{
-                                        position: 'absolute',
-                                        right: -10,
-                                        top: '50%',
-                                        transform: 'translateY(-50%)',
-                                        bgcolor: 'grey.900',
-                                        color: 'white',
-                                        px: 1,
-                                        py: 0.5,
-                                        borderRadius: 1,
-                                        fontSize: '0.7rem',
-                                        visibility: 'hidden',
-                                        zIndex: 1000,
-                                        whiteSpace: 'nowrap',
-                                        '&::before': {
-                                          content: '""',
-                                          position: 'absolute',
-                                          left: -4,
-                                          top: '50%',
-                                          transform: 'translateY(-50%)',
-                                          width: 0,
-                                          height: 0,
-                                          borderTop: '4px solid transparent',
-                                          borderBottom: '4px solid transparent',
-                                          borderRight: '4px solid',
-                                          borderRightColor: 'grey.900'
-                                        }
-                                      }}
-                                    >
-                                      Click to view reasoning
-                                    </Typography>
-                                  </>
+                                  <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
                                 )}
                               </Box>
                             );
@@ -840,6 +873,13 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                               label={formatDuration(task.duration)}
                               variant="outlined"
                             />
+                            {/* Global timing shown once here — event rows below
+                                are offset from this task's own start. */}
+                            {processedTraces.globalStart && !task.unassigned && (
+                              <Typography variant="caption" color="text.secondary">
+                                starts {formatTimeDelta(processedTraces.globalStart, task.startTime)}
+                              </Typography>
+                            )}
                           </Box>
 
                           <Collapse in={expandedTasks.has(taskKey)}>
@@ -864,16 +904,11 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                                       cursor: isClickable ? 'pointer' : 'default',
                                       '&:hover': {
                                         bgcolor: isClickable ? 'action.hover' : 'transparent',
-                                        '& .output-hint': { opacity: 1 },
-                                        '& .click-hint': { visibility: 'visible' }
+                                        '& .row-open-icon': { opacity: 0.6 }
                                       }
                                     }}
                                     onClick={() => isClickable && handleEventClick(event)}
                                   >
-                                    <Typography variant="caption" sx={{ minWidth: 60 }}>
-                                      {processedTraces.globalStart &&
-                                        formatTimeDelta(processedTraces.globalStart, event.timestamp)}
-                                    </Typography>
                                     <Box sx={{ minWidth: 20, display: 'flex', alignItems: 'center' }}>
                                       {getEventIcon(event.type)}
                                     </Box>
@@ -888,64 +923,13 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                                     >
                                       {event.description}
                                     </Typography>
-                                    {event.duration && (
-                                      <Chip
-                                        size="small"
-                                        label={formatDuration(event.duration)}
-                                        sx={{ height: 20 }}
-                                      />
-                                    )}
+                                    <Typography variant="caption" sx={DURATION_COLUMN_SX}>
+                                      {event.duration != null && event.duration >= MIN_ROW_DURATION_MS
+                                        ? formatDuration(event.duration)
+                                        : ''}
+                                    </Typography>
                                     {isClickable && (
-                                      <>
-                                        <Chip
-                                          className="output-hint"
-                                          size="small"
-                                          label="View"
-                                          sx={{
-                                            height: 18,
-                                            fontSize: '0.65rem',
-                                            bgcolor: 'primary.main',
-                                            color: 'white',
-                                            opacity: 0.7,
-                                            transition: 'opacity 0.2s',
-                                            '& .MuiChip-label': { px: 0.5 }
-                                          }}
-                                        />
-                                        <Typography
-                                          className="click-hint"
-                                          variant="caption"
-                                          sx={{
-                                            position: 'absolute',
-                                            right: -10,
-                                            top: '50%',
-                                            transform: 'translateY(-50%)',
-                                            bgcolor: 'grey.900',
-                                            color: 'white',
-                                            px: 1,
-                                            py: 0.5,
-                                            borderRadius: 1,
-                                            fontSize: '0.7rem',
-                                            visibility: 'hidden',
-                                            zIndex: 1000,
-                                            whiteSpace: 'nowrap',
-                                            '&::before': {
-                                              content: '""',
-                                              position: 'absolute',
-                                              left: -4,
-                                              top: '50%',
-                                              transform: 'translateY(-50%)',
-                                              width: 0,
-                                              height: 0,
-                                              borderTop: '4px solid transparent',
-                                              borderBottom: '4px solid transparent',
-                                              borderRight: '4px solid',
-                                              borderRightColor: 'grey.900'
-                                            }
-                                          }}
-                                        >
-                                          Click to view output
-                                        </Typography>
-                                      </>
+                                      <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
                                     )}
                                   </Box>
                                 );
@@ -1267,6 +1251,11 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                 <Typography variant="caption" color="text.secondary">
                   Event Type: {selectedEvent.type}
                 </Typography>
+                {selectedEvent.intrinsicMs != null && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    Measured operation time: {formatDuration(selectedEvent.intrinsicMs)}
+                  </Typography>
+                )}
               </Box>
               <IconButton onClick={() => setSelectedEvent(null)} size="small">
                 <CloseIcon />

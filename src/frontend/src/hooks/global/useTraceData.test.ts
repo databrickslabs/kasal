@@ -57,6 +57,61 @@ describe('processTraces — light/chat agent (task-less run)', () => {
   });
 });
 
+describe('processTraces — additive row durations', () => {
+  it('row durations sum to the task span, even across filtered raw traces', () => {
+    const t0 = new Date('2024-01-01T00:00:00.000Z').getTime();
+    const at = (ms: number) => new Date(t0 + ms).toISOString();
+
+    const traces: Trace[] = [
+      makeTrace({ event_source: 'Worker', event_type: 'task_started', task_id: 'T1',
+                  event_context: 'Do the work', created_at: at(0) }),
+      makeTrace({ event_source: 'Worker', event_type: 'memory_retrieval', task_id: 'T1',
+                  trace_metadata: { query_time_ms: 601, results_count: 6 },
+                  output: { content: 'mem' }, created_at: at(100) }),
+      makeTrace({ event_source: 'Worker', event_type: 'llm_call', task_id: 'T1',
+                  trace_metadata: { model: 'm' }, created_at: at(500) }),
+      makeTrace({ event_source: 'Worker', event_type: 'llm_response', task_id: 'T1',
+                  output: { content: 'answer' }, created_at: at(6000) }),
+      // Filtered raw trace (guardrail_started → null): its wall time must be
+      // donated to the preceding visible row (the LLM Response), not vanish.
+      makeTrace({ event_source: 'Worker', event_type: 'guardrail_started', task_id: 'T1',
+                  created_at: at(6300) }),
+      makeTrace({ event_source: 'Worker', event_type: 'llm_guardrail', task_id: 'T1',
+                  trace_metadata: { success: true }, output: { content: 'ok' },
+                  created_at: at(16000) }),
+      makeTrace({ event_source: 'Worker', event_type: 'task_completed', task_id: 'T1',
+                  event_context: 'Do the work', output: { content: 'done' },
+                  created_at: at(17000) }),
+    ];
+
+    const result = processTraces(traces);
+    const task = result.agents[0].tasks[0];
+
+    // Task header duration = first-event → last-event span.
+    expect(task.duration).toBe(17000);
+
+    // Additivity: sum of the visible rows' wall slices equals the task span
+    // (sub-50ms suppressed-row slack allowed, well within 200ms here).
+    const sum = task.events.reduce((acc, e) => acc + (e.duration ?? 0), 0);
+    expect(Math.abs(sum - task.duration)).toBeLessThanOrEqual(200);
+
+    // The LLM Response row carries its TRUE gap to the next visible row
+    // (response → guardrail), including the filtered guardrail_started slice.
+    const response = task.events.find(e => e.type === 'llm_response');
+    expect(response!.duration).toBe(10000);
+
+    // Intrinsic op time is detail (intrinsicMs), not the column value: the
+    // memory row's duration is its wall slice, not query_time_ms.
+    const memory = task.events.find(e => e.type === 'memory_retrieval');
+    expect(memory!.duration).toBe(400);
+    expect(memory!.intrinsicMs).toBe(601);
+
+    // Last row closes the span (task end − its own timestamp).
+    const last = task.events[task.events.length - 1];
+    expect(last.duration).toBe(0);
+  });
+});
+
 describe('processTraces — crew run (has task ids)', () => {
   it('keeps a stray no-task trace under "Unassigned" (not flagged)', () => {
     const traces: Trace[] = [

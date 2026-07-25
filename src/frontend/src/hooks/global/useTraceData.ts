@@ -7,6 +7,7 @@ import {
 } from '../../components/Jobs/traceEventProcessors';
 import TraceService from '../../api/TraceService';
 import { useRunStatusStore, Trace } from '../../store/runStatus';
+import { formatDurationMs } from '../../utils/formatDuration';
 
 interface UseTraceDataParams {
   runId: string;
@@ -28,18 +29,21 @@ interface UseTraceDataReturn {
   selectedEvent: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   } | null;
   setSelectedEvent: (event: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   } | null) => void;
   handleEventClick: (event: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   }) => void;
@@ -338,13 +342,15 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       const taskStart = new Date(taskTraces[0].created_at);
       const taskEnd = new Date(taskTraces[taskTraces.length - 1].created_at);
 
-      const events = taskTraces.map((trace, idx) => {
+      // Exhaustive wall-time accounting: build the VISIBLE rows first, then
+      // give each row the slice from its own timestamp to the NEXT visible
+      // row's (raw traces filtered out by the processors donate their time to
+      // the preceding visible row); the last row runs to the task end. By
+      // construction the row durations sum to the task span — no time is
+      // swallowed invisibly. Intrinsic op times (memory query/save, MCP call)
+      // are carried separately as detail — never as the column value.
+      const visibleEvents = taskTraces.map((trace) => {
         const timestamp = new Date(trace.created_at);
-        const nextTrace = taskTraces[idx + 1];
-        const duration = nextTrace
-          ? new Date(nextTrace.created_at).getTime() - timestamp.getTime()
-          : undefined;
-
         const processed = processTraceEvent(trace);
         if (!processed) return null;
 
@@ -352,11 +358,18 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
           type: processed.type,
           description: processed.description,
           timestamp,
-          duration,
+          intrinsicMs: processed.durationMs,
           output: extractOutputForDisplay(trace.output),
           extraData: extractExtraData(trace)
         };
       }).filter((event): event is NonNullable<typeof event> => event !== null);
+
+      const events = visibleEvents.map((event, idx) => ({
+        ...event,
+        duration: idx + 1 < visibleEvents.length
+          ? visibleEvents[idx + 1].timestamp.getTime() - event.timestamp.getTime()
+          : taskEnd.getTime() - event.timestamp.getTime(),
+      }));
 
       return {
         taskName: displayName,
@@ -382,6 +395,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
         description: processed?.description ?? 'Agent Reasoning',
         timestamp,
         duration,
+        intrinsicMs: processed?.durationMs,
         output: extractOutputForDisplay(trace.output),
         extraData: extractExtraData(trace)
       };
@@ -427,16 +441,17 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 }
 
 const formatDuration = (ms: number): string => {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = seconds / 60;
-  return `${minutes.toFixed(1)}m`;
+  // Offsets/chips deal in whole-ms timestamp deltas — show a literal zero
+  // instead of the helper's "<1 ms" (which is meant for measured sub-ms times).
+  if (ms <= 0) return '0 ms';
+  return formatDurationMs(ms);
 };
 
+// Offset column: ONE format everywhere — seconds with one decimal ("+0.0s",
+// "+7.0s", "+11.8s") so offsets line up and read as a single system.
 const formatTimeDelta = (start: Date, timestamp: Date): string => {
-  const delta = timestamp.getTime() - start.getTime();
-  return `+${formatDuration(delta)}`;
+  const deltaSec = Math.max(0, timestamp.getTime() - start.getTime()) / 1000;
+  return `+${deltaSec.toFixed(1)}s`;
 };
 
 const truncateTaskName = (name: string, maxLength = 80): string => {
@@ -467,6 +482,7 @@ export function useTraceData({
   const [selectedEvent, setSelectedEvent] = useState<{
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   } | null>(null);
@@ -593,6 +609,7 @@ export function useTraceData({
   const handleEventClick = useCallback((event: {
     type: string;
     description: string;
+    intrinsicMs?: number;
     output?: string | Record<string, unknown>;
     extraData?: Record<string, unknown>;
   }) => {

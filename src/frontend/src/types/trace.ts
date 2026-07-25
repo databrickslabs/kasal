@@ -39,7 +39,12 @@ export interface TraceEvent {
   type: string;
   description: string;
   timestamp: Date;
+  /** Additive wall-time slice: own timestamp → next visible row (last row →
+   *  task end). Row durations sum to the task span by construction. */
   duration?: number;
+  /** Intrinsic measured op time (memory query/save ms, MCP call ms). Detail
+   *  only — shown in the event's output dialog, never in the duration column. */
+  intrinsicMs?: number;
   output?: string | Record<string, unknown>;
   extraData?: Record<string, unknown>;
 }

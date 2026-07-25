@@ -123,7 +123,7 @@ describe('memory_retrieval_completed processor', () => {
     expect(result!.description).toContain('Memory Context Retrieved');
   });
 
-  it('includes retrieval time from metadata', () => {
+  it('exposes retrieval time from metadata as durationMs (not in the label)', () => {
     const trace = makeTrace({
       event_type: 'memory_retrieval_completed',
       output: { content: 'data' },
@@ -131,10 +131,11 @@ describe('memory_retrieval_completed processor', () => {
     });
     const result = EVENT_PROCESSORS['memory_retrieval_completed'](trace);
     expect(result).not.toBeNull();
-    expect(result!.description).toContain('43ms');
+    expect(result!.description).toBe('Memory Context Retrieved');
+    expect(result!.durationMs).toBeCloseTo(42.7);
   });
 
-  it('includes retrieval time from extra_data fallback', () => {
+  it('exposes retrieval time from extra_data fallback as durationMs', () => {
     const trace = makeTrace({
       event_type: 'memory_retrieval_completed',
       output: { content: 'data' },
@@ -142,7 +143,8 @@ describe('memory_retrieval_completed processor', () => {
     });
     const result = EVENT_PROCESSORS['memory_retrieval_completed'](trace);
     expect(result).not.toBeNull();
-    expect(result!.description).toContain('100ms');
+    expect(result!.description).toBe('Memory Context Retrieved');
+    expect(result!.durationMs).toBe(100);
   });
 
   it('omits timing when not available', () => {
@@ -153,6 +155,7 @@ describe('memory_retrieval_completed processor', () => {
     const result = EVENT_PROCESSORS['memory_retrieval_completed'](trace);
     expect(result).not.toBeNull();
     expect(result!.description).toBe('Memory Context Retrieved');
+    expect(result!.durationMs).toBeUndefined();
   });
 });
 

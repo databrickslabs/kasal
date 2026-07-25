@@ -143,6 +143,10 @@ export function formatMemoryType(type: string): string {
 export interface ProcessedEvent {
   type: string;
   description: string;
+  /** Intrinsic measured duration in ms (memory query/save time, MCP call time,
+   *  ...). Kept out of the label — the timeline renders it in the shared
+   *  duration column; rows without one get a derived gap-to-next instead. */
+  durationMs?: number;
 }
 
 // ============================================================================
@@ -308,11 +312,10 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const formattedType = memoryType !== 'memory' ? formatMemoryType(memoryType) : '';
     const metadata = parseTraceMetadata(trace);
     const saveTime = metadata?.save_time_ms as number | undefined;
-    const timeSuffix = saveTime !== undefined ? ` — ${saveTime}ms` : '';
     const description = formattedType
-      ? `Memory Write (${formattedType})${timeSuffix}`
-      : `Memory Write${timeSuffix}`;
-    return { type: 'memory_write', description };
+      ? `Memory Write (${formattedType})`
+      : 'Memory Write';
+    return { type: 'memory_write', description, durationMs: saveTime };
   },
 
   // Memory Retrieval
@@ -327,13 +330,10 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
 
     let description = formattedType ? `Memory Read (${formattedType})` : 'Memory Read';
     if (resultsCount > 0) {
-      description += ` - ${resultsCount} results`;
-    }
-    if (queryTime !== undefined) {
-      description += ` — ${queryTime}ms`;
+      description += ` — ${resultsCount} results`;
     }
 
-    return { type: 'memory_retrieval', description };
+    return { type: 'memory_retrieval', description, durationMs: queryTime };
   },
 
   // Memory Retrieval Completed - aggregated memory context
@@ -341,11 +341,7 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const metadata = parseTraceMetadata(trace);
     const extra = extractExtraData(trace);
     const retrievalTime = (metadata?.retrieval_time_ms as number) || (extra?.retrieval_time_ms as number);
-    let description = 'Memory Context Retrieved';
-    if (retrievalTime !== undefined) {
-      description += ` — ${Math.round(retrievalTime)}ms`;
-    }
-    return { type: 'memory_context', description };
+    return { type: 'memory_context', description: 'Memory Context Retrieved', durationMs: retrievalTime };
   },
 
   // Memory Context Retrieved
@@ -531,9 +527,8 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const metadata = parseTraceMetadata(trace);
     const serverName = metadata?.server_name as string | undefined;
     const duration = metadata?.connection_duration_ms as number | undefined;
-    let description = serverName ? `MCP Connected: ${serverName}` : 'MCP Connected';
-    if (duration !== undefined) description += ` — ${duration}ms`;
-    return { type: 'mcp_connection', description };
+    const description = serverName ? `MCP Connected: ${serverName}` : 'MCP Connected';
+    return { type: 'mcp_connection', description, durationMs: duration };
   },
 
   // MCP Tool Started
@@ -551,8 +546,7 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       ? trace.event_context.substring(5)
       : 'MCP Tool';
     const execTime = metadata?.execution_duration_ms as number | undefined;
-    const timeSuffix = execTime !== undefined ? ` — ${execTime}ms` : '';
-    return { type: 'mcp_tool_result', description: `MCP: ${mcpToolName} (result)${timeSuffix}` };
+    return { type: 'mcp_tool_result', description: `MCP: ${mcpToolName} (result)`, durationMs: execTime };
   },
 
   // HITL Feedback Requested
