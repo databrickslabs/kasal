@@ -32,12 +32,28 @@ class TestDefaultModelsDataStructure:
         assert MODEL_CONFIGS is DEFAULT_MODELS
 
     def test_specific_models_exist(self):
-        """Test that well-known model keys are present."""
-        assert "gpt-4-turbo" in DEFAULT_MODELS
-        assert "gpt-4o" in DEFAULT_MODELS
+        """Test that the current model keys are present.
+
+        Refreshed 2026-07-25: the OpenAI GPT-4 family was retired by OpenAI on
+        2026-10-23 and replaced by GPT-5.6, and deepseek-chat/-reasoner were
+        deprecated on 2026-07-24 in favour of the two v4 endpoints.
+        """
+        assert "gpt-5.6-sol" in DEFAULT_MODELS
         assert "databricks-llama-4-maverick" in DEFAULT_MODELS
-        assert "deepseek-chat" in DEFAULT_MODELS
+        assert "deepseek-v4-flash" in DEFAULT_MODELS
+        assert "deepseek-v4-pro" in DEFAULT_MODELS
         assert "databricks-gpt-5-3-codex" in DEFAULT_MODELS
+
+    def test_default_engine_model_is_seeded(self):
+        """The model the server falls back to must exist in the catalogue.
+
+        Without this, a default can be repointed at a key that was never seeded
+        and every agent without an explicit llm fails at run time.
+        """
+        from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+        assert DEFAULT_ENGINE_MODEL in DEFAULT_MODELS
+        assert DEFAULT_ENGINE_MODEL not in REMOVED_MODEL_KEYS
 
     def test_new_frontier_models_present(self):
         """The latest Databricks Claude (>4.6) and GPT (>5.3) models are seeded.
@@ -146,11 +162,15 @@ class TestDefaultModelsDataStructure:
             )
 
     def test_valid_providers(self):
-        """Test that all providers are known."""
-        valid_providers = {
-            "openai", "anthropic", "gemini",
-            "ollama", "databricks", "deepseek", "vllm",
-        }
+        """Test that all providers are known.
+
+        Derived from the ModelProvider enum rather than a literal set: the
+        literal went stale the moment `kimi` was added, failing this test for a
+        catalogue that was perfectly valid.
+        """
+        from src.schemas.model_provider import ModelProvider
+
+        valid_providers = {provider.value for provider in ModelProvider}
         for model_key, model_data in DEFAULT_MODELS.items():
             assert model_data["provider"] in valid_providers, (
                 f"Model '{model_key}' has unknown provider '{model_data['provider']}'"
@@ -701,3 +721,53 @@ class TestAuditedDatabricksModels:
             DEFAULT_MODELS["databricks-qwen3-next-80b-a3b-instruct"]["max_output_tokens"]
             <= 10000
         )
+
+
+class TestDeepSeekModels:
+    """DeepSeek's live API surface, verified 2026-07-25 against
+    api-docs.deepseek.com/quick_start/pricing.
+
+    The seeded values were wrong in every field that matters — 128k context (8x
+    under), 8k/64k output caps, and two model names DeepSeek deprecated on
+    2026/07/24 — which silently truncated context and capped output on a model
+    that supports far more.
+    """
+
+    def test_exactly_two_real_models_plus_two_aliases(self):
+        keys = {k for k, v in DEFAULT_MODELS.items() if v.get("provider") == "deepseek"}
+        assert keys == {
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v3.1-non-thinking",
+            "deepseek-v3.1-thinking",
+        }
+
+    def test_context_and_output_match_the_published_limits(self):
+        for key in ("deepseek-v4-flash", "deepseek-v4-pro"):
+            model = DEFAULT_MODELS[key]
+            assert model["context_window"] == 1_000_000, key
+            assert model["max_output_tokens"] == 384_000, key
+            assert model["extended_thinking"] is True, key
+
+    def test_retired_names_resolve_to_a_live_endpoint(self):
+        """The API call uses `name`, not the key (llm_manager builds
+        f"deepseek/{name}"), so an agent still on a v3.1 key must land on a v4
+        endpoint rather than a model that no longer exists."""
+        assert DEFAULT_MODELS["deepseek-v3.1-non-thinking"]["name"] == "deepseek-v4-flash"
+        assert DEFAULT_MODELS["deepseek-v3.1-thinking"]["name"] == "deepseek-v4-pro"
+
+    def test_deprecated_models_are_pruned_not_merely_dropped(self):
+        """Dropping a key from DEFAULT_MODELS leaves it in already-seeded DBs —
+        it has to be listed for pruning to leave the model picker."""
+        for key in ("deepseek-chat", "deepseek-reasoner", "deepseek-coder-v2", "deepseek-v3"):
+            assert key not in DEFAULT_MODELS, key
+            assert key in REMOVED_MODEL_KEYS, key
+
+    def test_deepseek_is_excluded_from_top_level_reasoning_effort(self):
+        """DeepSeek v4 DOES take a reasoning effort, but nested inside
+        `thinking: {...}`. Our emitter sends it top-level, so DeepSeek would
+        ignore it — it must not be advertised as supported."""
+        from src.utils.model_config import model_supports_reasoning_effort
+
+        assert not model_supports_reasoning_effort("deepseek-v4-flash")
+        assert not model_supports_reasoning_effort("deepseek-v4-pro")

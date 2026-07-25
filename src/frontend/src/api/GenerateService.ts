@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../config/defaultModel';
 import axios from 'axios';
 import { Agent } from './AgentService';
 import { Task } from './TaskService';
@@ -39,7 +40,7 @@ export class GenerateService {
       
       const response = await apiClient.post<Agent>('/agent-generation/generate', {
         prompt: prompt,
-        model: model || "gpt-4o-mini",
+        model: model || getDefaultModel(),
         tools: stringTools
       });
       return response.data;

@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 # Node data models
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 class Position(BaseModel):
     """Position of a node in the flow diagram."""
     x: float
@@ -220,7 +222,7 @@ class CrewFromConversationRequest(BaseModel):
 
 class AgentConfig(BaseModel):
     """Configuration for an agent in the crew."""
-    llm: Optional[str] = Field("databricks-llama-4-maverick", description="LLM model for the agent")
+    llm: Optional[str] = Field(DEFAULT_ENGINE_MODEL, description="LLM model for the agent")
     function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
     max_iter: Optional[int] = Field(25, description="Maximum iterations for the agent")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
@@ -246,7 +248,7 @@ class Agent(BaseModel):
     goal: str = Field(..., description="Goal of the agent")
     backstory: str = Field(..., description="Backstory of the agent")
     tools: Optional[List[str]] = Field([], description="Tools available to the agent")
-    llm: Optional[str] = Field("databricks-llama-4-maverick", description="LLM model for the agent")
+    llm: Optional[str] = Field(DEFAULT_ENGINE_MODEL, description="LLM model for the agent")
     function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
     max_iter: Optional[int] = Field(25, description="Maximum iterations")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")

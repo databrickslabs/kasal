@@ -224,7 +224,7 @@ describe('AgentNode', () => {
 
     it('renders default LLM when no llm specified', () => {
       renderNode({ llm: undefined });
-      expect(screen.getByText('databricks-llama-4-maverick')).toBeInTheDocument();
+      expect(screen.getByText('databricks-claude-sonnet-4-6')).toBeInTheDocument();
     });
 
     it('renders connection handles', () => {

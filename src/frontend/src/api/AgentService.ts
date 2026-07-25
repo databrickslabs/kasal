@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../config/defaultModel';
 import { apiClient } from '../config/api/ApiConfig';
 import { Agent, KnowledgeSource, StepCallback } from '../types/agent';
 import { ModelService } from './ModelService';
@@ -27,7 +28,7 @@ export class AgentService {
   static async findOrCreateAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
     try {
       const defaultValues: Partial<Agent> = {
-        llm: 'databricks-llama-4-maverick',
+        llm: getDefaultModel(),
         tools: [],
         max_iter: 25,
         verbose: false,
@@ -80,7 +81,7 @@ export class AgentService {
   static async createAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
     try {
       const defaultValues: Partial<Agent> = {
-        llm: 'databricks-llama-4-maverick',
+        llm: getDefaultModel(),
         tools: [],
         max_iter: 25,
         verbose: false,

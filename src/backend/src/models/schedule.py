@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime, Index
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.db.base import Base
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class Schedule(Base):
@@ -31,7 +32,7 @@ class Schedule(Base):
     is_active = Column(Boolean, default=True)  # Whether the schedule is active
     # NOTE: `model` is the model the scheduled RUN uses (not a planner model — the
     # CrewAI-style planner was removed along with the schedules.planning column).
-    model = Column(String, default="gpt-4o-mini")
+    model = Column(String, default=DEFAULT_ENGINE_MODEL)
     last_run_at = Column(DateTime, nullable=True)  # Last time the schedule was executed
     next_run_at = Column(DateTime, nullable=True)  # Next scheduled run time
     created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
@@ -55,7 +56,7 @@ class Schedule(Base):
         if self.is_active is None:
             self.is_active = True
         if self.model is None:
-            self.model = "gpt-4o-mini"
+            self.model = DEFAULT_ENGINE_MODEL
         if self.execution_type is None:
             self.execution_type = "crew"
         if self.created_at is None:

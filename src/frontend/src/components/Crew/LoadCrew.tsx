@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -230,7 +231,7 @@ const LoadCrew: React.FC<LoadCrewProps> = ({ open, onClose, onCrewLoad, inputs, 
             role: agentConfig.role || '',
             goal: agentConfig.goal || '',
             backstory: agentConfig.backstory || '',
-            llm: agentConfig.llm || 'databricks-llama-4-maverick',
+            llm: agentConfig.llm || getDefaultModel(),
             tools: Array.isArray(agentConfig.tools) ? agentConfig.tools.map(t => String(t)) : [],
             function_calling_llm: agentConfig.function_calling_llm,
             max_iter: agentConfig.max_iter || 25,

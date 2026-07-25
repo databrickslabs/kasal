@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """Shared agent tool-sourcing + agent assembly used by BOTH the crew path
 (``agent_adapter.create_agent``) and the flow path
 (``flow.modules.agent_adapter.configure_agent_and_tools``).
@@ -155,7 +157,7 @@ async def build_agent_with_tools(
     spec: Dict[str, Any],
     *,
     group_id: Optional[str],
-    default_model: str = "gpt-4o",
+    default_model: str = DEFAULT_ENGINE_MODEL,
     label: str = "",
     base_tools: Optional[List[Any]] = None,
     tool_ids: Optional[List[Any]] = None,

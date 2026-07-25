@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """
 Base BackendFlow class for handling flow execution.
 
@@ -179,7 +181,7 @@ class BackendFlow:
         """
         try:
             # Get the default model name from environment or use a default
-            model_name = os.getenv('DEFAULT_LLM_MODEL', 'gpt-4o')
+            model_name = os.getenv('DEFAULT_LLM_MODEL', DEFAULT_ENGINE_MODEL)
             logger.info(f"Getting LLM model: {model_name} for flow execution")
             
             # Use LLMManager to get a properly configured LLM

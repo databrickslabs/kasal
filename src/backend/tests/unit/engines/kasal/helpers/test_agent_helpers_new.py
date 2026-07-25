@@ -4,6 +4,8 @@ Unit tests for src/engines/kasal/helpers/agent_helpers.py
 Targets uncovered lines (52% → 85%+).
 """
 import pytest
+
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.engines.kasal.paths.crew.agent_adapter import (
@@ -288,7 +290,7 @@ class TestCreateAgentLLMConfig:
         # Should call configure_kasal_llm with "gpt-4o"
         mock_lm.configure_kasal_llm.assert_called()
         call_args = mock_lm.configure_kasal_llm.call_args
-        assert call_args[0][0] == "gpt-4o"
+        assert call_args[0][0] == DEFAULT_ENGINE_MODEL
 
     @pytest.mark.asyncio
     async def test_no_group_id_raises(self):
@@ -780,7 +782,7 @@ class TestCreateAgentLLMConfigExtended:
             )
         # Should use gpt-4o as default
         call_args = mock_lm.configure_kasal_llm.call_args
-        assert call_args[0][0] == "gpt-4o"
+        assert call_args[0][0] == DEFAULT_ENGINE_MODEL
 
     @pytest.mark.asyncio
     async def test_unexpected_mcp_tools_format_logged(self):

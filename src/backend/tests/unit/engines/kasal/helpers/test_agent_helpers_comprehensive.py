@@ -9,6 +9,8 @@ Tests cover:
   MCP tools, fallback paths, additional params, prompt template handling.
 """
 import pytest
+
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 
@@ -266,7 +268,7 @@ class TestCreateAgentLlmConfig:
         assert call_args[0][2] == pytest.approx(0.7)
 
     @pytest.mark.asyncio
-    async def test_no_llm_in_config_uses_default_gpt4o(self):
+    async def test_no_llm_in_config_uses_engine_default(self):
         captured = {}
 
         def capture_agent(**kwargs):
@@ -290,7 +292,7 @@ class TestCreateAgentLlmConfig:
 
         # Should call configure_kasal_llm("gpt-4o", ...)
         mock_configure.assert_called_once()
-        assert mock_configure.call_args[0][0] == "gpt-4o"
+        assert mock_configure.call_args[0][0] == DEFAULT_ENGINE_MODEL
 
 
 # ============================================================================

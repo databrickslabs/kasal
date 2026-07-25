@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
 import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip, CircularProgress } from '@mui/material';
@@ -577,7 +578,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}>
-          {data.llm || 'databricks-llama-4-maverick'}
+          {data.llm || getDefaultModel()}
         </Typography>
       </Box>
 

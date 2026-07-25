@@ -4,6 +4,7 @@ Unit tests for crew schemas.
 Tests the functionality of Pydantic schemas for crew operations
 including validation, serialization, and field constraints.
 """
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 import pytest
 from datetime import datetime
 from uuid import uuid4, UUID
@@ -722,7 +723,7 @@ class TestAgentConfig:
     def test_agent_config_defaults(self):
         """Test AgentConfig with default values."""
         config = AgentConfig()
-        assert config.llm == "databricks-llama-4-maverick"
+        assert config.llm == DEFAULT_ENGINE_MODEL
         assert config.function_calling_llm is None
         assert config.max_iter == 25
         assert config.max_rpm is None
@@ -794,7 +795,7 @@ class TestAgent:
         assert agent.backstory == "Expert analyst"
         assert agent.id is None
         assert agent.tools == []
-        assert agent.llm == "databricks-llama-4-maverick"
+        assert agent.llm == DEFAULT_ENGINE_MODEL
         assert agent.max_iter == 25
         assert agent.verbose is False
         assert agent.allow_delegation is False

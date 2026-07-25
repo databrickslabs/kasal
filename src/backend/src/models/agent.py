@@ -5,6 +5,8 @@ from uuid import uuid4
 from src.db.base import Base
 
 
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 def generate_uuid():
     return str(uuid4())
 
@@ -27,7 +29,7 @@ class Agent(Base):
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
     
     # Core configuration
-    llm = Column(String, default="databricks-llama-4-maverick")
+    llm = Column(String, default=DEFAULT_ENGINE_MODEL)
     temperature = Column(Integer, nullable=True)  # Optional temperature override (0-100, will be converted to 0.0-1.0)
     tools = Column(JSON, default=list, nullable=False)
     tool_configs = Column(JSON, default=dict, nullable=True)  # User-specific tool configuration overrides

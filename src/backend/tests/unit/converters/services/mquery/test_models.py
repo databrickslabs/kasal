@@ -270,7 +270,7 @@ def test_mquery_conversion_config_defaults():
     """MQueryConversionConfig has sensible defaults."""
     cfg = MQueryConversionConfig()
     assert cfg.workspace_id == ""
-    assert cfg.llm_model == "databricks-claude-sonnet-4"
+    assert cfg.llm_model == "databricks-claude-sonnet-4-5"
     assert cfg.max_tokens == 4000
     assert cfg.include_hidden_tables is False
     assert cfg.generate_views is True

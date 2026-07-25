@@ -2,6 +2,7 @@ import { Models, ModelConfig } from '../types/models';
 import { apiClient } from '../config/api/ApiConfig';
 import axios, { AxiosError, AxiosResponse } from 'axios';
 import { models as defaultModels } from '../config/models/models';
+import { getDefaultModel, setServerDefaultModel } from '../config/defaultModel';
 
 interface ApiModelResponse {
   id: number;
@@ -13,6 +14,10 @@ interface ApiModelResponse {
   max_output_tokens?: number;
   extended_thinking?: boolean;
   enabled?: boolean;
+  // Derived server-side from the same allow-list the engine uses; must be
+  // carried through convertApiResponseToModels or the Reasoning Effort control
+  // reads it as undefined and disables itself for every model.
+  supports_reasoning_effort?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -145,6 +150,7 @@ export class ModelService {
         context_window: model.context_window,
         max_output_tokens: model.max_output_tokens,
         extended_thinking: model.extended_thinking,
+        supports_reasoning_effort: model.supports_reasoning_effort === true,
         enabled: model.enabled !== false // Default to enabled if not specified
       };
     });
@@ -165,6 +171,14 @@ export class ModelService {
     if (!response || !response.data) {
       console.warn('API returned empty response or no data');
       return [];
+    }
+
+    // Every models endpoint carries the server's default alongside the list.
+    // Recorded here — the single choke point every model fetch passes through —
+    // so the UI's idea of "the default" always comes from the backend rather
+    // than a literal that can silently drift from it.
+    if (typeof response.data === 'object' && !Array.isArray(response.data)) {
+      setServerDefaultModel((response.data as { default_model?: string }).default_model);
     }
 
     try {
@@ -222,16 +236,20 @@ export class ModelService {
       console.error('Error extracting models from response:', error);
     }
 
-    // Fallback for all unhandled formats
+    // Fallback for all unhandled formats. This is a shape-only placeholder so
+    // the picker is not empty when the API response is unparseable — it names
+    // the default model rather than a literal (it used to say gpt-4o-mini, which
+    // outlived that model). The provider/limits are the default's, and are only
+    // ever displayed; the actual request uses the key.
     console.warn('Could not extract any models from the API response, using fallback model');
     return [{
       id: 0,
-      key: 'gpt-4o-mini',
-      name: 'gpt-4o-mini',
-      provider: 'openai',
+      key: getDefaultModel(),
+      name: getDefaultModel(),
+      provider: getDefaultModel().startsWith('databricks-') ? 'databricks' : 'openai',
       temperature: 0.7,
-      context_window: 128000,
-      max_output_tokens: 4096,
+      context_window: 200000,
+      max_output_tokens: 64000,
       extended_thinking: false,
       enabled: true,
       created_at: new Date().toISOString(),

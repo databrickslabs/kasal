@@ -9,6 +9,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from src.models.schedule import Schedule
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class TestSchedule:
@@ -51,7 +52,7 @@ class TestSchedule:
         # Check defaults
         assert schedule.inputs == {}
         assert schedule.is_active is True
-        assert schedule.model == "gpt-4o-mini"
+        assert schedule.model == DEFAULT_ENGINE_MODEL
         assert schedule.last_run_at is None
         assert schedule.next_run_at is None
 
@@ -94,7 +95,7 @@ class TestSchedule:
         
         assert schedule.inputs == {}
         assert schedule.is_active is True
-        assert schedule.model == "gpt-4o-mini"
+        assert schedule.model == DEFAULT_ENGINE_MODEL
         assert schedule.last_run_at is None
         assert schedule.next_run_at is None
 
@@ -444,7 +445,7 @@ class TestScheduleInputsAndConfiguration:
             model="gpt-4"
         )
 
-        assert default_model.model == "gpt-4o-mini"
+        assert default_model.model == DEFAULT_ENGINE_MODEL
         assert explicit_model.model == "gpt-4"
         assert not hasattr(default_model, 'planning')
         assert not hasattr(explicit_model, 'planning')

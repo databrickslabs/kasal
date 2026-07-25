@@ -16,6 +16,7 @@ from src.utils.prompt_utils import robust_json_parser
 from src.services.template_service import TemplateService
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
 from src.core.llm_manager import LLMManager
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -150,18 +151,13 @@ class ConnectionService:
             ValueError: If there's a problem with the generation
             Exception: For any other errors during generation
         """
-        # Default model if not specified - use Databricks model if service principal auth, OpenAI otherwise
-        default_model = "gpt-4o-mini"
-        try:
-            from src.utils.databricks_auth import get_auth_context
-            auth = await get_auth_context()
-            if auth and auth.auth_method == "service_principal":
-                default_model = "databricks-llama-4-maverick"
-                logger.info("Using Databricks model (service principal auth detected)")
-        except Exception:
-            logger.debug("Could not determine auth method, using OpenAI default")
-        
-        model = request.model or os.getenv("CONNECTION_MODEL", default_model)
+        # Default model if not specified. This used to branch on auth method —
+        # "gpt-4o-mini" normally, "databricks-llama-4-maverick" under service
+        # principal auth — which meant a Databricks-only deployment silently
+        # needed an OPENAI_API_KEY for connection generation. The single engine
+        # default is already a Databricks endpoint, so the branch is gone;
+        # override per deployment with DEFAULT_LLM_MODEL or CONNECTION_MODEL.
+        model = request.model or os.getenv("CONNECTION_MODEL", DEFAULT_ENGINE_MODEL)
         
         logger.info(f"Generating connections with model: {model}")
         logger.info(f"Number of agents: {len(request.agents)}, Number of tasks: {len(request.tasks)}")

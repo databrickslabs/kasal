@@ -16,6 +16,23 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+# The model used when a spec reaches the engine without one of its own.
+#
+# Single source of truth for every default: the three execution paths had
+# drifted apart — light-agent and flow defaulted to databricks-llama-4-maverick
+# while the crew path used a hardcoded "gpt-4o", so in a Databricks-first
+# deployment an agent missing an llm silently needed an OPENAI_API_KEY that may
+# not exist. The model/schema layers (models/agent.py, schemas/agent.py,
+# schemas/crew.py) point here too, so a default can no longer diverge per path.
+#
+# Sonnet 4.6 rather than llama-4-maverick: maverick is 128k context / 8k output,
+# and that 8k output cap is a real ceiling for a fallback. Sonnet 4.6 is the
+# current balanced tier at 200k/64k and — unlike the gpt-5* and claude-opus-4-7/
+# 4-8 families — accepts `temperature`, so it carries no request-surface quirk
+# for a model that has to work without any per-agent configuration.
+DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-claude-sonnet-4-6")
+
+
 # Models whose request surface accepts a native reasoning budget:
 #   - Chat Completions: `reasoning_effort: "low"|"medium"|"high"`
 #   - Responses API:    `reasoning: {"effort": ...}`
@@ -26,8 +43,15 @@ logger = logging.getLogger(__name__)
 # Excluded on purpose:
 #   - Anthropic Claude (Databricks or direct): uses `thinking: {budget_tokens}`,
 #     not `reasoning_effort`.
-#   - Gemini / Kimi / DeepSeek / self-hosted vLLM: no `reasoning_effort` param
+#   - Gemini / Kimi / self-hosted vLLM: no `reasoning_effort` param
 #     (Kimi K2.7 cannot even disable thinking).
+#   - DeepSeek v4 (flash/pro): DOES support reasoning effort, but NESTED —
+#     `thinking: {"type": "enabled", "reasoning_effort": "high"|"max"}`, where
+#     low/medium collapse to "high". Our emitter sends a TOP-LEVEL
+#     `reasoning_effort`, which DeepSeek would ignore, so it stays excluded here
+#     until the nested shape is emitted (same situation as Anthropic's
+#     `thinking: {budget_tokens}`). Verified 2026-07-25 against
+#     api-docs.deepseek.com/api/create-chat-completion.
 #   - o1 / o1-preview / o1-mini: predate `reasoning_effort`.
 #   - *deep-research*: fixed internal budget, rejects an explicit effort.
 _REASONING_EFFORT_SUBSTRINGS = ("gpt-5", "gpt5", "gpt-oss")
@@ -154,25 +178,22 @@ def get_max_rpm_for_model(model_key: str) -> int:
     Returns:
         Integer representing the maximum RPM
     """
-    # RPM limits for various models - these are conservative defaults
+    # RPM limits for various models - these are conservative defaults.
+    # Refreshed 2026-07-25 alongside the model catalogue: the retired OpenAI
+    # (gpt-4*/gpt-3.5*/o1), Anthropic (Claude 4.0 snapshots) and Gemini 2.x
+    # entries were dropped. Unlisted models fall through to the provider
+    # heuristics below, so this map only needs entries that differ from them.
     rpm_limits = {
         # OpenAI models
-        "gpt-4": 50,
-        "gpt-4-0125-preview": 50,
-        "gpt-4-1106-preview": 50,
-        "gpt-4-turbo-preview": 50,
-        "gpt-4o-mini": 100,
-        "gpt-4o": 100,
-        "o1-mini": 100,
-        "o1": 100,
+        "gpt-5.6-sol": 50,
+        "gpt-5.6-terra": 100,
+        "gpt-5.6-luna": 100,
         "o3-mini": 100,
-        "o3-mini-high": 100,
-        "gpt-3.5-turbo": 200,
-        "gpt-3.5-turbo-1106": 200,
-        
-        # Anthropic models (Claude 4.x; Claude 3 retired)
-        "claude-opus-4-20250514": 5,  # More conservative for Opus
-        "claude-sonnet-4-20250514": 10,
+
+        # Anthropic models
+        "claude-opus-5": 5,  # More conservative for Opus
+        "claude-sonnet-5": 10,
+        "claude-haiku-4-5": 20,  # Small/fast tier
 
         # Ollama models are hosted locally, but still use conservative defaults
         "qwen2.5:32b": 5,
@@ -189,16 +210,17 @@ def get_max_rpm_for_model(model_key: str) -> int:
         "milkey/QwQ-32B-0305:q4_K_M": 5,  # Large model, conservative limit
         
         # DeepSeek models
-        "deepseek-chat": 5,
-        "deepseek-reasoner": 3,  # More conservative for reasoning
+        "deepseek-v4-flash": 5,
+        "deepseek-v4-pro": 3,  # More conservative for the thinking-by-default model
         
         # Databricks models
         "databricks-meta-llama-3-3-70b-instruct": 5,
         "databricks-meta-llama-3-1-405b-instruct": 3,  # Larger model, more conservative
 
         # Google models
-        "gemini-2.5-pro": 10,  # Standard rate limit for Gemini
-        "gemini-2.0-flash": 10,  # Standard rate limit for Gemini Flash
+        "gemini-3.6-flash": 10,  # Standard rate limit for Gemini Flash
+        "gemini-3.5-flash": 10,
+        "gemini-3.5-flash-lite": 20,  # Lite tier tolerates more requests
     }
     
     # Return the RPM limit if it exists, otherwise return a default
@@ -206,7 +228,9 @@ def get_max_rpm_for_model(model_key: str) -> int:
         return rpm_limits[model_key]
         
     # Try to determine a sensible default based on model provider
-    if "gpt-4" in model_key or "gpt4" in model_key:
+    if "gpt-5" in model_key or "gpt5" in model_key:
+        return 100
+    elif "gpt-4" in model_key or "gpt4" in model_key:
         return 50
     elif "gpt-3.5" in model_key or "gpt3" in model_key:
         return 200

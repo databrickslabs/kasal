@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import { useEffect, useCallback, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
@@ -54,7 +55,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
       position,
       data: {
         label: 'Manager Agent',
-        llm: managerLLM || 'databricks-llama-4-maverick',
+        llm: managerLLM || getDefaultModel(),
       },
     };
 

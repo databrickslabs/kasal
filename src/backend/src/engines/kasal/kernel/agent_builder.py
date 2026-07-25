@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """Shared agent-build logic used by BOTH the crew path
 (``agent_adapter.create_agent``) and the flow path
 (``flow.modules.agent_adapter``).
@@ -120,7 +122,7 @@ async def build_agent_llm(
     spec: Dict[str, Any],
     *,
     group_id: Optional[str],
-    default_model: str = "gpt-4o",
+    default_model: str = DEFAULT_ENGINE_MODEL,
     label: str = "",
 ) -> Any:
     """Build a CrewAI-compatible LLM for an agent the way the crew path always has.
@@ -281,7 +283,7 @@ async def build_agent(
     tools: List[Any],
     *,
     group_id: Optional[str],
-    default_model: str = "gpt-4o",
+    default_model: str = DEFAULT_ENGINE_MODEL,
     label: str = "",
     extra_kwargs: Optional[Dict[str, Any]] = None,
     custom_attrs: Optional[Dict[str, Any]] = None,

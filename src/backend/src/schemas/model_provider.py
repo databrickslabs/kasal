@@ -1,11 +1,13 @@
 """
 Model provider enums and constants.
 
-This module provides enumerations for model providers and 
-lists of supported models per provider.
+This module provides the enumeration of LLM providers and, derived from the
+seed catalogue, the list of models Kasal ships per provider.
 """
 
 from enum import Enum
+from typing import Dict, List
+
 
 class ModelProvider(str, Enum):
     """Enum for LLM model providers."""
@@ -18,61 +20,35 @@ class ModelProvider(str, Enum):
     VLLM = "vllm"
     KIMI = "kimi"
 
-# List of supported models per provider
-SUPPORTED_MODELS = {
-    ModelProvider.OPENAI: [
-        "gpt-4-turbo-preview",
-        "gpt-4",
-        "gpt-4-0125-preview",
-        "gpt-4-1106-preview",
-        "gpt-3.5-turbo",
-        "gpt-3.5-turbo-1106",
-        "gpt-4o-mini",
-        "gpt-4o",
-        "o1-mini",
-        "o1",
-        "o3-mini",
-        "o3-mini-high"
-    ],
-    ModelProvider.OLLAMA: [
-        "qwen2.5:32b",
-        "llama2",
-        "llama2:13b",
-        "llama3.2:latest",
-        "mistral",
-        "mixtral",
-        "codellama",
-        "mistral-nemo:12b-instruct-2407-q2_K",
-        "llama3.2:3b-text-q8_0",
-        "gemma2:27b",
-        "deepseek-r1:32b",
-        "milkey/QwQ-32B-0305:q4_K_M"
-    ],
-    ModelProvider.ANTHROPIC: [
-        # Claude 3 (and older Claude 2) models removed — superseded by Claude 4.x.
-        "claude-opus-4-20250514",
-        "claude-sonnet-4-20250514",
-    ],
-    ModelProvider.DATABRICKS: [
-        "databricks-meta-llama-3-3-70b-instruct",
-        "databricks-meta-llama-3-1-405b-instruct",
-    ],
-    ModelProvider.DEEPSEEK: [
-        "deepseek-chat",
-        "deepseek-reasoner",
-    ],
-    ModelProvider.GEMINI: [
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-    ],
-    ModelProvider.VLLM: [
-        "deepseek-r1-70b",
-    ],
-    ModelProvider.KIMI: [
-        "kimi-k2.5",
-        "kimi-k2.6",
-        "kimi-k2.7-code",
-        "kimi-k2.7-code-highspeed",
-        "kimi-k3",
-    ],
-} 
+
+def _supported_models() -> Dict[ModelProvider, List[str]]:
+    """Group the seeded model catalogue by provider.
+
+    This used to be a hand-maintained literal, and it drifted badly: it still
+    listed gpt-4o, gpt-3.5-turbo, claude-opus-4-20250514, gemini-2.0-flash and
+    deepseek-chat long after those were retired, while missing every model added
+    since. Deriving it from ``DEFAULT_MODELS`` means the two lists cannot
+    disagree — a model is supported exactly when it is seeded.
+
+    A provider with no seeded models maps to an empty list rather than being
+    absent, so callers can index by any ``ModelProvider`` member.
+    """
+    # Imported inside the function: src.seeds.model_configs pulls in the DB
+    # session factory, and schemas are imported early enough that doing it at
+    # module scope risks an import cycle.
+    from src.seeds.model_configs import DEFAULT_MODELS
+
+    grouped: Dict[ModelProvider, List[str]] = {provider: [] for provider in ModelProvider}
+    for key, config in DEFAULT_MODELS.items():
+        try:
+            provider = ModelProvider(config.get("provider"))
+        except ValueError:
+            # A seeded model for a provider this enum does not know about; the
+            # enum is the contract, so skip rather than inventing a member.
+            continue
+        grouped[provider].append(key)
+    return grouped
+
+
+# List of supported models per provider, keyed by ModelProvider.
+SUPPORTED_MODELS: Dict[ModelProvider, List[str]] = _supported_models()

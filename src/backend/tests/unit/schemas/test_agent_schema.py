@@ -4,6 +4,7 @@ Unit tests for agent schemas.
 Tests the functionality of Pydantic schemas for agent operations
 including validation, serialization, and field constraints.
 """
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 import pytest
 from datetime import datetime
 from pydantic import ValidationError
@@ -30,7 +31,7 @@ class TestAgentBase:
         assert agent.role == "analyst"
         assert agent.goal == "Analyze data effectively"
         assert agent.backstory == "Expert in data analysis"
-        assert agent.llm == "databricks-llama-4-maverick"  # Default
+        assert agent.llm == DEFAULT_ENGINE_MODEL  # Default
         assert agent.tools == []  # Default empty list
         assert agent.function_calling_llm is None
         assert agent.max_iter == 25  # Default
@@ -370,7 +371,7 @@ class TestAgentCreate:
         assert agent.role == "developer"
         assert agent.goal == "Develop software"
         assert agent.backstory == "Software developer"
-        assert agent.llm == "databricks-llama-4-maverick"  # Default
+        assert agent.llm == DEFAULT_ENGINE_MODEL  # Default
         assert agent.max_iter == 25  # Default
         assert agent.inject_date is True  # Default
         assert agent.date_format is None  # Default
@@ -697,7 +698,7 @@ class TestAgentInDBBase:
         assert agent.updated_at == now
 
         # Should inherit all base class defaults
-        assert agent.llm == "databricks-llama-4-maverick"
+        assert agent.llm == DEFAULT_ENGINE_MODEL
         assert agent.tools == []
         assert agent.max_iter == 25
         assert agent.verbose is False
@@ -806,7 +807,7 @@ class TestAgent:
         assert agent.backstory == "Inheritance expert"
         assert agent.created_at == now
         assert agent.updated_at == now
-        assert agent.llm == "databricks-llama-4-maverick"  # Default from base
+        assert agent.llm == DEFAULT_ENGINE_MODEL  # Default from base
         assert agent.max_iter == 25  # Default from base
         assert agent.inject_date is True  # Default from base
         assert agent.date_format is None  # Default from base
@@ -953,7 +954,7 @@ class TestSchemaIntegration:
             backstory="Basic background"
         )
         assert basic_agent.name == "Unnamed Agent"
-        assert basic_agent.llm == "databricks-llama-4-maverick"
+        assert basic_agent.llm == DEFAULT_ENGINE_MODEL
         assert basic_agent.max_iter == 25
         assert basic_agent.verbose is False
         assert basic_agent.inject_date is True

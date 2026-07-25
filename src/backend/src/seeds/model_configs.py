@@ -16,112 +16,91 @@ logger = logging.getLogger(__name__)
 # Define default model configurations
 DEFAULT_MODELS = {
     # --- OpenAI ---
-    "gpt-4-turbo": {
-        "name": "gpt-4-turbo-preview",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
-    },
-    "gpt-4o-mini": {
-        "name": "gpt-4o-mini",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
-    },
-    "o1-preview": {
-        "name": "o1-preview",
+    # Verified 2026-07-25 against developers.openai.com/api/docs/models and
+    # .../deprecations. The GPT-5.6 family is the current flagship line; every
+    # model previously seeded here is retired or scheduled:
+    #   gpt-4 / gpt-4-turbo / gpt-3.5-turbo  retired 2026-10-23
+    #   o1-preview                           shut down 2025-07-28
+    #   o3-deep-research / o4-mini-deep-research  shut down 2026-07-23
+    #   gpt-5                                shuts down 2026-12-11
+    #   gpt-5.2-chat-latest                  shuts down 2026-08-10
+    "gpt-5.6-sol": {
+        "name": "gpt-5.6-sol",
         "temperature": 1,
         "provider": "openai",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
-    },
-    "gpt-4o": {
-        "name": "gpt-4o",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
-    },
-    "gpt-4": {
-        "name": "gpt-4",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 8192,
-        "max_output_tokens": 4096,
-    },
-    "gpt-3.5-turbo": {
-        "name": "gpt-3.5-turbo",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 16385,
-        "max_output_tokens": 4096,
-    },
-    "gpt-5": {
-        "name": "gpt-5",
-        "temperature": 0.7,
-        "provider": "openai",
-        "context_window": 400000,
+        "context_window": 1050000,
         "max_output_tokens": 128000,
+        "extended_thinking": True,
     },
-    "gpt-5.2": {
-        "name": "openai/gpt-5.2",
-        "temperature": 0.7,
+    "gpt-5.6-terra": {
+        "name": "gpt-5.6-terra",
+        "temperature": 1,
         "provider": "openai",
-        "context_window": 400000,
+        "context_window": 1050000,
         "max_output_tokens": 128000,
+        "extended_thinking": True,
     },
-    "o3-deep-research": {
-        "name": "o3-deep-research-2025-06-26",
+    "gpt-5.6-luna": {
+        "name": "gpt-5.6-luna",
         "temperature": 1,
         "provider": "openai",
-        "context_window": 200000,
-        "max_output_tokens": 100000,
-    },
-    "o4-mini-deep-research": {
-        "name": "o4-mini-deep-research-2025-06-26",
-        "temperature": 1,
-        "provider": "openai",
-        "context_window": 200000,
-        "max_output_tokens": 100000,
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
     },
     # --- Gemini ---
-    "gemini-2.0-flash": {
-        "name": "gemini-2.0-flash",
+    # Verified 2026-07-25 against ai.google.dev/gemini-api/docs/models and
+    # .../latest-model. Only STABLE ids are seeded — the previous entries pointed
+    # at `-preview` suffixes (gemini-3-pro-preview, gemini-3-flash-preview) and
+    # gemini-2.0-flash, all of which Google now lists as Shut down.
+    "gemini-3.6-flash": {
+        "name": "gemini-3.6-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "gemini-3.5-flash": {
+        "name": "gemini-3.5-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "gemini-3.5-flash-lite": {
+        "name": "gemini-3.5-flash-lite",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    # --- Anthropic ---
+    # Verified 2026-07-25 against the anthropics/skills model reference. The
+    # previous entries were the Claude 4.0 dated snapshots
+    # (claude-opus-4-20250514 / claude-sonnet-4-20250514), both now deprecated.
+    # Claude 5 is the current generation; Haiku 4.5 stays as the small/fast tier
+    # (there is no Haiku 5). Fable/Mythos are deliberately not seeded: Fable was
+    # suspended once already and Mythos is limited-access.
+    "claude-opus-5": {
+        "name": "claude-opus-5",
         "temperature": 0.7,
-        "provider": "gemini",
+        "provider": "anthropic",
         "context_window": 1000000,
-        "max_output_tokens": 4096,
+        "max_output_tokens": 128000,
     },
-    "gemini-3-pro": {
-        "name": "gemini-3-pro-preview",
-        "temperature": 1,
-        "provider": "gemini",
+    "claude-sonnet-5": {
+        "name": "claude-sonnet-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
         "context_window": 1000000,
-        "max_output_tokens": 64000,
+        "max_output_tokens": 128000,
     },
-    "gemini-3-flash": {
-        "name": "gemini-3-flash-preview",
-        "temperature": 1,
-        "provider": "gemini",
-        "context_window": 1000000,
-        "max_output_tokens": 64000,
-    },
-    # --- Anthropic (Claude 3 models removed — retired/superseded by Claude 4.x) ---
-    "claude-opus-4-20250514": {
-        "name": "claude-opus-4-20250514",
+    "claude-haiku-4-5": {
+        "name": "claude-haiku-4-5",
         "temperature": 0.7,
         "provider": "anthropic",
         "context_window": 200000,
-        "max_output_tokens": 32000,
-    },
-    "claude-sonnet-4": {
-        "name": "claude-sonnet-4-20250514",
-        "temperature": 0.7,
-        "provider": "anthropic",
-        "context_window": 200000,
-        "max_output_tokens": 8192,
+        "max_output_tokens": 64000,
     },
     # --- Ollama ---
     "llama3.2:latest": {
@@ -181,64 +160,54 @@ DEFAULT_MODELS = {
         "max_output_tokens": 4096,
     },
     # --- DeepSeek ---
-    "deepseek-chat": {
-        "name": "deepseek-chat",
-        "temperature": 0.7,
-        "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 8000,
-    },
-    "deepseek-reasoner": {
-        "name": "deepseek-reasoner",
-        "temperature": 0.7,
-        "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 64000,
-    },
-    # DeepSeek retired the v3.1 API names ("supported API model names are
-    # deepseek-v4-pro or deepseek-v4-flash") — the old keys stay so existing
-    # selections keep working, remapped to their v4 equivalents.
+    # Verified 2026-07-25 against https://api-docs.deepseek.com/quick_start/pricing.
+    # DeepSeek serves exactly TWO API models now, both 1M context / 384K max
+    # output, and both thinking-capable (flash supports thinking + non-thinking,
+    # thinking is the default; pro thinks by default). Mode is a REQUEST
+    # parameter — `"thinking": {"type": "enabled", "reasoning_effort": ...}` —
+    # not a separate model name, so there is no "thinking model" to seed
+    # separately.
+    #
+    # The old entries were wrong in every field that matters: context_window was
+    # 128k (8x under), max_output_tokens 8k/64k, and deepseek-chat /
+    # deepseek-reasoner were DEPRECATED on 2026/07/24. They are pruned via
+    # REMOVED_MODEL_KEYS.
     "deepseek-v4-flash": {
         "name": "deepseek-v4-flash",
         "temperature": 0.7,
         "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 8000,
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
     },
     "deepseek-v4-pro": {
         "name": "deepseek-v4-pro",
         "temperature": 0.7,
         "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 64000,
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
     },
+    # Compatibility aliases, NOT extra models. DeepSeek retired the v3.1 API
+    # names; these keys stay because agents already reference them (the API call
+    # uses the `name` field, not the key — see llm_manager.configure_crewai_llm —
+    # so they resolve to the v4 endpoints and keep working). Removing them would
+    # leave those agents pointing at a model that no longer exists.
     "deepseek-v3.1-non-thinking": {
         "name": "deepseek-v4-flash",
         "temperature": 0.7,
         "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 8000,
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
     },
     "deepseek-v3.1-thinking": {
         "name": "deepseek-v4-pro",
         "temperature": 0.7,
         "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 64000,
-    },
-    "deepseek-coder-v2": {
-        "name": "deepseek-coder-v2",
-        "temperature": 0.7,
-        "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
-    },
-    "deepseek-v3": {
-        "name": "deepseek-v3",
-        "temperature": 0.7,
-        "provider": "deepseek",
-        "context_window": 128000,
-        "max_output_tokens": 4096,
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
     },
     # --- vLLM (self-hosted, OpenAI-compatible) ---
     "deepseek-r1-70b": {
@@ -271,20 +240,7 @@ DEFAULT_MODELS = {
     },
     # --- Kimi (Moonshot AI — OpenAI-compatible API at https://api.moonshot.ai/v1,
     # override with KIMI_ENDPOINT; key = KIMI_API_KEY in the API Keys service) ---
-    "kimi-k2.5": {
-        "name": "kimi-k2.5",
-        "temperature": 0.7,
-        "provider": "kimi",
-        "context_window": 262144,
-        "max_output_tokens": 32768,
-    },
-    "kimi-k2.6": {
-        "name": "kimi-k2.6",
-        "temperature": 0.7,
-        "provider": "kimi",
-        "context_window": 262144,
-        "max_output_tokens": 32768,
-    },
+    # k2.5 / k2.6 removed 2026-07-25: superseded by the k2.7 coding line and K3.
     "kimi-k2.7-code": {
         "name": "kimi-k2.7-code",
         "temperature": 0.7,
@@ -507,11 +463,47 @@ MODEL_CONFIGS = DEFAULT_MODELS
 # DB on seed (the upsert loop alone never deletes). Claude 3 is retired/superseded
 # by Claude 4.x (Databricks no longer serves Claude 3.7 Sonnet either).
 REMOVED_MODEL_KEYS = [
+    # DeepSeek, audited 2026-07-25 against api-docs.deepseek.com/quick_start/pricing.
+    # deepseek-chat / deepseek-reasoner were DEPRECATED on 2026/07/24 (they mapped
+    # to the non-thinking / thinking variants of deepseek-v4-flash). coder-v2 and
+    # v3 predate the v4 API entirely and are not servable. The two v4 models plus
+    # the two v3.1 compatibility aliases are all that remain.
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-coder-v2",
+    "deepseek-v3",
+    # OpenAI, audited 2026-07-25 against developers.openai.com/api/docs/models
+    # and .../deprecations. Every one of these is retired or has a shutdown date;
+    # the GPT-5.6 family (sol/terra/luna) replaces them.
+    "gpt-4",  # retired 2026-10-23
+    "gpt-4-turbo",
+    "gpt-4o",  # retired 2026-10-23
+    "gpt-4o-mini",  # retired 2026-10-23
+    "gpt-3.5-turbo",  # retired 2026-10-23
+    "o1-preview",  # shut down 2025-07-28
+    "o1-mini",
+    "o3-deep-research",  # shut down 2026-07-23
+    "o4-mini-deep-research",  # shut down 2026-07-23
+    "gpt-5",  # shuts down 2026-12-11
+    "gpt-5.2",  # gpt-5.2-chat-latest shuts down 2026-08-10
+    # Anthropic direct API, audited 2026-07-25. The Claude 4.0 dated snapshots are
+    # deprecated; Claude 5 (opus/sonnet) + Haiku 4.5 are seeded in their place.
+    "claude-opus-4-20250514",
+    "claude-sonnet-4",
     "claude-3-5-sonnet-20241022",
     "claude-3-5-haiku-20241022",
     "claude-3-7-sonnet-20250219",
     "claude-3-7-sonnet-20250219-thinking",
     "claude-3-opus-20240229",
+    # Gemini, audited 2026-07-25 against ai.google.dev/gemini-api/docs/models.
+    # gemini-2.0-flash is shut down; the two -preview ids were preview aliases
+    # that Google has since retired in favour of stable 3.5/3.6 releases.
+    "gemini-2.0-flash",
+    "gemini-3-pro",
+    "gemini-3-flash",
+    # Kimi (Moonshot), audited 2026-07-25: superseded by the k2.7 coding line and K3.
+    "kimi-k2.5",
+    "kimi-k2.6",
     "databricks-claude-3-7-sonnet",
     # Databricks deprecated the sonnet-4 endpoint (returns BAD_REQUEST "This
     # endpoint databricks-claude-sonnet-4 is deprecated"). Superseded by

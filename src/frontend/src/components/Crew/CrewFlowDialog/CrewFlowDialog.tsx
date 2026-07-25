@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../../config/defaultModel';
 import React, { useState, useEffect, useRef, ChangeEvent, KeyboardEvent } from 'react';
 import { 
   Dialog, 
@@ -312,7 +313,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               role: agentData.role || '',
               goal: agentData.goal || '',
               backstory: agentData.backstory || '',
-              llm: agentData.llm || 'databricks-llama-4-maverick',
+              llm: agentData.llm || getDefaultModel(),
               tools: agentData.tools || [],
               function_calling_llm: agentData.function_calling_llm,
               max_iter: agentData.max_iter || 25,

@@ -264,7 +264,7 @@ class TestRunSyncHelper:
 class TestMquerySchemaComprehensive:
     def test_llm_model_default(self):
         schema = MqueryConversionPipelineSchema()
-        assert schema.llm_model == "databricks-claude-sonnet-4"
+        assert schema.llm_model == "databricks-claude-sonnet-4-5"
 
     def test_use_llm_default_true(self):
         schema = MqueryConversionPipelineSchema()

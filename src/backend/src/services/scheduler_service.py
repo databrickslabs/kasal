@@ -15,6 +15,7 @@ from src.schemas.schedule import ScheduleCreate, ScheduleCreateFromExecution, Sc
 from src.schemas.execution import CrewConfig
 from src.schemas.scheduler import SchedulerJobCreate, SchedulerJobUpdate, SchedulerJobResponse
 from src.utils.cron_utils import ensure_utc, calculate_next_run_from_last
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.services.kasal_execution_service import KasalExecutionService, JobStatus
 from src.db.session import async_session_factory
 from src.models.execution_history import ExecutionHistory as Run
@@ -176,7 +177,7 @@ class SchedulerService:
 
             # Fallback to default model if no model found
             if not model:
-                model = "gpt-4o-mini"
+                model = DEFAULT_ENGINE_MODEL
             schedule_dict["model"] = model
 
             # Add group context if provided
@@ -466,7 +467,7 @@ class SchedulerService:
         try:
             # Generate job ID and determine execution type
             job_id = str(uuid.uuid4())
-            model = config.model or "gpt-4o-mini"
+            model = config.model or DEFAULT_ENGINE_MODEL
             execution_type = getattr(config, 'execution_type', 'crew') or 'crew'
 
             # Setup async session
@@ -850,7 +851,7 @@ class SchedulerService:
                     break
         # Fallback to default if no model found
         if not model:
-            model = "gpt-4o-mini"
+            model = DEFAULT_ENGINE_MODEL
             
         schedule_data = ScheduleCreate(
             name=job_create.name,
@@ -908,7 +909,7 @@ class SchedulerService:
                     break
         # Fallback to default if no model found
         if not model:
-            model = "gpt-4o-mini"
+            model = DEFAULT_ENGINE_MODEL
             
         schedule_dict = {
             "name": job_create.name,

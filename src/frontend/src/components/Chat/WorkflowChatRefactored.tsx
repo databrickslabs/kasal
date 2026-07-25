@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
@@ -380,8 +381,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       } catch (error) {
 
         setModels({
-          'databricks-llama-4-maverick': {
-            name: 'databricks-llama-4-maverick',
+          [getDefaultModel()]: {
+            name: getDefaultModel(),
             temperature: 0.7,
             context_window: 128000,
             max_output_tokens: 4096,

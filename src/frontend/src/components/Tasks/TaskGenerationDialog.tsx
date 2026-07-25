@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -32,7 +33,7 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dialogModel, setDialogModel] = useState<string>('databricks-llama-4-maverick');
+  const [dialogModel, setDialogModel] = useState<string>(getDefaultModel());
   const [models, setModels] = useState<Models>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   
@@ -62,8 +63,8 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
             console.log(`Auto-selecting first available model: ${firstModelKey}`);
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
-            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
+            // Use selectedModel if provided, otherwise use the server default
+            setDialogModel(selectedModel || getDefaultModel());
           }
         } catch (error) {
           console.error('Error fetching models:', error);
@@ -78,8 +79,8 @@ const TaskGenerationDialog: React.FC<TaskGenerationDialogProps> = ({
             console.log(`Auto-selecting first available fallback model: ${firstModelKey}`);
             setDialogModel(firstModelKey);
           } else {
-            // Use selectedModel if provided, otherwise use databricks-llama-4-maverick
-            setDialogModel(selectedModel || 'databricks-llama-4-maverick');
+            // Use selectedModel if provided, otherwise use the server default
+            setDialogModel(selectedModel || getDefaultModel());
           }
         } finally {
           setModelsLoading(false);

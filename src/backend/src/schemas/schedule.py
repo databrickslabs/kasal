@@ -3,6 +3,8 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 
 class ScheduleBase(BaseModel):
     """Base schema for schedule configuration supporting both crew and flow executions"""
@@ -25,7 +27,10 @@ class ScheduleBase(BaseModel):
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     is_active: bool = Field(default=True, description="Whether the schedule is active")
-    model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
+    model: str = Field(
+        default_factory=lambda: DEFAULT_ENGINE_MODEL,
+        description="Model to use for the job",
+    )
 
     @model_validator(mode='after')
     def validate_execution_type_requirements(self):
@@ -80,7 +85,10 @@ class ScheduleResponse(BaseModel):
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
     is_active: bool = Field(default=True, description="Whether the schedule is active")
-    model: str = Field(default="gpt-4o-mini", description="Model to use for the job")
+    model: str = Field(
+        default_factory=lambda: DEFAULT_ENGINE_MODEL,
+        description="Model to use for the job",
+    )
 
     # Timestamps
     last_run_at: Optional[datetime] = Field(None, description="Timestamp of the last execution")
@@ -119,4 +127,7 @@ class CrewConfig(BaseModel):
 
     # Common fields
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Input values for the job")
-    model: str = Field(default="gpt-4o-mini", description="Model to use for the job") 
+    model: str = Field(
+        default_factory=lambda: DEFAULT_ENGINE_MODEL,
+        description="Model to use for the job",
+    ) 

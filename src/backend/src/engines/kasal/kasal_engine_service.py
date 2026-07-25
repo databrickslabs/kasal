@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """CrewAI Engine Service for AI agent orchestration.
 
 This module provides the core engine service for CrewAI-based agent execution,
@@ -120,7 +122,7 @@ class KasalEngineService(BaseEngineService):
         Args:
             **kwargs: Initialization parameters including:
                 - llm_provider: LLM provider name (default: "openai")
-                - model: Model identifier (default: "gpt-4o")
+                - model: Model identifier (default: DEFAULT_ENGINE_MODEL)
                 - Additional provider-specific configuration
             
         Returns:
@@ -151,7 +153,7 @@ class KasalEngineService(BaseEngineService):
 
             # Additional initialization if needed
             llm_provider = kwargs.get("llm_provider", "openai")
-            model = kwargs.get("model", "gpt-4o")
+            model = kwargs.get("model", DEFAULT_ENGINE_MODEL)
             init_logger.info(f"Initializing CrewAI engine with {llm_provider} using model {model}")
 
             return True

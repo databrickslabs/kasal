@@ -163,21 +163,22 @@ class TestGetMaxRpmForModel:
     """Test get_max_rpm_for_model function."""
     
     def test_get_max_rpm_for_known_openai_models(self):
-        """Test RPM limits for known OpenAI models."""
-        assert get_max_rpm_for_model("gpt-4") == 50
-        assert get_max_rpm_for_model("gpt-4-0125-preview") == 50
-        assert get_max_rpm_for_model("gpt-4o-mini") == 100
-        assert get_max_rpm_for_model("gpt-4o") == 100
-        assert get_max_rpm_for_model("o1-mini") == 100
-        assert get_max_rpm_for_model("o1") == 100
+        """Test RPM limits for the current OpenAI models."""
+        assert get_max_rpm_for_model("gpt-5.6-sol") == 50
+        assert get_max_rpm_for_model("gpt-5.6-terra") == 100
+        assert get_max_rpm_for_model("gpt-5.6-luna") == 100
         assert get_max_rpm_for_model("o3-mini") == 100
+        # Retired families still resolve through the generic patterns rather
+        # than dropping to the unknown-model floor of 3.
+        assert get_max_rpm_for_model("gpt-4") == 50
         assert get_max_rpm_for_model("gpt-3.5-turbo") == 200
     
     def test_get_max_rpm_for_known_anthropic_models(self):
         """Test RPM limits for Anthropic Claude models (Claude 4.x; Claude 3 retired)."""
         # Explicit dict entries.
-        assert get_max_rpm_for_model("claude-opus-4-20250514") == 5
-        assert get_max_rpm_for_model("claude-sonnet-4-20250514") == 10
+        assert get_max_rpm_for_model("claude-opus-5") == 5
+        assert get_max_rpm_for_model("claude-sonnet-5") == 10
+        assert get_max_rpm_for_model("claude-haiku-4-5") == 20
         # Any other Claude model falls through to the generic Claude heuristic.
         assert get_max_rpm_for_model("databricks-claude-opus-4-8") == 10
         assert get_max_rpm_for_model("databricks-claude-sonnet-4-6") == 10
@@ -195,8 +196,8 @@ class TestGetMaxRpmForModel:
     
     def test_get_max_rpm_for_known_deepseek_models(self):
         """Test RPM limits for known DeepSeek models."""
-        assert get_max_rpm_for_model("deepseek-chat") == 5
-        assert get_max_rpm_for_model("deepseek-reasoner") == 3
+        assert get_max_rpm_for_model("deepseek-v4-flash") == 5
+        assert get_max_rpm_for_model("deepseek-v4-pro") == 3
     
     def test_get_max_rpm_for_known_databricks_models(self):
         """Test RPM limits for known Databricks models."""
@@ -206,8 +207,11 @@ class TestGetMaxRpmForModel:
     
     def test_get_max_rpm_for_known_google_models(self):
         """Test RPM limits for known Google models."""
+        assert get_max_rpm_for_model("gemini-3.6-flash") == 10
+        assert get_max_rpm_for_model("gemini-3.5-flash") == 10
+        assert get_max_rpm_for_model("gemini-3.5-flash-lite") == 20
+        # Unlisted Gemini models fall through to the provider heuristic.
         assert get_max_rpm_for_model("gemini-2.5-pro") == 10
-        assert get_max_rpm_for_model("gemini-2.0-flash") == 10
     
     def test_get_max_rpm_for_unknown_model_with_gpt4_pattern(self):
         """Test RPM limits for unknown models with GPT-4 pattern."""

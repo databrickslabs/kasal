@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useState, useEffect } from 'react';
 import {
   TextField,
@@ -53,8 +54,8 @@ import AgentBestPractices from '../BestPractices/AgentBestPractices';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
-  'databricks-llama-4-maverick': {
-    name: 'databricks-llama-4-maverick',
+  [getDefaultModel()]: {
+    name: getDefaultModel(),
     temperature: 0.7,
     context_window: 128000,
     max_output_tokens: 4096,
@@ -97,7 +98,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       role: initialData?.role || '',
       goal: initialData?.goal || '',
       backstory: initialData?.backstory || '',
-      llm: initialData?.llm || 'databricks-llama-4-maverick',
+      llm: initialData?.llm || getDefaultModel(),
       temperature: initialData?.temperature || undefined,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       function_calling_llm: initialData?.function_calling_llm || undefined,

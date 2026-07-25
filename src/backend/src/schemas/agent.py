@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 # Shared properties
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 class AgentBase(BaseModel):
     """Base Pydantic model for Agents with shared attributes."""
     name: str = Field(default="Unnamed Agent")
@@ -13,7 +15,7 @@ class AgentBase(BaseModel):
     backstory: str
     
     # Core configuration
-    llm: str = Field(default="databricks-llama-4-maverick")
+    llm: str = Field(default=DEFAULT_ENGINE_MODEL)
     temperature: Optional[int] = Field(default=None, ge=0, le=100, description="Temperature override (0-100)")
     tools: List[Any] = Field(default_factory=list)
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(default_factory=dict)  # Tool-specific config overrides
@@ -64,7 +66,7 @@ class AgentBase(BaseModel):
     @field_validator('llm', mode='before')
     @classmethod
     def coerce_llm_none_to_default(cls, v):
-        return v if v is not None else "databricks-llama-4-maverick"
+        return v if v is not None else DEFAULT_ENGINE_MODEL
 
     @field_validator('max_iter', mode='before')
     @classmethod

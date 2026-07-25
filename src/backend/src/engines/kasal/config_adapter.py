@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """
 Configuration Adapter for CrewAI engine.
 
@@ -80,7 +82,7 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
             "memory": True,
             "reasoning": config.reasoning
         },
-        "model": config.model or "gpt-4o",
+        "model": config.model or DEFAULT_ENGINE_MODEL,
         "max_rpm": config.inputs.get("max_rpm", 10) if config.inputs else 10,
         # Include the original frontend configuration for logging
         "original_config": {

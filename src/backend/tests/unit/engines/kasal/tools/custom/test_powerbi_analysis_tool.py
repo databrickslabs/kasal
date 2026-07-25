@@ -135,7 +135,7 @@ class TestPowerBIAnalysisSchema:
         # llm_model moved out of the LLM-facing schema; the default lives in
         # the tool's _default_config (tool_configs injection path).
         tool = PowerBIAnalysisTool()
-        assert tool._default_config["llm_model"] == "databricks-claude-sonnet-4"
+        assert tool._default_config["llm_model"] == "databricks-claude-sonnet-4-5"
 
 
 # ===========================================================================
@@ -174,7 +174,7 @@ class TestPowerBIAnalysisToolInit:
 
     def test_default_config_llm_model_default(self):
         tool = PowerBIAnalysisTool()
-        assert tool._default_config["llm_model"] == "databricks-claude-sonnet-4"
+        assert tool._default_config["llm_model"] == "databricks-claude-sonnet-4-5"
 
     def test_default_config_max_dax_retries_default(self):
         tool = PowerBIAnalysisTool()
@@ -2521,7 +2521,7 @@ class TestGenerateDaxWithLlmFallback:
         config = {
             "llm_workspace_url": "https://databricks.example.com",
             "llm_token": "fake-token",
-            "llm_model": "databricks-claude-sonnet-4",
+            "llm_model": "databricks-claude-sonnet-4-5",
             "business_mappings": {},
             "field_synonyms": {},
             "active_filters": {},

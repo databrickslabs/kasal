@@ -4,6 +4,7 @@ Unit tests for agent model.
 Tests the functionality of the Agent database model including
 field validation, relationships, and data integrity.
 """
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -38,7 +39,7 @@ class TestAgent:
         assert agent.tools == []  # Set by __init__ method
         assert agent.knowledge_sources == []  # Set by __init__ method
         # Test column defaults are configured correctly
-        assert Agent.__table__.columns['llm'].default.arg == "databricks-llama-4-maverick"
+        assert Agent.__table__.columns['llm'].default.arg == DEFAULT_ENGINE_MODEL
         assert Agent.__table__.columns['max_iter'].default.arg == 25
         assert Agent.__table__.columns['verbose'].default.arg is False
 
@@ -151,7 +152,7 @@ class TestAgent:
         assert agent.tools == []
         assert agent.knowledge_sources == []
         # Test column defaults are configured correctly
-        assert Agent.__table__.columns['llm'].default.arg == "databricks-llama-4-maverick"
+        assert Agent.__table__.columns['llm'].default.arg == DEFAULT_ENGINE_MODEL
         assert Agent.__table__.columns['max_iter'].default.arg == 25
         assert Agent.__table__.columns['verbose'].default.arg is False
         assert Agent.__table__.columns['allow_delegation'].default.arg is False
@@ -203,7 +204,7 @@ class TestAgent:
             "gpt-4",
             "gpt-3.5-turbo",
             "claude-3-sonnet",
-            "databricks-llama-4-maverick",
+            DEFAULT_ENGINE_MODEL,
             "custom-model"
         ]
 

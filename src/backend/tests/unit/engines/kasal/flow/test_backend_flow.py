@@ -1,4 +1,6 @@
 import pytest
+
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 import uuid
 import asyncio
 import os
@@ -257,7 +259,7 @@ class TestBackendFlow:
                 result = await flow._get_llm()
 
                 assert result == mock_llm
-                mock_llm_manager.get_llm.assert_called_once_with('gpt-4o')
+                mock_llm_manager.get_llm.assert_called_once_with(DEFAULT_ENGINE_MODEL)
 
     @pytest.mark.asyncio
     async def test_get_llm_exception(self):

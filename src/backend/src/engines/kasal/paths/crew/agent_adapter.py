@@ -1,3 +1,5 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
 """
 Utilities for Agent configuration, validation, and setup.
 
@@ -92,7 +94,7 @@ async def create_agent(
     agent = await build_agent_with_tools(
         agent_config,
         group_id=group_id_param,
-        default_model="gpt-4o",
+        default_model=DEFAULT_ENGINE_MODEL,
         label=agent_key,
         base_tools=tools or [],
         tool_ids=agent_config.get('tools') if tool_service else None,

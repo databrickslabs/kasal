@@ -5,6 +5,8 @@ Targets: get_execution_logger, adapt_config, normalize_config, normalize_flow_co
 Goal: push coverage from 17.7% to 50%+
 """
 import pytest
+
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from unittest.mock import MagicMock, patch, PropertyMock
 
 
@@ -108,10 +110,11 @@ class TestAdaptConfig:
     def test_basic_adapt_config(self, mock_extract):
         from src.engines.kasal.config_adapter import adapt_config
 
-        cfg = _make_crew_config(model="gpt-4o")
+        cfg = _make_crew_config(model="some-configured-model")
         result = adapt_config(cfg)
 
-        assert result["model"] == "gpt-4o"
+        # An explicitly configured model passes through untouched.
+        assert result["model"] == "some-configured-model"
         assert result["agents"] == {"agent1": {}}
         assert result["tasks"] == {"task1": {}}
         assert result["crew"]["verbose"] is True
@@ -233,13 +236,13 @@ class TestAdaptConfig:
         assert result["max_rpm"] == 10
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
-    def test_model_defaults_to_gpt4o_when_none(self, mock_extract):
+    def test_model_defaults_to_the_engine_default_when_none(self, mock_extract):
         from src.engines.kasal.config_adapter import adapt_config
 
         cfg = _make_crew_config(model=None)
         result = adapt_config(cfg)
 
-        assert result["model"] == "gpt-4o"
+        assert result["model"] == DEFAULT_ENGINE_MODEL
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_original_config_preserved(self, mock_extract):

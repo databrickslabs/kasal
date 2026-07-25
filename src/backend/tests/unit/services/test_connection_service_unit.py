@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.connection_service import ConnectionService
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.schemas.connection import (
     ConnectionRequest,
     ConnectionResponse,
@@ -599,7 +600,7 @@ class TestGenerateConnections:
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
     async def test_model_default_no_env_no_request(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
-        """When request.model is empty and no env var, defaults to gpt-4o-mini."""
+        """When request.model is empty and no env var, defaults to the engine model."""
         svc = ConnectionService(session=None)
         # Use empty string model to trigger default logic
         request = _make_request(model="")
@@ -622,8 +623,7 @@ class TestGenerateConnections:
             result = await svc.generate_connections(request)
 
         assert isinstance(result, ConnectionResponse)
-        # Default should be gpt-4o-mini when auth returns None
-        assert "gpt-4o-mini" in captured_model
+        assert any(DEFAULT_ENGINE_MODEL in m for m in captured_model)
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)
@@ -657,8 +657,13 @@ class TestGenerateConnections:
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
-    async def test_service_principal_auth_uses_databricks_model(self, MockTemplateService, mock_parser, MockLLMManager):
-        """When auth context says service_principal, default model is databricks."""
+    async def test_auth_method_does_not_change_the_default_model(self, MockTemplateService, mock_parser, MockLLMManager):
+        """The default no longer branches on auth method.
+
+        It used to: gpt-4o-mini normally, databricks-llama-4-maverick under
+        service principal auth — so a Databricks-only deployment silently needed
+        an OPENAI_API_KEY for connection generation. One default now covers both.
+        """
         svc = ConnectionService(session=None)
         # Empty string model triggers default logic
         request = _make_request(model="")
@@ -681,14 +686,14 @@ class TestGenerateConnections:
             os.environ.pop("CONNECTION_MODEL", None)
             result = await svc.generate_connections(request)
 
-        assert any("databricks" in m for m in captured_model)
+        assert any(DEFAULT_ENGINE_MODEL in m for m in captured_model)
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     async def test_auth_context_exception_falls_back(self, MockTemplateService, mock_parser, MockLLMManager):
-        """When get_auth_context raises, the default model is still gpt-4o-mini."""
+        """When get_auth_context raises, the default model is still the engine model."""
         svc = ConnectionService(session=None)
         # Empty string model triggers default logic
         request = _make_request(model="")
@@ -709,7 +714,7 @@ class TestGenerateConnections:
             os.environ.pop("CONNECTION_MODEL", None)
             result = await svc.generate_connections(request)
 
-        assert any("gpt-4o-mini" in m for m in captured_model)
+        assert any(DEFAULT_ENGINE_MODEL in m for m in captured_model)
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)

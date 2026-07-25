@@ -1,3 +1,4 @@
+import { getDefaultModel } from '../../config/defaultModel';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
@@ -40,8 +41,8 @@ import { useUILayoutStore } from '../../store/uiLayout';
 
 // Default fallback model when API is down
 const DEFAULT_FALLBACK_MODEL = {
-  'databricks-llama-4-maverick': {
-    name: 'databricks-llama-4-maverick',
+  [getDefaultModel()]: {
+    name: getDefaultModel(),
     temperature: 0.7,
     context_window: 128000,
     max_output_tokens: 4096,

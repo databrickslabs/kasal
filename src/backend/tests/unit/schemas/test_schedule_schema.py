@@ -15,6 +15,7 @@ from src.schemas.schedule import (
     ScheduleUpdate, ScheduleResponse, ScheduleListResponse,
     ToggleResponse, CrewConfig
 )
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class TestScheduleBase:
@@ -35,7 +36,7 @@ class TestScheduleBase:
         assert schedule.tasks_yaml == {"task1": {"description": "Analysis task"}}
         assert schedule.inputs == {}  # Default
         assert schedule.is_active is True  # Default
-        assert schedule.model == "gpt-4o-mini"  # Default
+        assert schedule.model == DEFAULT_ENGINE_MODEL  # Default
 
     def test_schedule_schemas_have_no_planning_field(self):
         """Regression: the CrewAI-style planner was removed end to end, so no
@@ -302,7 +303,7 @@ class TestScheduleResponse:
         # Should inherit all base class defaults
         assert response.inputs == {}
         assert response.is_active is True
-        assert response.model == "gpt-4o-mini"
+        assert response.model == DEFAULT_ENGINE_MODEL
         assert not hasattr(response, 'planning')
 
     def test_schedule_response_config(self):
@@ -483,7 +484,7 @@ class TestCrewConfig:
         assert config.agents_yaml == {"agent": {"role": "worker"}}
         assert config.tasks_yaml == {"task": {"description": "work task"}}
         assert config.inputs == {}  # Default
-        assert config.model == "gpt-4o-mini"  # Default
+        assert config.model == DEFAULT_ENGINE_MODEL  # Default
 
     def test_crew_config_has_no_planning_field(self):
         """Regression: the schedule CrewConfig no longer carries ``planning``.
@@ -547,7 +548,7 @@ class TestCrewConfig:
             "tasks_yaml": {"task": {"description": "default test task"}}
         }
         config = CrewConfig(**data)
-        assert config.model == "gpt-4o-mini"
+        assert config.model == DEFAULT_ENGINE_MODEL
         assert isinstance(config.inputs, dict)
         assert len(config.inputs) == 0
 
