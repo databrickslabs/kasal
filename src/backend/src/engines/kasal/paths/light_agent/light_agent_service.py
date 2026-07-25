@@ -1355,12 +1355,26 @@ class LightAgentService:
                 ).get_recent_by_session_and_group(session_id, group_ids, limit=recent_limit)
                 # Running compaction summary: turns at or before summary_upto are
                 # represented by the summary block, not injected verbatim.
-                session_record = await ChatSessionRepository(
-                    db_session
-                ).get_by_id_and_group(session_id, group_ids)
-                if session_record is not None:
-                    context_summary = getattr(session_record, "context_summary", None)
-                    summary_upto = getattr(session_record, "context_summary_upto", None)
+                #
+                # Its own try: this is an ENHANCEMENT of the transcript, not a
+                # precondition for it. Sharing the outer handler meant any failure
+                # here — a missing session row, a schema drift, a transient error —
+                # threw away the history that had already been fetched and returned
+                # an empty preamble, so the agent silently lost all cross-turn
+                # recall (it would not know the user's name) with only a debug line
+                # to say why.
+                try:
+                    session_record = await ChatSessionRepository(
+                        db_session
+                    ).get_by_id_and_group(session_id, group_ids)
+                    if session_record is not None:
+                        context_summary = getattr(session_record, "context_summary", None)
+                        summary_upto = getattr(session_record, "context_summary_upto", None)
+                except Exception as summary_err:  # noqa: BLE001
+                    logger.debug(
+                        f"[light_agent] compaction summary unavailable, using the "
+                        f"raw transcript: {summary_err}"
+                    )
         except Exception as hist_err:  # noqa: BLE001
             logger.debug(f"[light_agent] chat history fetch skipped: {hist_err}")
             return ""

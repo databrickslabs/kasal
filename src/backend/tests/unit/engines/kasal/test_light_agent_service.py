@@ -545,3 +545,76 @@ async def test_trace_writer_close_is_idempotent():
         await writer.close()
         await writer.close()  # no session ever opened; must not raise
     assert opens == []
+
+
+# ── Compaction summary must not be able to take the transcript down ──────────
+# The preamble fetches two things: the chat history, and the session's running
+# compaction summary. They shared one try/except, so any failure in the SECOND
+# discarded the FIRST — the agent lost all cross-turn recall (it would not know
+# the user's name stated two turns earlier) and said so only in a debug line.
+
+
+@pytest.mark.asyncio
+async def test_transcript_survives_a_failing_summary_lookup():
+    messages = [
+        _msg("user", "my name is ada lovelace"),
+        _msg("assistant", "Hello Ada!"),
+        _msg("user", "who am i"),  # current turn
+    ]
+    p_sess, p_repo = _history_patches(messages)
+
+    broken = MagicMock()
+    broken.get_by_id_and_group = AsyncMock(side_effect=RuntimeError("session row gone"))
+    p_session_repo = patch(
+        "src.repositories.chat_session_repository.ChatSessionRepository",
+        MagicMock(return_value=broken),
+    )
+
+    config, ctx = _cfg_ctx()
+    with p_sess, p_repo, p_session_repo:
+        out = await LightAgentService()._conversation_preamble(
+            config, ctx, "g1", lambda *_: None
+        )
+
+    assert "User: my name is ada lovelace" in out
+    assert "Assistant: Hello Ada!" in out
+
+
+@pytest.mark.asyncio
+async def test_summary_is_applied_when_the_lookup_succeeds():
+    """The enhancement still works: turns at/before summary_upto are dropped in
+    favour of the summary block."""
+    import datetime as _dt
+
+    old = _dt.datetime(2020, 1, 1)
+    new = _dt.datetime(2030, 1, 1)
+
+    def _stamped(mtype, content, ts):
+        m = _msg(mtype, content)
+        m.timestamp = ts
+        return m
+
+    messages = [
+        _stamped("user", "ancient turn about pears", old),
+        _stamped("user", "my name is ada lovelace", new),
+        _stamped("assistant", "Hello Ada!", new),
+        _stamped("user", "who am i", new),  # current turn
+    ]
+    p_sess, p_repo = _history_patches(messages)
+
+    record = SimpleNamespace(context_summary="Earlier: fruit talk.", context_summary_upto=old)
+    repo = MagicMock()
+    repo.get_by_id_and_group = AsyncMock(return_value=record)
+    p_session_repo = patch(
+        "src.repositories.chat_session_repository.ChatSessionRepository",
+        MagicMock(return_value=repo),
+    )
+
+    config, ctx = _cfg_ctx()
+    with p_sess, p_repo, p_session_repo:
+        out = await LightAgentService()._conversation_preamble(
+            config, ctx, "g1", lambda *_: None
+        )
+
+    assert "pears" not in out          # represented by the summary, not verbatim
+    assert "User: my name is ada lovelace" in out
