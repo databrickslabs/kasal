@@ -227,6 +227,27 @@ class CrewAIEventsBus:
     def emit(self, source: Any, event: BaseEvent) -> None:
         if isinstance(event, BaseEvent):
             _stamp_causality(event)
+            # Identity from the event's OWN payload beats ambient context: an
+            # event carrying its task/agent object is self-attributing, while
+            # the ambient values may still describe the PREVIOUS task (they are
+            # refreshed by listeners only AFTER this back-fill runs — that lag
+            # once mis-bucketed a second task's whole timeline under the first).
+            own_task = getattr(event, "task", None) or getattr(event, "from_task", None)
+            if own_task is not None:
+                if event.task_id is None and getattr(own_task, "id", None) is not None:
+                    event.task_id = str(own_task.id)
+                if event.task_name is None:
+                    task_name = getattr(own_task, "name", None) or getattr(
+                        own_task, "description", None
+                    )
+                    if task_name:
+                        event.task_name = str(task_name)
+            own_agent = getattr(event, "agent", None) or getattr(event, "from_agent", None)
+            if own_agent is not None:
+                if event.agent_id is None and getattr(own_agent, "id", None) is not None:
+                    event.agent_id = str(own_agent.id)
+                if event.agent_role is None and getattr(own_agent, "role", None):
+                    event.agent_role = str(own_agent.role)
             ambient = _ambient_context.get()
             if ambient:
                 event.execution_context = {**ambient, **event.execution_context}

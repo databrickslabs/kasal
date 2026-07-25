@@ -69,8 +69,12 @@ _EVENT_SPAN_MAP = {
     "LLMCallFailedEvent": ("kasal.llm.call_failed", "llm_call_failed"),
 }
 
-# Events to skip (too noisy)
-_SKIP_EVENTS = {"LLMStreamChunkEvent"}
+# Events to skip. LLMStreamChunkEvent: too noisy (one per token).
+# AgentExecutionCompletedEvent: pure duplicate — under the kasal engine it
+# fires alongside LLMCallCompletedEvent with the same answer text and no
+# usage data, and mapping both to "llm_response" rendered every response
+# twice in the trace timeline.
+_SKIP_EVENTS = {"LLMStreamChunkEvent", "AgentExecutionCompletedEvent"}
 
 # Tool-call span names (by _EVENT_SPAN_MAP span_name) that we ALSO mirror into
 # the active MLflow trace so tool/MCP calls show up in the UC trace

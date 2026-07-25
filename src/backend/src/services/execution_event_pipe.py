@@ -52,14 +52,20 @@ _EOF_KIND = "__eof__"
 # piped too (e.g. both AgentExecutionCompleted and LLMCallCompleted map to
 # "llm_response") — suppression is by event_type, so a half-covered type would
 # silently drop the un-piped class from the live SSE view.
+#
+# DELIBERATELY NOT PIPED: task_completed and crew_completed. Their `output`
+# IS the deliverable (the frontend builds previews/presentations from the
+# task_completed trace output) — pipe frames truncate output to 500 chars,
+# and suppressing the poller for those types shipped an amputated deck to the
+# UI. They flow through the DB poller with FULL output instead; the ~2s extra
+# latency on a terminal event is invisible next to a broken deliverable.
 _TRACE_EVENT_MAP = {
     "CrewKickoffStartedEvent": "crew_started",
-    "CrewKickoffCompletedEvent": "crew_completed",
     "TaskStartedEvent": "task_started",
-    "TaskCompletedEvent": "task_completed",
     "TaskFailedEvent": "task_failed",
     "AgentExecutionStartedEvent": "agent_execution",
-    "AgentExecutionCompletedEvent": "llm_response",
+    # AgentExecutionCompletedEvent is NOT piped — it duplicates
+    # LLMCallCompletedEvent's llm_response (see event_bridge._SKIP_EVENTS).
     "ToolUsageStartedEvent": "tool_usage",
     "ToolUsageFinishedEvent": "tool_usage",
     "ToolUsageErrorEvent": "tool_error",

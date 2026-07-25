@@ -453,7 +453,7 @@ class TestBroadcastNewTracesForJob:
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [
-            MockExecutionTrace(id=11, event_type="task_completed"),
+            MockExecutionTrace(id=11, event_type="task_started"),
         ]
         mock_session.execute.return_value = mock_result
 
