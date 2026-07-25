@@ -66,8 +66,8 @@ class TestSeedersRegistration:
         assert "documentation" not in seed_runner.SEEDERS
 
     def test_optional_seeders_in_known_set(self):
-        """Optional seeders (dspy_examples, example_crews) may or may not be
-        present depending on import availability, but if present they must be
+        """Optional seeders (example_crews, bi_specialist_crews) may or may not
+        be present depending on import availability, but if present they must be
         in the known set."""
         known = {
             "tools",
@@ -77,7 +77,6 @@ class TestSeedersRegistration:
             "documentation",
             "groups",
             "api_keys",
-            "dspy_examples",
             "example_crews",
             "bi_specialist_crews",
         }
@@ -290,7 +289,7 @@ class TestRunAllSeeders:
         """Every name in the fast_seeders list should be directly awaited."""
         fast_names = [
             "groups", "api_keys", "tools", "schemas",
-            "prompt_templates", "model_configs", "dspy_examples", "example_crews",
+            "prompt_templates", "model_configs", "example_crews",
         ]
         seeders = _make_seeders_dict(*fast_names)
         with patch.object(seed_runner, "SEEDERS", seeders):
@@ -663,7 +662,6 @@ class TestRunSeedersWithFactory:
             "src.seeds.documentation",
             "src.seeds.groups",
             "src.seeds.api_keys",
-            "src.seeds.dspy_examples",
             "src.seeds.example_crews",
         ]
 
@@ -861,11 +859,11 @@ class TestRunAllSeedersIntegration:
         mock_resync.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_all_nine_seeders_scenario(self):
-        """Simulate having all 9 seeders registered."""
+    async def test_all_seeders_scenario(self):
+        """Simulate having every registerable seeder present at once."""
         all_names = [
             "tools", "schemas", "prompt_templates", "model_configs",
-            "documentation", "groups", "api_keys", "dspy_examples", "example_crews",
+            "documentation", "groups", "api_keys", "example_crews",
         ]
         seeders = _make_seeders_dict(*all_names)
 
@@ -882,7 +880,7 @@ class TestRunAllSeedersIntegration:
         # Fast seeders should be awaited
         fast_names = [
             "tools", "schemas", "prompt_templates", "model_configs",
-            "groups", "api_keys", "dspy_examples", "example_crews",
+            "groups", "api_keys", "example_crews",
         ]
         for name in fast_names:
             seeders[name].assert_awaited_once()

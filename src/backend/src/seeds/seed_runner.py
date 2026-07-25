@@ -34,7 +34,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.seeds import tools, schemas, prompt_templates, model_configs, groups, api_keys, dspy_examples, example_crews, bi_specialist_crews
+    from src.seeds import tools, schemas, prompt_templates, model_configs, groups, api_keys, example_crews, bi_specialist_crews
     from src.db.session import async_session_factory
     debug_log("Successfully imported all seeder modules")
 except ImportError as e:
@@ -92,12 +92,6 @@ except (NameError, AttributeError) as e:
     logger.error(f"Error adding api_keys seeder: {e}")
 
 try:
-    SEEDERS["dspy_examples"] = dspy_examples.seed
-    debug_log("Added dspy_examples.seed to SEEDERS")
-except (NameError, AttributeError) as e:
-    logger.error(f"Error adding dspy_examples seeder: {e}")
-
-try:
     SEEDERS["example_crews"] = example_crews.seed
     debug_log("Added example_crews.seed to SEEDERS")
 except (NameError, AttributeError) as e:
@@ -140,7 +134,7 @@ async def run_all_seeders() -> None:
     # Separate fast seeders from slow ones. Anything not explicitly fast runs
     # in the background so a slow seeder can never block startup (the removed
     # documentation seeder used to be the only slow one).
-    fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs', 'dspy_examples', 'example_crews', 'bi_specialist_crews']
+    fast_seeders = ['groups', 'api_keys', 'tools', 'schemas', 'prompt_templates', 'model_configs', 'example_crews', 'bi_specialist_crews']
     slow_seeders = [name for name in SEEDERS if name not in fast_seeders]
 
     # Run fast seeders first (sequentially as they're quick)
@@ -255,7 +249,7 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
     seed_module_names = [
         'src.seeds.tools', 'src.seeds.schemas', 'src.seeds.prompt_templates',
         'src.seeds.model_configs', 'src.seeds.groups',
-        'src.seeds.api_keys', 'src.seeds.dspy_examples', 'src.seeds.example_crews',
+        'src.seeds.api_keys', 'src.seeds.example_crews',
         'src.seeds.bi_specialist_crews',
     ]
     for mod_name in seed_module_names:
