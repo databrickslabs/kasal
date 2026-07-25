@@ -35,6 +35,7 @@ import {
   Refresh as RefreshIcon,
   EditNote as EditNoteIcon,
   Fullscreen as FullscreenIcon,
+  PanTool as ApprovalIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -78,7 +79,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   const [approval, setApproval] = useState<HITLApprovalResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
+  // Only 'reject' has a second step now — approving commits on the first click,
+  // so there is deliberately no 'approve' member to fall back into.
+  const [actionType, setActionType] = useState<'reject' | null>(null);
   const [comment, setComment] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionAction, setRejectionAction] = useState<HITLRejectionAction>(
@@ -336,32 +339,12 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     }
     /* v8 ignore stop */
 
-    // Show approval form based on action type
-    if (actionType === 'approve') {
-      return (
-        <Box>
-          <Typography variant="body1" gutterBottom>
-            Approving this gate will resume the flow execution.
-          </Typography>
-          <TextField
-            label="Comment (optional)"
-            fullWidth
-            multiline
-            rows={3}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Add an optional comment..."
-            sx={{ mt: 2 }}
-          />
-          {error && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {error}
-            </Alert>
-          )}
-        </Box>
-      );
-    }
-
+    // NOTE: approving is deliberately ONE step. It used to open a second
+    // "Approve Gate" dialog whose only job was to collect an optional comment,
+    // so the common case — read the request, approve — cost two clicks and a
+    // context switch. The comment now sits inline below (see the main view) and
+    // Approve commits immediately. Rejecting KEEPS its second step: it is the
+    // destructive branch, needs a reason, and offers reject-vs-retry.
     if (actionType === 'reject') {
       return (
         <Box>
@@ -406,61 +389,79 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     }
 
     // Default: show approval details
+    const gateConfig = (approval.gate_config ?? {}) as {
+      kind?: string;
+      message?: string;
+      agent_role?: string;
+      tool_name?: string;
+      tool_args?: Record<string, string>;
+    };
+    const isToolCall = gateConfig.kind === 'tool_call';
+
     return (
       <Box>
-        {/* Status and Time */}
-        <Box display="flex" alignItems="center" gap={1} mb={2}>
-          <Chip
-            label={approval.status}
-            size="small"
-            color="warning"
-          />
-          <Chip
-            icon={<TimeIcon />}
-            label={formatTimeRemaining(approval.expires_at)}
-            size="small"
-            variant="outlined"
-            color={approval.is_expired ? 'error' : 'default'}
-          />
-        </Box>
-
-        {/* Message */}
-        <Typography variant="h6" gutterBottom>
-          {(approval.gate_config as { message?: string })?.message || 'Approval Required'}
+        {/* The ask, first and largest — everything else is supporting detail. */}
+        <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
+          {isToolCall && gateConfig.tool_name
+            ? `Run ${gateConfig.tool_name}?`
+            : gateConfig.message || 'Approval Required'}
         </Typography>
 
-        {/* Tool-call gate: the agent is paused mid-run waiting for this call */}
-        {(approval.gate_config as { kind?: string })?.kind === 'tool_call' && (
+        {/* Who is blocked and what happens either way. The consequence of
+            denying is not obvious, so it is stated rather than implied. */}
+        {isToolCall && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            <strong>{gateConfig.agent_role || 'An agent'}</strong> is paused waiting
+            for this call. Denying lets it continue without the tool.
+          </Typography>
+        )}
+
+        <Box display="flex" alignItems="center" gap={1} sx={{ mt: 1.5, mb: 2 }}>
+          <Chip
+            label={approval.is_expired ? 'Expired' : 'Awaiting your decision'}
+            size="small"
+            color={approval.is_expired ? 'error' : 'warning'}
+          />
+          {/* Time-remaining is meaningless once expired, and the status chip
+              already says so — showing both just repeats the word twice. */}
+          {!approval.is_expired && (
+            <Chip
+              icon={<TimeIcon />}
+              label={formatTimeRemaining(approval.expires_at)}
+              size="small"
+              variant="outlined"
+            />
+          )}
+        </Box>
+
+        {/* Tool arguments — the thing actually being authorised, so it is
+            labelled and readable rather than an unexplained JSON blob. */}
+        {isToolCall && (
           <Box mb={2}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Agent{' '}
-              <strong>
-                {(approval.gate_config as { agent_role?: string })?.agent_role || 'unknown'}
-              </strong>{' '}
-              wants to run{' '}
-              <strong>
-                {(approval.gate_config as { tool_name?: string })?.tool_name || 'a tool'}
-              </strong>
-              . The run is paused until you decide (deny lets the agent continue
-              without the tool).
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}
+            >
+              Arguments
             </Typography>
             <Box
               component="pre"
               sx={{
-                mt: 1,
+                mt: 0.5,
+                mb: 0,
                 p: 1.5,
                 bgcolor: 'action.hover',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 1,
                 fontSize: '0.8rem',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                 overflowX: 'auto',
                 maxHeight: 200,
               }}
             >
-              {JSON.stringify(
-                (approval.gate_config as { tool_args?: Record<string, string> })?.tool_args ?? {},
-                null,
-                2,
-              )}
+              {JSON.stringify(gateConfig.tool_args ?? {}, null, 2)}
             </Box>
           </Box>
         )}
@@ -663,8 +664,26 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
           );
         })()}
 
-        {/* Metadata */}
-        <Box display="flex" flexWrap="wrap" gap={2} sx={{ fontSize: '0.85rem' }}>
+        {/* The optional comment that used to be the ENTIRE second dialog.
+            Inline and single-line here: available without costing a click,
+            and small enough not to compete with the decision itself. */}
+        <TextField
+          label="Comment (optional)"
+          fullWidth
+          size="small"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          disabled={actionLoading || approval.is_expired}
+          sx={{ mt: 1, mb: 2 }}
+        />
+
+        {/* Metadata — provenance, deliberately the quietest thing on screen. */}
+        <Box
+          display="flex"
+          flexWrap="wrap"
+          gap={2}
+          sx={{ pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}
+        >
           <Box>
             <Typography variant="caption" color="text.secondary" display="block">
               Gate
@@ -710,25 +729,6 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       );
     }
 
-    if (actionType === 'approve') {
-      return (
-        <>
-          <Button onClick={() => setActionType(null)} disabled={actionLoading}>
-            Back
-          </Button>
-          <Button
-            variant="contained"
-            color="success"
-            onClick={handleApprove}
-            disabled={actionLoading}
-            startIcon={actionLoading ? <CircularProgress size={16} /> : <ApproveIcon />}
-          >
-            Confirm Approval
-          </Button>
-        </>
-      );
-    }
-
     if (actionType === 'reject') {
       return (
         <>
@@ -748,16 +748,19 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       );
     }
 
-    // Default: show approve/reject buttons
+    // Default: one row, one obvious primary action.
     return (
       <>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose} color="inherit">
+          Cancel
+        </Button>
+        <Box flexGrow={1} />
         <Button
           variant="outlined"
           color="error"
           startIcon={<RejectIcon />}
           onClick={() => setActionType('reject')}
-          disabled={approval.is_expired}
+          disabled={actionLoading || approval.is_expired}
         >
           Reject
         </Button>
@@ -785,9 +788,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
           <Button
             variant="contained"
             color="success"
-            startIcon={<ApproveIcon />}
-            onClick={() => setActionType('approve')}
-            disabled={approval.is_expired}
+            startIcon={actionLoading ? <CircularProgress size={16} /> : <ApproveIcon />}
+            onClick={handleApprove}
+            disabled={actionLoading || approval.is_expired}
           >
             Approve
           </Button>
@@ -814,13 +817,22 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         sx: { minHeight: 300 },
       }}
     >
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          {actionType === 'approve' && 'Approve Gate'}
-          {actionType === 'reject' && 'Reject Gate'}
-          {!actionType && 'Human Approval Required'}
+      <DialogTitle
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 1,
+          py: 1.5,
+        }}
+      >
+        <Box display="flex" alignItems="center" gap={1.25} minWidth={0}>
+          <ApprovalIcon color={actionType === 'reject' ? 'error' : 'warning'} />
+          <Typography variant="h6" component="span" noWrap sx={{ fontWeight: 600 }}>
+            {actionType === 'reject' ? 'Reject Gate' : 'Human Approval Required'}
+          </Typography>
         </Box>
-        <IconButton size="small" onClick={onClose}>
+        <IconButton size="small" onClick={onClose} aria-label="Close dialog">
           <CloseIcon />
         </IconButton>
       </DialogTitle>

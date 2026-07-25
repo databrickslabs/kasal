@@ -134,7 +134,7 @@ describe('HITLApprovalDialog', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^close$/i })).toBeInTheDocument();
     });
   });
 
@@ -310,7 +310,8 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('pending')).toBeInTheDocument();
+        // Humanised: the raw enum value ("pending") told the user nothing.
+        expect(screen.getByText('Awaiting your decision')).toBeInTheDocument();
       });
     });
 
@@ -439,9 +440,19 @@ describe('HITLApprovalDialog', () => {
       });
     });
 
-    it('switches to approve form when Approve button is clicked', async () => {
+    // Approving used to open a SECOND dialog whose only content was an optional
+    // comment box, so the common case cost two clicks. Approve now commits
+    // immediately and the comment lives inline on the main view.
+    it('approves in a single click, with no confirmation step', async () => {
       const mockApproval = createMockApproval();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
+      mocks.mockApproveGate.mockResolvedValue({
+        success: true,
+        approval_id: 1,
+        status: HITLApprovalStatus.APPROVED,
+        message: 'Approved',
+        execution_resumed: true,
+      });
 
       render(
         <TestWrapper>
@@ -456,12 +467,13 @@ describe('HITLApprovalDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: /approve/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Approving this gate will resume the flow execution.')).toBeInTheDocument();
-        expect(screen.getByLabelText(/comment/i)).toBeInTheDocument();
+        expect(mocks.mockApproveGate).toHaveBeenCalled();
       });
+      expect(screen.queryByRole('button', { name: /confirm approval/i })).not.toBeInTheDocument();
+      expect(screen.queryByText('Approve Gate')).not.toBeInTheDocument();
     });
 
-    it('shows Approve Gate as title when in approve mode', async () => {
+    it('offers the optional comment inline, without a second step', async () => {
       const mockApproval = createMockApproval();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
 
@@ -472,13 +484,7 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /approve/i }));
-
-      await waitFor(() => {
-        expect(screen.getByText('Approve Gate')).toBeInTheDocument();
+        expect(screen.getByLabelText(/comment/i)).toBeInTheDocument();
       });
     });
 
@@ -504,12 +510,6 @@ describe('HITLApprovalDialog', () => {
       });
 
       fireEvent.click(screen.getByRole('button', { name: /approve/i }));
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /confirm approval/i })).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /confirm approval/i }));
 
       await waitFor(() => {
         expect(mocks.mockApproveGate).toHaveBeenCalledWith(1, { comment: undefined });
@@ -540,12 +540,6 @@ describe('HITLApprovalDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: /approve/i }));
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /confirm approval/i })).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /confirm approval/i }));
-
-      await waitFor(() => {
         expect(defaultProps.onActionComplete).toHaveBeenCalledWith('approve');
         expect(defaultProps.onClose).toHaveBeenCalled();
       });
@@ -572,23 +566,17 @@ describe('HITLApprovalDialog', () => {
         expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: /approve/i }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/comment/i)).toBeInTheDocument();
-      });
-
       const commentInput = screen.getByLabelText(/comment/i);
       fireEvent.change(commentInput, { target: { value: 'Looks good to proceed' } });
 
-      fireEvent.click(screen.getByRole('button', { name: /confirm approval/i }));
+      fireEvent.click(screen.getByRole('button', { name: /approve/i }));
 
       await waitFor(() => {
         expect(mocks.mockApproveGate).toHaveBeenCalledWith(1, { comment: 'Looks good to proceed' });
       });
     });
 
-    it('shows back button when in approve mode', async () => {
+    it('offers a way back out of the reject step', async () => {
       const mockApproval = createMockApproval();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
 
@@ -599,17 +587,17 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+      fireEvent.click(screen.getByRole('button', { name: /reject/i }));
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /back/i })).toBeInTheDocument();
       });
     });
 
-    it('returns to default view when back is clicked', async () => {
+    it('returns to the default view when back is clicked', async () => {
       const mockApproval = createMockApproval();
       mocks.mockGetExecutionHITLStatus.mockResolvedValue(createMockExecutionStatus(mockApproval));
 
@@ -620,10 +608,10 @@ describe('HITLApprovalDialog', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+      fireEvent.click(screen.getByRole('button', { name: /reject/i }));
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /back/i })).toBeInTheDocument();
@@ -985,12 +973,6 @@ describe('HITLApprovalDialog', () => {
       });
 
       fireEvent.click(screen.getByRole('button', { name: /approve/i }));
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /confirm approval/i })).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /confirm approval/i }));
 
       await waitFor(() => {
         expect(screen.getByText('Approval failed')).toBeInTheDocument();
