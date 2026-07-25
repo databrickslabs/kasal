@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.exceptions import BadRequestError
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services import prompt_optimization_service as svc_module
 from src.services.prompt_optimization_service import (
@@ -140,6 +141,18 @@ def clear_runs():
     svc_module._RUNS.clear()
     yield
     svc_module._RUNS.clear()
+
+
+@pytest.fixture(autouse=True)
+def configured_judge(monkeypatch):
+    """Every test runs against a PROPERLY CONFIGURED system.
+
+    Starting an optimization now refuses when no judge is set, because a judge
+    that defaults to the model under optimization grades its own work. Tests
+    that exercise judge resolution itself override this with their own
+    monkeypatch.setenv / delenv.
+    """
+    monkeypatch.setenv("GEPA_JUDGE_MODEL", "independent-judge")
 
 
 @contextlib.contextmanager
@@ -1158,7 +1171,10 @@ class TestRunRegistryBehaviors:
 
 class TestJudgeModelResolution:
     """Target == judge is self-preference: the judge prefers its own outputs, so
-    the score gain is partly an artifact. The default must avoid it."""
+    the score climbs whether or not the prompts improved. Because that score is
+    the fitness function GEPA optimises against, the run is REFUSED rather than
+    warned about — a warning still produced an authoritative-looking number that
+    nobody could distinguish from a real gain."""
 
     def test_explicit_request_value_wins(self, monkeypatch):
         monkeypatch.setenv("GEPA_JUDGE_MODEL", "configured-judge")
@@ -1169,26 +1185,29 @@ class TestJudgeModelResolution:
         assert _resolve_judge_model(None, "target", "x") == "configured-judge"
         assert _resolve_judge_model("   ", "target", "x") == "configured-judge"
 
-    def test_configured_default_equal_to_target_is_not_used(self, monkeypatch, caplog):
-        """A GEPA_JUDGE_MODEL that happens to BE the target buys nothing — it
-        must still warn rather than look like a deliberate, safe choice."""
+    def test_configured_default_equal_to_target_is_refused(self, monkeypatch):
+        """A GEPA_JUDGE_MODEL that happens to BE the target buys nothing, and
+        must not look like a deliberate, safe choice."""
         monkeypatch.setenv("GEPA_JUDGE_MODEL", "target")
-        with caplog.at_level("WARNING"):
-            assert _resolve_judge_model(None, "target", "run x") == "target"
-        assert "SELF-PREFERENCE" in caplog.text
+        with pytest.raises(BadRequestError) as err:
+            _resolve_judge_model(None, "target", "run x")
+        assert "GEPA_JUDGE_MODEL" in str(err.value)
 
-    def test_fallback_to_target_warns(self, monkeypatch, caplog):
+    def test_no_judge_configured_is_refused(self, monkeypatch):
+        """Silently falling back to the target is what made every unconfigured
+        run report a meaningless score."""
         monkeypatch.delenv("GEPA_JUDGE_MODEL", raising=False)
-        with caplog.at_level("WARNING"):
-            assert _resolve_judge_model(None, "the-target", "run x") == "the-target"
-        assert "SELF-PREFERENCE" in caplog.text
-        assert "the-target" in caplog.text
+        with pytest.raises(BadRequestError) as err:
+            _resolve_judge_model(None, "the-target", "run x")
+        assert "the-target" in str(err.value)
+        assert "judge_model" in str(err.value)
 
-    def test_explicitly_choosing_the_target_still_warns(self, monkeypatch, caplog):
+    def test_explicitly_choosing_the_target_is_refused(self, monkeypatch):
+        """The hand-picked case: the old guard only covered defaulting, so
+        selecting the same model in both dropdowns sailed through."""
         monkeypatch.delenv("GEPA_JUDGE_MODEL", raising=False)
-        with caplog.at_level("WARNING"):
-            assert _resolve_judge_model("t", "t", "run x") == "t"
-        assert "SELF-PREFERENCE" in caplog.text
+        with pytest.raises(BadRequestError):
+            _resolve_judge_model("t", "t", "run x")
 
     @pytest.mark.asyncio
     async def test_start_optimization_records_a_non_target_judge(self, monkeypatch):

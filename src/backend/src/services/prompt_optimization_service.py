@@ -43,6 +43,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.repositories.prompt_optimization_run_repository import (
@@ -750,33 +751,39 @@ def _crew_target_model(agents: Any) -> Optional[str]:
 
 
 def _resolve_judge_model(requested: Optional[str], target_model: str, what: str) -> str:
-    """Pick the correctness judge's model, preferring anything but the target.
+    """Pick the correctness judge's model. It may never be the target.
 
     Resolution order:
       1. an explicit `judge_model` on the request,
-      2. the configured default `GEPA_JUDGE_MODEL` (when it differs from the
-         model under optimization),
-      3. the target model — today's behavior, kept so a run never fails to
-         start, but logged as a WARNING.
+      2. the configured default `GEPA_JUDGE_MODEL`,
+      3. no judge — the run is REFUSED.
 
-    Step 3 is SELF-PREFERENCE: when the judge is the model being optimized it
-    grades its own outputs, systematically favors them, and the reported gain
-    is partly an artifact of that bias rather than a real improvement. The
-    same applies when a caller explicitly asks for the target as judge, so
-    that case warns too.
+    Judging with the model under optimization is self-preference: the judge
+    grades its own outputs and systematically favours them, so the score climbs
+    whether or not the prompts improved. Because that score is the fitness
+    function GEPA optimises against, the search can then be rewarding reward
+    hacking with nothing to distinguish it from real progress.
+
+    This used to warn and continue. A warning was the wrong shape for it: the
+    run still produced an authoritative-looking number, the log line was never
+    read, and the resulting gain was indistinguishable from a real one. Refusing
+    up front costs a corrected setting; proceeding costs trust in every score
+    the system has ever reported.
+
+    Raises:
+        BadRequestError: when the judge would be the target, or none is set.
     """
     chosen = (requested or "").strip()
     if chosen:
         if chosen == target_model:
-            logger.warning(
-                "%s: judge_model was explicitly set to the model under "
-                "optimization (%s). Target == judge is SELF-PREFERENCE — the "
-                "judge favors its own outputs, so treat the score gain as "
-                "unverified.",
-                what,
-                target_model,
+            raise BadRequestError(
+                f"{what}: the judge model and the model under optimization are "
+                f"both '{target_model}'. A model grading its own output prefers "
+                f"it, so the score would rise without the prompts improving. "
+                f"Pick a different judge model."
             )
         return chosen
+
     configured = (os.getenv("GEPA_JUDGE_MODEL") or "").strip()
     if configured and configured != target_model:
         logger.info(
@@ -786,15 +793,20 @@ def _resolve_judge_model(requested: Optional[str], target_model: str, what: str)
             target_model,
         )
         return configured
-    logger.warning(
-        "%s: no judge model configured — falling back to the model under "
-        "optimization (%s). Target == judge is SELF-PREFERENCE: the judge "
-        "favors its own outputs and the measured gain may not be real. Set "
-        "judge_model on the request, or GEPA_JUDGE_MODEL for a default.",
-        what,
-        target_model,
+
+    if configured:
+        raise BadRequestError(
+            f"{what}: GEPA_JUDGE_MODEL is '{configured}', which is also the "
+            f"model under optimization. A model grading its own output prefers "
+            f"it. Set GEPA_JUDGE_MODEL to a different model, or pass an "
+            f"explicit judge_model."
+        )
+    raise BadRequestError(
+        f"{what}: no judge model configured. The judge decides which candidate "
+        f"prompts win, so it cannot silently fall back to the model under "
+        f"optimization ('{target_model}') — that grades its own work. Pass "
+        f"judge_model on the request, or set GEPA_JUDGE_MODEL."
     )
-    return target_model
 
 
 def _judge_sample_count() -> int:
