@@ -83,6 +83,17 @@ class CrewConfigBuilder:
             if process_type.lower() == 'hierarchical':
                 process_type = Process.hierarchical
                 logger.info("Using hierarchical process for crew")
+            elif process_type.lower() == 'parallel':
+                # The engine has no "parallel" Process — parallelism is per-task
+                # async_execution, which crew_preparation turns on for every
+                # context-free task when the crew process is "parallel". The
+                # crew itself still runs the sequential kernel; the async tasks
+                # are dispatched together and a completion task joins them.
+                process_type = Process.sequential
+                logger.info(
+                    "Using parallel process for crew (sequential kernel; "
+                    "independent tasks dispatched concurrently)"
+                )
             else:
                 process_type = Process.sequential
                 logger.info("Using sequential process for crew")

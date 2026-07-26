@@ -651,14 +651,38 @@ class CrewPreparation:
                 # Tasks with async_execution=True will run in parallel (if they have no context dependencies)
                 # CrewAI validation requires that a crew ends with at most one async task
                 # We handle this by auto-creating a completion task after the loop if needed
-                is_async = task_config.get("async_execution", False)
+                #
+                # The crew's process is the ONLY input: "parallel" runs every
+                # task that does not consume another's output concurrently.
+                # There is deliberately no per-task override — the task form used
+                # to carry an Async Execution toggle, a second invisible input
+                # for the same behaviour that did nothing unless every
+                # independent task happened to be ticked, and that could
+                # contradict the crew's own process. A stored value from that era
+                # is ignored rather than honoured, so what the crew says is what
+                # runs; it is logged so an old crew's behaviour change is
+                # traceable.
+                has_context = "_context_refs" in task_config or task_config.get("context")
+                crew_process = str(
+                    (self.config.get("crew") or {}).get("process", "") or ""
+                ).lower()
+                stored_async = bool(task_config.get("async_execution", False))
+                is_async = crew_process == "parallel" and not has_context
+
+                if stored_async != is_async:
+                    logger.info(
+                        f"Task '{task_name}': async_execution {stored_async} -> {is_async} "
+                        f"(crew process '{crew_process or 'sequential'}', "
+                        f"{'has' if has_context else 'no'} context)"
+                    )
+                # create_task builds the Task from task_config, so the decision
+                # has to land there — computing it and only logging it would
+                # leave the Task synchronous.
+                task_config["async_execution"] = is_async
 
                 if is_async:
                     # Mark that this task wants async execution for later processing
                     task_config["_wanted_async"] = True
-                    has_context = "_context_refs" in task_config or task_config.get(
-                        "context"
-                    )
                     if has_context:
                         logger.info(
                             f"Task '{task_name}' has async_execution=True with context - will wait for dependencies"

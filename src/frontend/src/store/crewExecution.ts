@@ -103,7 +103,7 @@ interface CrewExecutionState {
   reasoningLLM: string;
   reasoningConfig: ReasoningConfig;
   schemaDetectionEnabled: boolean;
-  processType: 'sequential' | 'hierarchical';
+  processType: 'sequential' | 'hierarchical' | 'parallel';
   managerLLM: string;
   managerNodeId: string | null;  // ID of the manager node (if exists)
   isLoadingCrew: boolean;  // Flag to prevent manager removal during crew loading
@@ -153,7 +153,7 @@ interface CrewExecutionState {
   setReasoningLLM: (model: string) => void;
   setReasoningConfig: (cfg: Partial<ReasoningConfig>) => void;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
-  setProcessType: (type: 'sequential' | 'hierarchical') => void;
+  setProcessType: (type: 'sequential' | 'hierarchical' | 'parallel') => void;
   setManagerLLM: (model: string) => void;
   setManagerNodeId: (id: string | null) => void;
   setIsLoadingCrew: (loading: boolean) => void;
@@ -212,7 +212,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   reasoningLLM: '',
   reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
   schemaDetectionEnabled: true,
-  processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical') || 'sequential',
+  processType: (localStorage.getItem('crewai-process-type') as 'sequential' | 'hierarchical' | 'parallel') || 'sequential',
   managerLLM: localStorage.getItem('crewai-manager-llm') || '',
   managerNodeId: null,
   isLoadingCrew: false,

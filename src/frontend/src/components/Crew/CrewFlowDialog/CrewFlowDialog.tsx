@@ -481,13 +481,13 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         const tabStore = useTabManagerStore.getState();
 
         // Determine the final process type
-        let finalProcessType: 'sequential' | 'hierarchical' = 'sequential';
+        let finalProcessType: 'sequential' | 'hierarchical' | 'parallel' = 'sequential';
         if (hasManagerNode) {
           console.log('[CrewFlowDialog] Manager node found, forcing hierarchical process type');
           finalProcessType = 'hierarchical';
         } else if (selectedCrew.process) {
           console.log('[CrewFlowDialog] Setting process type from crew data:', selectedCrew.process);
-          finalProcessType = selectedCrew.process as 'sequential' | 'hierarchical';
+          finalProcessType = selectedCrew.process as 'sequential' | 'hierarchical' | 'parallel';
         }
         store.setProcessType(finalProcessType);
 

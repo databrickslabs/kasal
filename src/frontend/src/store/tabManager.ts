@@ -7,7 +7,7 @@ import { useUILayoutStore } from './uiLayout';
 
 // Execution configuration per tab
 export interface TabExecutionConfig {
-  processType?: 'sequential' | 'hierarchical';
+  processType?: 'sequential' | 'hierarchical' | 'parallel';
   reasoningEnabled?: boolean;
   reasoningLLM?: string;
   reasoningConfig?: ReasoningConfig;  // Model reasoning/thinking budget

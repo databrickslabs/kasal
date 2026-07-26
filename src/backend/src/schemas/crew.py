@@ -123,7 +123,7 @@ class CrewBase(BaseModel):
     edges: List[Edge] = Field(default_factory=list)
 
     # Crew execution configuration
-    process: Optional[str] = Field("sequential", description="Execution process type: sequential or hierarchical")
+    process: Optional[str] = Field("sequential", description="Execution process type: sequential, hierarchical, or parallel (independent tasks run concurrently)")
     reasoning: Optional[bool] = Field(False, description="Enable the model's native reasoning budget for this crew's agents")
     reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
     reasoning_config: Optional[Dict[str, Any]] = Field(None, description="Reasoning budget, e.g. {'reasoning_effort': 'low'|'medium'|'high'}")

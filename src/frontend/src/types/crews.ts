@@ -9,7 +9,7 @@ export interface ReasoningConfig {
 }
 
 export interface CrewExecutionConfig {
-  process?: 'sequential' | 'hierarchical';
+  process?: 'sequential' | 'hierarchical' | 'parallel';
   reasoning?: boolean;
   reasoning_llm?: string;
   reasoning_config?: ReasoningConfig;  // Model reasoning/thinking budget

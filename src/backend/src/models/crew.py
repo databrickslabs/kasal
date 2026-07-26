@@ -21,7 +21,7 @@ class Crew(Base):
     edges = Column(JSON, nullable=True)
 
     # Crew execution configuration
-    process = Column(String(50), default='sequential')  # sequential or hierarchical
+    process = Column(String(50), default='sequential')  # sequential | hierarchical | parallel
     reasoning = Column(Boolean, default=False)  # Enable the model's native reasoning budget
     reasoning_llm = Column(String(255), nullable=True)  # LLM for reasoning
     reasoning_config = Column(JSON, nullable=True)  # {"reasoning_effort": "low"|"medium"|"high"}

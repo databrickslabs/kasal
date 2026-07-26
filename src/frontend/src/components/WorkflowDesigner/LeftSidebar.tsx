@@ -61,8 +61,8 @@ interface LeftSidebarProps {
   setReasoningEnabled: (enabled: boolean) => void;
   schemaDetectionEnabled: boolean;
   setSchemaDetectionEnabled: (enabled: boolean) => void;
-  processType?: 'sequential' | 'hierarchical';
-  setProcessType?: (type: 'sequential' | 'hierarchical') => void;
+  processType?: 'sequential' | 'hierarchical' | 'parallel';
+  setProcessType?: (type: 'sequential' | 'hierarchical' | 'parallel') => void;
 
   // New prop for configuration
   setIsConfigurationDialogOpen?: (open: boolean) => void;
@@ -206,7 +206,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   }, [setManagerLLM]);
 
   const handleProcessTypeChange = useCallback((event: SelectChangeEvent) => {
-    const value = event.target.value as 'sequential' | 'hierarchical';
+    const value = event.target.value as 'sequential' | 'hierarchical' | 'parallel';
 
     setStoreProcessType(value);
     // Also call the prop setter if it exists for backward compatibility
@@ -260,7 +260,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               >
                 Process Type
               </Typography>
-              <Tooltip title="Determines how agents collaborate. Sequential: agents work one after another in a fixed order. Hierarchical: a manager agent dynamically delegates tasks to specialized agents. Use Hierarchical for complex workflows requiring adaptive task distribution and parallel execution." placement="right">
+              <Tooltip title="Determines how agents collaborate. Sequential: agents work one after another in a fixed order. Parallel: tasks that don't depend on another task's output all start at once, and any task that does consume one still waits for it — use this for fan-outs like researching several topics independently. Hierarchical: a manager agent dynamically delegates tasks to specialized agents; use it for complex workflows needing adaptive task distribution." placement="right">
                 <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
               </Tooltip>
             </Box>
@@ -289,6 +289,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   </MenuItem>
                   <MenuItem value="hierarchical" sx={{ fontSize: '0.75rem' }}>
                     Hierarchical - Manager-based delegation
+                  </MenuItem>
+                  <MenuItem value="parallel" sx={{ fontSize: '0.75rem' }}>
+                    Parallel - Independent tasks run at once
                   </MenuItem>
                 </Select>
               </FormControl>

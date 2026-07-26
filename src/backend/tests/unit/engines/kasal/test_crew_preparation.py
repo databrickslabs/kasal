@@ -330,7 +330,13 @@ class TestCrewPreparation:
         """
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
 
-        # Both tasks set to async - they should run in parallel
+        # Parallelism is a CREW-level decision now — the per-task async_execution
+        # toggle is gone from the task form, and a stored value is ignored, so
+        # the crew's process is what makes these two run together.
+        crew_preparation.config["crew"] = {
+            **(crew_preparation.config.get("crew") or {}),
+            "process": "parallel",
+        }
         crew_preparation.config["tasks"] = [
             {
                 "id": "task1",
@@ -338,7 +344,6 @@ class TestCrewPreparation:
                 "description": "First task",
                 "agent": "researcher",
                 "expected_output": "Output 1",
-                "async_execution": True  # Will remain True (runs in parallel)
             },
             {
                 "id": "task2",
@@ -346,7 +351,6 @@ class TestCrewPreparation:
                 "description": "Second task",
                 "agent": "writer",
                 "expected_output": "Output 2",
-                "async_execution": True  # Will remain True (runs in parallel)
             }
         ]
 

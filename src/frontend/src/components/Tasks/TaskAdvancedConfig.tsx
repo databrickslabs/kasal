@@ -251,15 +251,12 @@ const TaskAdvancedConfigComponent: React.FC<TaskAdvancedConfigProps> = ({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="subtitle2" color="text.secondary">Execution Settings</Typography>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={Boolean(advancedConfig.async_execution)}
-            onChange={(e) => onConfigChange('async_execution', e.target.checked)}
-          />
-        }
-        label="Async Execution"
-      />
+      {/* No Async Execution toggle: parallelism is a CREW-level decision, set
+          once via Process Type -> Parallel, which runs every task that does not
+          consume another task's output concurrently. A per-task switch here was
+          a second, invisible input for the same behaviour — it did nothing
+          unless every independent task happened to be ticked, and it could
+          silently contradict the crew's process. */}
       <FormControlLabel
         control={
           <Switch

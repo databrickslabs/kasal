@@ -7,6 +7,7 @@ import { GeneratedAgent, GeneratedTask, GeneratedCrew, ChatMessage } from '../ty
 import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore } from '../../../store/uiLayout';
+import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { ConfigureCrewResult } from '../../../api/DispatcherService';
 import { EdgeCategory, getEdgeStyleConfig } from '../../../config/edgeConfig';
 import type {
@@ -638,6 +639,18 @@ export function createCrewSkeletonHandler(
     // Reset execution state
     setLastExecutionJobId(null);
     setExecutingJobId(null);
+
+    // Adopt the plan's process so a fan-out actually fans out. The planner
+    // already decided this (independent tasks, no context between them); without
+    // carrying it over, the crew rendered as a parallel graph and then ran one
+    // task after another because the crew-level process was still 'sequential'.
+    // Hierarchical is user-chosen and manager-backed, so never overwrite it.
+    if (plan.process_type === 'parallel' || plan.process_type === 'sequential') {
+      const execStore = useCrewExecutionStore.getState();
+      if (execStore.processType !== 'hierarchical') {
+        execStore.setProcessType(plan.process_type);
+      }
+    }
 
     const agentCount = plan.agents.length;
     const taskCount = plan.tasks.length;
