@@ -18,7 +18,7 @@ import {
   summarizeTaskOutput,
   taskHeaderLabel,
   unescapeLiterals,
-} from '../ChatWorkspace';
+} from './taskChatRendering';
 
 const TASK_DESCRIPTION =
   'As CNN News & Presentation Lead, orchestrate a crew plan to collect the latest ' +

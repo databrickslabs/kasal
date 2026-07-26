@@ -259,19 +259,24 @@ vi.mock('./utils/crewConfigBuilder', () => ({
   buildFlowConfig: vi.fn(() => ({ cfg: 'flow' })),
   buildCrewConfigFromGenerated: vi.fn(() => ({ cfg: 'gen' })),
 }));
-import ChatWorkspace, {
-  toolMatchKey,
-  summarizeArgs,
-  buildTraceEntry,
-  summarizeTaskOutput,
-  cleanTaskLabel,
-  extractResultText,
+import ChatWorkspace from './ChatWorkspace';
+import {
   extractA2uiSurface,
+  extractResultText,
   stripEmbeddedUiDocument,
-  tracesToRunSteps,
+} from './utils/resultExtraction';
+import {
+  cleanTaskLabel,
+  summarizeTaskOutput,
+} from './utils/taskChatRendering';
+import {
+  buildTraceEntry,
   deriveMessageActivitySteps,
   pickRunActivitySteps,
-} from './ChatWorkspace';
+  summarizeArgs,
+  toolMatchKey,
+  tracesToRunSteps,
+} from './utils/traceActivity';
 import { buildCrewConfigFromGenerated } from './utils/crewConfigBuilder';
 
 const mockedBuildGenerated = buildCrewConfigFromGenerated as unknown as ReturnType<typeof vi.fn>;
