@@ -2350,6 +2350,70 @@ class TestProgressiveGeneration:
             kwargs = m["plan"].call_args.kwargs
             assert kwargs["max_agents"] == 4
             assert kwargs["max_tasks"] == 8
+            # An explicit count is a TARGET, not a ceiling — the planner is told
+            # to hit it exactly instead of minimising agents.
+            assert kwargs["explicit_agents"] == 4
+
+    @pytest.mark.asyncio
+    async def test_spelled_out_agent_count_sets_the_cap(self):
+        """Regression: the cap parser was digit-only, so the dispatcher's prompt
+        rewrite ("create 4 agents" -> "four specialized agents") silently dropped
+        the user's count back to DEFAULT_MAX_AGENTS=3 and the fourth topic agent
+        was never planned."""
+        request = self._make_progressive_request(
+            prompt=(
+                "Create a CrewAI crew with four specialized agents: one agent "
+                "reports the latest Swiss sports news, one reports Swiss politics "
+                "news, one reports Swiss economy news, and one reports Swiss "
+                "technology news."
+            ),
+            auto_execute=False,
+            chat_mode_type="chat",
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-spelled")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_agents"] == 4
+            assert kwargs["explicit_agents"] == 4
+            # Every agent needs a task of its own or the orphan sweep drops it.
+            assert kwargs["max_tasks"] >= 4
+
+    @pytest.mark.asyncio
+    async def test_agent_count_above_default_task_ceiling_raises_tasks(self):
+        """8 agents with no stated task count must not be squeezed under the
+        6-task default — agents without tasks are deleted as orphans."""
+        request = self._make_progressive_request(
+            prompt="build a crew with 8 agents, one per region",
+            auto_execute=False,
+            chat_mode_type="chat",
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-8")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_agents"] == 8
+            assert kwargs["max_tasks"] == 8
+
+    @pytest.mark.asyncio
+    async def test_no_explicit_count_leaves_planner_free(self):
+        """Without a stated count the caps stay upper bounds and the planner is
+        NOT told to hit an exact number."""
+        request = self._make_progressive_request(
+            prompt="research the top competitors and write a summary report",
+            auto_execute=False,
+            chat_mode_type="chat",
+        )
+
+        with self._progressive_patches() as m:
+            await self.service.create_crew_progressive(request, None, "gen-free")
+
+            kwargs = m["plan"].call_args.kwargs
+            assert kwargs["max_agents"] == 3
+            assert kwargs["max_tasks"] == 6
+            assert kwargs["explicit_agents"] is None
 
     @pytest.mark.asyncio
     async def test_chat_answer_mode_short_circuits_to_fast_path(self):

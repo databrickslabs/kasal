@@ -1267,18 +1267,42 @@ class CrewGenerationService:
                 # Bounded gap (≤3 words, e.g. "4 specialized research agents") and a
                 # lookahead so a count can't be claimed ACROSS the other noun —
                 # "4 agents and 8 tasks" must read tasks=8, not greedily tasks=4.
-                _count_re = r'(\d+)\s+(?:(?!agents?\b|tasks?\b)\w+\s+){0,3}%s\b'
-                agent_count_match = re.search(_count_re % 'agents?', combined)
-                task_count_match = re.search(_count_re % 'tasks?', combined)
+                # Spelled-out counts matter as much as digits: the dispatcher's
+                # prompt rewrite turns "create 4 agents" into "four specialized
+                # agents", and a digit-only pattern silently dropped the user's
+                # count back to DEFAULT_MAX_AGENTS.
+                _NUMBER_WORDS = {
+                    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                }
+                _num = r'\d+|' + '|'.join(_NUMBER_WORDS)
+                _count_re = (
+                    r'\b(%s)\s+(?:(?!agents?\b|tasks?\b)\w+\s+){0,3}%%s\b' % _num
+                )
 
-                if task_count_match:
-                    max_tasks = min(int(task_count_match.group(1)), ABSOLUTE_MAX_TASKS)
+                def _parse_count(noun: str) -> Optional[int]:
+                    m = re.search(_count_re % noun, combined)
+                    if not m:
+                        return None
+                    token = m.group(1)
+                    return int(token) if token.isdigit() else _NUMBER_WORDS[token]
+
+                requested_tasks = _parse_count('tasks?')
+                requested_agents = _parse_count('agents?')
+
+                if requested_tasks is not None:
+                    max_tasks = min(requested_tasks, ABSOLUTE_MAX_TASKS)
                     logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks")
                 else:
                     max_tasks = DEFAULT_MAX_TASKS
-                if agent_count_match:
-                    max_agents = min(int(agent_count_match.group(1)), ABSOLUTE_MAX_AGENTS)
+                if requested_agents is not None:
+                    max_agents = min(requested_agents, ABSOLUTE_MAX_AGENTS)
                     logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
+                    # An explicit agent count can exceed the default task ceiling
+                    # ("5 agents" with no task count): every agent needs a task of
+                    # its own or the orphan sweep below deletes it again.
+                    if requested_tasks is None and max_agents > max_tasks:
+                        max_tasks = min(max_agents, ABSOLUTE_MAX_TASKS)
                 else:
                     max_agents = min(DEFAULT_MAX_AGENTS, max_tasks)
 
@@ -1326,6 +1350,9 @@ class CrewGenerationService:
                     plan = await self._generate_crew_plan(
                         request, group_context, model,
                         max_agents=max_agents, max_tasks=max_tasks,
+                        explicit_agents=(
+                            max_agents if requested_agents is not None else None
+                        ),
                         exemplars=(recipe_decision.text if recipe_decision else ""),
                     )
                 except Exception as e:
@@ -2067,6 +2094,7 @@ class CrewGenerationService:
         model: str,
         max_agents: int = 1,
         max_tasks: int = 1,
+        explicit_agents: Optional[int] = None,
         exemplars: str = "",
     ) -> Dict[str, Any]:
         """Fast LLM call to get crew outline (names/roles only).
@@ -2081,6 +2109,10 @@ class CrewGenerationService:
                 than generating excess agents that get truncated (which would
                 lose the user's actual goal).
             max_tasks: Maximum number of tasks to generate.
+            explicit_agents: The agent count the user asked for IN WORDS
+                ("create 4 agents"), when they did. Turns the cap from an upper
+                bound into an exact target — otherwise "use the minimum number
+                of agents" wins and a five-topic fan-out collapses to one agent.
         """
         # Dedicated lightweight plan template (~1.4k chars). The old approach
         # sent the full 9.4k-char generate_crew template and then told the
@@ -2106,18 +2138,35 @@ class CrewGenerationService:
             )
             system_message = planning_prefix + system_message
 
-        # Inject cap constraints based on verb-counted max_tasks
-        system_cap = (
-            f"OUTPUT CONSTRAINT: Generate up to {max_agents} agent(s) and "
-            f"up to {max_tasks} task(s). Each distinct action verb in the user's "
-            f"message should map to a separate task. Use the minimum number of "
-            f"agents needed to cover the tasks.\n\n"
-        )
-        cap_instruction = (
-            f"\n\nCONSTRAINT: Generate up to {max_agents} agent(s) and "
-            f"up to {max_tasks} task(s). Match task count to the number of "
-            f"distinct action verbs in the message."
-        )
+        # Inject cap constraints based on verb-counted max_tasks. When the user
+        # named a count, it is a TARGET, not a ceiling — say so explicitly and
+        # suppress the minimise-agents rule, which otherwise overrides it.
+        if explicit_agents:
+            system_cap = (
+                f"OUTPUT CONSTRAINT: The user explicitly asked for "
+                f"{explicit_agents} agents — generate EXACTLY {explicit_agents} "
+                f"agent(s), one per distinct subject the user enumerated, and at "
+                f"least one task per agent (max {max_tasks} tasks). Do NOT merge "
+                f"them into fewer agents and do NOT apply the "
+                f"minimum-agents rule here.\n\n"
+            )
+            cap_instruction = (
+                f"\n\nCONSTRAINT: Generate EXACTLY {explicit_agents} agent(s) — "
+                f"one per subject the user listed — and give every agent its own "
+                f"task (up to {max_tasks} tasks). An agent with no task is dropped."
+            )
+        else:
+            system_cap = (
+                f"OUTPUT CONSTRAINT: Generate up to {max_agents} agent(s) and "
+                f"up to {max_tasks} task(s). Each distinct action verb in the user's "
+                f"message should map to a separate task. Use the minimum number of "
+                f"agents needed to cover the tasks.\n\n"
+            )
+            cap_instruction = (
+                f"\n\nCONSTRAINT: Generate up to {max_agents} agent(s) and "
+                f"up to {max_tasks} task(s). Match task count to the number of "
+                f"distinct action verbs in the message."
+            )
 
         user_message = request.prompt + cap_instruction
 
