@@ -3432,8 +3432,16 @@ class TestProgressiveGeneration:
                         await self.service.create_crew_progressive(
                             request, None, gen_id
                         )
-                        # Should fall back to env var or "kasal-lakebase"
-                        mock_get_lb.assert_called_once()
+                        # Should fall back to env var or "kasal-lakebase".
+                        # Asserted on the ARGUMENT, not the call count: the
+                        # generation opens more than one private-connection
+                        # session (the recipe lookup takes a short-lived one of
+                        # its own before planning), and every one of them must
+                        # resolve the same instance name. A count assertion here
+                        # would fail for a reason that has nothing to do with
+                        # the env-var fallback this test exists to check.
+                        mock_get_lb.assert_called_with("kasal-lakebase")
+                        assert mock_get_lb.call_count >= 1
 
     # ------------------------------------------------------------------
     # Tool resolution exception (lines 1065-1066)

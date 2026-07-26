@@ -788,6 +788,27 @@ async def _ensure_workflow_recipes_table(conn) -> None:
         logger.warning(f"Could not ensure workflow_recipes table: {e}")
 
 
+async def _ensure_workflow_recipe_trials_table(conn) -> None:
+    """Idempotently create workflow_recipe_trials (the reuse measurement ledger).
+
+    Same reasoning as the recipes table above: a brand-new table needs no ALTER,
+    so a checkfirst-create reaches already-deployed installs identically on
+    SQLite, PostgreSQL and Lakebase. Missing this table must never break
+    generation — the recording path swallows its own errors — but without it
+    every trial write is a silent no-op and the effectiveness report stays empty.
+    """
+    try:
+        from src.models.workflow_recipe_trial import WorkflowRecipeTrial
+
+        def _create_workflow_recipe_trials_table(sync_conn):
+            WorkflowRecipeTrial.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_workflow_recipe_trials_table)
+        logger.info("Ensured workflow_recipe_trials table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure workflow_recipe_trials table: {e}")
+
+
 async def _ensure_chat_sessions_columns(conn) -> None:
     """Idempotently add the running_job_id + preview_* columns to chat_sessions.
 
@@ -1091,6 +1112,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_chat_sessions_table(conn)
     await _ensure_chat_sessions_columns(conn)
     await _ensure_workflow_recipes_table(conn)
+    await _ensure_workflow_recipe_trials_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)

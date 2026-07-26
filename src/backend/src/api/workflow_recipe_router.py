@@ -17,6 +17,8 @@ from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.workflow_recipe import (
     RecipeCurateRequest,
+    RecipeEffectiveness,
+    RecipeJobEntry,
     RecipeSuggestRequest,
     RecipeSummary,
 )
@@ -122,6 +124,59 @@ async def record_reuse(
     if recipe is None:
         raise NotFoundError(f"Workflow recipe {recipe_id} not found")
     return service.to_summary(recipe)
+
+
+@router.get(
+    "/by-job",
+    response_model=dict[str, RecipeJobEntry],
+    status_code=status.HTTP_200_OK,
+)
+async def recipes_by_job(
+    service: WorkflowRecipeServiceDep,
+    group_context: GroupContextDep,
+) -> dict:
+    """Which recipe each of this workspace's runs was mined into, keyed by job id.
+
+    The run list uses this to show — and let a human set — recipe state per run.
+    One request for the whole index rather than a lookup per row: a page of runs
+    would otherwise cost a page of requests.
+
+    Allowed roles: admin / editor / operator — same as reading recipes at all.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
+        raise ForbiddenError("Not permitted to read workflow recipes")
+
+    group_ids = group_context.group_ids if group_context else []
+    return await service.recipes_by_job(group_ids)
+
+
+@router.get(
+    "/effectiveness",
+    response_model=RecipeEffectiveness,
+    status_code=status.HTTP_200_OK,
+)
+async def recipe_effectiveness(
+    service: WorkflowRecipeServiceDep,
+    group_context: GroupContextDep,
+    days: int = Query(30, ge=1, le=365, description="Window to report over"),
+) -> RecipeEffectiveness:
+    """Whether reusing recipes measurably improves the crews this workspace gets.
+
+    Reports three populations: generations that got exemplars, generations that
+    qualified but were withheld them by the holdout (the control), and
+    generations the library had nothing blessed for. Only the first pair is a
+    fair comparison — the third differs because the request was novel, not
+    because of anything this feature did — and ``comparable`` says whether that
+    pair currently has data on both sides.
+
+    Allowed roles: admin / editor — this reports on how the workspace's
+    generation behaviour is being shaped, which is a configuration concern.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Not permitted to read workflow recipe effectiveness")
+
+    group_ids = group_context.group_ids if group_context else []
+    return await service.effectiveness(group_ids, days=days)
 
 
 @router.get("", response_model=List[RecipeSummary], status_code=status.HTTP_200_OK)

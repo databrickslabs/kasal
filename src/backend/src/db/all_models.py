@@ -41,8 +41,10 @@ from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 # Documentation models
 from src.models.documentation_embedding import DocumentationEmbedding, KnowledgeEmbedding
 
-# Workflow reuse — executed crews kept as reusable recipes
+# Workflow reuse — executed crews kept as reusable recipes, plus the ledger
+# that measures whether reusing them actually helps
 from src.models.workflow_recipe import WorkflowRecipe
+from src.models.workflow_recipe_trial import WorkflowRecipeTrial
 
 # Database configuration models
 from src.models.database_config import LakebaseConfig
@@ -122,5 +124,8 @@ __all__ = [
     # Memory backend models
     "MemoryBackend",
     # Prompt optimization models
-    "PromptOptimizationRun"
+    "PromptOptimizationRun",
+    # Workflow reuse models
+    "WorkflowRecipe",
+    "WorkflowRecipeTrial",
 ]

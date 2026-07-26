@@ -31,6 +31,7 @@ Reach a specific goal, assuming you already know the basics.
 - [Crew export and deployment](./crew-export-deployment.md): export CrewAI crews to Python projects, Databricks notebooks, or deployable Databricks Apps, and ship them to Model Serving.
 - [Lakebase setup for Kasal](./lakebase-deployment.md): configure managed Lakebase PostgreSQL so crews, agents, tasks, and run history survive Databricks Apps restarts.
 - [MLflow tracing setup](./mlflow-tracing-setup.md): export every crew and flow execution to MLflow Tracing for observability.
+- [Measuring workflow-recipe effectiveness](./workflow-recipe-measurement.md): run a controlled holdout to find out whether reusing past crews actually improves generated ones.
 - [Developer guide](./DEVELOPER_GUIDE.md): day-to-day workflows for building, extending, and debugging Kasal.
 
 ## Reference
@@ -49,6 +50,7 @@ Understand why Kasal is built the way it is.
 - [Why Kasal](./WHY_KASAL.md): the problems Kasal solves and who it's for on Databricks.
 - [Solution architecture](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
 - [LLM architecture](./LLM_ARCHITECTURE.md): the four layers behind a model call — facade, configuration, endpoint policy, transport — and which one owns what.
+- [Workflow recipes](./workflow-recipes.md): why Kasal keeps the crews you have already run, and why it refuses to reuse them until a person says they were any good.
 - [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of how a Power BI model becomes UC Metric Views — extraction, config generation, the M-query path, and the LLM-first DAX translation with skill files, with the code location of each stage.
 - [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md): the restructure of `src/engines/kasal` into path, kernel, and infra packages, with the dead-code audit and migration log.
 

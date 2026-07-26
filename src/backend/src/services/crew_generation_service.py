@@ -137,25 +137,119 @@ class CrewGenerationService:
             tools_context += f"\n{GENIE_ROUTING_DIRECTIVE}"
             logger.info("[GenieRouting] generate_crew: applied Genie routing directive (GenieTool available)")
 
-        # Few-shot examples from crews this workspace already built and a human
-        # marked good. Empty (so the prompt is byte-for-byte unchanged) until
-        # someone curates — see WorkflowRecipeService.exemplars_for_prompt for
-        # why only blessed recipes qualify. Never allowed to fail generation.
-        exemplars = ""
-        if prompt and group_context:
-            try:
-                from src.services.workflow_recipe_service import WorkflowRecipeService
+        # Add tools context to the system message. Exemplars are appended by the
+        # caller: it owns the recipe decision (including the holdout arm) because
+        # it is also what records the trial once generation has produced ids.
+        return system_message + tools_context
 
-                exemplars = await WorkflowRecipeService(self.session).exemplars_for_prompt(
-                    prompt, group_context.group_ids or []
+    async def _prepare_exemplars(self, request: Any, group_context: Optional[GroupContext],
+                                 session: Any = None) -> Optional[Any]:
+        """Ask the recipe library what it can contribute to this generation.
+
+        Returns the decision (text + candidates + arm) or None when reuse is not
+        applicable or errored. Failure is swallowed on purpose: crew generation
+        predates this feature and must keep working without it.
+
+        ``session`` is explicit because the progressive path runs as a background
+        task AFTER the request-scoped session is closed — it must pass one of its
+        own rather than let this reach for ``self.session``.
+        """
+        prompt = getattr(request, "prompt", None)
+        if not prompt or not group_context:
+            return None
+        try:
+            from src.services.workflow_recipe_service import WorkflowRecipeService
+
+            return await WorkflowRecipeService(session or self.session).prepare_exemplars(
+                prompt, group_context.group_ids or []
+            )
+        except Exception as exemplar_err:  # noqa: BLE001
+            logger.warning(f"CREATE CREW: exemplar injection skipped: {exemplar_err}")
+            return None
+
+    async def _record_recipe_trial(self, decision: Optional[Any], result: Dict[str, Any],
+                                   group_context: Optional[GroupContext],
+                                   session: Any = None) -> None:
+        """Record what the recipe library did for this generation, and what came
+        out of it. Best-effort — the service's own recorder never raises."""
+        if decision is None:
+            return
+        try:
+            from src.services.workflow_recipe_service import WorkflowRecipeService
+
+            await WorkflowRecipeService(session or self.session).record_trial(
+                decision,
+                generated=result,
+                group_id=group_context.primary_group_id if group_context else None,
+                group_email=group_context.group_email if group_context else None,
+            )
+        except Exception as trial_err:  # noqa: BLE001
+            logger.warning(f"CREATE CREW: recipe trial not recorded: {trial_err}")
+
+    async def _isolated_session_ctx(self):
+        """A PRIVATE-connection session context, matching the generation flow.
+
+        Never the shared StaticPool ``async_session_factory``: on SQLite that is
+        one connection, and a concurrent commit/rollback on it can discard an
+        agent this generation already committed, breaking the next task's
+        agent_id foreign key. That is a fixed regression with a test guarding it
+        — recipe work must not reintroduce it just because its own writes look
+        harmless.
+        """
+        import os as _os
+
+        from src.db.database_router import (
+            get_lakebase_config_from_db,
+            is_lakebase_enabled,
+        )
+        from src.db.lakebase_session import get_lakebase_session
+        from src.db.session import get_isolated_db_session
+
+        if await is_lakebase_enabled():
+            lb_config = await get_lakebase_config_from_db()
+            lb_instance = (
+                (lb_config or {}).get("instance_name")
+                or _os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            )
+            return get_lakebase_session(lb_instance)
+        return get_isolated_db_session()
+
+    async def _recipe_decision_isolated(self, request: Any,
+                                        group_context: Optional[GroupContext]) -> Optional[Any]:
+        """Exemplar decision on a session of its own.
+
+        The progressive path plans BEFORE it opens its working session (planning
+        does no DB writes), and its inherited request session is already closed,
+        so retrieval needs a short-lived session that it owns and disposes of.
+        """
+        try:
+            ctx = await self._isolated_session_ctx()
+            async with ctx as recipe_session:
+                return await self._prepare_exemplars(
+                    request, group_context, session=recipe_session
                 )
-                if exemplars:
-                    logger.info("CREATE CREW: injected curated workflow-recipe exemplars")
-            except Exception as exemplar_err:  # noqa: BLE001
-                logger.warning(f"CREATE CREW: exemplar injection skipped: {exemplar_err}")
+        except Exception as exc:  # noqa: BLE001 — never block generation
+            logger.warning(f"PROGRESSIVE: exemplar lookup skipped: {exc}")
+            return None
 
-        # Add tools context to the system message
-        return system_message + tools_context + exemplars
+    async def _record_recipe_trial_isolated(self, decision: Optional[Any],
+                                            agents: List[Dict[str, Any]],
+                                            tasks: List[Dict[str, Any]],
+                                            group_context: Optional[GroupContext]) -> None:
+        """Trial write on a session of its own, for the same reason."""
+        if decision is None:
+            return
+        try:
+            ctx = await self._isolated_session_ctx()
+            async with ctx as trial_session:
+                await self._record_recipe_trial(
+                    decision,
+                    {"agents": agents, "tasks": tasks},
+                    group_context,
+                    session=trial_session,
+                )
+        except Exception as exc:  # noqa: BLE001 — measurement never breaks a run
+            logger.warning(f"PROGRESSIVE: recipe trial not recorded: {exc}")
 
     def _process_crew_setup(self, setup: Dict[str, Any], allowed_tools: List[Dict[str, Any]], tool_name_to_id_map: Dict[str, str], model: str = None, disable_memory: bool = False) -> Dict[str, Any]:
         """
@@ -483,6 +577,16 @@ class CrewGenerationService:
             )
             logger.info("CREATE CREW: Prepared prompt template with detailed tool information")
 
+            # Few-shot examples from crews this workspace already built and a
+            # human marked good. The decision is kept (not just the text) so the
+            # trial can be recorded below with what came out — including the
+            # control case, where blessed matches existed and were withheld.
+            # Empty and inert until someone curates; never fails generation.
+            recipe_decision = await self._prepare_exemplars(request, group_context)
+            if recipe_decision is not None and recipe_decision.text:
+                system_message += recipe_decision.text
+                logger.info("CREATE CREW: injected curated workflow-recipe exemplars")
+
             # Documentation context disabled: skip vector search/embedding for crew generation
             # Prepare messages for the LLM
             messages = [
@@ -607,6 +711,12 @@ class CrewGenerationService:
             result = await self.crew_generator_repository.create_crew_entities(crew_dict, group_context)
 
             logger.info("CREATE CREW: Successfully created crew entities")
+
+            # Measurement ledger. Recorded AFTER creation so the row carries the
+            # agent ids that later link this generation to the run it becomes —
+            # the only exact join between "we suggested a shape" and "here is how
+            # that crew actually did".
+            await self._record_recipe_trial(recipe_decision, result, group_context)
             return result
         except Exception as e:
             logger.error(f"CREATE CREW: Error creating crew: {str(e)}")
@@ -1196,10 +1306,27 @@ class CrewGenerationService:
                 # the correct number from the start (instead of generating many
                 # and truncating, which loses the user's actual goal).
                 logger.info(f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning (max {max_agents} agents, {max_tasks} tasks)")
+
+                # Crews this workspace already built and a human marked good.
+                # The PLAN call is where they belong: it decides the shape —
+                # how many agents, how the work splits — which is exactly what a
+                # past crew is evidence about. Injecting them into the later
+                # per-agent/per-task calls would arrive after those decisions
+                # were already made. Empty and inert until someone curates.
+                recipe_decision = await self._recipe_decision_isolated(
+                    request, group_context
+                )
+                if recipe_decision is not None and recipe_decision.injected_labels:
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: reusing "
+                        f"{len(recipe_decision.injected_labels)} curated recipe(s)"
+                    )
+
                 try:
                     plan = await self._generate_crew_plan(
                         request, group_context, model,
                         max_agents=max_agents, max_tasks=max_tasks,
+                        exemplars=(recipe_decision.text if recipe_decision else ""),
                     )
                 except Exception as e:
                     logger.error(f"PROGRESSIVE [{generation_id}]: Planning failed: {e}")
@@ -1717,6 +1844,20 @@ class CrewGenerationService:
                     "tasks": clean_tasks,
                 }
 
+                # Measurement ledger — written with the ids that were actually
+                # persisted, which later link this generation to the run it
+                # becomes.
+                await self._record_recipe_trial_isolated(
+                    recipe_decision, agent_results, clean_tasks, group_context
+                )
+
+                # Tell the user what this drew on, AFTER the fact. Reuse is
+                # surfaced, never gated: an approval step on every generation
+                # would slow the common case down to re-confirm a judgement
+                # already made when the recipe was marked good.
+                if recipe_decision is not None and recipe_decision.injected_labels:
+                    gen_complete_data["reused_recipes"] = recipe_decision.injected_labels
+
                 # ── ChatMode auto-execute ─────────────────────────────────
                 # ChatMode generates AND runs in one backend flow so the run
                 # survives the user switching sessions before the plan finishes
@@ -1926,6 +2067,7 @@ class CrewGenerationService:
         model: str,
         max_agents: int = 1,
         max_tasks: int = 1,
+        exemplars: str = "",
     ) -> Dict[str, Any]:
         """Fast LLM call to get crew outline (names/roles only).
 
@@ -1980,7 +2122,9 @@ class CrewGenerationService:
         user_message = request.prompt + cap_instruction
 
         messages = [
-            {"role": "system", "content": system_cap + system_message},
+            # Exemplars go on the SYSTEM message so they cannot displace the
+            # hardcoded verb-to-task few-shots below, which own the output format.
+            {"role": "system", "content": system_cap + system_message + exemplars},
         ]
 
         # Few-shot examples showing verb-to-task mapping AND both agent-count

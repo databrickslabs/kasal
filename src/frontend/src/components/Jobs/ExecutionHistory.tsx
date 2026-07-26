@@ -23,6 +23,10 @@ import { Theme } from '@mui/material/styles';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import InsightsIcon from '@mui/icons-material/Insights';
+import RecipeCurationButton from './RecipeCurationButton';
+import { refreshRecipeIndexIfStale } from './recipeIndexCache';
+import RecipeEffectivenessDialog from './RecipeEffectivenessDialog';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import PreviewIcon from '@mui/icons-material/Preview';
@@ -189,6 +193,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const [selectedRunForTrace, setSelectedRunForTrace] = useState<Run | null>(null);
   const [showTraceOpen, setShowTraceOpen] = useState<boolean>(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [recipesDialogOpen, setRecipesDialogOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [selectedJobLogs, setSelectedJobLogs] = useState<LogEntry[]>([]);
@@ -245,6 +250,14 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
       onExecutionCountChange(runs.length);
     }
   }, [runs.length, onExecutionCountChange]);
+
+  // Recipes are produced by a background sweep MINUTES after a run finishes, so
+  // a row is on screen long before its recipe exists. Re-read the job→recipe
+  // index as the list changes (self-throttled by a TTL) — otherwise the Reusable
+  // control never appears for a just-finished run until a full page reload.
+  useEffect(() => {
+    refreshRecipeIndexIfStale();
+  }, [runs]);
   
   // Effect for periodic job status check
   useEffect(() => {
@@ -851,6 +864,24 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
                     Schedule Execution
                   </TableCell>
+                  {/* Reuse judgement sits next to Result and Trace on purpose:
+                      marking a crew reusable is a claim about its OUTPUT, and
+                      this is the only place the output is one click away. */}
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                      Reusable
+                      <Tooltip title="Is reuse helping? Coverage and per-arm outcomes">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={() => setRecipesDialogOpen(true)}
+                          sx={{ height: '18px', width: '18px', p: 0 }}
+                        >
+                          <InsightsIcon sx={{ fontSize: '0.8125rem' }} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '120px', backgroundColor: theme => theme.palette.background.paper }}>
                     <Box sx={{ 
                       display: 'flex', 
@@ -900,7 +931,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isMobile ? 4 : 10} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={isMobile ? 4 : 11} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -1032,6 +1063,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                           </IconButton>
                         </Tooltip>
                       </TableCell>
+                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
+                        {/* Renders nothing for runs that were never mined into a
+                            recipe — canvas and chat runs have no reusable crew
+                            structure, so the column stays quiet for them. */}
+                        <RecipeCurationButton jobId={run.job_id} />
+                      </TableCell>
                       <TableCell>
                         <RunActions
                           run={run}
@@ -1124,6 +1161,11 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
             onClose={closeRunResult}
             result={memoizedResult}
             run={selectedRun || undefined}
+          />
+
+          <RecipeEffectivenessDialog
+            open={recipesDialogOpen}
+            onClose={() => setRecipesDialogOpen(false)}
           />
         </CardContent>
       </Card>
