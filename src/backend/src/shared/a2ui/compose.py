@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -395,13 +396,33 @@ def _slide_has_visual(slide: Dict[str, Any], comps: Dict[Any, Dict[str, Any]]) -
     return False
 
 
-def presentation_design_lint(payload: Any) -> List[str]:
+# Citation shapes an answer can carry: a bare URL, a markdown link, or a
+# numbered-reference / "Sources:" section. Used only to decide whether a deck
+# DROPPING attribution is worth a retry — never to invent citations.
+_SOURCE_MARKERS = re.compile(
+    r"https?://|\]\(\s*https?://|^\s*(?:sources?|references?|citations?|bibliography)\s*:",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def answer_cites_sources(text: str) -> bool:
+    """True when the answer being composed carries something citable."""
+    return bool(text) and bool(_SOURCE_MARKERS.search(text))
+
+
+def presentation_design_lint(payload: Any, answer_has_sources: bool = False) -> List[str]:
     """Deterministic design critique of a VALID presentation surface (no LLM).
 
-    Returns human-readable findings when the deck is visually flat — the
-    cheap analogue of PPTAgent-style reflective evaluation. Findings drive ONE
-    correction retry in ``compose_a2ui``; a deck that stays flat is still
-    returned (text-only slides beat no deck), unlike the hollow-body gate.
+    Returns human-readable findings when the deck is visually flat, thin, or has
+    dropped attribution the source answer supplied — the cheap analogue of
+    PPTAgent-style reflective evaluation. Findings drive ONE correction retry in
+    ``compose_a2ui``; a deck that stays flat is still returned (text-only slides
+    beat no deck), unlike the hollow-body gate.
+
+    ``answer_has_sources`` says whether the ANSWER being composed carried any
+    citation at all. Without it the attribution check would fire on every deck
+    built from an unsourced answer, where there is nothing to cite and nothing
+    a retry could fix.
     """
     if not isinstance(payload, dict):
         return []
@@ -453,6 +474,38 @@ def presentation_design_lint(payload: Any) -> List[str]:
                     "break the run with a Diagram, Chart, stats or two-column slide"
                 )
                 break
+
+    # Thin bodies: a body slide carrying one lone bullet is a slide that should
+    # have been merged, or a topic that was under-developed. Counts direct text
+    # children only — a slide whose body IS a visual is judged by the checks above.
+    thin = 0
+    for s in body_slides:
+        if _slide_has_visual(s, comps):
+            continue
+        kids = [comps.get(cid) for cid in (s.get("children") or [])]
+        text_kids = [
+            k
+            for k in kids
+            if isinstance(k, dict) and k.get("component") in ("Text", "Markdown", "List")
+        ]
+        if len(text_kids) == 1 and text_kids[0].get("component") == "Text":
+            thin += 1
+    if thin * 3 >= len(body_slides) and thin > 1:
+        findings.append(
+            f"{thin} of {len(body_slides)} body slides carry a single bullet — give each "
+            "3-5 substantive points or merge the slide into its neighbour"
+        )
+
+    # Attribution: only flagged when the ANSWER carried sources and the deck then
+    # dropped them. A deck with nothing to cite is not a design defect, so this
+    # never fires on decks composed from an unsourced answer.
+    if answer_has_sources:
+        cited = sum(1 for s in slides if s.get("sources"))
+        if cited == 0:
+            findings.append(
+                "the answer cites sources but no slide carries any — put the citations "
+                "backing each slide's claims in that slide's 'sources'"
+            )
     return findings
 
 
@@ -475,8 +528,9 @@ def plan_presentation_outline(
             "You plan a slide deck OUTLINE from an answer's content. Reply with ONE "
             'JSON object only: {"slides": [{"title": str, "variant": str, '
             '"visual": str, "focus": str}]}.\n'
-            "variant is one of: title, content, two-column, visual, stats, agenda, "
-            "quote, section. visual names the visual that slide carries: "
+            "variant is one of: title, content, two-column, comparison, visual, "
+            "image-full, stats, agenda, quote, section. visual names the visual that "
+            "slide carries: "
             "'chart:<bar|line|pie|area|scatter|radar>', "
             "'diagram:<process|timeline|cycle|funnel|pyramid|comparison|matrix2x2|hierarchy>', "
             "'table', 'stats', or 'none'. focus is one short sentence on what the "
@@ -487,9 +541,14 @@ def plan_presentation_outline(
             "loops -> diagram:cycle, narrowing stages -> diagram:funnel, layered "
             "levels -> diagram:pyramid, two options -> diagram:comparison, two axes "
             "-> diagram:matrix2x2, org/tree structure -> diagram:hierarchy, numeric "
-            "series -> chart, key figures -> stats; never plan two consecutive "
+            "series -> chart, key figures -> stats; use variant 'comparison' when two "
+            "peers are weighed in TEXT on both sides; never plan two consecutive "
             "slides with the same variant unless both are 'content'; plan only "
             "slides the content can genuinely fill.\n"
+            "DEPTH: plan 10-16 slides when the answer supports it — split a crowded "
+            "topic into two focused slides rather than dropping material. Plan fewer "
+            "only when the answer genuinely has less to say; never pad with slides "
+            "the content cannot fill.\n"
             + (f"Deck purpose: {purpose}\n" if purpose else "")
             + (f"The user's request: {query}\n" if query else "")
             + (
@@ -819,9 +878,24 @@ def a2ui_system_prompt(
         "variant='two-column' (children = the Text nodes then the visual node); give a "
         "dominant Chart/Diagram/Table its own variant='visual' slide; use variant='agenda' "
         "(children = short Text nodes) for the overview; variant='quote' for a punchy "
-        "takeaway (put it in 'title'). NEVER use the same variant on more than two "
+        "takeaway (put it in 'title'). Weigh TWO peers — options, vendors, before/after, "
+        "pros/cons — with variant='comparison': set 'leftLabel' and 'rightLabel' to the "
+        "two things being compared and list the left-hand Text nodes THEN the right-hand "
+        "ones in 'children' (use this, NOT 'two-column', when both sides are text). Open a "
+        "major section with variant='image-full' when the answer supplies a real image URL "
+        "(one Image child, title overlaid). NEVER use the same variant on more than two "
         "consecutive slides. Use AS MANY slides as the content needs, give each a DISTINCT "
-        "focus, and NEVER cram everything onto one slide. Keep ONE consistent theme — the "
+        "focus, and NEVER cram everything onto one slide. DEPTH: a substantial answer "
+        "deserves 10-16 slides — prefer splitting a crowded slide into two focused slides "
+        "over dropping material; only go shorter when the answer genuinely has less to say. "
+        "ATTRIBUTION: when the answer cites sources (URLs, publications, datasets, report "
+        "names), put the ones backing THAT slide's claims in its 'sources' as "
+        '[{"label":"IEA Global EV Outlook 2025","url":"https://..."}] — label is required, '
+        "url optional; 1-3 per slide, on the slides whose facts they support, NOT on every "
+        "slide, and NEVER invent a source or a URL the answer does not contain. Write the "
+        "presenter's script for each body slide into 'notes' (2-4 sentences: what to say, "
+        "the context behind the bullets, the transition to the next slide) — 'notes' is "
+        "never displayed on the slide itself. Keep ONE consistent theme — the "
         "app styles it, so do not specify colors.\n"
         "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
         "REAL, answerable questions — each {question, options:[4 distinct strings], "
@@ -1106,7 +1180,9 @@ def compose_a2ui(
                     )
                 else:
                     findings = (
-                        presentation_design_lint(payload)
+                        presentation_design_lint(
+                            payload, answer_has_sources=answer_cites_sources(text)
+                        )
                         if not design_retry_done
                         else []
                     )

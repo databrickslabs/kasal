@@ -198,7 +198,7 @@
       }
     },
     "Slide": {
-      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), 'two-column' (bullets on the left, a visual — Chart/Diagram/Table/Image — on the right; children are the text nodes THEN the visual node), 'visual' (a slide whose body is ONE dominant Chart/Diagram/Table with an optional caption Text), 'agenda' (numbered overview rows; children are short Text nodes), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic.",
+      "summary": "A single slide. Set 'variant' to vary the LAYOUT (the deck has ONE consistent theme): 'title' (opening slide: kicker + big title + subtitle), 'stats' (a 'by the numbers' slide whose children are 3-4 KeyValue big numbers), 'quote' (a single punchy takeaway placed in 'title'), 'content' (default: kicker + title + bullet/markdown body), 'two-column' (bullets on the left, a visual — Chart/Diagram/Table/Image — on the right; children are the text nodes THEN the visual node), 'comparison' (TWO peer panels side by side, each with its own heading from 'leftLabel'/'rightLabel'; children are the left-hand nodes THEN the right-hand nodes — use for A-vs-B, vendor/option trade-offs, before/after or pros/cons, NOT for text-plus-visual which is 'two-column'), 'visual' (a slide whose body is ONE dominant Chart/Diagram/Table with an optional caption Text), 'image-full' (full-bleed Image child with the title overlaid on a dark scrim — a chapter opener), 'agenda' (numbered overview rows; children are short Text nodes), or 'section' (a divider). Give most slides a short UPPERCASE 'kicker' label naming the topic. Put the presenter's script in 'notes' (never shown on the slide; it becomes PowerPoint speaker notes) and the citations backing this slide's claims in 'sources'.",
       "props": {
         "variant": {
           "type": "string",
@@ -208,7 +208,9 @@
             "quote",
             "content",
             "two-column",
+            "comparison",
             "visual",
+            "image-full",
             "agenda",
             "section"
           ]
@@ -229,7 +231,20 @@
           "type": "componentIds"
         },
         "notes": {
-          "type": "string"
+          "type": "string",
+          "binding": true
+        },
+        "leftLabel": {
+          "type": "string",
+          "binding": true
+        },
+        "rightLabel": {
+          "type": "string",
+          "binding": true
+        },
+        "sources": {
+          "type": "array",
+          "binding": true
         }
       }
     },

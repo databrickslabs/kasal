@@ -5,8 +5,9 @@
  * the component modules, which is what keeps this module free of cycles.
  */
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { ComponentNode, NodeProps } from '../types'
-import { ChevronDown, Download, FileText, Presentation } from 'lucide-react'
+import { ChevronDown, Download, FileText, Presentation, StickyNote } from 'lucide-react'
 import { Button } from '../ui/button'
 import { downloadPptx } from '../lib/download'
 import { DeckThemeContext } from '../lib/deckThemes'
@@ -14,6 +15,7 @@ import { SurfaceContext, SurfaceChromeContext } from '../lib/surfaceContext'
 import { cn } from '../lib/utils'
 import { SlideCtx } from './slideContext'
 import { asStr } from './values'
+import { normSlideSources } from '../lib/slideSources'
 
 // Whether a slide-child subtree carries any real content. A 'content' slide is
 // "effectively empty" when it has no children OR only blank Text/Markdown — both
@@ -44,7 +46,7 @@ const SLIDE_VISUAL_COMPONENTS = new Set([
   'Chart', 'Diagram', 'Table', 'Graph', 'Sequence', 'Forecast', 'Image', 'Album', 'Map',
 ])
 
-export function Slide({ node, render }: NodeProps) {
+export function Slide({ node, render, resolve }: NodeProps) {
   const { idx, total } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
   const surface = useContext(SurfaceContext)
@@ -63,10 +65,55 @@ export function Slide({ node, render }: NodeProps) {
     return children.some((id) => nodeHasContent(id, byId))
   }, [surface, children])
 
-  const num = (
-    <div className="absolute right-6 top-5 text-xs font-semibold tracking-wide" style={{ color: theme.muted }}>
-      {idx + 1} / {total}
+  // Citations for the claims on this slide. Bound values are resolved (the
+  // composer often points `sources` at a shared /sources list in the dataModel),
+  // and the footer is laid out absolutely so adding attribution never reflows a
+  // variant's body — a researched deck looks identical to an unsourced one apart
+  // from the footer.
+  const sources = useMemo(() => normSlideSources(resolve(node.sources)), [resolve, node.sources])
+  const sourcesFooter = sources.length ? (
+    <div
+      className="a2-slide-sources absolute inset-x-14 bottom-4 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t pt-2 text-[0.78rem] leading-snug"
+      style={{ borderColor: theme.panelBorder, color: theme.muted }}
+    >
+      <span className="font-semibold uppercase tracking-[0.14em]" style={{ color: theme.kicker }}>
+        Sources
+      </span>
+      {sources.map((s, i) => (
+        <span key={`${s.label}-${i}`} className="min-w-0">
+          <span className="font-semibold">{i + 1}.</span>{' '}
+          {s.url ? (
+            <a href={s.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              {s.label}
+            </a>
+          ) : (
+            s.label
+          )}
+        </span>
+      ))}
     </div>
+  ) : null
+
+  // The sources footer is absolutely positioned, so every layout needs bottom
+  // clearance when it is present or the body would run underneath it. Set inline
+  // rather than as a `pb-*` class: Tailwind padding utilities have equal
+  // specificity to each layout's own `p-*`/`py-*`, so which one wins would depend
+  // on stylesheet order, not on the order written here.
+  const stageStyle: CSSProperties = {
+    background: theme.stage,
+    color: theme.fg,
+    ...(sources.length ? { paddingBottom: 76 } : {}),
+  }
+
+  // Slide chrome shared by every variant: the page number and (when present) the
+  // sources footer. Emitted wherever a layout previously emitted `num` alone.
+  const chrome = (
+    <>
+      <div className="absolute right-6 top-5 text-xs font-semibold tracking-wide" style={{ color: theme.muted }}>
+        {idx + 1} / {total}
+      </div>
+      {sourcesFooter}
+    </>
   )
   const eyebrow = kicker ? (
     <div className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: theme.kicker }}>
@@ -79,15 +126,21 @@ export function Slide({ node, render }: NodeProps) {
   // void — a broken-looking near-empty slide. Redirect it to the centered SECTION
   // layout so the lone title reads as a deliberate divider regardless of what the
   // generator emitted.
-  const bodyVariant = variant === 'content' || variant === 'two-column' || variant === 'visual' || variant === 'agenda'
+  const bodyVariant =
+    variant === 'content' ||
+    variant === 'two-column' ||
+    variant === 'visual' ||
+    variant === 'agenda' ||
+    variant === 'comparison' ||
+    variant === 'image-full'
   const titleOnlyContent = bodyVariant && !slideHasBody && node.title != null
   if (variant === 'title' || variant === 'section' || titleOnlyContent) {
     return (
       <div
         className="a2-slide relative flex h-full flex-col items-center justify-center p-12 text-center"
-        style={{ background: theme.stage, color: theme.fg }}
+        style={stageStyle}
       >
-        {num}
+        {chrome}
         {eyebrow}
         {node.title != null && (
           <h2 className="mt-3 text-balance text-[2.7rem] font-extrabold leading-[1.05] tracking-tight" style={{ color: theme.title }}>
@@ -104,8 +157,8 @@ export function Slide({ node, render }: NodeProps) {
   if (variant === 'stats') {
     const cols = Math.min(Math.max(children.length, 1), 4)
     return (
-      <div className="a2-slide relative flex h-full flex-col p-10" style={{ background: theme.stage, color: theme.fg }}>
-        {num}
+      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+        {chrome}
         {eyebrow}
         {node.title != null && (
           <h2 className="mt-1 text-balance text-3xl font-bold tracking-tight" style={{ color: theme.title }}>{asStr(node.title)}</h2>
@@ -120,8 +173,8 @@ export function Slide({ node, render }: NodeProps) {
 
   if (variant === 'quote') {
     return (
-      <div className="a2-slide relative flex h-full flex-col justify-center p-12" style={{ background: theme.stage, color: theme.fg }}>
-        {num}
+      <div className="a2-slide relative flex h-full flex-col justify-center p-12" style={stageStyle}>
+        {chrome}
         {eyebrow}
         <div className="mb-5 mt-3 h-1 w-16 rounded-full" style={{ background: theme.accent }} />
         {node.title != null && (
@@ -135,11 +188,39 @@ export function Slide({ node, render }: NodeProps) {
     )
   }
 
+  if (variant === 'image-full') {
+    // Full-bleed media with the title overlaid — the "chapter opener" slide.
+    // Text is forced to white over a dark scrim rather than themed: the media is
+    // an arbitrary photo, so a light theme's dark title would be unreadable on it.
+    return (
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden" style={stageStyle}>
+        <div className="absolute inset-0 [&_img]:size-full [&_img]:object-cover [&>*]:size-full">{body}</div>
+        <div
+          className="absolute inset-0"
+          style={{ background: 'linear-gradient(0deg, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.35) 45%, rgba(0,0,0,0.1) 100%)' }}
+        />
+        <div className="relative mt-auto p-12 text-white">
+          {kicker && (
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-white/80">{kicker}</div>
+          )}
+          {node.title != null && (
+            <h2 className="mt-3 max-w-4xl text-balance text-[2.7rem] font-extrabold leading-[1.05] tracking-tight">
+              {asStr(node.title)}
+            </h2>
+          )}
+          <div className="mt-5 h-1 w-20 rounded-full" style={{ background: theme.accent }} />
+          {subtitle && <p className="mt-5 max-w-3xl text-pretty text-xl leading-relaxed text-white/90">{subtitle}</p>}
+        </div>
+        {chrome}
+      </div>
+    )
+  }
+
   // Shared top-left header band (kicker → accent rule → title → subtitle) for the
   // two-column / visual / agenda layouts, mirroring the content layout's header.
   const header = (
     <>
-      {num}
+      {chrome}
       {eyebrow}
       <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
       {node.title != null && (
@@ -163,7 +244,7 @@ export function Slide({ node, render }: NodeProps) {
     const left = visualIds.length && textIds.length ? textIds : children.slice(0, mid)
     const right = visualIds.length && textIds.length ? visualIds : children.slice(mid)
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
         {header}
         <div className="mt-6 grid min-h-0 flex-1 grid-cols-2 items-center gap-10">
           <div className="flex min-w-0 flex-col justify-center space-y-4 text-pretty text-[1.35rem] leading-relaxed [&_ul]:space-y-3 [&_ol]:space-y-3">
@@ -181,7 +262,7 @@ export function Slide({ node, render }: NodeProps) {
     // One dominant visual (Chart/Diagram/Table) with an optional caption — the
     // body fills the stage below the title instead of using content text sizes.
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
         {header}
         <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-4 text-base">{body}</div>
       </div>
@@ -192,7 +273,7 @@ export function Slide({ node, render }: NodeProps) {
     // Numbered overview rows — each child (a short Text) gets an accent number
     // badge, the staple "agenda / what we'll cover" layout.
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
         {header}
         <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-5">
           {children.map((id, i) => (
@@ -211,13 +292,49 @@ export function Slide({ node, render }: NodeProps) {
     )
   }
 
+  if (variant === 'comparison') {
+    // Two labelled panels side by side (A vs B). Distinct from 'two-column',
+    // which is text-on-the-left / visual-on-the-right: here BOTH sides are peers
+    // and each carries its own heading, so options, vendors, before/after states
+    // or pros/cons read as a genuine comparison rather than a split body.
+    const labels = [asStr(node.leftLabel), asStr(node.rightLabel)]
+    const mid = Math.ceil(children.length / 2)
+    const columns = [children.slice(0, mid), children.slice(mid)]
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {header}
+        <div className="mt-6 grid min-h-0 flex-1 grid-cols-2 items-stretch gap-8">
+          {columns.map((col, side) => (
+            <div
+              key={side}
+              className="flex min-w-0 flex-col rounded-2xl border p-6"
+              style={{ background: theme.panel, borderColor: theme.panelBorder }}
+            >
+              {labels[side] && (
+                <div
+                  className="mb-4 border-b pb-3 text-lg font-bold tracking-tight"
+                  style={{ color: side === 0 ? theme.accent : theme.kicker, borderColor: theme.panelBorder }}
+                >
+                  {labels[side]}
+                </div>
+              )}
+              <div className="flex min-w-0 flex-1 flex-col justify-center space-y-3 text-pretty text-[1.25rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+                {col.map((id) => render(id))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   // content (default). Sized for the 1280×720 design canvas (the whole slide is
   // then scaled to the stage), so text reads at slide proportions — not tiny. The
   // body is vertically CENTERED in the area below the title so a few bullets fill
   // the slide instead of clustering at the top over a void.
   return (
-    <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={{ background: theme.stage, color: theme.fg }}>
-      {num}
+    <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      {chrome}
       {eyebrow}
       <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
       {node.title != null && (
@@ -361,11 +478,14 @@ export function SurfaceDownloadMenu({ className }: { className?: string }) {
   )
 }
 
-export function SlideDeck({ node, render }: NodeProps) {
+export function SlideDeck({ node, render, resolve }: NodeProps) {
   const slides = Array.isArray(node.children) ? node.children : []
   const total = slides.length
   const [idx, setIdx] = useState(0)
+  const [showNotes, setShowNotes] = useState(false)
   const { fit } = useContext(SurfaceChromeContext)
+  const surface = useContext(SurfaceContext)
+  const theme = useContext(DeckThemeContext)
   const clamp = (n: number) => Math.max(0, Math.min(total - 1, n))
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -377,6 +497,14 @@ export function SlideDeck({ node, render }: NodeProps) {
   })
   if (!total) return null
   const cur = clamp(idx)
+  // Speaker notes live off the 1280×720 canvas — they are the presenter's script,
+  // not slide content — so they render under the deck and only when the current
+  // slide actually has them. `deckNotes` gates the toggle so a deck with no notes
+  // anywhere never shows a dead control.
+  const byId = Object.fromEntries((surface?.components || []).map((c) => [c.id, c]))
+  const noteFor = (id: string) => asStr(resolve(byId[id]?.notes)).trim()
+  const deckHasNotes = slides.some((id) => noteFor(id) !== '')
+  const currentNote = noteFor(slides[cur])
   return (
     <div className={cn('flex flex-col gap-3', fit && 'h-full min-h-0')}>
       <SurfaceDownloadMenu />
@@ -425,10 +553,39 @@ export function SlideDeck({ node, render }: NodeProps) {
             />
           ))}
         </div>
-        <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i + 1))} disabled={cur === total - 1}>
-          Next ›
-        </Button>
+        <div className="flex items-center gap-2">
+          {deckHasNotes && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={showNotes}
+              onClick={() => setShowNotes((v) => !v)}
+              title="Speaker notes"
+            >
+              <StickyNote className="mr-1.5 size-3.5" />
+              Notes
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setIdx((i) => clamp(i + 1))} disabled={cur === total - 1}>
+            Next ›
+          </Button>
+        </div>
       </div>
+      {showNotes && deckHasNotes && (
+        <div
+          className="shrink-0 overflow-auto rounded-xl border p-4 text-sm leading-relaxed"
+          style={{ background: theme.panel, borderColor: theme.panelBorder, color: theme.fg, maxHeight: 200 }}
+        >
+          <div className="mb-1.5 text-xs font-bold uppercase tracking-[0.14em]" style={{ color: theme.kicker }}>
+            Speaker notes · slide {cur + 1}
+          </div>
+          {currentNote ? (
+            <p className="whitespace-pre-wrap text-pretty">{currentNote}</p>
+          ) : (
+            <p style={{ color: theme.muted }}>No notes for this slide.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

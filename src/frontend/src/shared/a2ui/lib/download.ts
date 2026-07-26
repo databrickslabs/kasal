@@ -5,6 +5,7 @@ import type { ComponentNode, Surface } from '../types'
 import type { DeckTheme } from './deckThemes'
 import { readableTextOn, seriesFromAccent } from './deckThemes'
 import { resolveValue } from '../resolve'
+import { normSlideSources } from './slideSources'
 
 function triggerDownload(href: string, filename: string) {
   const a = document.createElement('a')
@@ -368,6 +369,20 @@ export async function downloadPptx(
     const variant = String(node?.variant ?? '').toLowerCase()
     const kicker = String(resolve(node?.kicker) ?? '').trim()
     const title = String(resolve(node?.title) ?? '').trim()
+
+    // Notes and citations are attached BEFORE the per-variant `continue`s below,
+    // so no layout can silently drop them from the download.
+    // Speaker notes become real PowerPoint notes (presenter view), not slide text.
+    const notes = String(resolve(node?.notes) ?? '').trim()
+    if (notes) slide.addNotes(notes)
+    // Citations as a footer band, mirroring the on-screen sources footer.
+    const srcs = normSlideSources(resolve(node?.sources))
+    if (srcs.length) {
+      slide.addText(
+        `Sources — ${srcs.map((s, i) => `${i + 1}. ${s.label}`).join('    ')}`,
+        { x: 0.6, y: 6.75, w: 12.1, h: 0.45, fontSize: 10, color: mutedC, valign: 'top' },
+      )
+    }
 
     // Centered title / section divider (mirrors the renderer's centered layout).
     if (variant === 'title' || variant === 'section') {

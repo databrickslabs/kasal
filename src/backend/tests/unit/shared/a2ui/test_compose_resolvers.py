@@ -157,14 +157,24 @@ def test_presentation_needs_body_covers_new_body_variants():
 
 
 # --- presentation_design_lint (deck visual-density critique) ----------------
-def _text_slide(i):
+def _text_slide(i, bullets=3):
+    """A content slide with `bullets` Text children.
+
+    Defaults to 3 because that is the floor the composer prompt asks for ("3-5
+    Text nodes"); a 1-bullet slide is a thin slide the lint deliberately flags,
+    so tests about VISUAL density must not accidentally build one.
+    """
+    ids = [f"t{i}_{b}" for b in range(bullets)]
     return {
         "id": f"s{i}",
         "component": "Slide",
         "variant": "content",
         "title": f"Slide {i}",
-        "children": [f"t{i}"],
-        "_children": [{"id": f"t{i}", "component": "Text", "text": "A real point."}],
+        "children": ids,
+        "_children": [
+            {"id": tid, "component": "Text", "text": f"A real point {b}."}
+            for b, tid in enumerate(ids)
+        ],
     }
 
 
@@ -204,6 +214,43 @@ def test_design_lint_passes_a_deck_with_enough_visuals():
         _diagram_slide(6),
     ]
     assert presentation_design_lint(_deck(*slides)) == []
+
+
+def test_design_lint_flags_thin_single_bullet_slides():
+    """A body slide carrying one lone bullet is a slide that should have been
+    merged or developed — the deck reads as an outline, not a presentation."""
+    thin = _deck(
+        *[_text_slide(i, bullets=1) for i in range(1, 5)],
+        _diagram_slide(5),
+        _diagram_slide(6),
+    )
+    findings = presentation_design_lint(thin)
+    assert any("single bullet" in f for f in findings), findings
+    # Well-developed slides with the same visual mix produce no thin finding.
+    thick = _deck(
+        *[_text_slide(i, bullets=4) for i in range(1, 5)],
+        _diagram_slide(5),
+        _diagram_slide(6),
+    )
+    assert not any("single bullet" in f for f in presentation_design_lint(thick))
+
+
+def test_design_lint_flags_dropped_attribution_only_when_answer_had_sources():
+    """The attribution finding must not fire on decks composed from an answer
+    that had nothing to cite — there would be no way for a retry to fix it."""
+    deck = _deck(*[_text_slide(i) for i in range(1, 5)], _diagram_slide(5), _diagram_slide(6))
+    assert not any("cites sources" in f for f in presentation_design_lint(deck))
+    findings = presentation_design_lint(deck, answer_has_sources=True)
+    assert any("cites sources" in f for f in findings), findings
+    # A deck that DID carry the citations through is clean.
+    cited = _deck(
+        *[_text_slide(i) for i in range(1, 5)], _diagram_slide(5), _diagram_slide(6)
+    )
+    cited["components"][1]["sources"] = [{"label": "IEA", "url": "https://example.com"}]
+    assert not any(
+        "cites sources" in f
+        for f in presentation_design_lint(cited, answer_has_sources=True)
+    )
 
 
 def test_design_lint_ignores_short_decks_and_non_presentations():

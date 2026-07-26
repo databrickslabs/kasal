@@ -980,13 +980,17 @@ class TestDatabricksAppA2UI:
 
         # Bare module specifiers (not relative/absolute) from the vendored tree.
         import_re = re.compile(r"""(?:from|import)\s+['"]([^'".][^'"]*)['"]""")
+        # Comments must be stripped first: the pattern keys off the bare word
+        # "from", so ordinary prose like `// distinct from 'two-column', which…`
+        # would otherwise be read as an import of a package named "two-column".
+        comment_re = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
         imported: set[str] = set()
         for path, content in files.items():
             if not path.startswith("frontend/src/a2ui/"):
                 continue
             if not path.endswith((".ts", ".tsx")):
                 continue
-            for spec in import_re.findall(content):
+            for spec in import_re.findall(comment_re.sub(" ", content)):
                 # Normalize "leaflet/dist/leaflet.css" / "@scope/pkg/sub" → package root.
                 if spec.startswith("@"):
                     root = "/".join(spec.split("/")[:2])
