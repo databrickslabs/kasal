@@ -416,7 +416,7 @@ class TestProgressivePathIsWired:
                 return_value="PLAN TEMPLATE",
             ),
             patch(
-                "src.services.crew_generation_service.LLMManager.completion",
+                "src.services.crew_generation.progressive.LLMManager.completion",
                 side_effect=fake_completion,
             ),
             patch.object(

@@ -27,7 +27,7 @@ def _build_service():
             "src.services.crew_generation_service.LLMLogRepository"
         ) as mock_log_repo_cls,
         patch(
-            "src.services.crew_generation_service.CrewGeneratorRepository"
+            "src.services.crew_generation.progressive.CrewGeneratorRepository"
         ) as mock_crew_repo_cls,
     ):
         mock_log_svc = Mock()
@@ -109,13 +109,13 @@ def _crew_complete_patches(
             self.mocks = {}
 
         def __enter__(self):
-            p1 = patch("src.services.crew_generation_service.ToolService")
+            p1 = patch("src.services.crew_generation.progressive.ToolService")
             p2 = patch.object(service, "_get_tool_details", new_callable=AsyncMock)
             p3 = patch.object(
                 service, "_prepare_prompt_template", new_callable=AsyncMock
             )
-            p4 = patch("src.services.crew_generation_service.LLMManager")
-            p5 = patch("src.services.crew_generation_service.robust_json_parser")
+            p4 = patch("src.services.crew_generation.complete.LLMManager")
+            p5 = patch("src.services.crew_generation.complete.robust_json_parser")
             p6 = patch.object(service, "_process_crew_setup")
 
             self._patches = [p1, p2, p3, p4, p5, p6]
@@ -159,7 +159,7 @@ class TestInit:
             patch("src.services.crew_generation_service.LLMLogService") as log_svc,
             patch("src.services.crew_generation_service.LLMLogRepository") as log_repo,
             patch(
-                "src.services.crew_generation_service.CrewGeneratorRepository"
+                "src.services.crew_generation.progressive.CrewGeneratorRepository"
             ) as crew_repo,
         ):
             svc = CrewGenerationService(mock_session)
@@ -1162,15 +1162,15 @@ class TestCreateCrewComplete:
         tool_detail = {"name": "ToolA", "id": "id-a", "title": "ToolA"}
 
         with (
-            patch("src.services.crew_generation_service.ToolService"),
+            patch("src.services.crew_generation.progressive.ToolService"),
             patch.object(
                 self.service, "_get_tool_details", new_callable=AsyncMock
             ) as gtd,
             patch.object(
                 self.service, "_prepare_prompt_template", new_callable=AsyncMock
             ) as ppt,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
-            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.robust_json_parser") as rjp,
             patch.object(self.service, "_process_crew_setup") as pcs,
         ):
 
@@ -1262,14 +1262,14 @@ class TestCreateCrewComplete:
         req = self._make_request(model="m")
 
         with (
-            patch("src.services.crew_generation_service.ToolService"),
+            patch("src.services.crew_generation.progressive.ToolService"),
             patch.object(
                 self.service, "_get_tool_details", new_callable=AsyncMock
             ) as gtd,
             patch.object(
                 self.service, "_prepare_prompt_template", new_callable=AsyncMock
             ) as ppt,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
         ):
             gtd.return_value = []
             ppt.return_value = "sys"
@@ -1695,7 +1695,7 @@ class TestProgressiveGeneration:
                 patch.object(
                     self.service, "_generate_crew_plan", side_effect=capture_then_stop
                 ),
-                patch("src.services.crew_generation_service.sse_manager") as sse,
+                patch("src.services.crew_generation.progressive.sse_manager") as sse,
             ):
                 sse.broadcast_to_job = AsyncMock()
                 await self.service.create_crew_progressive(
@@ -1721,8 +1721,8 @@ class TestProgressiveGeneration:
 
         with (
             patch("src.services.crew_generation_service.TemplateService") as ts,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
-            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.robust_json_parser") as rjp,
         ):
             ts.get_effective_template_content = AsyncMock(return_value="system prompt")
             lm.completion = AsyncMock(return_value='{"agents":[]}')
@@ -1744,8 +1744,8 @@ class TestProgressiveGeneration:
 
         with (
             patch("src.services.crew_generation_service.TemplateService") as ts,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
-            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.robust_json_parser") as rjp,
         ):
             ts.get_effective_template_content = AsyncMock(return_value="sys")
             lm.completion = AsyncMock(return_value="{}")
@@ -1767,8 +1767,8 @@ class TestProgressiveGeneration:
 
         with (
             patch("src.services.crew_generation_service.TemplateService") as ts,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
-            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.robust_json_parser") as rjp,
         ):
             ts.get_effective_template_content = AsyncMock(return_value="sys")
             lm.completion = AsyncMock(return_value="{}")
@@ -2174,7 +2174,7 @@ class TestProgressiveGeneration:
 
             def __enter__(self):
                 # Patch sse_manager.broadcast_to_job
-                p_sse = patch("src.services.crew_generation_service.sse_manager")
+                p_sse = patch("src.services.crew_generation.progressive.sse_manager")
                 # Patch the isolated DB session used by the local-DB (SQLite) path.
                 # The function does a local import
                 # ``from src.db.session import ... get_isolated_db_session`` and uses
@@ -2193,18 +2193,18 @@ class TestProgressiveGeneration:
                 )
                 # Patch AgentGenerationService
                 p_agent_svc = patch(
-                    "src.services.crew_generation_service.AgentGenerationService"
+                    "src.services.crew_generation.progressive.AgentGenerationService"
                 )
                 # Patch TaskGenerationService
                 p_task_svc = patch(
-                    "src.services.crew_generation_service.TaskGenerationService"
+                    "src.services.crew_generation.progressive.TaskGenerationService"
                 )
                 # Patch CrewGeneratorRepository
                 p_repo = patch(
-                    "src.services.crew_generation_service.CrewGeneratorRepository"
+                    "src.services.crew_generation.progressive.CrewGeneratorRepository"
                 )
                 # Patch ToolService
-                p_tool_svc = patch("src.services.crew_generation_service.ToolService")
+                p_tool_svc = patch("src.services.crew_generation.progressive.ToolService")
                 # Patch _get_tool_details
                 p_gtd = patch.object(
                     service, "_get_tool_details", new_callable=AsyncMock
@@ -3918,8 +3918,8 @@ class TestProgressiveGeneration:
 
         with (
             patch("src.services.crew_generation_service.TemplateService") as ts,
-            patch("src.services.crew_generation_service.LLMManager") as lm,
-            patch("src.services.crew_generation_service.robust_json_parser") as rjp,
+            patch("src.services.crew_generation.complete.LLMManager") as lm,
+            patch("src.services.crew_generation.complete.robust_json_parser") as rjp,
         ):
             ts.get_effective_template_content = AsyncMock(return_value="sys prompt")
             lm.completion = AsyncMock(return_value='{"agents":[{"name":"A"}]}')
