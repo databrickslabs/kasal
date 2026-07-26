@@ -1163,7 +1163,13 @@ class TestDatabricksAppA2UI:
 
         files = _files(await exporter.export(crew_data, {}))
         for rel in (
-            "frontend/src/a2ui/components.tsx",
+            # components.tsx was split into a components/ package; the barrel is
+            # the public surface and the split modules must all ship.
+            "frontend/src/a2ui/components/index.ts",
+            "frontend/src/a2ui/components/primitives.tsx",
+            "frontend/src/a2ui/components/data.tsx",
+            "frontend/src/a2ui/components/diagrams.tsx",
+            "frontend/src/a2ui/components/slides.tsx",
             "frontend/src/a2ui/A2UIRenderer.tsx",
             "frontend/src/a2ui/registry.tsx",
             "frontend/src/a2ui/resolve.ts",
@@ -1179,8 +1185,12 @@ class TestDatabricksAppA2UI:
         assert "frontend/src/lib/deckThemes.ts" not in files
         assert "frontend/src/lib/markdown.tsx" not in files
         # Byte-identical to the live source → genuinely one implementation.
-        live = (SHARED_A2UI_FRONTEND_DIR / "components.tsx").read_text(encoding="utf-8")
-        assert files["frontend/src/a2ui/components.tsx"] == live
+        # Checks every module in the components/ package, not just one file, so a
+        # split module that drifts (or is never re-vendored) is caught.
+        for src in sorted((SHARED_A2UI_FRONTEND_DIR / "components").glob("*.ts*")):
+            rel = f"frontend/src/a2ui/components/{src.name}"
+            assert rel in files, f"missing vendored {rel}"
+            assert files[rel] == src.read_text(encoding="utf-8"), f"drift in {rel}"
         # Renderer unit-test files are not shipped (the export only builds).
         assert not any(
             p.startswith("frontend/src/a2ui/") and ".test." in p for p in files
@@ -1451,7 +1461,7 @@ class TestDatabricksAppCitations:
         assert "align-super" in md
         assert "export function linkifyCitations" in md
         # Both markdown surfaces use the shared renderer + linkifier.
-        for path in ("frontend/src/App.tsx", "frontend/src/a2ui/components.tsx"):
+        for path in ("frontend/src/App.tsx", "frontend/src/a2ui/components/primitives.tsx"):
             src = files[path]
             assert "linkifyCitations" in src and "components={mdComponents}" in src
 
