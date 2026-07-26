@@ -51,7 +51,7 @@ import RunDialogs from './RunDialogs';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { usePermissions } from '../../hooks/usePermissions';
-import ExecutionStatusBadge from '../ExecutionStatusBadge';
+import ExecutionStatusBadge from './ExecutionStatusBadge';
 import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
 export interface RunHistoryRef {

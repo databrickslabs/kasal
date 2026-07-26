@@ -11,7 +11,7 @@ import {
   PanTool as WaitingApprovalIcon,
   ThumbDown as RejectedIcon,
 } from '@mui/icons-material';
-import { HITLApprovalDialog } from './HITL';
+import { HITLApprovalDialog } from '../HITL';
 
 interface ExecutionStatusBadgeProps {
   status: string;

@@ -9,7 +9,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { Run } from '../../api/ExecutionHistoryService';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { useTranslation } from 'react-i18next';
-import ExecutionStopButton from '../ExecutionStopButton';
+import ExecutionStopButton from './ExecutionStopButton';
 import { useUserPreferencesStore } from '../../store/userPreferencesStore';
 
 interface RunActionsProps {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWorkflowRedux } from '../hooks/workflow/useWorkflowRedux';
+import { useWorkflowRedux } from '../../hooks/workflow/useWorkflowRedux';
 import { Box, Button, Typography } from '@mui/material';
 
 export const WorkflowTest: React.FC = () => {

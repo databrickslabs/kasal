@@ -1,8 +1,8 @@
 import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { KnowledgeFileUpload } from '../KnowledgeFileUpload';
-import { Agent } from '../../../types/agent';
+import { KnowledgeFileUpload } from './KnowledgeFileUpload';
+import { Agent } from '../../types/agent';
 
 // Mock the knowledge config store - must use vi.hoisted for variables used in vi.mock
 const mockKnowledgeConfigStore = vi.hoisted(() => ({
@@ -13,19 +13,19 @@ const mockKnowledgeConfigStore = vi.hoisted(() => ({
   checkConfiguration: vi.fn(),
 }));
 
-vi.mock('../../../store/knowledgeConfigStore', () => ({
+vi.mock('../../store/knowledgeConfigStore', () => ({
   useKnowledgeConfigStore: () => mockKnowledgeConfigStore,
 }));
 
 // Mock the agent store
-vi.mock('../../../store/agent', () => ({
+vi.mock('../../store/agent', () => ({
   useAgentStore: () => ({
     updateAgent: vi.fn(),
   }),
 }));
 
 // Mock the API client
-vi.mock('../../../config/api/ApiConfig', () => ({
+vi.mock('../../config/api/ApiConfig', () => ({
   apiClient: {
     post: vi.fn(),
     get: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('../../../config/api/ApiConfig', () => ({
 }));
 
 // Mock AgentService
-vi.mock('../../../api/AgentService', () => ({
+vi.mock('../../api/AgentService', () => ({
   AgentService: {
     updateAgentFull: vi.fn(),
     getAgent: vi.fn(),
@@ -42,7 +42,7 @@ vi.mock('../../../api/AgentService', () => ({
 }));
 
 // Mock DatabricksService
-vi.mock('../../../api/DatabricksService', () => ({
+vi.mock('../../api/DatabricksService', () => ({
   DatabricksService: {
     getInstance: vi.fn(() => ({
       getDatabricksConfig: vi.fn().mockResolvedValue({

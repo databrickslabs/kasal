@@ -1,8 +1,8 @@
 import React, { ReactNode, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
-import { getThemeOptions } from '../../theme';
-import { useThemeStore } from '../../store/theme';
+import { getThemeOptions } from './theme';
+import { useThemeStore } from '../store/theme';
 
 interface ThemeProviderProps {
   children: ReactNode;

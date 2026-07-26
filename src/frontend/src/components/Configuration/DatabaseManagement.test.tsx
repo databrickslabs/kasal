@@ -67,18 +67,18 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../config/api/ApiConfig', () => ({
+vi.mock('../../config/api/ApiConfig', () => ({
   apiClient: mockApiClient,
   config: {
     backendUrl: 'http://localhost:8000',
   },
 }));
 
-vi.mock('../../../store/databaseStore', () => ({
+vi.mock('../../store/databaseStore', () => ({
   useDatabaseStore: () => mockDatabaseStoreState,
 }));
 
-vi.mock('../../../api/APIKeysService', () => ({
+vi.mock('../../api/APIKeysService', () => ({
   APIKeysService: {
     getInstance: vi.fn(() => ({
       getAPIKeys: mockGetAPIKeys,
@@ -121,7 +121,7 @@ const resetMockStoreState = () => {
 
 // Dynamically import DatabaseManagement after mocks are set up
 const importComponent = async () => {
-  const mod = await import('../DatabaseManagement');
+  const mod = await import('./DatabaseManagement');
   return mod.default;
 };
 

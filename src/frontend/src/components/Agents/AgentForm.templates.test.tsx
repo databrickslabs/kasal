@@ -1,10 +1,10 @@
 import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import AgentForm from '../AgentForm';
+import AgentForm from './AgentForm';
 
 // Mock AgentService
-vi.mock('../../../api/AgentService', () => ({
+vi.mock('../../api/AgentService', () => ({
   AgentService: {
     createAgentFull: vi.fn(),
     updateAgentFull: vi.fn(),
@@ -13,14 +13,14 @@ vi.mock('../../../api/AgentService', () => ({
 }));
 
 // Mock ToolService
-vi.mock('../../../api/ToolService', () => ({
+vi.mock('../../api/ToolService', () => ({
   ToolService: {
     listTools: vi.fn().mockResolvedValue([]),
   },
 }));
 
 // Mock ModelService
-vi.mock('../../../api/ModelService', () => ({
+vi.mock('../../api/ModelService', () => ({
   ModelService: {
     listModels: vi.fn().mockResolvedValue({
       'test-model': {
@@ -35,7 +35,7 @@ vi.mock('../../../api/ModelService', () => ({
 }));
 
 // Mock LLMProviderService
-vi.mock('../../../api/LLMProviderService', () => ({
+vi.mock('../../api/LLMProviderService', () => ({
   LLMProviderService: {
     getInstance: vi.fn(() => ({
       listLLMProviders: vi.fn().mockResolvedValue([]),
@@ -44,7 +44,7 @@ vi.mock('../../../api/LLMProviderService', () => ({
 }));
 
 // Mock GenerateService
-vi.mock('../../../api/GenerateService', () => ({
+vi.mock('../../api/GenerateService', () => ({
   GenerateService: {
     generateTemplates: vi.fn().mockResolvedValue({
       system_template: 'Generated system template',
@@ -55,14 +55,14 @@ vi.mock('../../../api/GenerateService', () => ({
 }));
 
 // Mock stores
-vi.mock('../../../store/knowledgeConfigStore', () => ({
+vi.mock('../../store/knowledgeConfigStore', () => ({
   useKnowledgeConfigStore: () => ({
     isMemoryBackendConfigured: true,
     isKnowledgeSourceEnabled: true,
   }),
 }));
 
-vi.mock('../../../store/agent', () => ({
+vi.mock('../../store/agent', () => ({
   useAgentStore: () => ({
     updateAgent: vi.fn(),
   }),

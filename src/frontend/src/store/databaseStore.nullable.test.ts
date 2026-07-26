@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useDatabaseStore } from '../databaseStore';
+import { useDatabaseStore } from './databaseStore';
 
 describe('databaseStore - nullable setDatabaseInfo', () => {
   beforeEach(() => {

@@ -17,7 +17,7 @@ import {
   Stop as StopIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../../config/api/ApiConfig';
 import { toast } from 'react-hot-toast';
 
 interface ExecutionStopButtonProps {

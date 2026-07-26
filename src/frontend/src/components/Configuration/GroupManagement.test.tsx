@@ -10,8 +10,8 @@ import { ThemeProvider } from '@mui/material/styles';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-import GroupManagement from '../GroupManagement';
-import theme from '../../../theme/theme';
+import GroupManagement from './GroupManagement';
+import theme from '../../theme/theme';
 
 // Must use vi.hoisted for variables referenced in vi.mock
 const mocks = vi.hoisted(() => ({
@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // Mock GroupService as singleton
-vi.mock('../../../api/GroupService', () => ({
+vi.mock('../../api/GroupService', () => ({
   GroupService: {
     getInstance: vi.fn(() => ({
       getGroups: mocks.mockGetGroups,
@@ -38,7 +38,7 @@ vi.mock('../../../api/GroupService', () => ({
 }));
 
 // Mock UserService as singleton
-vi.mock('../../../api/UserService', () => ({
+vi.mock('../../api/UserService', () => ({
   UserService: {
     getInstance: vi.fn(() => ({
       getUsers: mocks.mockGetUsers,
@@ -47,7 +47,7 @@ vi.mock('../../../api/UserService', () => ({
 }));
 
 // Mock permission store with admin access
-vi.mock('../../../store/permissions', () => ({
+vi.mock('../../store/permissions', () => ({
   usePermissionStore: vi.fn((selector) => {
     const state = {
       userRole: 'admin',
@@ -58,7 +58,7 @@ vi.mock('../../../store/permissions', () => ({
 }));
 
 // Mock group store — use the hoisted mock so tests can assert on it
-vi.mock('../../../store/groups', () => ({
+vi.mock('../../store/groups', () => ({
   useGroupStore: vi.fn((selector) => {
     const state = {
       refresh: mocks.mockRefreshGroupStore,
@@ -158,7 +158,7 @@ describe('GroupManagement', () => {
 
     // The mock useGroupStore was called with selector functions during render.
     // Verify one of those selectors correctly extracts 'refresh'.
-    const { useGroupStore } = await import('../../../store/groups');
+    const { useGroupStore } = await import('../../store/groups');
     const mockedStore = vi.mocked(useGroupStore);
     const refreshSelector = mockedStore.mock.calls.find(
       (call) => {

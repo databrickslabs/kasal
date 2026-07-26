@@ -11,7 +11,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-import HITLApprovalDialog from '../HITLApprovalDialog';
+import HITLApprovalDialog from './HITLApprovalDialog';
 
 // The dialog now uses react-router's useNavigate (config-editor deep-link). These
 // unit tests don't exercise navigation, so stub the hook to avoid needing a Router.
@@ -24,7 +24,7 @@ import {
   HITLRejectionAction,
   HITLApprovalResponse,
   ExecutionHITLStatus,
-} from '../../../api/HITLService';
+} from '../../api/HITLService';
 
 // Must use vi.hoisted for variables referenced in vi.mock
 const mocks = vi.hoisted(() => ({
@@ -35,8 +35,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // Mock HITLService
-vi.mock('../../../api/HITLService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../api/HITLService')>();
+vi.mock('../../api/HITLService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/HITLService')>();
   return {
     ...actual,
     HITLService: {

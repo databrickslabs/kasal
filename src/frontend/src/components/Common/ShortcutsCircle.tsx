@@ -13,8 +13,8 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardIcon from '@mui/icons-material/Keyboard';
-import { ShortcutConfig } from '../types/shortcuts';
-import { useShortcutsStore } from '../store/shortcuts';
+import { ShortcutConfig } from '../../types/shortcuts';
+import { useShortcutsStore } from '../../store/shortcuts';
 
 interface ShortcutsCircleProps {
   shortcuts?: ShortcutConfig[];
