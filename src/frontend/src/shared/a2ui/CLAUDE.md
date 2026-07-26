@@ -29,7 +29,7 @@ touches many more places (see step 9).
 A completed run persists either a plain string or a `{text, a2ui: Surface}` envelope.
 The surface **is** the canonical rendering, so the raw text must NOT also show:
 
-- Backend gate — `engines/crewai/kernel/a2ui_runner.py::compose_surface` drops a
+- Backend gate — `engines/kasal/kernel/a2ui_runner.py::compose_surface` drops a
   `dashboard`/`document` surface that has **no deliverable component** (`_has_data_component`
   / `_DATA_COMPONENTS`). This stops prose-only surfaces from double-rendering **but** means
   any new deliverable component MUST be added to `_DATA_COMPONENTS` or its surface gets
@@ -65,7 +65,7 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
    - Add trigger words to `RICH_INTENT` (so a chat request even *invokes* the composer).
    - Add to `DELIVERABLE_KEYWORDS` if it's its own deliverable (order matters — specific
      multi-word keys before bare ones, e.g. `network graph` before a bare `graph`).
-6. **Prose gate** — `backend/src/engines/crewai/kernel/a2ui_runner.py`: add the component to
+6. **Prose gate** — `backend/src/engines/kasal/kernel/a2ui_runner.py`: add the component to
    `_DATA_COMPONENTS` if it's a genuine deliverable (chart/table/diagram/gallery/map), or its
    `dashboard`/`document` surface will be dropped as "prose-only".
 7. **Legacy adapter** — `components/ChatMode/utils/surfaceAdapter.ts`: add to `UiComponentType`
@@ -86,7 +86,7 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 10. **Exported app — RE-VENDOR (do not forget):** the exported Databricks App ships its OWN
     byte-identical copy of the renderer.
     - Copy every changed `shared/a2ui/*` file (NOT `*.test.*`) to
-      `backend/src/engines/crewai/exporters/templates/databricks_app/frontend/src/a2ui/`.
+      `backend/src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/`.
       `test_vendor_in_sync_with_frontend_source` fails until you do.
     - `catalog.json` and `compose.py` are copied **live** at export time — no vendoring.
     - Export parity (kept in sync with Kasal chat — preserve when editing the template):
@@ -111,10 +111,10 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 | Registry (name→renderer) | `frontend/src/shared/a2ui/registry.tsx` |
 | Composer + prompt + intent + deliverable keywords | `backend/src/shared/a2ui/compose.py` |
 | Catalog (what the model may emit) | `backend/src/shared/a2ui/catalog.json` |
-| Prose gate / `{text,a2ui}` envelope build | `backend/src/engines/crewai/kernel/a2ui_runner.py` |
+| Prose gate / `{text,a2ui}` envelope build | `backend/src/engines/kasal/kernel/a2ui_runner.py` |
 | Legacy parse + component/deliverable maps | `frontend/src/components/ChatMode/utils/surfaceAdapter.ts` |
 | Per-type branding list + settings | `frontend/src/components/Configuration/uiConfigShared.ts` |
 | Palette resolution + root→deliverable | `frontend/src/components/ChatMode/components/Chat/A2uiSurface.tsx` |
 | Text/surface dedup on completion | `frontend/src/components/ChatMode/store/executionStore.ts` |
-| Exported-app vendored renderer | `backend/src/engines/crewai/exporters/templates/databricks_app/frontend/src/a2ui/` |
+| Exported-app vendored renderer | `backend/src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/` |
 | Exported-app composition / rendering | `…/templates/databricks_app/agent_server/agent.py`, `…/frontend/src/App.tsx` |

@@ -1,4 +1,4 @@
-# CrewAI Engine CLAUDE.md
+# Kasal Engine CLAUDE.md
 
 Instructions for `src/backend/src/engines/kasal/`. **This layout is post-refactor
 (branch `refactor/crewai-engine-structure`).** Older docs/CLAUDE notes that show
